@@ -408,3 +408,134 @@ def remove_member(organization: str, user: str) -> dict:
 		членство.status = "Left"
 		членство.save(ignore_permissions=True)
 	return {"user": user, "left": True}
+
+
+# --- назначения руководителем (learning-services#365) ---
+
+НАЗНАЧЕНИЕ_НЕ_НАЙДЕНО = "allocation_not_found"
+КУРС_НЕ_ОТКРЫТ = "course_not_allowed"
+ВСЕ = "Whole Organization"
+ВЫБРАННЫЕ = "Selected Members"
+
+
+def _назначение(allocation: str):
+	if not frappe.db.exists("Course Allocation", allocation):
+		raise Отказ(НАЗНАЧЕНИЕ_НЕ_НАЙДЕНО, "Такого назначения нет", allocation=allocation)
+	назначение = frappe.get_doc("Course Allocation", allocation)
+	_руководитель(назначение.organization)
+	return назначение
+
+
+def _список(значение) -> list[str]:
+	"""Список из JSON-строки формы или из списка вызова."""
+	if not значение:
+		return []
+	if isinstance(значение, str):
+		значение = frappe.parse_json(значение)
+	return [str(х) for х in значение]
+
+
+@frappe.whitelist()
+@контракт
+def allocations(organization: str) -> dict:
+	"""Назначения организации и курсы, которые она может назначить."""
+	_руководитель(organization)
+	организация = frappe.get_doc("Learning Organization", organization)
+	курсы = frappe.get_all(
+		"LMS Course", filters={"published": 1}, fields=["name", "title"], order_by="title asc"
+	)
+	назначения = frappe.get_all(
+		"Course Allocation",
+		filters={"organization": organization},
+		fields=["name", "course", "audience", "deadline", "mandatory", "chosen_by_member"],
+		order_by="creation desc",
+	)
+	поимённые = {}
+	for строка in frappe.get_all(
+		"Course Allocation Member",
+		filters={"parent": ("in", [н.name for н in назначения] or [""]), "parenttype": "Course Allocation"},
+		fields=["parent", "user"],
+	):
+		поимённые.setdefault(строка.parent, []).append(строка.user)
+	названия = {к.name: к.title for к in курсы}
+	return {
+		"allocations": [
+			{
+				"id": н.name,
+				"course": н.course,
+				"title": названия.get(н.course)
+				or frappe.db.get_value("LMS Course", н.course, "title"),
+				"whole_team": н.audience == ВСЕ,
+				"members": поимённые.get(н.name, []),
+				"deadline": str(н.deadline) if н.deadline else None,
+				"mandatory": bool(н.mandatory),
+				"chosen_by_member": bool(н.chosen_by_member),
+			}
+			for н in назначения
+		],
+		"courses": [
+			{"id": к.name, "title": к.title} for к in курсы if организация.разрешает_курс(к.name)
+		],
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def assign_course(
+	organization: str,
+	course: str,
+	members=None,
+	deadline: str | None = None,
+	mandatory: int | bool = 0,
+) -> dict:
+	"""Назначает курс всей команде или выбранным; адресатам уходит письмо.
+
+	`members` пуст — вся команда: новичок, вступивший позже, получит курс сам.
+	"""
+	_руководитель(organization)
+	if not frappe.get_doc("Learning Organization", organization).разрешает_курс(course):
+		raise Отказ(КУРС_НЕ_ОТКРЫТ, "Этот курс организации не открыт", course=course)
+	люди = _список(members)
+	назначение = frappe.get_doc(
+		{
+			"doctype": "Course Allocation",
+			"organization": organization,
+			"course": course,
+			"audience": ВЫБРАННЫЕ if люди else ВСЕ,
+			"members": [{"user": человек} for человек in люди],
+			"deadline": deadline or None,
+			"mandatory": 1 if mandatory in (True, 1, "1", "true") else 0,
+		}
+	).insert(ignore_permissions=True)
+	return {"id": назначение.name}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def update_allocation(
+	allocation: str, deadline: str | None = None, mandatory=None, members=None
+) -> dict:
+	"""Правит срок, обязательность и — у поимённого — список людей.
+
+	`deadline` пустой строкой снимает срок; не передан — остаётся. Дописанным
+	людям уходит письмо; вычеркнутые остаются зачисленными — прогресс у них.
+	"""
+	назначение = _назначение(allocation)
+	if deadline is not None:
+		назначение.deadline = deadline or None
+	if mandatory is not None:
+		назначение.mandatory = 1 if mandatory in (True, 1, "1", "true") else 0
+	if members is not None and назначение.audience == ВЫБРАННЫЕ:
+		назначение.set("members", [{"user": человек} for человек in _список(members)])
+	назначение.save(ignore_permissions=True)
+	return {"id": назначение.name}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def remove_allocation(allocation: str) -> dict:
+	"""Снимает назначение. Зачисления остаются: прогресс принадлежит человеку."""
+	назначение = _назначение(allocation)
+	frappe.db.delete("Allocation Notice", {"allocation": назначение.name})
+	назначение.delete(ignore_permissions=True)
+	return {"id": allocation, "removed": True}

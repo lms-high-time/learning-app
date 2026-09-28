@@ -52,10 +52,13 @@ class OrganizationMembership(Document):
 			return 0
 
 		создано = 0
+		from lms_frappe_app.agent_learning.notices import уведомить_о_назначении
+
 		for имя in досрочные_назначения_организации(self.organization):
-			создано += frappe.get_doc("Course Allocation", имя).выдать_зачисления(
-				участники=[self.user]
-			)
+			назначение = frappe.get_doc("Course Allocation", имя)
+			создано += назначение.выдать_зачисления(участники=[self.user])
+			# Новичку курс назначен так же, как всем: письмо и ему (#365).
+			уведомить_о_назначении(назначение, [self.user])
 		return создано
 
 	def _проверить_повтор(self) -> None:

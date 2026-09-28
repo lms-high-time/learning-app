@@ -1552,6 +1552,75 @@ ISO 8601 со смещением часового пояса сайта; при 
 **Отказы:** `team_not_available`, `not_allowed`, `not_a_member`,
 `last_org_admin`.
 
+## `lms_frappe_app.api.team.allocations`
+
+Назначения организации и курсы, которые она может назначить
+(learning-services#365). Только руководителю.
+
+**Параметры:** `organization`.
+
+```json
+{ "ok": true, "data": {
+  "allocations": [ { "id": "ca-01", "course": "course-p3", "title": "Проекты по P3.express",
+                     "whole_team": false, "members": [ "ivanov@example.com" ],
+                     "deadline": "2026-10-31", "mandatory": true,
+                     "chosen_by_member": false } ],
+  "courses": [ { "id": "course-p3", "title": "Проекты по P3.express" } ] } }
+```
+
+`chosen_by_member` — курс взял сам сотрудник из каталога организации;
+`courses` — опубликованные курсы, открытые организации.
+
+**Отказы:** `team_not_available`, `not_allowed`.
+
+## `lms_frappe_app.api.team.assign_course`
+
+Назначает курс всей команде (`members` пуст — новичок получит курс сам) или
+выбранным людям, со сроком и отметкой обязательности. Адресатам уходит письмо
+о назначении, один раз. Только `POST`.
+
+**Параметры:** `organization`, `course`, `members` (необязательный — список
+учётных записей), `deadline` (необязательный, `ГГГГ-ММ-ДД`), `mandatory`
+(необязательный).
+
+```json
+{ "ok": true, "data": { "id": "ca-01" } }
+```
+
+За несколько дней до срока (`deadline_reminder_days` в `Agent Learning
+Settings`, по умолчанию 3) тем, кто не прошёл курс, уходит напоминание — тоже
+один раз. На курс, взятый сотрудником самим, писем нет.
+
+**Отказы:** `team_not_available`, `not_allowed`, `course_not_allowed` —
+курс организации не открыт.
+
+## `lms_frappe_app.api.team.update_allocation`
+
+Правит срок, обязательность и — у поимённого назначения — список людей.
+Дописанным уходит письмо; вычеркнутые остаются зачисленными. Только `POST`.
+
+**Параметры:** `allocation`, `deadline` (пустая строка снимает срок, не
+передан — остаётся), `mandatory`, `members`.
+
+```json
+{ "ok": true, "data": { "id": "ca-01" } }
+```
+
+**Отказы:** `allocation_not_found`, `team_not_available`, `not_allowed`.
+
+## `lms_frappe_app.api.team.remove_allocation`
+
+Снимает назначение. Зачисления остаются: прогресс принадлежит человеку.
+Только `POST`.
+
+**Параметры:** `allocation`.
+
+```json
+{ "ok": true, "data": { "id": "ca-01", "removed": true } }
+```
+
+**Отказы:** `allocation_not_found`, `team_not_available`, `not_allowed`.
+
 ---
 
 # Методы админки
