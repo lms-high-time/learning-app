@@ -173,7 +173,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Организации",
-   "link_count": 3,
+   "link_count": 4,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -200,6 +200,16 @@
   {
    "hidden": 0,
    "is_query_report": 0,
+   "label": "Приглашения",
+   "link_count": 0,
+   "link_to": "Organization Invite",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
    "label": "Назначения курсов",
    "link_count": 0,
    "link_to": "Course Allocation",
@@ -208,7 +218,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-25 18:00:00.000000",
+ "modified": "2026-09-29 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",
