@@ -37,3 +37,19 @@ class AgentStudentArtifact(Document):
 					frappe.ValidationError,
 				)
 			ключи.add(строка.block_key)
+
+	def on_update(self):
+		# Открытая страница документа перечитывает его сама, когда в него
+		# пишет агент — из чата или по MCP (learning-services#348). Событие —
+		# только ученику и только после коммита: страница, получившая его
+		# раньше, прочла бы старые данные.
+		frappe.publish_realtime(
+			event="artifact_updated",
+			user=self.student,
+			message={
+				"course": self.course,
+				"artifact": self.artifact,
+				"organization": self.organization,
+			},
+			after_commit=True,
+		)

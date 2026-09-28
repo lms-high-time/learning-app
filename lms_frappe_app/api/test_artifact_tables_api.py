@@ -175,3 +175,16 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		# транзакции без него: здесь проверяется форма, число — на стенде.
 		self.assertIsInstance(документ["version"], int)
 		self.assertNotIn("versions", документ)
+
+	def test_запись_шлёт_событие_только_ученику(self):
+		"""Страница перечитывает документ, когда в него пишет агент (#348)."""
+		from unittest.mock import patch
+
+		with patch("frappe.publish_realtime") as publish:
+			self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
+		события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
+		self.assertEqual(len(события), 1)
+		self.assertEqual(события[0].kwargs["user"], self.ученик)
+		self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
+		self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
+		self.assertTrue(события[0].kwargs["after_commit"])
