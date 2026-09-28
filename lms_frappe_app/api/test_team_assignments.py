@@ -24,6 +24,7 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.письма = patch("frappe.sendmail").start()
+		patch.object(notices, "почта_есть", return_value=True).start()
 		self.addCleanup(patch.stopall)
 		суффикс = frappe.generate_hash(length=6)
 		self.компания = создать_организацию(f"Компания {суффикс}")
@@ -84,6 +85,13 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		добавить_в_организацию(новичок, self.компания)
 
 		self.assertIn(новичок, self.письма_о("assigned"))
+
+	def test_без_исходящей_почты_назначение_сохраняется_письмо_ждёт(self):
+		with patch.object(notices, "почта_есть", return_value=False):
+			назначение = self.назначить()
+
+		self.assertTrue(frappe.db.exists("Course Allocation", назначение))
+		self.assertEqual(self.письма_о("assigned"), set())
 
 	def test_курс_взятый_самим_без_писем(self):
 		frappe.get_doc(
