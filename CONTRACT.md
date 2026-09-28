@@ -2126,7 +2126,11 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 Порядок блоков задаётся здесь и нигде больше: ученик видит их в нём же.
 `hint` адресована агенту ученика; `lesson` — на каком уроке блок обычно
 собирают, подсказка, а не ограничение. Ключи нормализуются к нижнему
-регистру; повторяющийся ключ отклоняется ошибкой валидации.
+регистру; повторяющийся ключ отклоняется ошибкой валидации. Ключи `table`,
+`report`, `canvas`, `compare` заняты видами страницы документа (они и блок
+делят один сегмент адреса `/documents/<курс>/<документ>/<вид или блок>`) —
+отказ `artifact_invalid_spec` с `key`; так же у шаблона и у схемы, собранной
+из шаблона с правками курса (learning-services#367).
 
 ```json
 { "ok": true, "data": { "id": "ACA-00001", "course": "course-p3",
@@ -2161,20 +2165,67 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 `_` и `-`, до 60 знаков (`risk-register`); `title` — название документа по
 умолчанию; `blocks`, `layout`, `canvas` — как у `set_course_artifact`, но
 без `lesson` у блоков: урок принадлежит курсу и задаётся в правках привязки;
-`note` (необязательно) — что поменялось в версии.
+`note` (необязательно) — что поменялось в версии; `extends`,
+`extends_version`, `overlay` (необязательно) — наследник, ниже; `renamed`
+(необязательно) — переименования ключей, ниже.
 
 Схема проверяется той же проверкой, что у `set_course_artifact`: вид блока,
 поля и колонки, формулы, холст. Сверх того у шаблона есть блоки, у каждого —
 ключ, и ключи не повторяются.
+
+**Наследник** (learning-services#375) — шаблон, который отличается от другого
+одинаково в нескольких курсах: `extends` — ключ родителя, `extends_version` —
+его версия (без неё — последняя на момент записи), `overlay` — правки к
+родителю в формате правок курса (`set_course_artifact_template`), но без
+`lesson` нигде и без `title`: название наследника — `title`. `blocks` и
+`canvas` у наследника пусты, правка холста — `overlay.canvas`; раскладка —
+родителя или `overlay.layout`, параметр `layout` у наследника не читается:
+MCP шлёт его всегда, и наследник шаблона-холста молча стал бы столбцом.
+
+```json
+{ "template": "risk-register-construction", "title": "Реестр рисков стройки",
+  "extends": "risk-register", "extends_version": 3,
+  "overlay": { "blocks": { "risks": { "hint": "…",
+    "spec": { "columns": { "source": { "options": [ "люди", "погода" ] } } } } } } }
+```
+
+Схема наследника собирается при записи — родитель ⊕ правки, — проверяется,
+как схема любого шаблона, и хранится в версии целиком: `artifact_template`
+отдаёт её собранной, курс привязывается к наследнику, как к любому шаблону.
+Наследник закреплён за версией родителя: новая версия родителя его не
+меняет, на неё наследник переходит своей новой версией. Наследника у
+наследника нет.
+
+**Переименования** (learning-services#376) — какие ключи прошлой версии этого
+же шаблона в этой версии зовутся иначе:
+
+```json
+{ "blocks": { "risks": "threats" }, "fields": { "limit": "threshold" },
+  "tables": { "register": "threats" },
+  "columns": { "threats": { "event": "what" } } }
+```
+
+Колонки — по таблице под её новым именем. Старое имя было в прошлой версии,
+новое есть в этой и не занято в прошлой, если только само не переименовано
+(обмен двух ключей законен); два старых имени не получают одно новое. У
+первой версии переименований нет. По ним `upgrade_course_artifact` переносит
+правки курса и данные учеников на новые ключи; без них новое имя для курса —
+удалённая колонка и новая пустая.
 
 ```json
 { "ok": true, "data": { "id": "ATPL-00001", "template": "risk-register", "version": 3 } }
 ```
 
 **Отказы:** `artifact_invalid_template` (с `template`) — ключ не по форме или
-нет названия; `artifact_invalid_spec` (с `key`, `table`, `column`, `field`) —
-схема не читается, в ней нет блоков, ключ блока пуст или повторяется, у блока
-есть `lesson`; `invalid_block_kind` (с `key` и `kind`).
+нет названия; у наследника есть `blocks` или `canvas`; шаблон наследует сам
+себя; родитель сам наследник (с `extends`); `extends_version` или `overlay`
+без `extends`; переименования не по форме или не сходятся с версиями (с
+`path`, например `renamed.columns.threats.event`); `artifact_template_not_found`
+(с `template` и `version`) — нет родителя или его версии; `artifact_invalid_overlay` — правки наследника не
+собираются (как у `set_course_artifact_template`), в них есть `lesson` (с
+`key`) или `title` (с `name`); `artifact_invalid_spec` (с `key`, `table`,
+`column`, `field`) — схема не читается, в ней нет блоков, ключ блока пуст или
+повторяется, у блока есть `lesson`; `invalid_block_kind` (с `key` и `kind`).
 
 ## `lms_frappe_app.api.authoring.list_artifact_templates`
 
@@ -2188,12 +2239,14 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 { "ok": true, "data": { "templates": [
   { "template": "risk-register", "title": "Реестр рисков", "version": 3,
     "note": "Колонка «Источник» стала выбором",
+    "extends": null,
     "courses": [ { "course": "course-basics", "course_title": "Основы",
                    "artifact": "risk_register", "version": 2 } ] } ] } }
 ```
 
 `version` у шаблона — последняя, у курса — закреплённая. `note` — `null`, если
-версию не пояснили.
+версию не пояснили. `extends` — у наследника родитель последней версии,
+`{"template": "risk-register", "version": 3}`, у прочих `null`.
 
 ## `lms_frappe_app.api.authoring.artifact_template`
 
@@ -2209,11 +2262,15 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
                 "kind": "text", "accept": [], "spec": { "table": "register",
                 "columns": [ { "key": "event", "title": "Событие", "type": "text" } ] } } ],
   "canvas": null, "note": "Колонка «Источник» стала выбором",
+  "renamed": null, "extends": null, "overlay": null,
   "created": "2026-09-29T12:00:00.000000" } }
 ```
 
 Блоки — в той форме, в какой их принимает `set_course_artifact`, без `lesson`;
-`spec` — `null` у блока без полей и колонок.
+`spec` — `null` у блока без полей и колонок. У наследника схема — уже
+собранная, `extends` — `{"template", "version"}` родителя, `overlay` — правки
+к нему; у прочих оба `null`. `renamed` — переименования этой версии
+относительно прошлой, `null` — их нет.
 
 **Отказы:** `artifact_template_not_found` (с `template` и `version`).
 
@@ -2273,6 +2330,58 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 `artifact_invalid_spec`, `invalid_block_kind` — собранная схема не проходит
 проверку `set_course_artifact`: например, убран блок, который называет сетка
 холста.
+
+## `lms_frappe_app.api.authoring.upgrade_course_artifact`
+
+Документ курса — на новую версию своего шаблона (learning-services#376). Новая
+версия шаблона живой курс не меняет; переход — этот явный вызов. Переименования
+всех версий между закреплённой и новой (`renamed` у `set_artifact_template`)
+складываются в одно. Им переименовываются правки курса — ключи блоков в
+`blocks` и `after` у `add_blocks`, поля и колонки в правках схемы блока и их
+`after`, таблица, ключи ячеек холста в `grid`, `labels`, `summary` и
+`sketch`, поля и колонки в `summary`, — и схема собирается заново с новой
+версией тем же путём, что у `set_course_artifact_template`: новой версией
+документа курса. В той же транзакции документы учеников по этому курсу и
+ключу переходят на новые ключи: ключи блоков, поля, названия таблиц, колонки
+строк, счётчики строк. Добавленное курсом (`add_*`) остаётся со своими
+ключами.
+
+**Параметры:** `course`, `artifact` — ключ документа в курсе, `version`
+(необязательно) — версия шаблона, без него последняя.
+
+```json
+{ "ok": true, "data": { "id": "ACA-00009", "course": "course-basics",
+  "artifact": "risk_register", "version": 3,
+  "template": "risk-register", "template_version": 4, "from_version": 2,
+  "diff": {
+    "blocks": { "added": [ "site_log" ], "removed": [], "changed": [ "threats" ] },
+    "fields": { "added": [], "removed": [ "limit_note" ] },
+    "columns": { "added": [ "threats.permit" ], "removed": [] } },
+  "students": 12 } }
+```
+
+`version` — новая версия схемы документа курса, `template_version` — версия
+шаблона, на которую курс перешёл, `from_version` — с какой. `diff` — между
+прежней схемой курса (с переименованными ключами: переименование не выглядит
+удалённым и добавленным) и новой; колонки — `"таблица.колонка"`, изменённый
+блок — тот, что есть в обеих и отличается чем угодно, от подсказки до урока.
+`students` — сколько документов учеников поменялось.
+
+Правки курса, которые не собираются с новой версией (называют то, чего в ней
+нет), — отказ, и не меняется ничего: ни схема курса, ни данные учеников.
+Назад версия не переходит: откат — `set_course_artifact_template` с номером
+версии, без переноса данных.
+
+**Отказы:** `course_not_found`; `artifact_not_found` (с `artifact`) — в курсе
+нет такого документа; `artifact_not_bound` (с `artifact`) — документ задан
+схемой целиком, а не шаблоном; `artifact_template_not_found` (с `template` и
+`version`) — нет такой версии шаблона; `artifact_template_same_version` (с
+`template` и `version`) — курс уже на ней; `artifact_invalid_template` (с
+`template` и `version`) — версия ниже закреплённой; `artifact_invalid_overlay`
+(с `key` и `field` или `column`, `after`, `name`) — правки курса не собираются
+с новой версией; `lesson_not_found`, `artifact_invalid_spec`,
+`invalid_block_kind` — собранная схема не проходит проверку, как у
+`set_course_artifact_template`.
 
 ## `lms_frappe_app.api.authoring.add_quiz`
 
@@ -2454,6 +2563,12 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 У документа курса `template` и `template_version` — шаблон и закреплённая
 версия, `template_latest` — последняя версия шаблона: больше закреплённой —
 шаблон ушёл вперёд. У документа со схемой целиком все три — `null`.
+
+Шаблон, ушедший вперёд, даёт предупреждение `artifact_template_outdated` в
+`readiness` — с `artifact`, `template` и сообщением «Документ «Реестр
+рисков»: шаблон risk-register вышел в v4, курс на v3.», дополненным `note`
+последней версии. Публикацию оно не блокирует: курс на закреплённой версии
+работает, как работал; переход — `upgrade_course_artifact`.
 
 ## `lms_frappe_app.api.authoring.course_revision`
 
@@ -2679,7 +2794,8 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 
 Отказ приходит кодом `course_not_ready`, список — в поле `problems`.
 Предупреждения (`lesson_without_directive`, `course_without_directive`,
-`course_without_quiz`, `artifact_without_blocks`, `artifact_file_without_accept`) публикацию не блокируют и
+`course_without_quiz`, `artifact_without_blocks`, `artifact_file_without_accept`,
+`artifact_template_outdated`) публикацию не блокируют и
 возвращаются в успешном ответе.
 
 **Отказы:** `course_not_found`, `course_not_ready` (с `problems`).

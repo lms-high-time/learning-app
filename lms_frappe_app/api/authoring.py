@@ -470,7 +470,16 @@ def set_course_artifact(
 @frappe.whitelist(methods=["POST"])
 @контракт
 def set_artifact_template(
-	template: str, title: str, blocks, layout: str = "sections", canvas=None, note: str | None = None
+	template: str,
+	title: str,
+	blocks=None,
+	layout: str = "sections",
+	canvas=None,
+	note: str | None = None,
+	extends: str | None = None,
+	extends_version: int | None = None,
+	overlay=None,
+	renamed=None,
 ) -> dict:
 	"""Заводит новую версию шаблона документа (learning-services#370).
 
@@ -479,9 +488,32 @@ def set_artifact_template(
 	принадлежит курсу и задаётся в правках привязки. Каждый вызов — новая
 	версия; прежние не меняются, и курсы, закрепившие их, их и сохраняют.
 	`note` — что поменялось в версии: по нему автор курса решает, переходить ли.
+
+	Наследник (learning-services#375): `extends` — ключ родителя,
+	`extends_version` — его версия (без неё последняя), `overlay` — правки к
+	родителю в формате правок курса, без уроков. Своих `blocks` и `canvas` у
+	наследника нет, раскладка — родителя или из `overlay.layout`: `layout`
+	наследника не читается. `Why:` MCP шлёт `layout` всегда, и наследник
+	шаблона-холста молча стал бы столбцом.
+
+	`renamed` (learning-services#376) — какие ключи прошлой версии этого
+	шаблона стали какими: `{blocks, fields, tables, columns: {таблица: …}}`.
+	По нему `upgrade_course_artifact` переносит правки курса и данные
+	учеников; без него новое имя — удалённое старое и новое пустое.
 	"""
 	_автор()
-	return templates.записать_шаблон(template, title, список(blocks), layout, canvas, note)
+	return templates.записать_шаблон(
+		template,
+		title,
+		список(blocks),
+		layout,
+		canvas,
+		note,
+		extends=extends,
+		extends_version=extends_version,
+		правки=overlay,
+		renamed=renamed,
+	)
 
 
 @frappe.whitelist()
@@ -499,7 +531,10 @@ def list_artifact_templates() -> dict:
 @frappe.whitelist()
 @контракт
 def artifact_template(template: str, version: int | None = None) -> dict:
-	"""Версия шаблона целиком — последняя, если номер не назван."""
+	"""Версия шаблона целиком — последняя, если номер не назван.
+
+	У наследника — собранная схема, родитель с версией и правки к нему.
+	"""
 	_автор()
 	return templates.шаблон(template, version)
 
@@ -520,6 +555,22 @@ def set_course_artifact_template(
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	return templates.привязать(course, artifact, template, version, overlay)
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def upgrade_course_artifact(course: str, artifact: str, version: int | None = None) -> dict:
+	"""Документ курса — на новую версию своего шаблона (learning-services#376).
+
+	`version` не назван — последняя. Правки курса переносятся на ключи новой
+	версии по её `renamed`, схема собирается заново и проверяется целиком;
+	данные учеников переносятся на новые ключи в той же транзакции. Отвечает
+	разницей схем: что автор должен проверить, прежде чем публиковать.
+	Назад — не переход: откат — `set_course_artifact_template` с версией.
+	"""
+	_автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	return templates.перейти(course, artifact, version)
 
 
 @frappe.whitelist(methods=["POST"])
