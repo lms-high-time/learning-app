@@ -1,12 +1,11 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Организация-клиент: политика квиза, домены и список курсов.
+"""Организация-клиент: обязательность квиза, домены и список курсов.
 
-`Why:` строгость зачёта у корпоративных клиентов разная, и задаётся она
-здесь — одним набором полей, где пустое значит «как в общих настройках».
-Правило про пустое живёт в одной функции, но ошибиться в нём можно тихо:
-организация, «унаследовавшая» ноль попыток, заблокировала бы курс целиком.
+Порог, лимит попыток и пауза — платформы, одни на всех: урок, сданный лично,
+годится любой компании (learning-services#353). Организация решает только,
+обязателен ли квиз.
 """
 
 import frappe
@@ -15,7 +14,12 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
 	политика_квиза,
 )
-from lms_frappe_app.tests.sample_data import политика_по_умолчанию, создать_курс, создать_организацию
+from lms_frappe_app.tests.sample_data import (
+	настроить_квиз,
+	политика_по_умолчанию,
+	создать_курс,
+	создать_организацию,
+)
 
 
 class IntegrationTestLearningOrganization(IntegrationTestCase):
@@ -31,29 +35,23 @@ class IntegrationTestLearningOrganization(IntegrationTestCase):
 
 	# --- политика квиза ---
 
-	def test_организация_перекрывает_только_заданные_поля(self):
-		# Пустое поле означает «как в общих настройках»: организация не обязана
-		# дублировать значения, которые её устраивают.
-		политика = политика_квиза(self.организация)
-		self.assertEqual(политика["pass_threshold"], 0.8)
-		self.assertEqual(политика["max_attempts"], 3)
-
-		self.правка(pass_threshold=0.9)
-
-		политика = политика_квиза(self.организация)
-		self.assertEqual(политика["pass_threshold"], 0.9)
-		self.assertEqual(политика["max_attempts"], 3)
-
-	def test_ноль_попыток_читается_как_наследование(self):
-		"""`Why:` Frappe отдаёт незаполненный Int нулём, и отличить «не трогали»
-		от «выставили ноль» негде. Выбрано безопасное при недосмотре: унаследовать
-		ограничение, а не снять его — «без лимита» задаётся в общих настройках."""
-		self.правка(max_attempts=0, retry_delay_hours=0)
+	def test_порог_лимит_и_пауза_у_организации_не_свои(self):
+		настроить_квиз(pass_threshold=1, max_attempts=0, retry_delay_minutes=10)
 
 		политика = политика_квиза(self.организация)
 
-		self.assertEqual(политика["max_attempts"], 3)
-		self.assertEqual(политика["retry_delay_hours"], 1)
+		self.assertEqual(
+			(политика["pass_threshold"], политика["max_attempts"], политика["retry_delay_minutes"]),
+			(1, 0, 10),
+		)
+
+	def test_пустой_порог_значит_зачёт_без_ошибок(self):
+		"""Запасное значение кода — решение владельца (#353), а не прежние 80%."""
+		настроить_квиз(pass_threshold=0, max_attempts=0)
+
+		политика = политика_квиза()
+
+		self.assertEqual((политика["pass_threshold"], политика["max_attempts"]), (1.0, 0))
 
 	def test_требование_квиза_перекрывается_и_наследуется(self):
 		self.правка(quiz_required="No")
@@ -66,22 +64,7 @@ class IntegrationTestLearningOrganization(IntegrationTestCase):
 		self.правка(quiz_required="")
 		self.assertTrue(политика_квиза(self.организация)["quiz_required"])
 
-	def test_без_организации_политика_общая(self):
-		"""Частный ученик учится по общим настройкам, а не без правил вовсе."""
-		политика = политика_квиза()
-
-		self.assertEqual(политика["pass_threshold"], 0.8)
-		self.assertEqual(политика["max_attempts"], 3)
-
 	# --- проверки при сохранении ---
-
-	def test_недопустимый_порог_отклоняется(self):
-		with self.assertRaises(frappe.ValidationError):
-			self.правка(pass_threshold=80)
-
-	def test_отрицательное_число_попыток_отклоняется(self):
-		with self.assertRaises(frappe.ValidationError):
-			self.правка(max_attempts=-1)
 
 	def test_домены_приводятся_к_единому_виду(self):
 		организация = self.правка(email_domains="@Example.COM\n\n example.com \nzavod.ru")

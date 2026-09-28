@@ -272,7 +272,7 @@ def политика_по_умолчанию() -> None:
 			"quiz_required": 1,
 			"pass_threshold": 0.8,
 			"max_attempts": 3,
-			"retry_delay_hours": 1,
+			"retry_delay_minutes": 60,
 			"session_timeout_hours": 6,
 			"carry_over_depth": 3,
 			"bridge_after_hours": 24,
@@ -283,5 +283,13 @@ def политика_по_умолчанию() -> None:
 			"authoring_guide_tool": "authoring_guide",
 		}
 	)
+	настройки.save(ignore_permissions=True)
+	frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
+
+
+def настроить_квиз(**поля) -> None:
+	"""Порог, лимит попыток и паузу задаёт платформа — одна на всех (#353)."""
+	настройки = frappe.get_doc("Agent Learning Settings")
+	настройки.update(поля)
 	настройки.save(ignore_permissions=True)
 	frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")

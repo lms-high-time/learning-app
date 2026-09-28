@@ -22,6 +22,7 @@ from lms_frappe_app.agent_learning.quiz import (
 )
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.tests.sample_data import (
+	настроить_квиз,
 	добавить_в_организацию,
 	политика_по_умолчанию,
 	создать_занятие,
@@ -65,16 +66,8 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		return начать_попытку(self.занятие)
 
 	def назначить_политику(self, **поля):
-		"""Курс урока назначается организацией с этой политикой квиза."""
-		организация = создать_организацию(f"Политика {frappe.generate_hash(length=6)}", **поля)
-		добавить_в_организацию(self.ученик, организация)
-		frappe.get_doc(
-			{
-				"doctype": "Course Allocation",
-				"organization": организация,
-				"course": frappe.db.get_value("LMS Quiz", self.квиз, "course"),
-			}
-		).insert(ignore_permissions=True)
+		"""Правила квиза — платформы, одни на всех (learning-services#353)."""
+		настроить_квиз(**поля)
 
 	def пройти_целиком(self, верно_выбор=True, верно_ввод=True):
 		начало = self.начать()
@@ -329,7 +322,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 	# --- политика организации ---
 
 	def test_исчерпанные_попытки_отклоняются_с_числом(self):
-		self.назначить_политику(max_attempts=1, retry_delay_hours=0)
+		self.назначить_политику(max_attempts=1, retry_delay_minutes=0)
 
 		_, итог = self.пройти_целиком(верно_выбор=False, верно_ввод=False)
 
@@ -343,7 +336,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		self.assertEqual(отказ.exception.подробности["attempts_used"], 1)
 
 	def test_повтор_раньше_паузы_отклоняется_с_временем(self):
-		self.назначить_политику(max_attempts=5, retry_delay_hours=24)
+		self.назначить_политику(max_attempts=5, retry_delay_minutes=1440)
 
 		_, итог = self.пройти_целиком(верно_выбор=False, верно_ввод=False)
 
@@ -355,7 +348,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 
 	def test_проваленная_попытка_называет_паузу_и_остаток(self):
 		"""Момент пересдачи — с часовым поясом сайта: без него строка читается как UTC."""
-		self.назначить_политику(max_attempts=3, retry_delay_hours=24)
+		self.назначить_политику(max_attempts=3, retry_delay_minutes=1440)
 
 		попытка, итог = self.пройти_целиком(верно_выбор=False, верно_ввод=False)
 
@@ -421,7 +414,10 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 		return создать_занятие(self.ученик, self.урок)
 
 	def организация_с_политикой(self, **поля):
-		организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}", **поля)
+		"""Курс даёт организация, а правила квиза — платформы, одни на всех (#353)."""
+		if поля:
+			настроить_квиз(**поля)
+		организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}")
 		добавить_в_организацию(self.ученик, организация)
 		frappe.get_doc(
 			{"doctype": "Course Allocation", "organization": организация, "course": self.курс}
@@ -432,7 +428,7 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 
 	def test_брошенная_попытка_расходует_лимит(self):
 		"""Иначе ответы перебираются: ответил, увидел вердикт, бросил, начал заново."""
-		self.организация_с_политикой(max_attempts=1, retry_delay_hours=1)
+		self.организация_с_политикой(max_attempts=1, retry_delay_minutes=60)
 
 		первая = начать_попытку(self.занятие())["attempt"]
 		принять_ответ(первая, self.вопрос, "2")  # неверно, попытка остаётся открытой

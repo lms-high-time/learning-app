@@ -448,8 +448,8 @@ Frappe заворачивает результат whitelisted-метода в �
   "course_directive": { "audience": "teacher_only", "teaching_directive": "…",
                         "student_profile": "…", "glossary": [ "…" ],
                         "remember_about_student": [ "…" ] },
-  "quiz": { "required": true, "pass_threshold": 0.8,
-            "attempts_left": 3 },
+  "quiz": { "required": true, "pass_threshold": 1.0,
+            "attempts_left": null },
   "student_context": {
     "facts": [ { "key": "role", "text": "Руководитель отдела",
                  "since": "2026-09-01T12:20:00", "updated": "2026-09-01T12:20:00" } ],
@@ -499,9 +499,11 @@ Frappe заворачивает результат whitelisted-метода в �
 файл и срез.
 
 Политика квиза в ответе — **действующая для этого ученика на этом курсе**.
-Курс может быть назначен несколькими организациями сразу: человек вправе
-состоять в нескольких. Тогда применяется строжайшая из политик — больший
-порог, меньше попыток, дольше пауза.
+Порог, лимит попыток и пауза перед повтором — платформы, одни на всех
+(`Agent Learning Settings`; по умолчанию зачёт только без ошибок, без лимита,
+пауза 10 минут — решение владельца, learning-services#353). Организация
+решает только, обязателен ли квиз; если курс назначили несколько, квиз
+обязателен, когда этого требует хоть одна.
 
 `content.markdown` — результат нормализатора: связный текст без макросов
 Frappe Learning, медиа вынесены в `media`. Длинный урок отдаётся сегментами.
@@ -821,7 +823,7 @@ Learning не позволяет смешивать открытые с пров
 { "ok": true, "data": {
   "verdict": { "correct": true },
   "next_question": null, "attempt_finished": true,
-  "result": { "score": 0.8, "passed": true, "pass_threshold": 0.8,
+  "result": { "score": 1.0, "passed": true, "pass_threshold": 1.0,
               "session_status": "Completed" } } }
 ```
 
@@ -831,9 +833,9 @@ Learning не позволяет смешивать открытые с пров
 { "ok": true, "data": {
   "verdict": { "correct": false },
   "next_question": null, "attempt_finished": true,
-  "result": { "score": 0.4, "passed": false, "pass_threshold": 0.8,
+  "result": { "score": 0.5, "passed": false, "pass_threshold": 1.0,
               "session_status": "Awaiting Quiz",
-              "attempts_left": 2,
+              "attempts_left": null,
               "retry_after": "2026-09-25T14:30:00+03:00" } } }
 ```
 
@@ -1291,7 +1293,8 @@ ISO 8601 со смещением часового пояса сайта; при 
     "status": "in_progress", "progress": 0.42,
     "deadline": "2026-09-15", "mandatory": true, "overdue": false,
     "last_activity": "2026-09-01T12:20:00",
-    "document": { "blocks_total": 11, "blocks_filled": 7 } } ] } }
+    "document": { "blocks_total": 11, "blocks_filled": 7 },
+    "quiz": { "passed": 4, "first_try": 3 } } ] } }
 ```
 
 `document` — сколько блоков во всех документах курса и сколько из них заполнил
@@ -1299,6 +1302,11 @@ ISO 8601 со смещением часового пояса сайта; при 
 считается. Считаются блоки действующих схем; у курса без документов — нули.
 Отдельно от `progress`: урок засчитывает квиз, и без этой пары пройденный курс
 с пустым документом не отличить от собранного.
+
+`quiz` — сколько уроков курса сдано и сколько из них с первой попытки. Зачёт —
+без ошибок и без лимита попыток, поэтому «сдан» не отличает понявшего от
+перебравшего ответы, а номер зачтённой попытки отличает. Попытки считаются во
+всех пространствах: прогресс у человека общий; наружу — только числа.
 
 `status` — `not_started`, `in_progress` или `completed`; параметром `status`
 выдача сужается до одного из них. Руководителю без организаций приходит

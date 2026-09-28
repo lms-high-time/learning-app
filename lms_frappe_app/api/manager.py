@@ -10,6 +10,7 @@
 """
 
 import frappe
+from frappe.query_builder.functions import Min
 
 from lms_frappe_app.agent_learning.access import курсы_ученика
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
@@ -61,6 +62,7 @@ def org_report(course: str | None = None, status: str | None = None) -> dict:
 		всего_блоков, заполнено_блоков = _документ_по_участникам(
 			назначение.course, участники, назначение.organization
 		)
+		квизы = _квизы_по_участникам(назначение.course, участники)
 
 		for участник in участники:
 			строка = _строка_отчёта(
@@ -74,6 +76,7 @@ def org_report(course: str | None = None, status: str | None = None) -> dict:
 					"blocks_total": всего_блоков,
 					"blocks_filled": заполнено_блоков.get(участник, 0),
 				},
+				квиз=квизы.get(участник, {"passed": 0, "first_try": 0}),
 			)
 			if status and строка["status"] != status:
 				continue
@@ -156,6 +159,36 @@ def _документ_по_участникам(
 		)["blocks_filled"]
 		заполнено[экземпляр.student] = заполнено.get(экземпляр.student, 0) + сколько
 	return всего, заполнено
+
+
+def _квизы_по_участникам(курс: str, участники: list[str]) -> dict[str, dict[str, int]]:
+	"""Сколько уроков курса сдано и сколько из них с первой попытки — одним запросом.
+
+	`Why:` зачёт — за 100%, без лимита попыток (learning-services#353), и
+	«сдан» уже не отличает понявшего от перебравшего ответы. Номер зачтённой
+	попытки отличает. Попытки считаются по всем пространствам: прогресс у
+	человека общий, и урок, сданный лично, пройден и для компании; наружу
+	идут только числа, без ответов.
+	"""
+	попытка = frappe.qb.DocType("Agent Quiz Attempt")
+	строки = (
+		frappe.qb.from_(попытка)
+		.select(попытка.student, попытка.lesson, Min(попытка.attempt_number).as_("first"))
+		.where(
+			(попытка.course == курс)
+			& (попытка.student.isin(участники))
+			& (попытка.passed == 1)
+		)
+		.groupby(попытка.student, попытка.lesson)
+		.run(as_dict=True)
+	)
+	итог: dict[str, dict[str, int]] = {}
+	for строка in строки:
+		счёт = итог.setdefault(строка.student, {"passed": 0, "first_try": 0})
+		счёт["passed"] += 1
+		if строка.first == 1:
+			счёт["first_try"] += 1
+	return итог
 
 
 def _названия_курсов(курсы: list[str]) -> dict[str, str]:
@@ -341,6 +374,7 @@ def _строка_отчёта(
 	имя: str | None,
 	активность,
 	документ: dict,
+	квиз: dict,
 ) -> dict:
 	from frappe.utils import getdate, nowdate
 
@@ -372,6 +406,7 @@ def _строка_отчёта(
 		),
 		"last_activity": активность.isoformat() if активность else None,
 		"document": документ,
+		"quiz": квиз,
 	}
 
 
