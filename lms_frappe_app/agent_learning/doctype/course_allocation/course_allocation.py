@@ -32,6 +32,11 @@ class CourseAllocation(Document):
 
 	def on_update(self):
 		self.выдать_зачисления()
+		# Письмо — адресатам, кому ещё не уходило: и при создании, и когда в
+		# поимённое назначение дописали людей (learning-services#365).
+		from lms_frappe_app.agent_learning.notices import уведомить_о_назначении
+
+		уведомить_о_назначении(self, self.адресаты())
 
 	def _проверить_курс_разрешён(self) -> None:
 		организация: LearningOrganization = frappe.get_doc(
