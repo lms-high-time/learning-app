@@ -440,7 +440,7 @@ def set_course_directive(
 @frappe.whitelist(methods=["POST"])
 @контракт
 def set_course_artifact(
-	course: str, artifact: str, title: str, blocks, layout: str = "sections"
+	course: str, artifact: str, title: str, blocks, layout: str = "sections", canvas=None
 ) -> dict:
 	"""Задаёт схему документа курса новой версией.
 
@@ -456,6 +456,10 @@ def set_course_artifact(
 	`{fields, table, columns, prefix, title, rows, views}`. Форма проверяется
 	здесь, до записи: схема, которую не прочесть, сломала бы документ каждого
 	ученика курса, а не одного.
+
+	`canvas` — холст документа (learning-services#351): `{grid, labels,
+	sketch, summary}`, сетка из ключей блоков. Проверяется так же до записи:
+	сетку, которую браузер не разложит, увидел бы каждый ученик.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
@@ -488,10 +492,16 @@ def set_course_artifact(
 			}
 		)
 	artifact_tables.проверить_документ(строки)
+	холст = artifact_tables.проверить_холст(canvas, строки)
 	версия = directives.записать(
 		"Agent Course Artifact",
 		{"course": course, "slug": нормализовать_ключ(artifact)},
-		{"title": title, "layout": layout, "blocks": строки},
+		{
+			"title": title,
+			"layout": layout,
+			"blocks": строки,
+			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
+		},
 	)
 	# Наружу ключ документа зовётся `artifact`, как в методах ученика.
 	return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}

@@ -188,3 +188,66 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
 		self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
 		self.assertTrue(события[0].kwargs["after_commit"])
+
+	def test_холст_и_формула_поля(self):
+		"""Холст схемы и посчитанное поле доходят до ученика (#351)."""
+		frappe.set_user("Administrator")
+		блоки = [
+			{
+				"key": "problem",
+				"title": "Проблема",
+				"spec": {
+					"fields": [
+						{"key": "stage_goal", "title": "Цель этапа", "type": "number"},
+						{"key": "price", "title": "Цена", "type": "number"},
+						{
+							"key": "clients_needed",
+							"title": "Клиентов нужно",
+							"type": "formula",
+							"formula": "stage_goal / price",
+						},
+					]
+				},
+			},
+			{"key": "uvp", "title": "Обещание"},
+			{"key": "first_sketch", "title": "Первый набросок", "spec": {"fields": [{"key": "uvp"}]}},
+		]
+		холст = {
+			"grid": ["problem uvp", "problem uvp"],
+			"labels": {"uvp": "Обещание"},
+			"sketch": "first_sketch",
+			"summary": {"problem": ["clients_needed"]},
+		}
+		ответ = authoring.set_course_artifact(
+			course=self.курс, artifact="lean", title="Холст", blocks=блоки, layout="canvas", canvas=холст
+		)
+		self.assertTrue(ответ["ok"], ответ)
+
+		frappe.set_user(self.ученик)
+		ответ = student.update_artifact(
+			self.курс, "lean", "problem", fields={"stage_goal": 300000, "price": 5000}
+		)
+		self.assertTrue(ответ["ok"], ответ)
+		документ = student.artifact(self.курс, "lean")["data"]
+		self.assertEqual(документ["canvas"], холст)
+		self.assertEqual(документ["fields"]["clients_needed"], 60)
+		проблема = next(б for б in документ["blocks"] if б["key"] == "problem")
+		self.assertEqual(проблема["fields"][2]["value"], 60)
+
+		ответ = student.update_artifact(self.курс, "lean", "problem", fields={"clients_needed": 1})
+		self.assertEqual(ответ["error"]["code"], "artifact_invalid_value")
+		# Документ без холста отвечает `null`, а не пропуском ключа.
+		self.assertIsNone(student.artifact(self.курс, "risk_register")["data"]["canvas"])
+
+	def test_холст_который_не_разложить_отказ(self):
+		frappe.set_user("Administrator")
+		ответ = authoring.set_course_artifact(
+			course=self.курс,
+			artifact="risk_register",
+			title="Реестр рисков",
+			blocks=БЛОКИ,
+			canvas={"grid": ["risks assessment", "assessment risks"]},
+		)
+		self.assertFalse(ответ["ok"])
+		self.assertEqual(ответ["error"]["code"], "artifact_invalid_spec")
+		self.assertEqual(ответ["error"]["key"], "risks")
