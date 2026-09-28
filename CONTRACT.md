@@ -1406,7 +1406,7 @@ ISO 8601 со смещением часового пояса сайта; при 
 ```json
 { "ok": true, "data": {
   "organization": "org-1", "title": "Кофейни", "can_see_report": true,
-  "can_manage": true, "can_change_roles": false,
+  "can_manage": true, "can_change_roles": false, "member_limit": 25,
   "members": [ { "user": "ivanov@example.com", "full_name": "Иван Иванов",
                  "role": "Member", "left": false, "left_on": null } ],
   "courses": [ { "id": "course-p3", "title": "Проекты по P3.express",
@@ -1418,7 +1418,9 @@ ISO 8601 со смещением часового пояса сайта; при 
 остаются у организации. `can_see_report` — зрителю открыт отчёт
 (`org_report` с `organization`): только руководителю. `can_manage` — зритель
 приглашает и отмечает уход (руководитель), `can_change_roles` — меняет роли
-(администратор организации, `Org Admin`).
+(администратор организации, `Org Admin`). `member_limit` — сколько
+действующих участников может быть в неподтверждённой организации
+(`own_org_member_limit`); `null` — без лимита.
 
 **Отказы:** `team_not_available`.
 
@@ -1623,6 +1625,22 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 ```
 
 **Отказы:** `allocation_not_found`, `team_not_available`, `not_allowed`.
+
+## `lms_frappe_app.api.team.organization_terms`
+
+Условия своей организации до её создания (learning-services#379): лимит
+участников неподтверждённой организации и сколько ещё таких организаций
+может создать вызывающий.
+
+**Параметры:** нет.
+
+```json
+{ "ok": true, "data": { "member_limit": 25, "organizations_left": 3 } }
+```
+
+`null` в любом поле — без лимита.
+
+**Отказы:** нет.
 
 ## `lms_frappe_app.api.team.create_organization`
 
