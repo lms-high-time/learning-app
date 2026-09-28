@@ -6,7 +6,9 @@
 Правила правок проверяет `agent_learning/artifacts/test_overlay.py` без базы;
 здесь — что они дошли до методов автора: версии шаблона, собранная схема у
 ученика та же, что у схемы целиком, закреплённая версия, отвязка схемой
-целиком и патч, переводящий готовые документы на шаблоны.
+целиком и патч, переводящий готовые документы на шаблоны. Дальше —
+наследник (#375), переход на новую версию с переименованиями (#376) и
+проверка каталога (#377).
 """
 
 import json
@@ -14,7 +16,9 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.artifacts import catalog
 from lms_frappe_app.api import authoring, student
+from lms_frappe_app.commands import commands
 from lms_frappe_app.patches.v0_1 import artifact_templates
 from lms_frappe_app.tests.sample_data import зачислить, создать_куратора, создать_урок, создать_ученика
 
@@ -771,3 +775,94 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		)
 		self.assertEqual(шаблоны, [ключ.replace("_", "-")] * 2)
 		self.assertEqual(frappe.db.count("Agent Artifact Template", {"template": ключ.replace("_", "-")}), 1)
+
+
+class IntegrationTestArtifactCatalog(IntegrationTestCase):
+	"""Каталог из базы — через проверку и сборку движка (#377).
+
+	Каталог общий для сайта, и на стенде в нём чужие документы: тест смотрит
+	только на беды своих записей.
+	"""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		урок = создать_урок(f"Урок {суффикс}")
+		self.курс = зачислить(создать_ученика(f"cat-{суффикс}@example.com"), урок)
+		self.ключ = f"catalog-{суффикс}"
+		self.наследник = f"{self.ключ}-site"
+		self.другой = f"{self.ключ}-other"
+		for ключ in (self.ключ, self.другой):
+			authoring.set_artifact_template(template=ключ, title="Журнал", blocks=БЛОКИ, canvas=ХОЛСТ)
+		authoring.set_artifact_template(
+			template=self.наследник, title="Журнал объекта", extends=self.ключ, overlay=ПРАВКИ_НАСЛЕДНИКА
+		)
+		self.привязка = authoring.set_course_artifact_template(
+			course=self.курс,
+			artifact="journal",
+			template=self.наследник,
+			overlay={
+				"blocks": {"intro": {"lesson": урок}},
+				"add_blocks": [{"key": "log", "title": "Журнал"}],
+			},
+		)["data"]["id"]
+		self.целиком = authoring.set_course_artifact(
+			course=self.курс, artifact="plain", title="Схема целиком", blocks=БЛОКИ[:2]
+		)["data"]["id"]
+
+	def свои(self) -> list[dict]:
+		return [
+			беда
+			for беда in catalog.проверить_каталог()
+			if беда.get("template") in (self.ключ, self.наследник, self.другой)
+			or беда.get("course") == self.курс
+		]
+
+	def test_каталог_в_порядке(self):
+		self.assertEqual(self.свои(), [])
+
+	def test_подделанная_запись_видна(self):
+		шаблон = frappe.db.get_value("Agent Artifact Template", {"template": self.другой}, "name")
+		# Ключ блока, который движок больше не принимает.
+		frappe.db.set_value(
+			"Agent Artifact Template", шаблон, "blocks", json.dumps([*БЛОКИ[:2], {"key": "report"}])
+		)
+		наследник = frappe.db.get_value("Agent Artifact Template", {"template": self.наследник}, "name")
+		frappe.db.set_value("Agent Artifact Template", наследник, "overlay", json.dumps({"canvas": None}))
+		frappe.db.set_value(
+			"Agent Artifact Block",
+			{"parent": self.привязка, "block_key": "items"},
+			"hint",
+			"Правка мимо движка",
+		)
+		frappe.db.set_value(
+			"Agent Artifact Block",
+			{"parent": self.целиком, "block_key": "items"},
+			"spec",
+			json.dumps({"columns": [{"key": "id"}]}),
+		)
+
+		беды = {(б["doctype"], б["name"]): б for б in self.свои()}
+
+		self.assertEqual(
+			{имя: беда["code"] for (_, имя), беда in беды.items()},
+			{
+				шаблон: "artifact_invalid_spec",
+				наследник: "catalog_mismatch",
+				self.привязка: "catalog_mismatch",
+				self.целиком: "artifact_invalid_spec",
+			},
+		)
+		self.assertEqual(беды[("Agent Artifact Template", шаблон)]["details"], {"key": "report"})
+		self.assertEqual(беды[("Agent Course Artifact", self.привязка)]["details"], {"parts": ["blocks"]})
+		self.assertEqual(
+			беды[("Agent Artifact Template", наследник)]["details"], {"parts": ["blocks", "canvas"]}
+		)
+		строки: list[str] = []
+		self.assertEqual(catalog.отчёт(строки.append), 1)
+		self.assertTrue(any(self.привязка in с and "journal" in с for с in строки), строки)
+		with self.assertRaises(frappe.ValidationError):
+			catalog.после_миграции()
+
+	def test_команда_bench_объявлена(self):
+		self.assertIn("check-artifact-catalog", [команда.name for команда in commands])
