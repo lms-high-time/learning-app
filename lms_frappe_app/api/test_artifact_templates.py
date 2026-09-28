@@ -470,6 +470,244 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		self.assertEqual(self.код(привязать(overlay={"blocks": {"outro": None}})), "artifact_invalid_spec")
 		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": self.курс}))
 
+	# --- переход на новую версию ---
+
+	def вторая_версия(self, **поля) -> dict:
+		"""Шаблон v2: блок, таблица, поле и колонка переименованы; колонка и
+		блок добавлены."""
+		блоки = [
+			БЛОКИ[0],
+			{
+				"key": "entries",
+				"title": "Записи",
+				"hint": "Что случилось",
+				"spec": {
+					"table": "log",
+					"prefix": "I",
+					"fields": [{"key": "threshold", "title": "Предел", "type": "number"}],
+					"columns": [
+						{"key": "what", "title": "Событие", "type": "text", "required": True},
+						{"key": "source", "title": "Источник", "type": "select", "options": ["a", "b"]},
+						{"key": "kind", "title": "Вид", "type": "text"},
+						{"key": "owner", "title": "Кто", "type": "text"},
+					],
+				},
+			},
+			БЛОКИ[2],
+			{"key": "extra", "title": "Ещё"},
+		]
+		return self.шаблон(
+			**{
+				"blocks": блоки,
+				"canvas": {"grid": ["intro entries", "outro outro"], "labels": {"intro": "Начало"}},
+				"renamed": {
+					"blocks": {"items": "entries"},
+					"fields": {"limit": "threshold"},
+					"tables": {"items": "log"},
+					"columns": {"log": {"event": "what"}},
+				},
+				"note": "Записи стали журналом",
+				**поля,
+			}
+		)
+
+	def курс_с_данными(self):
+		"""Курс на v1 с правками и ученик, заполнивший документ."""
+		self.шаблон()
+		authoring.set_course_artifact_template(
+			course=self.курс,
+			artifact="journal",
+			template=self.ключ,
+			overlay={
+				"blocks": {
+					"intro": {"lesson": self.урок},
+					"items": {
+						"spec": {
+							"fields": {"limit": {"title": "Порог"}},
+							"columns": {"source": {"options": ["люди", "погода"]}},
+							"add_columns": [{"key": "permit", "title": "Разрешение", "after": "event"}],
+						}
+					},
+				},
+				"canvas": {"labels": {"items": "Записи"}},
+			},
+		)
+		frappe.set_user(self.ученик)
+		for ключ, поля in (
+			("intro", {"content": "Начало проекта"}),
+			(
+				"items",
+				{
+					"content": "Заметка к записям",
+					"rows": [{"event": "Пожар", "source": "люди", "permit": "есть"}],
+					"fields": {"limit": 3},
+				},
+			),
+		):
+			ответ = student.update_artifact(self.курс, "journal", ключ, **поля)
+			self.assertTrue(ответ["ok"], ответ)
+		frappe.set_user(self.куратор)
+
+	def test_переход_переносит_правки_и_данные_учеников(self):
+		self.курс_с_данными()
+		self.вторая_версия()
+		# Третья переименовывает колонку ещё раз: переименования версий складываются.
+		третья = authoring.artifact_template(template=self.ключ)["data"]
+		третья["blocks"][1]["spec"]["columns"][2]["key"] = "sort"
+		self.шаблон(
+			blocks=третья["blocks"],
+			canvas=третья["canvas"],
+			renamed={"columns": {"log": {"kind": "sort"}}},
+			note="Вид — сортировка",
+		)
+		предупреждения = authoring.course_draft(course=self.курс)["data"]["readiness"]["warnings"]
+		устарел = [п for п in предупреждения if п["code"] == "artifact_template_outdated"]
+		self.assertEqual(
+			устарел,
+			[
+				{
+					"code": "artifact_template_outdated",
+					"artifact": "journal",
+					"template": self.ключ,
+					"message": f"Документ «Журнал»: шаблон {self.ключ} вышел в v3, курс на v1. Вид — сортировка",
+				}
+			],
+		)
+
+		ответ = authoring.upgrade_course_artifact(course=self.курс, artifact="journal")
+
+		self.assertTrue(ответ["ok"], ответ)
+		данные = ответ["data"]
+		self.assertEqual(
+			{к: в for к, в in данные.items() if к != "id"},
+			{
+				"course": self.курс,
+				"artifact": "journal",
+				"version": 2,
+				"template": self.ключ,
+				"template_version": 3,
+				"from_version": 1,
+				"diff": {
+					"blocks": {"added": ["extra"], "removed": [], "changed": ["entries"]},
+					"fields": {"added": [], "removed": []},
+					"columns": {"added": ["log.owner"], "removed": []},
+				},
+				"students": 1,
+			},
+		)
+		схема = frappe.get_doc("Agent Course Artifact", данные["id"])
+		self.assertEqual(
+			json.loads(схема.overlay),
+			{
+				"blocks": {
+					"intro": {"lesson": self.урок},
+					"entries": {
+						"spec": {
+							"fields": {"threshold": {"title": "Порог"}},
+							"columns": {"source": {"options": ["люди", "погода"]}},
+							"add_columns": [{"key": "permit", "title": "Разрешение", "after": "what"}],
+						}
+					},
+				},
+				"canvas": {"labels": {"entries": "Записи"}},
+			},
+		)
+		frappe.set_user(self.ученик)
+		документ = student.artifact(self.курс, "journal")["data"]
+		self.assertEqual([б["key"] for б in документ["blocks"]], ["intro", "entries", "outro", "extra"])
+		блоки = {б["key"]: б for б in документ["blocks"]}
+		self.assertEqual(блоки["entries"]["content"], "Заметка к записям")
+		self.assertEqual(блоки["intro"]["content"], "Начало проекта")
+		self.assertEqual(документ["fields"], {"threshold": 3})
+		строка = документ["tables"]["log"]["rows"][0]
+		self.assertEqual(
+			(строка["id"], строка["what"], строка["source"], строка["permit"]),
+			("I1", "Пожар", "люди", "есть"),
+		)
+		self.assertEqual(документ["canvas"]["labels"], {"intro": "Начало", "entries": "Записи"})
+		# Следующая строка — со следующим номером: счётчик переехал вместе с таблицей.
+		ответ = student.update_artifact(self.курс, "journal", "entries", rows=[{"what": "Потоп"}])
+		self.assertEqual(ответ["data"]["created"], ["I2"])
+		frappe.set_user(self.куратор)
+		предупреждения = authoring.course_draft(course=self.курс)["data"]["readiness"]["warnings"]
+		self.assertNotIn("artifact_template_outdated", [п["code"] for п in предупреждения])
+
+	def test_переход_на_названную_версию(self):
+		self.курс_с_данными()
+		self.вторая_версия()
+		self.шаблон(blocks=БЛОКИ[:2], canvas=None, note="Другая ветка")
+
+		ответ = authoring.upgrade_course_artifact(course=self.курс, artifact="journal", version=2)
+
+		self.assertEqual((ответ["data"]["template_version"], ответ["data"]["from_version"]), (2, 1))
+
+	def test_правки_не_собрались_ничего_не_меняется(self):
+		self.курс_с_данными()
+		# Колонку, которую правят правки курса, новая версия убрала.
+		v2 = authoring.artifact_template(template=self.ключ)["data"]
+		del v2["blocks"][1]["spec"]["columns"][1]
+		self.шаблон(blocks=v2["blocks"], canvas=v2["canvas"])
+		frappe.set_user(self.ученик)
+		до = student.artifact(self.курс, "journal")["data"]
+		frappe.set_user(self.куратор)
+
+		ответ = authoring.upgrade_course_artifact(course=self.курс, artifact="journal")
+
+		self.assertEqual(self.код(ответ), "artifact_invalid_overlay")
+		self.assertEqual((ответ["error"]["key"], ответ["error"]["column"]), ("items", "source"))
+		self.assertEqual(frappe.db.count("Agent Course Artifact", {"course": self.курс}), 1)
+		frappe.set_user(self.ученик)
+		self.assertEqual(student.artifact(self.курс, "journal")["data"], до)
+
+	def test_отказы_перехода(self):
+		self.курс_с_данными()
+
+		def перейти(**поля):
+			return authoring.upgrade_course_artifact(**{"course": self.курс, "artifact": "journal", **поля})
+
+		self.assertEqual(self.код(перейти(course="нет-такого-курса")), "course_not_found")
+		self.assertEqual(self.код(перейти(artifact="nope")), "artifact_not_found")
+		тот_же = перейти()
+		self.assertEqual(
+			(self.код(тот_же), тот_же["error"]["version"]), ("artifact_template_same_version", 1)
+		)
+		self.assertEqual(self.код(перейти(version=9)), "artifact_template_not_found")
+		self.вторая_версия()
+		authoring.set_course_artifact_template(
+			course=self.курс, artifact="journal", template=self.ключ, version=2
+		)
+		self.assertEqual(self.код(перейти(version=1)), "artifact_invalid_template")
+		authoring.set_course_artifact(course=self.курс, artifact="plain", title="П", blocks=БЛОКИ[:1])
+		не_привязан = перейти(artifact="plain")
+		self.assertEqual(
+			(self.код(не_привязан), не_привязан["error"]["artifact"]), ("artifact_not_bound", "plain")
+		)
+
+	def test_переименования_сверяются_с_версиями(self):
+		первая = authoring.set_artifact_template(
+			template=self.ключ, title="Журнал", blocks=БЛОКИ, renamed={"blocks": {"intro": "start"}}
+		)
+		self.assertEqual(
+			(self.код(первая), первая["error"]["path"]), ("artifact_invalid_template", "renamed")
+		)
+		self.шаблон()
+		for renamed, путь in (
+			({"blocks": {"nope": "intro"}}, "renamed.blocks.nope"),
+			({"columns": {"items": {"event": "what"}}}, "renamed.columns.items.event"),
+			({"tables": {"items": "log"}}, "renamed.tables.items"),
+		):
+			ответ = authoring.set_artifact_template(
+				template=self.ключ, title="Журнал", blocks=БЛОКИ, canvas=ХОЛСТ, renamed=renamed
+			)
+			self.assertEqual((self.код(ответ), ответ["error"]["path"]), ("artifact_invalid_template", путь))
+		self.assertEqual(frappe.db.count("Agent Artifact Template", {"template": self.ключ}), 1)
+		self.вторая_версия()
+		self.assertEqual(
+			authoring.artifact_template(template=self.ключ)["data"]["renamed"]["columns"],
+			{"log": {"event": "what"}},
+		)
+		self.assertIsNone(authoring.artifact_template(template=self.ключ, version=1)["data"]["renamed"])
+
 	# --- патч ---
 
 	def test_патч_переводит_документ_на_шаблон(self):

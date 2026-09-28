@@ -12,6 +12,7 @@
 
 import frappe
 
+from lms_frappe_app.agent_learning.artifacts.templates import последние_версии
 from lms_frappe_app.agent_learning.constants import ВАРИАНТОВ_МАКСИМУМ, ВЫБОР, ПРОВЕРЯЕМЫЕ_ТИПЫ
 from lms_frappe_app.agent_learning.errors import Отказ
 
@@ -146,6 +147,7 @@ def _проверить_количество(элементы: list) -> None:
 ФАЙЛ_БЕЗ_ФОРМАТОВ = "artifact_file_without_accept"
 БЕЗ_ОБЕЩАНИЯ = "course_without_promise"
 БЕЗ_ЗАЧИНА = "lesson_without_hook"
+ШАБЛОН_УШЁЛ_ВПЕРЁД = "artifact_template_outdated"
 
 
 def проверить_готовность(курс: str) -> dict:
@@ -227,9 +229,13 @@ def проверить_готовность(курс: str) -> dict:
 
 	# Артефакт публикацию не блокирует: курс без него — нормальный курс. Но
 	# объявленный и пустой — ошибка автора, которую ученик увидит первым.
-	for схема in frappe.get_all(
-		"Agent Course Artifact", filters={"course": курс, "is_active": 1}, fields=["name", "slug"]
-	):
+	схемы = frappe.get_all(
+		"Agent Course Artifact",
+		filters={"course": курс, "is_active": 1},
+		fields=["name", "slug", "title", "template", "template_version"],
+	)
+	стоит_знать += _шаблоны_ушли_вперёд(схемы)
+	for схема in схемы:
 		if not frappe.db.exists("Agent Artifact Block", {"parent": схема.name}):
 			стоит_знать.append(
 				{
@@ -256,6 +262,36 @@ def проверить_готовность(курс: str) -> dict:
 				)
 
 	return {"blocking": мешает, "warnings": стоит_знать}
+
+
+def _шаблоны_ушли_вперёд(схемы: list) -> list[dict]:
+	"""Документы курса, чей шаблон вышел в новую версию (learning-services#376).
+
+	Предупреждением, а не помехой: курс на закреплённой версии работает, как
+	работал. Но автор узнаёт о новой версии здесь — и по `note` решает,
+	переходить ли (`upgrade_course_artifact`).
+	"""
+	последние = последние_версии({с.template for с in схемы if с.template})
+	предупреждения = []
+	for схема in схемы:
+		последняя = последние.get(схема.template)
+		if not последняя or последняя["version"] <= (схема.template_version or 0):
+			continue
+		сообщение = (
+			f"Документ «{схема.title}»: шаблон {схема.template} вышел в v{последняя['version']}, "
+			f"курс на v{схема.template_version}."
+		)
+		if последняя["note"]:
+			сообщение += f" {последняя['note']}"
+		предупреждения.append(
+			{
+				"code": ШАБЛОН_УШЁЛ_ВПЕРЁД,
+				"artifact": схема.slug,
+				"template": схема.template,
+				"message": сообщение,
+			}
+		)
+	return предупреждения
 
 
 def _беды_квиза(квиз: str, урок: str) -> list[dict]:

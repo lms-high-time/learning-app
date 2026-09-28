@@ -401,6 +401,16 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 				overlay={"blocks": {"goal": {"lesson": с_квизом}}},
 			),
 		)
+		authoring.set_artifact_template(
+			template=шаблон,
+			title="Резюме проекта",
+			blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой, с цифрой"}],
+			note="Цель — с цифрой",
+		)
+		self.сверить(
+			"authoring.upgrade_course_artifact",
+			authoring.upgrade_course_artifact(course=курс, artifact="summary"),
+		)
 
 		self.сверить(
 			"authoring.add_quiz",

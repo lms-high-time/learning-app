@@ -27,15 +27,26 @@ import re
 
 import frappe
 
-from lms_frappe_app.agent_learning.artifacts import overlay
+from lms_frappe_app.agent_learning.artifacts import data, overlay, upgrade
 from lms_frappe_app.agent_learning.artifacts.canvas import проверить_холст, холст
 from lms_frappe_app.agent_learning.artifacts.codes import (
+	АРТЕФАКТ_НЕ_НАЙДЕН,
+	НЕ_ПРИВЯЗАН,
 	НЕВЕРНАЯ_СХЕМА,
 	НЕВЕРНЫЕ_ПРАВКИ,
 	НЕВЕРНЫЙ_ШАБЛОН,
+	ТА_ЖЕ_ВЕРСИЯ,
 	ШАБЛОН_НЕ_НАЙДЕН,
 )
-from lms_frappe_app.agent_learning.artifacts.course import блок_наружу, записать_схему, строки_схемы
+from lms_frappe_app.agent_learning.artifacts.course import (
+	_блоки_схем,
+	блок_наружу,
+	записать_схему,
+	строки_схемы,
+)
+from lms_frappe_app.agent_learning.doctype.agent_course_artifact.agent_course_artifact import (
+	нормализовать_ключ,
+)
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
 
 DOCTYPE = "Agent Artifact Template"
@@ -90,6 +101,7 @@ def записать_шаблон(
 	extends: str | None = None,
 	extends_version=None,
 	правки=None,
+	renamed=None,
 ) -> dict:
 	"""Новая версия шаблона. Контракт — у `api.authoring.set_artifact_template`."""
 	ключ = ключ_шаблона(template)
@@ -121,6 +133,9 @@ def записать_шаблон(
 				template=ключ,
 			)
 		блоки, холст_шаблона = проверить_шаблон(блоки, canvas)
+	переименования = upgrade.разобрать(renamed, template=ключ)
+	if переименования:
+		upgrade.проверить(переименования, _прошлые_блоки(ключ), блоки, template=ключ)
 	документ = frappe.get_doc(
 		{
 			"doctype": DOCTYPE,
@@ -130,10 +145,19 @@ def записать_шаблон(
 			"blocks": json.dumps(блоки, ensure_ascii=False),
 			"canvas": json.dumps(холст_шаблона, ensure_ascii=False) if холст_шаблона else None,
 			"note": note or None,
+			"renamed": json.dumps(переименования, ensure_ascii=False) if переименования else None,
 			**наследование,
 		}
 	).insert()
 	return {"id": документ.name, "template": ключ, "version": документ.version}
+
+
+def _прошлые_блоки(ключ: str) -> list | None:
+	"""Блоки последней записанной версии шаблона; шаблона ещё нет — `None`."""
+	try:
+		return шаблон(ключ)["blocks"]
+	except Отказ:
+		return None
 
 
 def _родитель(ключ: str, extends, extends_version, блоки: list, canvas, правки) -> tuple[dict, dict]:
@@ -196,6 +220,7 @@ def шаблон(template: str, version=None) -> dict:
 			"blocks",
 			"canvas",
 			"note",
+			"renamed",
 			"extends",
 			"extends_version",
 			"overlay",
@@ -215,6 +240,7 @@ def шаблон(template: str, version=None) -> dict:
 		"blocks": _json(запись.blocks) or [],
 		"canvas": холст(запись.canvas),
 		"note": запись.note or None,
+		"renamed": _json(запись.renamed) or None,
 		# Наследник: родитель с закреплённой версией и правки к нему. Схема
 		# выше — уже собранная: читать её, не собирая, может каждый.
 		"extends": _наследует(запись),
@@ -321,6 +347,151 @@ def привязать(course: str, artifact: str, template: str, version, пр�
 		"template": исходный["template"],
 		"template_version": исходный["version"],
 	}
+
+
+def перейти(course: str, artifact: str, version=None) -> dict:
+	"""Документ курса — на новую версию своего шаблона, с данными учеников.
+
+	Контракт — у `api.authoring.upgrade_course_artifact`. Переименования
+	версий между закреплённой и новой складываются в одно; им
+	переименовываются правки курса, и схема собирается заново тем же
+	`привязать`. Всё проверяется до записи: правки, которые не собрались с
+	новой версией, — отказ, и ничего не меняется. Данные учеников переносятся
+	на новые ключи в той же транзакции, что и новая схема.
+	"""
+	ключ = нормализовать_ключ(artifact)
+	действующая = frappe.db.get_value(
+		"Agent Course Artifact",
+		{"course": course, "slug": ключ, "is_active": 1},
+		["name", "slug", "template", "template_version", "overlay"],
+		as_dict=True,
+	)
+	if not действующая:
+		raise Отказ(АРТЕФАКТ_НЕ_НАЙДЕН, "В этом курсе нет такого документа", artifact=artifact)
+	if not действующая.template:
+		raise Отказ(
+			НЕ_ПРИВЯЗАН,
+			"Документ задан схемой целиком, а не шаблоном: привяжите его — set_course_artifact_template",
+			artifact=ключ,
+		)
+	цель = шаблон(действующая.template, version)
+	было_версия = действующая.template_version
+	if цель["version"] == было_версия:
+		raise Отказ(
+			ТА_ЖЕ_ВЕРСИЯ, "Курс уже на этой версии шаблона", template=цель["template"], version=было_версия
+		)
+	if цель["version"] < было_версия:
+		# Назад — не переход: переименований в обратную сторону нет, и данные
+		# учеников остались бы под ключами новой версии.
+		raise Отказ(
+			НЕВЕРНЫЙ_ШАБЛОН,
+			"Версия ниже закреплённой: откат — set_course_artifact_template с версией",
+			template=цель["template"],
+			version=цель["version"],
+		)
+
+	прежний = шаблон(действующая.template, было_версия)
+	переименования = upgrade.сложить(
+		[
+			_json(запись)
+			for запись in frappe.get_all(
+				DOCTYPE,
+				filters=[
+					["template", "=", цель["template"]],
+					["version", ">", было_версия],
+					["version", "<=", цель["version"]],
+				],
+				pluck="renamed",
+				order_by="version asc",
+			)
+		]
+	)
+	правки = upgrade.переименовать_правки(
+		разобрать_правки(действующая.overlay),
+		переименования,
+		upgrade.таблицы_блоков(прежний["blocks"]),
+	)
+	было = [блок_наружу(с) for с in _блоки_схем([действующая.name]).get(действующая.name, [])]
+
+	записано = привязать(course, ключ, цель["template"], цель["version"], правки)
+
+	стало = [блок_наружу(с) for с in _блоки_схем([записано["id"]]).get(записано["id"], [])]
+	return {
+		**записано,
+		"from_version": было_версия,
+		"diff": upgrade.разница(upgrade.переименовать_схему(было, переименования), стало),
+		"students": _перенести_данные(course, ключ, переименования),
+	}
+
+
+def _перенести_данные(course: str, artifact: str, переименования: dict) -> int:
+	"""Документы учеников по курсу и ключу — на ключи новой версии; сколько поменялось.
+
+	Пишется в обход контроллера и без отметки изменения: ученик ничего не
+	правил, и документ не должен выглядеть тронутым им.
+	"""
+	if not переименования:
+		return 0
+	блоки = переименования.get("blocks") or {}
+	перенесено = 0
+	for документ in frappe.get_all(
+		"Agent Student Artifact",
+		filters={"course": course, "artifact": artifact},
+		fields=["name", "data"],
+	):
+		тронут = False
+		if документ.data:
+			прежние = data.данные(документ.data)
+			новые = upgrade.переименовать_данные(прежние, переименования)
+			if новые != прежние:
+				frappe.db.set_value(
+					"Agent Student Artifact",
+					документ.name,
+					"data",
+					json.dumps(новые, ensure_ascii=False),
+					update_modified=False,
+				)
+				тронут = True
+		if блоки:
+			строки = frappe.get_all(
+				"Agent Artifact Content",
+				filters={"parent": документ.name, "parenttype": "Agent Student Artifact"},
+				fields=["name", "block_key"],
+			)
+			переименовать = [с for с in строки if с.block_key in блоки]
+			занятые = {блоки[с.block_key] for с in переименовать}
+			for строка in строки:
+				# Под новым ключом — текст блока, давно убранного из схемы:
+				# ученик его не видит, а ключ теперь у того, что он заполнял.
+				if строка.block_key in занятые and строка.block_key not in блоки:
+					frappe.db.delete("Agent Artifact Content", {"name": строка.name})
+			for строка in переименовать:
+				frappe.db.set_value(
+					"Agent Artifact Content",
+					строка.name,
+					"block_key",
+					блоки[строка.block_key],
+					update_modified=False,
+				)
+			тронут = тронут or bool(переименовать)
+		if тронут:
+			перенесено += 1
+	return перенесено
+
+
+def последние_версии(шаблоны: set[str]) -> dict[str, dict]:
+	"""Последняя версия каждого названного шаблона с её пояснением — одним запросом."""
+	последние: dict[str, dict] = {}
+	if not шаблоны:
+		return последние
+	for запись in frappe.get_all(
+		DOCTYPE,
+		filters={"template": ("in", sorted(шаблоны))},
+		fields=["template", "version", "note"],
+		order_by="version asc",
+	):
+		последние[запись.template] = {"version": запись.version, "note": запись.note or None}
+	return последние
 
 
 def разобрать_правки(правки) -> dict:

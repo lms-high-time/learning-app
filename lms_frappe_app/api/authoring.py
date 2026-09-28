@@ -479,6 +479,7 @@ def set_artifact_template(
 	extends: str | None = None,
 	extends_version: int | None = None,
 	overlay=None,
+	renamed=None,
 ) -> dict:
 	"""Заводит новую версию шаблона документа (learning-services#370).
 
@@ -494,6 +495,11 @@ def set_artifact_template(
 	наследника нет, раскладка — родителя или из `overlay.layout`: `layout`
 	наследника не читается. `Why:` MCP шлёт `layout` всегда, и наследник
 	шаблона-холста молча стал бы столбцом.
+
+	`renamed` (learning-services#376) — какие ключи прошлой версии этого
+	шаблона стали какими: `{blocks, fields, tables, columns: {таблица: …}}`.
+	По нему `upgrade_course_artifact` переносит правки курса и данные
+	учеников; без него новое имя — удалённое старое и новое пустое.
 	"""
 	_автор()
 	return templates.записать_шаблон(
@@ -506,6 +512,7 @@ def set_artifact_template(
 		extends=extends,
 		extends_version=extends_version,
 		правки=overlay,
+		renamed=renamed,
 	)
 
 
@@ -548,6 +555,22 @@ def set_course_artifact_template(
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	return templates.привязать(course, artifact, template, version, overlay)
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def upgrade_course_artifact(course: str, artifact: str, version: int | None = None) -> dict:
+	"""Документ курса — на новую версию своего шаблона (learning-services#376).
+
+	`version` не назван — последняя. Правки курса переносятся на ключи новой
+	версии по её `renamed`, схема собирается заново и проверяется целиком;
+	данные учеников переносятся на новые ключи в той же транзакции. Отвечает
+	разницей схем: что автор должен проверить, прежде чем публиковать.
+	Назад — не переход: откат — `set_course_artifact_template` с версией.
+	"""
+	_автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	return templates.перейти(course, artifact, version)
 
 
 @frappe.whitelist(methods=["POST"])
