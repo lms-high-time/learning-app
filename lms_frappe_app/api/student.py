@@ -1420,6 +1420,15 @@ def _артефакт_целиком(ученик: str, course: str, artifact: s
 		# Таблицы документа целиком: колонки всех блоков, строки с формулами
 		# и markdown для агента; значения полей по ключам (#330).
 		"tables": artifact_tables.таблицы_документа(схема.blocks, данные),
+		# Когда документ менялся и сколько раз сохранялся — по журналу `Version`,
+		# который Frappe ведёт у документа ученика (`track_changes`). История
+		# наружу не выходит, только её длина (learning-services#342).
+		"modified": экземпляр.modified.isoformat() if экземпляр else None,
+		"version": frappe.db.count(
+			"Version", {"ref_doctype": "Agent Student Artifact", "docname": экземпляр.name}
+		)
+		if экземпляр
+		else 0,
 		"fields": artifact_tables.поля_документа(схема.blocks, данные),
 	}
 
