@@ -229,7 +229,7 @@ def назначения_пользователя(user: str, course: str | None 
 	назначения = frappe.get_all(
 		"Course Allocation",
 		filters=фильтры,
-		fields=["name", "organization", "course", "audience", "deadline", "mandatory"],
+		fields=["name", "organization", "course", "audience", "deadline", "mandatory", "creation"],
 	)
 	свои = []
 	for назначение in назначения:

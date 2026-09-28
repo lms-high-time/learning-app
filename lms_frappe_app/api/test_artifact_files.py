@@ -280,13 +280,15 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 	# --- отчёт руководителя ---
 
 	def test_отчёт_руководителя_считает_файл_заполненным(self):
-		self.загрузить()
-		frappe.set_user("Administrator")
+		# Курс от организации — до первой записи: документ ложится в её
+		# пространство, а личный отчёт организации не считает (#341).
 		организация = создать_организацию(f"Отчёт {frappe.generate_hash(length=6)}")
 		добавить_в_организацию(self.ученик, организация)
 		frappe.get_doc(
 			{"doctype": "Course Allocation", "organization": организация, "course": self.курс}
 		).insert(ignore_permissions=True)
+		self.загрузить()
+		frappe.set_user("Administrator")
 		руководитель = создать_менеджера(f"rep-{frappe.generate_hash(length=6)}@example.com", организация)
 		frappe.set_user(руководитель)
 

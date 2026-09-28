@@ -299,17 +299,51 @@ def доступна_заметка(doc, ptype: str = "read", user: str | None =
 	return видит_всё(user) or doc.student == user
 
 
-def условие_артефакта(user: str | None = None) -> str:
-	"""`Agent Student Artifact`: только свои, менеджеру — ничего.
+def организации_с_документами(user: str) -> list[str]:
+	"""Организации, чьи документы пространства пользователь читает, кроме своих.
 
-	`Why:` артефакт — рабочий документ ученика, а не отчётность. Менеджеру
-	идёт покрытие целей, и артефакт в эту границу не входит: черновик резюме
-	проекта, который человек ещё уточняет, — не то, по чему его оценивают.
+	Руководитель — всегда своей организации; участник — если организация
+	открыла документы всем участникам. Только действующее членство: ушедший
+	теряет доступ к чужим документам сразу, свои читает по авторству.
+	"""
+	from lms_frappe_app.agent_learning.constants import ДОКУМЕНТЫ_ВИДЯТ_ВСЕ
+
+	руководит = организации_менеджера(user)
+	состоит = frappe.get_all(
+		"Organization Membership",
+		filters={"user": user, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
+		pluck="organization",
+	)
+	открыты_всем = (
+		frappe.get_all(
+			"Learning Organization",
+			filters={"name": ("in", состоит), "artifact_visibility": ДОКУМЕНТЫ_ВИДЯТ_ВСЕ},
+			pluck="name",
+		)
+		if состоит
+		else []
+	)
+	return sorted(set(руководит) | set(открыты_всем))
+
+
+def условие_артефакта(user: str | None = None) -> str:
+	"""`Agent Student Artifact`: свои плюс документы пространств, открытых пользователю.
+
+	Доступ решает **пространство документа**, а не то, что руководитель и
+	ученик где-то состоят вместе. `Why:` человек бывает в нескольких
+	организациях и учится лично; руководитель компании X не должен видеть
+	ни личный документ сотрудника, ни сделанный для компании Y
+	(learning-services#341). Личный документ — пустое пространство — не
+	читает никто, кроме автора.
 	"""
 	user = user or frappe.session.user
 	if видит_всё(user):
 		return ""
-	return f"`tabAgent Student Artifact`.`student` = {frappe.db.escape(user)}"
+	свои = f"`tabAgent Student Artifact`.`student` = {frappe.db.escape(user)}"
+	организации = организации_с_документами(user)
+	if not организации:
+		return свои
+	return f"({свои} or `tabAgent Student Artifact`.`organization` in ({_список(организации)}))"
 
 
 def доступен_артефакт(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -317,7 +351,9 @@ def доступен_артефакт(doc, ptype: str = "read", user: str | None
 	user = user or frappe.session.user
 	if not _только_чтение(ptype, user):
 		return False
-	return видит_всё(user) or doc.student == user
+	if видит_всё(user) or doc.student == user:
+		return True
+	return bool(doc.organization) and doc.organization in организации_с_документами(user)
 
 
 def доступен_desk(user: str | None = None) -> bool:
