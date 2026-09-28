@@ -13,6 +13,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.constants import СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА
+from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning_session import курс_урока
 from lms_frappe_app.api import manager, student
 from lms_frappe_app.patches.v0_1 import document_spaces
 from lms_frappe_app.tests.sample_data import (
@@ -20,6 +21,7 @@ from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	создать_вопрос,
 	создать_квиз,
+	создать_курс,
 	создать_менеджера,
 	создать_организацию,
 	создать_урок,
@@ -45,11 +47,12 @@ def назначить(организация: str, курс: str) -> None:
 	).insert(ignore_permissions=True)
 
 
-def написать(ученик: str, курс: str, текст: str) -> str:
+def написать(ученик: str, курс: str, текст: str, space: str | None = None) -> str:
 	"""Пишет блок документа от имени ученика, возвращает имя документа."""
 	frappe.set_user(ученик)
-	student.update_artifact(курс, "summary", "goal", текст)
+	ответ = student.update_artifact(курс, "summary", "goal", текст, space=space)
 	frappe.set_user("Administrator")
+	assert ответ["ok"], ответ
 	return frappe.db.get_value(
 		"Agent Student Artifact",
 		{"student": ученик, "course": курс, "artifact": "summary"},
@@ -104,30 +107,25 @@ class IntegrationTestDocumentSpace(IntegrationTestCase):
 			frappe.db.get_value("Agent Learning Session", занятие, "organization"), self.компания
 		)
 
-	def test_начатый_документ_не_переезжает_после_назначения(self):
-		"""Пока пространство не выбирают явно, работа продолжается там, где начата."""
+	def test_без_пространства_документ_выбранного(self):
+		"""Курс назначен после личной работы — компании достаётся свой документ (#346)."""
 		зачислить(self.ученик, self.урок)
 		личный = написать(self.ученик, self.курс, "Начал сам")
 
 		назначить(self.компания, self.курс)
-		продолжение = написать(self.ученик, self.курс, "Продолжил")
+		компании = написать(self.ученик, self.курс, "Для компании")
 
-		self.assertEqual(продолжение, личный)
+		self.assertNotEqual(компании, личный)
 		self.assertEqual(
-			frappe.db.count(
-				"Agent Student Artifact", {"student": self.ученик, "course": self.курс}
-			),
-			1,
+			frappe.db.get_value("Agent Student Artifact", компании, "organization"), self.компания
 		)
 
-	def test_приостановленная_организация_пространство_не_даёт(self):
-		назначить(self.компания, self.курс)
+	def test_приостановленная_организация_пространством_не_выбирается(self):
 		frappe.db.set_value("Learning Organization", self.компания, "status", "Suspended")
-		зачислить(self.ученик, self.урок)
+		frappe.set_user(self.ученик)
 
-		документ = написать(self.ученик, self.курс, "Сам по себе")
-
-		self.assertFalse(frappe.db.get_value("Agent Student Artifact", документ, "organization"))
+		self.assertEqual(student.my_spaces()["data"]["current"], "personal")
+		self.assertEqual(student.set_space(self.компания)["error"]["code"], "space_not_available")
 
 
 class IntegrationTestDocumentAccess(IntegrationTestCase):
@@ -157,8 +155,9 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 		назначить(self.икс, self.курсы["икс"])
 		назначить(self.игрек, self.курсы["игрек"])
 
+		пространства = {"икс": self.икс, "игрек": self.игрек, "личное": "personal"}
 		self.документы = {
-			пространство: написать(self.сотрудник, курс, f"Текст {пространство}")
+			пространство: написать(self.сотрудник, курс, f"Текст {пространство}", пространства[пространство])
 			for пространство, курс in self.курсы.items()
 		}
 
@@ -356,3 +355,140 @@ class IntegrationTestSessionAccess(IntegrationTestCase):
 
 		self.assertEqual(len(ответ["sessions"]), 1)
 		self.assertEqual(len(ответ["quiz_attempts"]), 1)
+
+
+class IntegrationTestSpaceChoice(IntegrationTestCase):
+	"""Выбранное пространство и `space` в методах ученика (#346)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.компания = создать_организацию(f"Компания {суффикс}")
+		self.чужая = создать_организацию(f"Чужая {суффикс}")
+		self.ученик = создать_ученика(f"choice-{суффикс}@example.com")
+		добавить_в_организацию(self.ученик, self.компания)
+
+		self.урок_компании = создать_урок(f"Урок к {суффикс}")
+		self.курс_компании = курс_урока(self.урок_компании)
+		self.урок_свой = создать_урок(f"Урок с {суффикс}")
+		self.курс_свой = зачислить(self.ученик, self.урок_свой)
+		for курс in (self.курс_компании, self.курс_свой):
+			завести_схему(курс)
+			frappe.db.set_value("LMS Course", курс, "published", 1)
+		frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": self.компания,
+				"course": self.курс_компании,
+				"deadline": "2030-01-01",
+			}
+		).insert(ignore_permissions=True)
+		# Компания открывает только свой курс: каталог в её пространстве — один курс.
+		организация = frappe.get_doc("Learning Organization", self.компания)
+		организация.append("allowed_courses", {"course": self.курс_компании})
+		организация.save(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+
+	def курсы(self, space=None) -> set[str]:
+		return {к["id"] for к in student.list_my_courses(space=space)["data"]["courses"]}
+
+	def test_по_умолчанию_выбрана_организация(self):
+		ответ = student.my_spaces()["data"]
+
+		self.assertEqual(ответ["current"], self.компания)
+		self.assertEqual([п["id"] for п in ответ["spaces"]], ["personal", self.компания])
+
+	def test_выбор_запоминается_а_чужое_отклоняется(self):
+		self.assertEqual(student.set_space("personal")["data"]["current"], "personal")
+		self.assertEqual(student.my_spaces()["data"]["current"], "personal")
+		self.assertEqual(student.whoami()["data"]["space"], "personal")
+
+		отказ = student.set_space(self.чужая)
+
+		self.assertEqual(отказ["error"]["code"], "space_not_available")
+
+	def test_личное_показывает_все_курсы_организация_свои(self):
+		self.assertEqual(self.курсы("personal"), {self.курс_компании, self.курс_свой})
+		self.assertEqual(self.курсы(self.компания), {self.курс_компании})
+		self.assertEqual(self.курсы(), {self.курс_компании})
+
+	def test_каталог_по_пространству(self):
+		свободный = создать_курс(f"Свободный {frappe.generate_hash(length=6)}")
+		frappe.db.set_value("LMS Course", свободный, "published", 1)
+
+		личный = {к["id"] for к in student.list_catalog(space="personal")["data"]["courses"]}
+		компании = {к["id"] for к in student.list_catalog(space=self.компания)["data"]["courses"]}
+
+		self.assertIn(свободный, личный)
+		self.assertNotIn(self.курс_свой, личный)
+		self.assertEqual(компании, set())
+
+	def test_запись_в_организации_её_назначение_по_выбору(self):
+		frappe.set_user("Administrator")
+		организация = frappe.get_doc("Learning Organization", self.компания)
+		организация.append("allowed_courses", {"course": self.курс_свой})
+		организация.save(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+
+		ответ = student.enroll(self.курс_свой, space=self.компания)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertIn(self.курс_свой, self.курсы(self.компания))
+		self.assertTrue(
+			frappe.db.exists(
+				"Course Allocation",
+				{"organization": self.компания, "course": self.курс_свой, "chosen_by_member": 1},
+			)
+		)
+		повтор = student.enroll(self.курс_свой, space=self.компания)
+		self.assertEqual(повтор["error"]["code"], "already_enrolled")
+
+	def test_один_курс_два_документа_общий_прогресс(self):
+		личный = написать(self.ученик, self.курс_компании, "Для себя", "personal")
+		компании = написать(self.ученик, self.курс_компании, "Для компании", self.компания)
+		frappe.set_user(self.ученик)
+
+		self.assertNotEqual(личный, компании)
+		for space, текст in (("personal", "Для себя"), (self.компания, "Для компании")):
+			блоки = student.artifact(self.курс_компании, "summary", space=space)["data"]["blocks"]
+			self.assertEqual(блоки[0]["content"], текст)
+		self.assertEqual(
+			frappe.db.count("LMS Enrollment", {"member": self.ученик, "course": self.курс_компании}), 1
+		)
+
+	def test_документ_пишется_в_пространство_открытого_занятия(self):
+		student.set_space("personal")
+		занятие = student.start_lesson(self.урок_компании, space=self.компания)["data"]
+
+		документ = написать(self.ученик, self.курс_компании, "По ходу урока")
+
+		self.assertEqual(занятие["space"], self.компания)
+		self.assertEqual(
+			frappe.db.get_value("Agent Student Artifact", документ, "organization"), self.компания
+		)
+
+	def test_урок_в_двух_пространствах_два_занятия(self):
+		первое = student.start_lesson(self.урок_компании, space=self.компания)["data"]["session"]
+		второе = student.start_lesson(self.урок_компании, space="personal")["data"]["session"]
+		повтор = student.start_lesson(self.урок_компании, space=self.компания)["data"]["session"]
+
+		self.assertNotEqual(первое, второе)
+		self.assertEqual(повтор, первое)
+
+	def test_курса_нет_в_пространстве_отказ(self):
+		ответ = student.update_artifact(self.курс_свой, "summary", "goal", "Текст", space=self.компания)
+
+		self.assertEqual(ответ["error"]["code"], "course_not_in_space")
+
+	def test_база_не_пускает_второй_личный_документ(self):
+		frappe.set_user("Administrator")
+		документ = {
+			"doctype": "Agent Student Artifact",
+			"student": self.ученик,
+			"course": self.курс_свой,
+			"artifact": "summary",
+		}
+		frappe.get_doc(документ).insert(ignore_permissions=True)
+
+		with self.assertRaises(frappe.UniqueValidationError):
+			frappe.get_doc(документ).insert(ignore_permissions=True)

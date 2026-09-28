@@ -105,17 +105,33 @@ def обеспечить_индекс_заметок() -> None:
 
 
 def обеспечить_индекс_артефактов() -> None:
-	"""Экземпляр артефакта один на «ученик + курс + артефакт».
+	"""Экземпляр артефакта один на «ученик + курс + артефакт + пространство».
 
 	`Why:` та же причина, что у индекса заметок: метод записи ищет экземпляр
 	перед созданием, но гонку двух вызовов агента и правку из админки держит
 	только база. Два экземпляра одного документа — это два разных «резюме
 	проекта», из которых страница покажет случайный.
+
+	Пространство входит в ключ (learning-services#346): один курс проходится
+	лично и в компании, и документов у него два. Входит через вычисляемую
+	колонку `space_key`: личное пространство — пустое `organization`, а NULL в
+	уникальном индексе MariaDB не равен NULL, и личные документы дублировались
+	бы беспрепятственно.
 	"""
 	frappe.db.sql_ddl(
 		"""
-		CREATE UNIQUE INDEX IF NOT EXISTS `agent_student_artifact_key`
-		ON `tabAgent Student Artifact` (`student`, `course`, `artifact`)
+		ALTER TABLE `tabAgent Student Artifact`
+		ADD COLUMN IF NOT EXISTS `space_key` varchar(140)
+		AS (ifnull(`organization`, '')) PERSISTENT
+		"""
+	)
+	frappe.db.sql_ddl(
+		"DROP INDEX IF EXISTS `agent_student_artifact_key` ON `tabAgent Student Artifact`"
+	)
+	frappe.db.sql_ddl(
+		"""
+		CREATE UNIQUE INDEX IF NOT EXISTS `agent_student_artifact_space_key`
+		ON `tabAgent Student Artifact` (`student`, `course`, `artifact`, `space_key`)
 		"""
 	)
 

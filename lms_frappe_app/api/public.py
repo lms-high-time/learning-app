@@ -14,6 +14,7 @@ from urllib.parse import quote
 import frappe
 
 from lms_frappe_app.agent_learning import artifact_tables, directives
+from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
@@ -40,7 +41,7 @@ from lms_frappe_app.api.student import (
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
 @контракт
-def course_map(course: str) -> dict:
+def course_map(course: str, space: str | None = None) -> dict:
 	"""Карта курса: главы, уроки, цели уроков и покрытие целей.
 
 	Покрытие приходит только зачисленному и только его собственное: у цели
@@ -76,7 +77,7 @@ def course_map(course: str) -> dict:
 	из_директив = {урок: _директива_карты(урок) for урок in порядок}
 	покрытие = _покрытие(порядок) if зачислен else {}
 	номера = {урок: номер for номер, урок in enumerate(порядок, start=1)}
-	документы, блоки_уроков = _документы_курса(course, frappe.session.user if зачислен else None)
+	документы, блоки_уроков = _документы_курса(course, frappe.session.user if зачислен else None, space)
 	ученику = {}
 	if зачислен:
 		пройдены = _пройденные(frappe.session.user, course)
@@ -116,7 +117,7 @@ def course_map(course: str) -> dict:
 
 @frappe.whitelist(methods=["GET"])
 @контракт
-def lesson_entry(lesson: str | None = None, course: str | None = None) -> dict:
+def lesson_entry(lesson: str | None = None, course: str | None = None, space: str | None = None) -> dict:
 	"""Вход в урок: зачин, пройден ли урок и куда вести на занятие.
 
 	Зовёт страница урока в браузере. Урок проходится с агентом, а не
@@ -154,7 +155,7 @@ def lesson_entry(lesson: str | None = None, course: str | None = None) -> dict:
 		"study": _куда_на_занятие(ученик, lesson),
 		# Что из документа курса собирают на этом занятии (#340); ученику
 		# курса — с отметкой, готов ли блок.
-		"blocks": _документы_курса(урок.course, ученик if _зачислен(урок.course) else None)[1].get(
+		"blocks": _документы_курса(урок.course, ученик if _зачислен(урок.course) else None, space)[1].get(
 			урок.name, []
 		),
 	}
@@ -272,16 +273,23 @@ def _покрытие(уроки: list[str]) -> dict[str, dict[str, str]]:
 	return покрытие
 
 
-def _документы_курса(course: str, ученик: str | None) -> tuple[list[dict], dict[str, list[dict]]]:
-	"""Документы курса и их блоки по урокам; ученику — с заполненностью.
+def _документы_курса(
+	course: str, ученик: str | None, space: str | None
+) -> tuple[list[dict], dict[str, list[dict]]]:
+	"""Документы курса и их блоки по урокам; ученику — с заполненностью в пространстве.
 
 	Один проход на курс: схемы документов и, если есть ученик, его содержимое
-	по всем документам сразу — так же, как перечень у `artifact`.
+	по всем документам сразу — так же, как перечень у `artifact`. `space` —
+	чей документ показывать; без него — по правилу `spaces.пространство_курса`.
 	"""
 	схемы = _схемы_курса(course)
 	if not схемы:
 		return [], {}
-	содержимое, вложения, данные = _содержимое_курса(ученик, course) if ученик else ({}, {}, {})
+	содержимое, вложения, данные = (
+		_содержимое_курса(ученик, course, пространства.пространство_курса(ученик, course, space))
+		if ученик
+		else ({}, {}, {})
+	)
 	документы: list[dict] = []
 	по_урокам: dict[str, list[dict]] = {}
 	for схема in схемы:
