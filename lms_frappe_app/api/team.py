@@ -324,7 +324,7 @@ def invite_info(token: str) -> dict:
 	организация = frappe.db.get_value(
 		"Learning Organization",
 		приглашение.organization,
-		["organization_name", "artifact_visibility", "status"],
+		["organization_name", "artifact_visibility", "status", "verified"],
 		as_dict=True,
 	)
 	пользователь = frappe.session.user
@@ -337,6 +337,9 @@ def invite_info(token: str) -> dict:
 		"title": организация.organization_name,
 		"documents_visible_to": ВИДНО_КОМУ[организация.artifact_visibility],
 		"suspended": организация.status != "Active",
+		# Созданную пользователем мы не подтверждали: страница вступления
+		# говорит это до кнопки (#366).
+		"verified": bool(организация.verified),
 		"member": bool(состоит),
 	}
 
@@ -357,6 +360,9 @@ def accept_invite(token: str) -> dict:
 	if frappe.db.get_value("Learning Organization", организация, "status") != "Active":
 		raise Отказ(ПРИГЛАШЕНИЕ_НЕ_НАЙДЕНО, "Организация сейчас приостановлена")
 	имя = frappe.db.get_value("Organization Membership", {"user": ученик, "organization": организация})
+	уже_в_ней = имя and frappe.db.get_value("Organization Membership", имя, "status") == ЧЛЕНСТВО_ДЕЙСТВУЕТ
+	if not уже_в_ней and места_кончились(организация):
+		raise Отказ(ОРГАНИЗАЦИЯ_ЗАПОЛНЕНА, "В организации не осталось мест, пока её не подтвердили")
 	if имя:
 		членство = frappe.get_doc("Organization Membership", имя)
 		if членство.status != ЧЛЕНСТВО_ДЕЙСТВУЕТ:
@@ -539,3 +545,78 @@ def remove_allocation(allocation: str) -> dict:
 	frappe.db.delete("Allocation Notice", {"allocation": назначение.name})
 	назначение.delete(ignore_permissions=True)
 	return {"id": allocation, "removed": True}
+
+
+# --- организацию создаёт сам пользователь (learning-services#366) ---
+
+ЛИМИТ_ОРГАНИЗАЦИЙ = "organization_limit"
+НАЗВАНИЕ_ЗАНЯТО = "organization_name_taken"
+НАЗВАНИЕ_НЕВЕРНО = "organization_name_invalid"
+ОРГАНИЗАЦИЯ_ЗАПОЛНЕНА = "organization_full"
+
+
+def места_кончились(organization: str) -> bool:
+	"""У неподтверждённой организации кончились места участников.
+
+	`Why:` организацию может завести кто угодно; лимит не даёт собрать в
+	неподтверждённой «компании» толпу, которой открыты документы друг друга,
+	пока мы не знаем, кто за ней стоит (learning-services#366).
+	"""
+	from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
+		настройка,
+	)
+
+	if frappe.db.get_value("Learning Organization", organization, "verified"):
+		return False
+	лимит = настройка("own_org_member_limit", 25)
+	if not лимит:
+		return False
+	занято = frappe.db.count(
+		"Organization Membership", {"organization": organization, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ}
+	)
+	return занято >= лимит
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def create_organization(title: str) -> dict:
+	"""Создаёт организацию: создатель — её администратор, её пространство выбрано.
+
+	Неподтверждённая: общий каталог, вступление по ссылке, лимит участников;
+	подтверждаем мы. Правила квиза у всех одни (#353).
+	"""
+	from lms_frappe_app.agent_learning import spaces
+	from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
+		настройка,
+	)
+
+	создатель = текущий_пользователь()
+	название = " ".join((title or "").split())
+	if not 2 <= len(название) <= 140:
+		raise Отказ(НАЗВАНИЕ_НЕВЕРНО, "Название — от 2 до 140 знаков")
+	лимит = настройка("own_org_limit", 3)
+	if лимит and frappe.db.count(
+		"Learning Organization", {"created_by": создатель, "verified": 0}
+	) >= лимит:
+		raise Отказ(ЛИМИТ_ОРГАНИЗАЦИЙ, "Больше неподтверждённых организаций создать нельзя", limit=лимит)
+	if frappe.db.exists("Learning Organization", {"organization_name": название}):
+		raise Отказ(НАЗВАНИЕ_ЗАНЯТО, "Организация с таким названием уже есть", title=название)
+
+	организация = frappe.get_doc(
+		{
+			"doctype": "Learning Organization",
+			"organization_name": название,
+			"verified": 0,
+			"created_by": создатель,
+		}
+	).insert(ignore_permissions=True)
+	frappe.get_doc(
+		{
+			"doctype": "Organization Membership",
+			"user": создатель,
+			"organization": организация.name,
+			"role": АДМИН,
+		}
+	).insert(ignore_permissions=True)
+	spaces.выбрать(создатель, организация.name)
+	return {"organization": организация.name, "title": название}

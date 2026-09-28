@@ -1499,11 +1499,13 @@ ISO 8601 со смещением часового пояса сайта; при 
 
 ```json
 { "ok": true, "data": { "organization": "org-1", "title": "Кофейни",
-  "documents_visible_to": "managers", "suspended": false, "member": false } }
+  "documents_visible_to": "managers", "suspended": false, "verified": true,
+  "member": false } }
 ```
 
-`documents_visible_to` — кто увидит документы по курсам компании; `member` —
-вошедший уже действующий участник.
+`documents_visible_to` — кто увидит документы по курсам компании; `verified` —
+организацию подключили мы (созданную пользователем — нет, и страница говорит
+это до кнопки); `member` — вошедший уже действующий участник.
 
 **Отказы:** `invite_not_found` — ссылки нет или она отозвана.
 
@@ -1520,7 +1522,8 @@ ISO 8601 со смещением часового пояса сайта; при 
 ```
 
 **Отказы:** `invite_not_found` — ссылки нет, она отозвана или организация
-приостановлена.
+приостановлена; `organization_full` — у неподтверждённой организации
+кончились места (`own_org_member_limit` в `Agent Learning Settings`).
 
 ## `lms_frappe_app.api.team.set_member_role`
 
@@ -1620,6 +1623,24 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 ```
 
 **Отказы:** `allocation_not_found`, `team_not_available`, `not_allowed`.
+
+## `lms_frappe_app.api.team.create_organization`
+
+Создаёт организацию: создатель — её администратор (`Org Admin`), её
+пространство выбрано (learning-services#366). Созданная пользователем —
+неподтверждённая (`verified: 0`): общий каталог, вступление только по ссылке,
+не больше `own_org_member_limit` участников, пока мы её не подтвердим; у одного
+человека — не больше `own_org_limit` таких организаций. Правила квиза у всех
+одни. Только `POST`.
+
+**Параметры:** `title` — название, от 2 до 140 знаков.
+
+```json
+{ "ok": true, "data": { "organization": "Моя команда", "title": "Моя команда" } }
+```
+
+**Отказы:** `organization_name_invalid`, `organization_name_taken`,
+`organization_limit`.
 
 ---
 
