@@ -25,11 +25,7 @@ from lms_frappe_app.agent_learning import (
 	snapshots,
 	structure,
 )
-from lms_frappe_app.agent_learning.artifacts import files, schema
-from lms_frappe_app.agent_learning.artifacts.canvas import проверить_холст
-from lms_frappe_app.agent_learning.doctype.agent_course_artifact.agent_course_artifact import (
-	нормализовать_ключ,
-)
+from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
 	ИМЯ_ВИДА_РЕПОРТА,
@@ -74,7 +70,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 УРОК_В_РАБОТЕ = "lesson_in_use"
 ГЛАВА_НЕ_ПУСТА = "chapter_not_empty"
 НЕВЕРНЫЙ_ВОПРОС = "invalid_question"
-НЕВЕРНЫЙ_ВИД_БЛОКА = "invalid_block_kind"
 
 
 def _автор() -> str:
@@ -463,46 +458,7 @@ def set_course_artifact(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	строки = []
-	for блок in список(blocks):
-		блок = _как_словарь(блок)
-		урок = блок.get("lesson") or None
-		if урок:
-			_должен_существовать("Course Lesson", урок, УРОК_НЕ_НАЙДЕН)
-		# Вид блока: текст, файл ученика или ссылка на внешний документ (#315).
-		вид = блок.get("kind") or files.ТЕКСТ
-		if вид not in files.ВИДЫ:
-			raise Отказ(
-				НЕВЕРНЫЙ_ВИД_БЛОКА,
-				"Вид блока: " + ", ".join(files.ВИДЫ),
-				key=блок.get("key"),
-				kind=вид,
-			)
-		спек = schema.проверить_спек(блок.get("spec"), блок.get("key"))
-		строки.append(
-			{
-				"block_key": блок.get("key"),
-				"title": блок.get("title"),
-				"hint": блок.get("hint"),
-				"lesson": урок,
-				"span": блок.get("span") or 1,
-				"kind": вид,
-				"accept": ",".join(files.допустимые(блок)) or None,
-				"spec": json.dumps(спек, ensure_ascii=False) if спек else None,
-			}
-		)
-	schema.проверить_документ(строки)
-	холст = проверить_холст(canvas, строки)
-	версия = directives.записать(
-		"Agent Course Artifact",
-		{"course": course, "slug": нормализовать_ключ(artifact)},
-		{
-			"title": title,
-			"layout": layout,
-			"blocks": строки,
-			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
-		},
-	)
+	версия = записать_схему(course, artifact, title, список(blocks), layout, canvas)
 	# Наружу ключ документа зовётся `artifact`, как в методах ученика.
 	return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
 
@@ -1307,44 +1263,6 @@ def _директива_наружу(doctype: str, владелец: dict, по�
 		"created_at": запись.creation.isoformat(),
 		**{поле: запись.get(поле) for поле in поля},
 	}
-
-
-def _действующие_артефакты(course: str) -> list[dict]:
-	"""Схемы документов курса, которые сейчас получает ученик, с версиями."""
-	собранное = []
-	for запись in frappe.get_all(
-		"Agent Course Artifact",
-		filters={"course": course, "is_active": 1},
-		fields=["name", "slug", "title", "layout", "version"],
-		order_by="creation asc",
-	):
-		собранное.append(
-			{
-				"id": запись.name,
-				"version": запись.version,
-				"artifact": запись.slug,
-				"title": запись.title,
-				"layout": запись.layout,
-				"blocks": [
-					{
-						"key": блок.block_key,
-						"title": блок.title,
-						"hint": блок.hint or "",
-						"lesson": блок.lesson or None,
-						"span": блок.span or 1,
-						"kind": files.вид(блок),
-						"accept": files.допустимые(блок),
-					}
-					for блок in frappe.get_all(
-						"Agent Artifact Block",
-						filters={"parent": запись.name},
-						fields=["block_key", "title", "hint", "lesson", "span", "kind", "accept"],
-						order_by="idx asc",
-					)
-				],
-			}
-		)
-	return собранное
 
 
 def _следы_учеников(lesson: str) -> dict:

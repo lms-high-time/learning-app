@@ -14,13 +14,14 @@ from frappe.query_builder.functions import Min
 
 from lms_frappe_app.agent_learning.access import курсы_ученика
 from lms_frappe_app.agent_learning.artifacts import data
+from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
+from lms_frappe_app.agent_learning.artifacts.document import _заполненность
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
 	адресаты_назначения,
 )
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса
-from lms_frappe_app.api.student import _заполненность, _схемы_курса
 from lms_frappe_app.agent_learning.permissions import (
 	видит_всё,
 	организации_менеджера,

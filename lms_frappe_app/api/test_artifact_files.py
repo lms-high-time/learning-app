@@ -7,7 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import course_builder
-from lms_frappe_app.agent_learning.artifacts import codes
+from lms_frappe_app.agent_learning.artifacts import codes, write
 from lms_frappe_app.agent_learning.spaces import пространство_курса
 from lms_frappe_app.api import authoring, manager, student
 from lms_frappe_app.tests.sample_data import (
@@ -61,7 +61,7 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 
 	def загрузить(self, имя: str = "plan.csv", данные: bytes = CSV, ключ: str = "money") -> dict:
 		пространство = пространство_курса(self.ученик, self.курс)
-		return student.контракт(student._положить_файл)(
+		return student.контракт(write._положить_файл)(
 			self.ученик, self.курс, пространство, "plan", ключ, имя, данные
 		)
 
@@ -363,7 +363,7 @@ class IntegrationTestArtifactKindsAuthoring(IntegrationTestCase):
 	def test_неизвестный_вид_отказ(self):
 		ответ = self.схема([{"key": "money", "title": "Финплан", "kind": "pdf"}])
 
-		self.assertEqual(ответ["error"]["code"], authoring.НЕВЕРНЫЙ_ВИД_БЛОКА)
+		self.assertEqual(ответ["error"]["code"], codes.НЕВЕРНЫЙ_ВИД_БЛОКА)
 
 	def test_готовность_предупреждает_о_файле_без_форматов(self):
 		self.схема([{"key": "money", "title": "Финплан", "kind": "file"}])

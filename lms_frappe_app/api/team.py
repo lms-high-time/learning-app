@@ -15,20 +15,19 @@
 import frappe
 
 from lms_frappe_app.agent_learning.artifacts import export
+from lms_frappe_app.agent_learning.artifacts.course import _действующая_схема, _схемы_курса
+from lms_frappe_app.agent_learning.artifacts.document import (
+	_блок,
+	_вложения,
+	_данные,
+	_заполнен,
+	_содержимое,
+	_файлы,
+)
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
 from lms_frappe_app.api import контракт, текущий_пользователь
-from lms_frappe_app.api.student import (
-	_блок,
-	_вложения,
-	_данные,
-	_действующая_схема,
-	_заполнен,
-	_содержимое,
-	_схемы_курса,
-	_файлы,
-)
 
 КОМАНДА_НЕДОСТУПНА = "team_not_available"
 КУРС_НЕ_ОРГАНИЗАЦИИ = "course_not_in_organization"

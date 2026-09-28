@@ -23,3 +23,9 @@
 ФАЙЛА_НЕТ = "artifact_file_missing"
 НЕВЕРНАЯ_ССЫЛКА = "artifact_invalid_url"
 НЕВЕРНАЯ_ТАБЛИЦА = "artifact_invalid_table"
+
+АРТЕФАКТ_НЕ_НАЙДЕН = "artifact_not_found"
+БЛОК_НЕ_НАЙДЕН = "artifact_block_not_found"
+ПУСТОЙ_БЛОК = "artifact_content_required"
+ОЧИСТКА_С_ТЕКСТОМ = "artifact_clear_with_content"
+НЕВЕРНЫЙ_ВИД_БЛОКА = "invalid_block_kind"

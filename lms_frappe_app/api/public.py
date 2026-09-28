@@ -16,6 +16,8 @@ import frappe
 from lms_frappe_app.agent_learning import directives
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
+from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
+from lms_frappe_app.agent_learning.artifacts.document import _блок_заполнен, _заполненность, _содержимое_курса
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
@@ -26,15 +28,7 @@ from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, О�
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 from lms_frappe_app.api import контракт, текущий_пользователь
 from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН
-from lms_frappe_app.api.student import (
-	_блок_заполнен,
-	_заполненность,
-	_пройденные,
-	_следующий_урок,
-	_содержимое_курса,
-	_схемы_курса,
-	веб_уроки_ученика,
-)
+from lms_frappe_app.api.student import _пройденные, _следующий_урок, веб_уроки_ученика
 
 #: Куда вести ученика, когда веб-чат недоступен: там шаги подключения агента.
 СТРАНИЦА_АГЕНТА = "/agent"

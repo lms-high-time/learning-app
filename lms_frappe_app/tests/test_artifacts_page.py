@@ -4,6 +4,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.artifacts import document, write
 from lms_frappe_app.tests.sample_data import создать_ученика, создать_урок, зачислить
 from lms_frappe_app.api import student
 
@@ -35,7 +36,7 @@ class IntegrationTestArtifactsPage(IntegrationTestCase):
 
 	def документ(self, пользователь: str, artifact: str = "summary") -> dict:
 		frappe.set_user(пользователь)
-		return student._артефакт_целиком(пользователь, self.курс, None, artifact)
+		return document._артефакт_целиком(пользователь, self.курс, None, artifact)
 
 	def переход(self, **параметры) -> str:
 		"""Куда `/artifacts` отправляет с этими параметрами."""
@@ -54,7 +55,7 @@ class IntegrationTestArtifactsPage(IntegrationTestCase):
 		self.assertEqual(self.переход(course="c1", artifact="summary"), "/lms/documents/c1/summary")
 
 	def test_markdown_собирается_одним_файлом(self):
-		from lms_frappe_app.www.artifacts import собрать_markdown
+		from lms_frappe_app.agent_learning.artifacts.export import собрать_markdown
 
 		текст = собрать_markdown(self.документ(self.ученик))
 
@@ -85,13 +86,13 @@ class IntegrationTestArtifactsPageFiles(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
-		student._положить_файл(self.ученик, self.курс, None, "plan", "money", "plan.csv", "Месяц;Выручка\nЯнварь;100\n".encode())
+		write._положить_файл(self.ученик, self.курс, None, "plan", "money", "plan.csv", "Месяц;Выручка\nЯнварь;100\n".encode())
 		student.update_artifact(self.курс, "plan", "crm", url="https://crm.example.com")
 
 	def test_markdown_называет_файл_и_ссылку(self):
-		from lms_frappe_app.www.artifacts import собрать_markdown
+		from lms_frappe_app.agent_learning.artifacts.export import собрать_markdown
 
-		текст = собрать_markdown(student._артефакт_целиком(self.ученик, self.курс, None, "plan"))
+		текст = собрать_markdown(document._артефакт_целиком(self.ученик, self.курс, None, "plan"))
 
 		self.assertIn("Файл: plan.csv", текст)
 		self.assertIn("| Месяц | Выручка |", текст)

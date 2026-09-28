@@ -11,6 +11,9 @@ from lms_frappe_app.agent_learning.artifacts.formulas import _лексемы, _�
 from lms_frappe_app.agent_learning.artifacts.schema import поля_схемы, таблицы_схемы
 from lms_frappe_app.agent_learning.artifacts.values import пусто
 
+#: Чем markdown документа отмечает пустой блок.
+ПУСТОЙ_БЛОК = "_Не заполнено._"
+
 
 def таблицы_документа(блоки: list, д: dict) -> dict[str, dict]:
 	"""Таблицы для страницы и агента: колонки всех блоков, строки с формулами."""
@@ -158,3 +161,38 @@ def _формула_excel(формула: str, буквы: dict, поля: dict,
 		else:
 			части.append(значение)
 	return "=" + "".join(части)
+
+
+def собрать_markdown(документ: dict) -> str:
+	"""Документ одним файлом: заголовок и блоки в порядке схемы.
+
+	Таблица документа выводится у блока, который её заводит, со всеми
+	колонками; у остальных её блоков — поля и заметка. Файл блока сюда не
+	вкладывается — только его имя и срез: markdown остаётся текстом.
+	"""
+	таблицы = документ.get("tables") or {}
+	поля = документ.get("fields") or {}
+	части = [f"# {документ['title']}"]
+	for блок in документ["blocks"]:
+		части.append(f"## {блок['title']}")
+		куски = []
+		значения = [
+			f"- {поле['title']}: {ячейка_текстом(поле, поля.get(поле['key']))}"
+			for поле in блок.get("fields") or []
+			if not пусто(поля.get(поле["key"]))
+		]
+		if значения:
+			куски.append("\n".join(значения))
+		таблица = таблицы.get(блок.get("table") or "")
+		if таблица and таблица["owner"] == блок["key"] and таблица["markdown"]:
+			куски.append(таблица["markdown"])
+		if блок.get("url"):
+			куски.append(f"Ссылка: {блок['url']}")
+		if блок.get("file"):
+			куски.append(f"Файл: {блок['file']['name']}")
+			if блок.get("preview"):
+				куски.append(блок["preview"])
+		if (блок["content"] or "").strip():
+			куски.append(блок["content"].strip())
+		части.append("\n\n".join(куски) or ПУСТОЙ_БЛОК)
+	return "\n\n".join(части) + "\n"
