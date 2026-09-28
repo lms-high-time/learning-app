@@ -40,6 +40,16 @@ from lms_frappe_app.tests.sample_data import зачислить, создать_
 ХОЛСТ = {"grid": ["intro items", "outro outro"], "labels": {"intro": "Начало"}}
 
 
+#: Наследник без итога: блок убран, сетка холста — без него.
+ПРАВКИ_НАСЛЕДНИКА = {
+	"blocks": {
+		"items": {"hint": "Что случилось на объекте", "spec": {"columns": {"kind": None}}},
+		"outro": None,
+	},
+	"canvas": {"grid": ["intro items"]},
+}
+
+
 class IntegrationTestArtifactTemplates(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -150,6 +160,131 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			authoring.list_artifact_templates()
+
+	# --- наследник ---
+
+	def наследник(self, **поля) -> dict:
+		ответ = authoring.set_artifact_template(
+			**{
+				"template": f"{self.ключ}-site",
+				"title": "Журнал объекта",
+				"extends": self.ключ,
+				"overlay": ПРАВКИ_НАСЛЕДНИКА,
+				**поля,
+			}
+		)
+		self.assertTrue(ответ["ok"], ответ)
+		return ответ["data"]
+
+	def test_наследник_хранит_собранную_схему(self):
+		self.шаблон()
+
+		записан = self.наследник(overlay=json.dumps(ПРАВКИ_НАСЛЕДНИКА))
+
+		self.assertEqual((записан["template"], записан["version"]), (f"{self.ключ}-site", 1))
+		наследник = authoring.artifact_template(template=f"{self.ключ}-site")["data"]
+		self.assertEqual(наследник["title"], "Журнал объекта")
+		self.assertEqual(наследник["extends"], {"template": self.ключ, "version": 1})
+		self.assertEqual(наследник["overlay"], ПРАВКИ_НАСЛЕДНИКА)
+		self.assertEqual([б["key"] for б in наследник["blocks"]], ["intro", "items"])
+		self.assertEqual(наследник["blocks"][1]["hint"], "Что случилось на объекте")
+		self.assertEqual([к["key"] for к in наследник["blocks"][1]["spec"]["columns"]], ["event", "source"])
+		self.assertEqual(наследник["canvas"]["grid"], ["intro items"])
+		self.assertEqual(наследник["canvas"]["labels"], {"intro": "Начало"})
+		родитель = authoring.artifact_template(template=self.ключ)["data"]
+		self.assertEqual((родитель["extends"], родитель["overlay"]), (None, None))
+
+		шаблоны = {т["template"]: т for т in authoring.list_artifact_templates()["data"]["templates"]}
+		self.assertEqual(шаблоны[f"{self.ключ}-site"]["extends"], {"template": self.ключ, "version": 1})
+		self.assertIsNone(шаблоны[self.ключ]["extends"])
+
+	def test_раскладка_наследника_от_родителя_и_правок(self):
+		"""`layout` наследника не читается: MCP шлёт его всегда, и наследник
+		холста молча стал бы столбцом."""
+		self.шаблон(layout="canvas")
+
+		self.наследник(layout="sections")
+
+		self.assertEqual(
+			authoring.artifact_template(template=f"{self.ключ}-site")["data"]["layout"], "canvas"
+		)
+		self.наследник(layout="canvas", overlay={**ПРАВКИ_НАСЛЕДНИКА, "layout": "sections"})
+		self.assertEqual(
+			authoring.artifact_template(template=f"{self.ключ}-site")["data"]["layout"], "sections"
+		)
+
+	def test_наследник_закреплён_за_версией_родителя(self):
+		self.шаблон()
+		self.наследник()
+
+		self.шаблон(blocks=[*БЛОКИ, {"key": "extra", "title": "Ещё"}], note="Новый блок")
+
+		первая = authoring.artifact_template(template=f"{self.ключ}-site")["data"]
+		self.assertEqual(первая["extends"]["version"], 1)
+		self.assertNotIn("extra", [б["key"] for б in первая["blocks"]])
+		вторая = self.наследник()
+		self.assertEqual(вторая["version"], 2)
+		последняя = authoring.artifact_template(template=f"{self.ключ}-site")["data"]
+		self.assertEqual(последняя["extends"]["version"], 2)
+		self.assertEqual([б["key"] for б in последняя["blocks"]], ["intro", "items", "extra"])
+		self.наследник(extends_version=1)
+		self.assertEqual(
+			authoring.artifact_template(template=f"{self.ключ}-site")["data"]["extends"]["version"], 1
+		)
+
+	def test_курс_привязывается_к_наследнику(self):
+		self.шаблон()
+		self.наследник()
+
+		ответ = authoring.set_course_artifact_template(
+			course=self.курс,
+			artifact="journal",
+			template=f"{self.ключ}-site",
+			overlay={"blocks": {"items": {"lesson": self.урок}}},
+		)
+
+		self.assertEqual(ответ["data"]["template"], f"{self.ключ}-site")
+		frappe.set_user(self.ученик)
+		документ = student.artifact(self.курс, "journal")["data"]
+		self.assertEqual([б["key"] for б in документ["blocks"]], ["intro", "items"])
+		self.assertEqual(документ["blocks"][1]["lesson"], self.урок)
+
+	def test_отказы_наследника(self):
+		self.шаблон()
+		self.наследник()
+		внук = f"{self.ключ}-sub"
+
+		def наследовать(**поля):
+			return authoring.set_artifact_template(
+				**{"template": внук, "title": "Т", "extends": self.ключ, **поля}
+			)
+
+		отказ = наследовать(extends=f"{self.ключ}-site")
+		self.assertEqual(
+			(self.код(отказ), отказ["error"]["extends"]), ("artifact_invalid_template", f"{self.ключ}-site")
+		)
+		self.assertEqual(self.код(наследовать(template=self.ключ)), "artifact_invalid_template")
+		self.assertEqual(self.код(наследовать(blocks=БЛОКИ)), "artifact_invalid_template")
+		self.assertEqual(self.код(наследовать(canvas=ХОЛСТ)), "artifact_invalid_template")
+		self.assertEqual(
+			self.код(
+				authoring.set_artifact_template(template=внук, title="Т", blocks=БЛОКИ, extends_version=1)
+			),
+			"artifact_invalid_template",
+		)
+		урок = наследовать(overlay={"blocks": {"intro": {"lesson": self.урок}}})
+		self.assertEqual((self.код(урок), урок["error"]["key"]), ("artifact_invalid_overlay", "intro"))
+		self.assertEqual(
+			self.код(наследовать(overlay={"add_blocks": [{"key": "log", "lesson": self.урок}]})),
+			"artifact_invalid_overlay",
+		)
+		self.assertEqual(self.код(наследовать(overlay={"title": "Иначе"})), "artifact_invalid_overlay")
+		self.assertEqual(
+			self.код(наследовать(overlay={"blocks": {"nope": None}})), "artifact_invalid_overlay"
+		)
+		self.assertEqual(self.код(наследовать(extends=f"nope-{self.суффикс}")), "artifact_template_not_found")
+		self.assertEqual(self.код(наследовать(extends_version=7)), "artifact_template_not_found")
+		self.assertFalse(frappe.db.exists("Agent Artifact Template", {"template": внук}))
 
 	# --- привязка ---
 

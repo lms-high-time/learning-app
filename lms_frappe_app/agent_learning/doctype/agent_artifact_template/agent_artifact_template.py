@@ -5,8 +5,19 @@ import frappe
 from frappe.model.document import Document
 
 #: Поля, из которых собирается схема. `note` в их число не входит: пояснение к
-#: версии можно уточнить, не трогая того, на что опираются курсы.
-ПОЛЯ_СХЕМЫ = ("template", "version", "title", "layout", "blocks", "canvas")
+#: версии можно уточнить, не трогая того, на что опираются курсы. Родитель
+#: наследника и правки к нему — входят: схема версии собрана из них.
+ПОЛЯ_СХЕМЫ = (
+	"template",
+	"version",
+	"title",
+	"layout",
+	"blocks",
+	"canvas",
+	"extends",
+	"extends_version",
+	"overlay",
+)
 
 
 class AgentArtifactTemplate(Document):

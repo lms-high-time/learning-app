@@ -470,7 +470,15 @@ def set_course_artifact(
 @frappe.whitelist(methods=["POST"])
 @контракт
 def set_artifact_template(
-	template: str, title: str, blocks, layout: str = "sections", canvas=None, note: str | None = None
+	template: str,
+	title: str,
+	blocks=None,
+	layout: str = "sections",
+	canvas=None,
+	note: str | None = None,
+	extends: str | None = None,
+	extends_version: int | None = None,
+	overlay=None,
 ) -> dict:
 	"""Заводит новую версию шаблона документа (learning-services#370).
 
@@ -479,9 +487,26 @@ def set_artifact_template(
 	принадлежит курсу и задаётся в правках привязки. Каждый вызов — новая
 	версия; прежние не меняются, и курсы, закрепившие их, их и сохраняют.
 	`note` — что поменялось в версии: по нему автор курса решает, переходить ли.
+
+	Наследник (learning-services#375): `extends` — ключ родителя,
+	`extends_version` — его версия (без неё последняя), `overlay` — правки к
+	родителю в формате правок курса, без уроков. Своих `blocks` и `canvas` у
+	наследника нет, раскладка — родителя или из `overlay.layout`: `layout`
+	наследника не читается. `Why:` MCP шлёт `layout` всегда, и наследник
+	шаблона-холста молча стал бы столбцом.
 	"""
 	_автор()
-	return templates.записать_шаблон(template, title, список(blocks), layout, canvas, note)
+	return templates.записать_шаблон(
+		template,
+		title,
+		список(blocks),
+		layout,
+		canvas,
+		note,
+		extends=extends,
+		extends_version=extends_version,
+		правки=overlay,
+	)
 
 
 @frappe.whitelist()
@@ -499,7 +524,10 @@ def list_artifact_templates() -> dict:
 @frappe.whitelist()
 @контракт
 def artifact_template(template: str, version: int | None = None) -> dict:
-	"""Версия шаблона целиком — последняя, если номер не назван."""
+	"""Версия шаблона целиком — последняя, если номер не назван.
+
+	У наследника — собранная схема, родитель с версией и правки к нему.
+	"""
 	_автор()
 	return templates.шаблон(template, version)
 

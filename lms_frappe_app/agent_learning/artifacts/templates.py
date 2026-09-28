@@ -9,6 +9,13 @@
 туда же, куда ложится схема от автора целиком, — ученик, страница и выгрузка
 о шаблонах не знают.
 
+Наследник (learning-services#375) — шаблон, заданный правками к закреплённой
+версии другого шаблона, в том же формате, что правки курса, но без уроков.
+Его схема собирается при записи и хранится в записи шаблона целиком, как у
+любого шаблона: курс привязывается к наследнику так же, и никто не собирает
+схему дважды. Новая версия родителя наследника не меняет — он переходит на
+неё своей новой версией.
+
 Права не проверяются здесь, как и во всём пакете: роль автора проверяют
 методы `api.authoring`.
 """
@@ -73,7 +80,17 @@ def проверить_шаблон(блоки: list, canvas) -> tuple[list[dict
 	return наружу, холст_шаблона
 
 
-def записать_шаблон(template: str, title: str, блоки: list, layout: str, canvas, note: str | None) -> dict:
+def записать_шаблон(
+	template: str,
+	title: str,
+	блоки: list,
+	layout: str,
+	canvas,
+	note: str | None,
+	extends: str | None = None,
+	extends_version=None,
+	правки=None,
+) -> dict:
 	"""Новая версия шаблона. Контракт — у `api.authoring.set_artifact_template`."""
 	ключ = ключ_шаблона(template)
 	if not КЛЮЧ_ШАБЛОНА.match(ключ):
@@ -84,7 +101,26 @@ def записать_шаблон(template: str, title: str, блоки: list, l
 		)
 	if not str(title or "").strip():
 		raise Отказ(НЕВЕРНЫЙ_ШАБЛОН, "У шаблона нужно название", template=ключ)
-	блоки, холст_шаблона = проверить_шаблон(блоки, canvas)
+	наследование = {"extends": None, "extends_version": None, "overlay": None}
+	if extends not in (None, ""):
+		родитель, правки = _родитель(ключ, extends, extends_version, блоки, canvas, правки)
+		собранное = собрать_наследника(родитель, правки)
+		# Раскладка наследника — родителя или из правок, а не `layout`: его
+		# MCP шлёт всегда, и наследник холста молча стал бы столбцом.
+		блоки, холст_шаблона, layout = собранное["blocks"], собранное["canvas"], собранное["layout"]
+		наследование = {
+			"extends": родитель["template"],
+			"extends_version": родитель["version"],
+			"overlay": json.dumps(правки, ensure_ascii=False),
+		}
+	else:
+		if extends_version not in (None, "") or правки not in (None, "", {}):
+			raise Отказ(
+				НЕВЕРНЫЙ_ШАБЛОН,
+				"extends_version и overlay — только у наследника: назовите extends",
+				template=ключ,
+			)
+		блоки, холст_шаблона = проверить_шаблон(блоки, canvas)
 	документ = frappe.get_doc(
 		{
 			"doctype": DOCTYPE,
@@ -94,9 +130,52 @@ def записать_шаблон(template: str, title: str, блоки: list, l
 			"blocks": json.dumps(блоки, ensure_ascii=False),
 			"canvas": json.dumps(холст_шаблона, ensure_ascii=False) if холст_шаблона else None,
 			"note": note or None,
+			**наследование,
 		}
 	).insert()
 	return {"id": документ.name, "template": ключ, "version": документ.version}
+
+
+def _родитель(ключ: str, extends, extends_version, блоки: list, canvas, правки) -> tuple[dict, dict]:
+	"""Версия родителя наследника и правки к ней; наследник не по правилам — отказ.
+
+	Наследник наследника — отказ. `Why:` двухуровневое наследование уже не
+	читается глазами: чтобы понять документ, пришлось бы собирать три схемы в
+	уме. Блоков и холста у наследника нет: его схема — родитель с правками, и
+	второй источник схемы разошёлся бы с первым.
+	"""
+	if ключ_шаблона(extends) == ключ:
+		raise Отказ(НЕВЕРНЫЙ_ШАБЛОН, "Шаблон не наследует сам себя", template=ключ)
+	if блоки or canvas:
+		raise Отказ(
+			НЕВЕРНЫЙ_ШАБЛОН,
+			"У наследника нет своих блоков и холста: правки родителя — в overlay",
+			template=ключ,
+		)
+	родитель = шаблон(extends, extends_version)
+	if родитель["extends"]:
+		raise Отказ(
+			НЕВЕРНЫЙ_ШАБЛОН,
+			"Наследник наследника не заводится: наследуйте родителя",
+			template=ключ,
+			extends=родитель["template"],
+		)
+	правки = разобрать_правки(правки)
+	if "title" in правки:
+		raise Отказ(НЕВЕРНЫЕ_ПРАВКИ, "Название наследника — в title, а не в overlay", name="title")
+	return родитель, правки
+
+
+def собрать_наследника(родитель: dict, правки: dict) -> dict:
+	"""Схема наследника — родитель с правками: `{layout, blocks, canvas}` в
+	каноническом виде, как её хранит запись шаблона.
+
+	Уроков в правках наследника нет: они — дело курса.
+	"""
+	overlay.без_уроков_в_правках(правки)
+	собранное = overlay.собрать(родитель, правки)
+	блоки, холст_шаблона = проверить_шаблон(собранное["blocks"], собранное["canvas"])
+	return {"layout": собранное["layout"] or "sections", "blocks": блоки, "canvas": холст_шаблона}
 
 
 def шаблон(template: str, version=None) -> dict:
@@ -108,7 +187,20 @@ def шаблон(template: str, version=None) -> dict:
 	записи = frappe.get_all(
 		DOCTYPE,
 		filters=фильтры,
-		fields=["name", "template", "version", "title", "layout", "blocks", "canvas", "note", "creation"],
+		fields=[
+			"name",
+			"template",
+			"version",
+			"title",
+			"layout",
+			"blocks",
+			"canvas",
+			"note",
+			"extends",
+			"extends_version",
+			"overlay",
+			"creation",
+		],
 		order_by="version desc",
 		limit=1,
 	)
@@ -123,8 +215,18 @@ def шаблон(template: str, version=None) -> dict:
 		"blocks": _json(запись.blocks) or [],
 		"canvas": холст(запись.canvas),
 		"note": запись.note or None,
+		# Наследник: родитель с закреплённой версией и правки к нему. Схема
+		# выше — уже собранная: читать её, не собирая, может каждый.
+		"extends": _наследует(запись),
+		"overlay": _json(запись.overlay) if запись.extends else None,
 		"created": запись.creation.isoformat(),
 	}
+
+
+def _наследует(запись) -> dict | None:
+	if not запись.extends:
+		return None
+	return {"template": запись.extends, "version": запись.extends_version}
 
 
 def шаблоны() -> list[dict]:
@@ -136,7 +238,7 @@ def шаблоны() -> list[dict]:
 	последние: dict[str, dict] = {}
 	for запись in frappe.get_all(
 		DOCTYPE,
-		fields=["template", "version", "title", "note"],
+		fields=["template", "version", "title", "note", "extends", "extends_version"],
 		order_by="template asc, version desc",
 	):
 		последние.setdefault(запись.template, запись)
@@ -173,6 +275,7 @@ def шаблоны() -> list[dict]:
 			"title": запись.title,
 			"version": запись.version,
 			"note": запись.note or None,
+			"extends": _наследует(запись),
 			"courses": курсы.get(ключ, []),
 		}
 		for ключ, запись in последние.items()

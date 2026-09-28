@@ -11,7 +11,11 @@
   "layout",
   "note",
   "blocks",
-  "canvas"
+  "canvas",
+  "sb_extends",
+  "extends",
+  "extends_version",
+  "overlay"
  ],
  "fields": [
   {
@@ -64,12 +68,41 @@
    "fieldname": "canvas",
    "fieldtype": "JSON",
    "label": "Холст"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sb_extends",
+   "fieldtype": "Section Break",
+   "label": "Наследование"
+  },
+  {
+   "description": "Ключ шаблона-родителя; пусто — шаблон задан блоками целиком (learning-services#375)",
+   "fieldname": "extends",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Наследует",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Версия родителя, закреплённая за этой версией наследника",
+   "fieldname": "extends_version",
+   "fieldtype": "Int",
+   "label": "Версия родителя",
+   "read_only": 1
+  },
+  {
+   "description": "Правки наследника к родителю — в формате правок курса, без уроков. Блоки и холст выше — уже собранные",
+   "fieldname": "overlay",
+   "fieldtype": "JSON",
+   "label": "Правки к родителю",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-29 12:00:00.000000",
+ "modified": "2026-09-29 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Artifact Template",

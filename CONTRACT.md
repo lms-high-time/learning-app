@@ -2147,20 +2147,49 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 `_` и `-`, до 60 знаков (`risk-register`); `title` — название документа по
 умолчанию; `blocks`, `layout`, `canvas` — как у `set_course_artifact`, но
 без `lesson` у блоков: урок принадлежит курсу и задаётся в правках привязки;
-`note` (необязательно) — что поменялось в версии.
+`note` (необязательно) — что поменялось в версии; `extends`,
+`extends_version`, `overlay` (необязательно) — наследник, ниже.
 
 Схема проверяется той же проверкой, что у `set_course_artifact`: вид блока,
 поля и колонки, формулы, холст. Сверх того у шаблона есть блоки, у каждого —
 ключ, и ключи не повторяются.
+
+**Наследник** (learning-services#375) — шаблон, который отличается от другого
+одинаково в нескольких курсах: `extends` — ключ родителя, `extends_version` —
+его версия (без неё — последняя на момент записи), `overlay` — правки к
+родителю в формате правок курса (`set_course_artifact_template`), но без
+`lesson` нигде и без `title`: название наследника — `title`. `blocks` и
+`canvas` у наследника пусты, правка холста — `overlay.canvas`; раскладка —
+родителя или `overlay.layout`, параметр `layout` у наследника не читается:
+MCP шлёт его всегда, и наследник шаблона-холста молча стал бы столбцом.
+
+```json
+{ "template": "risk-register-construction", "title": "Реестр рисков стройки",
+  "extends": "risk-register", "extends_version": 3,
+  "overlay": { "blocks": { "risks": { "hint": "…",
+    "spec": { "columns": { "source": { "options": [ "люди", "погода" ] } } } } } } }
+```
+
+Схема наследника собирается при записи — родитель ⊕ правки, — проверяется,
+как схема любого шаблона, и хранится в версии целиком: `artifact_template`
+отдаёт её собранной, курс привязывается к наследнику, как к любому шаблону.
+Наследник закреплён за версией родителя: новая версия родителя его не
+меняет, на неё наследник переходит своей новой версией. Наследника у
+наследника нет.
 
 ```json
 { "ok": true, "data": { "id": "ATPL-00001", "template": "risk-register", "version": 3 } }
 ```
 
 **Отказы:** `artifact_invalid_template` (с `template`) — ключ не по форме или
-нет названия; `artifact_invalid_spec` (с `key`, `table`, `column`, `field`) —
-схема не читается, в ней нет блоков, ключ блока пуст или повторяется, у блока
-есть `lesson`; `invalid_block_kind` (с `key` и `kind`).
+нет названия; у наследника есть `blocks` или `canvas`; шаблон наследует сам
+себя; родитель сам наследник (с `extends`); `extends_version` или `overlay`
+без `extends`; `artifact_template_not_found` (с `template` и `version`) — нет
+родителя или его версии; `artifact_invalid_overlay` — правки наследника не
+собираются (как у `set_course_artifact_template`), в них есть `lesson` (с
+`key`) или `title` (с `name`); `artifact_invalid_spec` (с `key`, `table`,
+`column`, `field`) — схема не читается, в ней нет блоков, ключ блока пуст или
+повторяется, у блока есть `lesson`; `invalid_block_kind` (с `key` и `kind`).
 
 ## `lms_frappe_app.api.authoring.list_artifact_templates`
 
@@ -2174,12 +2203,14 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 { "ok": true, "data": { "templates": [
   { "template": "risk-register", "title": "Реестр рисков", "version": 3,
     "note": "Колонка «Источник» стала выбором",
+    "extends": null,
     "courses": [ { "course": "course-basics", "course_title": "Основы",
                    "artifact": "risk_register", "version": 2 } ] } ] } }
 ```
 
 `version` у шаблона — последняя, у курса — закреплённая. `note` — `null`, если
-версию не пояснили.
+версию не пояснили. `extends` — у наследника родитель последней версии,
+`{"template": "risk-register", "version": 3}`, у прочих `null`.
 
 ## `lms_frappe_app.api.authoring.artifact_template`
 
@@ -2195,11 +2226,14 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
                 "kind": "text", "accept": [], "spec": { "table": "register",
                 "columns": [ { "key": "event", "title": "Событие", "type": "text" } ] } } ],
   "canvas": null, "note": "Колонка «Источник» стала выбором",
+  "extends": null, "overlay": null,
   "created": "2026-09-29T12:00:00.000000" } }
 ```
 
 Блоки — в той форме, в какой их принимает `set_course_artifact`, без `lesson`;
-`spec` — `null` у блока без полей и колонок.
+`spec` — `null` у блока без полей и колонок. У наследника схема — уже
+собранная, `extends` — `{"template", "version"}` родителя, `overlay` — правки
+к нему; у прочих оба `null`.
 
 **Отказы:** `artifact_template_not_found` (с `template` и `version`).
 

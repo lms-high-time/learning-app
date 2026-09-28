@@ -7,7 +7,7 @@ import copy
 import unittest
 
 from lms_frappe_app.agent_learning.artifacts import codes
-from lms_frappe_app.agent_learning.artifacts.overlay import собрать
+from lms_frappe_app.agent_learning.artifacts.overlay import без_уроков_в_правках, собрать
 from lms_frappe_app.agent_learning.errors import Отказ
 
 ШАБЛОН = {
@@ -254,6 +254,27 @@ class TestСборка(unittest.TestCase):
 		self.отказ({"blocks": {"intro": "текст"}})
 		self.отказ({"add_blocks": {"key": "x"}})
 		self.отказ({"canvas": ["intro"]})
+
+
+class TestПравкиНаследника(unittest.TestCase):
+	"""Правки наследника шаблона — те же правки, но без уроков (#375)."""
+
+	def test_урок_в_правке_блока_и_в_добавке_отказ(self):
+		for правки, ключ in (
+			({"blocks": {"intro": {"lesson": None}}}, "intro"),
+			({"add_blocks": [{"key": "log", "lesson": "L-1"}]}, "log"),
+		):
+			with self.assertRaises(Отказ) as отказ:
+				без_уроков_в_правках(правки)
+			self.assertEqual(отказ.exception.код, codes.НЕВЕРНЫЕ_ПРАВКИ)
+			self.assertEqual(отказ.exception.подробности, {"key": ключ})
+
+	def test_правки_без_уроков_проходят(self):
+		без_уроков_в_правках(
+			{"blocks": {"intro": {"hint": "…"}, "outro": None}, "add_blocks": [{"key": "x"}]}
+		)
+		# Не та форма — не здесь: её отклонит `собрать`.
+		без_уроков_в_правках({"blocks": ["intro"], "add_blocks": {"key": "x"}})
 
 
 if __name__ == "__main__":
