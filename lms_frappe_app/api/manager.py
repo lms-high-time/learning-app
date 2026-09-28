@@ -21,6 +21,7 @@ from lms_frappe_app.agent_learning.structure import уроки_курса
 from lms_frappe_app.agent_learning import artifact_tables
 from lms_frappe_app.api.student import _заполненность, _схемы_курса
 from lms_frappe_app.agent_learning.permissions import (
+	видит_всё,
 	организации_менеджера,
 	свои_организации_пересекаются,
 )
@@ -221,20 +222,18 @@ def student_detail(user: str) -> dict:
 	]
 	названия = _названия_курсов([запись["course"] for запись in курсы])
 
+	# Занятия и попытки — только в пространствах организаций вызывающего:
+	# личную работу и работу для другой компании руководитель не видит
+	# (learning-services#344). Сотрудник платформы видит всё.
+	пространства = None if видит_всё(менеджер) else свои_организации
 	занятия = frappe.get_all(
 		"Agent Learning Session",
-		filters={"student": user},
+		filters={"student": user, **({"organization": ("in", пространства)} if пространства is not None else {})},
 		fields=["name", "lesson", "course", "status", "started_at", "finished_at"],
 		order_by="started_at desc",
 		limit=50,
 	)
-	попытки = frappe.get_all(
-		"Agent Quiz Attempt",
-		filters={"student": user},
-		fields=["quiz", "lesson", "attempt_number", "status", "score", "passed", "finished_at"],
-		order_by="finished_at desc",
-		limit=50,
-	)
+	попытки = _попытки_в_пространствах(user, пространства)
 	покрытие = _покрытие_целей([з.name for з in занятия])
 	return {
 		"user": user,
@@ -272,6 +271,32 @@ def student_detail(user: str) -> dict:
 			for п in попытки
 		],
 	}
+
+
+def _попытки_в_пространствах(user: str, организации: list[str] | None) -> list[dict]:
+	"""Попытки квиза ученика в занятиях этих организаций; `None` — все. Одним запросом."""
+	попытка = frappe.qb.DocType("Agent Quiz Attempt")
+	занятие = frappe.qb.DocType("Agent Learning Session")
+	запрос = (
+		frappe.qb.from_(попытка)
+		.select(
+			попытка.quiz,
+			попытка.lesson,
+			попытка.attempt_number,
+			попытка.status,
+			попытка.score,
+			попытка.passed,
+			попытка.finished_at,
+		)
+		.where(попытка.student == user)
+		.orderby(попытка.finished_at, order=frappe.qb.desc)
+		.limit(50)
+	)
+	if организации is not None:
+		запрос = запрос.join(занятие).on(попытка.session == занятие.name).where(
+			занятие.organization.isin(организации)
+		)
+	return запрос.run(as_dict=True)
 
 
 def _покрытие_целей(занятия: list[str]) -> dict[str, list[dict]]:

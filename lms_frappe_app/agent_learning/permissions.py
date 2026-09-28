@@ -111,7 +111,13 @@ def условие_назначения(user: str | None = None) -> str:
 
 
 def условие_занятия(user: str | None = None) -> str:
-	"""`Agent Learning Session`: свои занятия, менеджеру — занятия его людей."""
+	"""`Agent Learning Session`: свои занятия, руководителю — занятия пространства его организаций.
+
+	`Why:` по пространству, а не по людям: человек учится лично и в
+	нескольких компаниях, и руководитель X не должен видеть его работу вне X
+	(learning-services#344). Ушедший остаётся в пространстве X — его занятия
+	в нём организации видны, как и его документы.
+	"""
 	user = user or frappe.session.user
 	if видит_всё(user):
 		return ""
@@ -119,11 +125,7 @@ def условие_занятия(user: str | None = None) -> str:
 	организации = организации_менеджера(user)
 	if not организации:
 		return свои
-	подзапрос = (
-		"select user from `tabOrganization Membership` "
-		f"where organization in ({_список(организации)}) and status = '{ЧЛЕНСТВО_ДЕЙСТВУЕТ}'"
-	)
-	return f"({свои} or `tabAgent Learning Session`.`student` in ({подзапрос}))"
+	return f"({свои} or `tabAgent Learning Session`.`organization` in ({_список(организации)}))"
 
 
 def доступно_занятие(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -137,15 +139,7 @@ def доступно_занятие(doc, ptype: str = "read", user: str | None =
 		return False
 	if видит_всё(user) or doc.student == user:
 		return True
-	организации = организации_менеджера(user)
-	if not организации:
-		return False
-	return bool(
-		frappe.db.exists(
-			"Organization Membership",
-			{"user": doc.student, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
-		)
-	)
+	return bool(doc.organization) and doc.organization in организации_менеджера(user)
 
 
 def доступно_членство(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -187,13 +181,13 @@ def доступно_событие(doc, ptype: str = "read", user: str | None =
 	if видит_всё(user):
 		return True
 	занятие = frappe.db.get_value(
-		"Agent Learning Session", doc.session, ["name", "student"], as_dict=True
+		"Agent Learning Session", doc.session, ["name", "student", "organization"], as_dict=True
 	)
 	return bool(занятие) and доступно_занятие(занятие, ptype, user)
 
 
 def условие_попытки(user: str | None = None) -> str:
-	"""`Agent Quiz Attempt`: свои попытки, менеджеру — попытки его людей."""
+	"""`Agent Quiz Attempt`: свои попытки, руководителю — попытки занятий, которые ему видны."""
 	user = user or frappe.session.user
 	if видит_всё(user):
 		return ""
@@ -202,10 +196,10 @@ def условие_попытки(user: str | None = None) -> str:
 	if not организации:
 		return свои
 	подзапрос = (
-		"select user from `tabOrganization Membership` "
-		f"where organization in ({_список(организации)}) and status = '{ЧЛЕНСТВО_ДЕЙСТВУЕТ}'"
+		"select name from `tabAgent Learning Session` "
+		f"where organization in ({_список(организации)})"
 	)
-	return f"({свои} or `tabAgent Quiz Attempt`.`student` in ({подзапрос}))"
+	return f"({свои} or `tabAgent Quiz Attempt`.`session` in ({подзапрос}))"
 
 
 def доступна_попытка(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -220,12 +214,9 @@ def доступна_попытка(doc, ptype: str = "read", user: str | None =
 	if видит_всё(user) or doc.student == user:
 		return True
 	организации = организации_менеджера(user)
-	return bool(организации) and bool(
-		frappe.db.exists(
-			"Organization Membership",
-			{"user": doc.student, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
-		)
-	)
+	if not организации or not doc.session:
+		return False
+	return frappe.db.get_value("Agent Learning Session", doc.session, "organization") in организации
 
 
 def условие_ответа(user: str | None = None) -> str:

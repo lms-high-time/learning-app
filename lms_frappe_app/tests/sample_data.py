@@ -206,8 +206,19 @@ def создать_квиз(lesson: str, вопросы: list[str], баллов
 
 
 def создать_занятие(student: str, lesson: str) -> str:
+	"""Занятие с курсом и пространством — по тому же правилу, что у `start_lesson`."""
+	from lms_frappe_app.agent_learning.access import пространство_курса
+
+	глава = frappe.db.get_value("Course Lesson", lesson, "chapter")
+	курс = frappe.db.get_value("Course Chapter", глава, "course")
 	return frappe.get_doc(
-		{"doctype": "Agent Learning Session", "student": student, "lesson": lesson}
+		{
+			"doctype": "Agent Learning Session",
+			"student": student,
+			"lesson": lesson,
+			"course": курс,
+			"organization": пространство_курса(student, курс) if курс else None,
+		}
 	).insert(ignore_permissions=True).name
 
 

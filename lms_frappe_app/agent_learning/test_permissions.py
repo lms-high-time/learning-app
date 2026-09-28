@@ -37,12 +37,18 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 		self.менеджер_а = создать_менеджера(f"m-{суффикс}@example.com", self.компания_а)
 
 		self.урок = создать_урок(f"Урок {суффикс}")
-		self.занятие_а = self._занятие(self.ученик_а)
-		self.занятие_б = self._занятие(self.ученик_б)
+		self.занятие_а = self._занятие(self.ученик_а, self.компания_а)
+		self.занятие_б = self._занятие(self.ученик_б, self.компания_б)
 
-	def _занятие(self, student: str):
+	def _занятие(self, student: str, организация: str):
+		"""Занятие в пространстве компании: руководителю видно по нему (#344)."""
 		return frappe.get_doc(
-			{"doctype": "Agent Learning Session", "student": student, "lesson": self.урок}
+			{
+				"doctype": "Agent Learning Session",
+				"student": student,
+				"lesson": self.урок,
+				"organization": организация,
+			}
 		).insert(ignore_permissions=True)
 
 	def _назначение(self, организация: str):

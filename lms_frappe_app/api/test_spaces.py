@@ -12,11 +12,14 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.constants import СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА
 from lms_frappe_app.api import manager, student
 from lms_frappe_app.patches.v0_1 import document_spaces
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
+	создать_вопрос,
+	создать_квиз,
 	создать_менеджера,
 	создать_организацию,
 	создать_урок,
@@ -280,3 +283,76 @@ class IntegrationTestDocumentSpacesPatch(IntegrationTestCase):
 			frappe.db.get_value("Agent Student Artifact", компании, "organization"), self.компания
 		)
 		self.assertFalse(frappe.db.get_value("Agent Student Artifact", свой, "organization"))
+
+
+class IntegrationTestSessionAccess(IntegrationTestCase):
+	"""Занятия, события и попытки видны руководителю по пространству (#344)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.икс = создать_организацию(f"Икс {суффикс}")
+		self.игрек = создать_организацию(f"Игрек {суффикс}")
+		self.сотрудник = создать_ученика(f"ses-e-{суффикс}@example.com")
+		добавить_в_организацию(self.сотрудник, self.икс)
+		добавить_в_организацию(self.сотрудник, self.игрек)
+		self.руководитель = создать_менеджера(f"ses-m-{суффикс}@example.com", self.икс)
+		урок = создать_урок(f"Урок {суффикс}")
+		зачислить(self.сотрудник, урок)
+		квиз = создать_квиз(урок, [создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])])
+
+		self.занятия, self.попытки, self.события = {}, {}, {}
+		for пространство, организация in (("икс", self.икс), ("игрек", self.игрек), ("личное", None)):
+			занятие = frappe.get_doc(
+				{
+					"doctype": "Agent Learning Session",
+					"student": self.сотрудник,
+					"lesson": урок,
+					"organization": организация,
+				}
+			).insert(ignore_permissions=True)
+			self.занятия[пространство] = занятие.name
+			self.попытки[пространство] = (
+				frappe.get_doc(
+					{
+						"doctype": "Agent Quiz Attempt",
+						"session": занятие.name,
+						"student": self.сотрудник,
+						"lesson": урок,
+						"quiz": квиз,
+						"attempt_number": 1,
+					}
+				)
+				.insert(ignore_permissions=True)
+				.name
+			)
+			self.события[пространство] = занятие.записать_событие(СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА, "тест").name
+
+	def видит(self, doctype: str, имя: str) -> bool:
+		frappe.set_user(self.руководитель)
+		try:
+			напрямую = frappe.has_permission(doctype, "read", doc=имя)
+			списком = bool(frappe.get_list(doctype, filters={"name": имя}, limit=1))
+		finally:
+			frappe.set_user("Administrator")
+		self.assertEqual(напрямую, списком, f"{doctype} {имя}")
+		return напрямую
+
+	def test_занятия_события_и_попытки_только_своего_пространства(self):
+		for doctype, записи in (
+			("Agent Learning Session", self.занятия),
+			("Agent Quiz Attempt", self.попытки),
+			("Agent Session Event", self.события),
+		):
+			with self.subTest(doctype):
+				self.assertTrue(self.видит(doctype, записи["икс"]))
+				self.assertFalse(self.видит(doctype, записи["игрек"]))
+				self.assertFalse(self.видит(doctype, записи["личное"]))
+
+	def test_подробности_по_сотруднику_без_чужих_пространств(self):
+		frappe.set_user(self.руководитель)
+
+		ответ = manager.student_detail(self.сотрудник)["data"]
+
+		self.assertEqual(len(ответ["sessions"]), 1)
+		self.assertEqual(len(ответ["quiz_attempts"]), 1)
