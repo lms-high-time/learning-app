@@ -1316,7 +1316,8 @@ ISO 8601 со смещением часового пояса сайта; при 
 
 ## `lms_frappe_app.api.manager.org_report`
 
-**Параметры:** `course` (необязательный), `status` (необязательный).
+**Параметры:** `course` (необязательный), `status` (необязательный), `organization`
+(необязательный) — отчёт одной из своих организаций; чужая — пустой `rows`.
 
 ```json
 { "ok": true, "data": { "rows": [
@@ -1383,6 +1384,68 @@ ISO 8601 со смещением часового пояса сайта; при 
 
 **Отказы:** `not_your_student` — запрошенный ученик не состоит ни в одной
 организации вызывающего.
+
+---
+
+# Методы команды
+
+Страница «Команда» в пространстве организации: участники и документы, которые
+они собирают в её пространстве (learning-services#355). Доступ — тот же, что у
+самих документов: руководители (`Manager`, `Org Admin`) видят всегда,
+участники — если организация открыла документы всем
+(`documents_visible_to: members`). Прочим, в том числе ушедшим, — отказ
+`team_not_available`. Разговоры с наставником, заметки агента и личные
+документы сюда не выходят ни при какой настройке.
+
+## `lms_frappe_app.api.team.team`
+
+Участники организации и курсы, которые она назначала, с документами курсов.
+
+**Параметры:** `organization`.
+
+```json
+{ "ok": true, "data": {
+  "organization": "org-1", "title": "Кофейни", "can_see_report": true,
+  "members": [ { "user": "ivanov@example.com", "full_name": "Иван Иванов",
+                 "role": "Member", "left": false, "left_on": null } ],
+  "courses": [ { "id": "course-p3", "title": "Проекты по P3.express",
+                 "documents": [ { "artifact": "project_summary",
+                                  "title": "Резюме проекта" } ] } ] } }
+```
+
+`members` — действующие, затем ушедшие (`left`, `left_on`): документы ушедших
+остаются у организации. `can_see_report` — зрителю открыт отчёт
+(`org_report` с `organization`): только руководителю.
+
+**Отказы:** `team_not_available`.
+
+## `lms_frappe_app.api.team.team_documents`
+
+Документ курса у каждого участника в пространстве организации — по блокам,
+для сравнения: что написал каждый в одном и том же блоке.
+
+**Параметры:** `organization`, `course`, `artifact`.
+
+```json
+{ "ok": true, "data": {
+  "organization": "org-1", "course": "course-p3", "artifact": "project_summary",
+  "title": "Резюме проекта",
+  "authors": [ { "user": "ivanov@example.com", "full_name": "Иван Иванов",
+                 "left": false, "blocks_filled": 4, "blocks_total": 6,
+                 "modified": "2026-09-28T14:02:11" } ],
+  "blocks": [ { "key": "sponsor", "title": "Спонсор проекта", "entries": [
+    { "user": "ivanov@example.com", "full_name": "Иван Иванов", "left": false,
+      "filled": true, "content": "Директор по развитию", "file": null,
+      "url": null, "table_markdown": null } ] } ] } }
+```
+
+Только документы пространства организации: личный документ по тому же курсу и
+документ для другой компании не входят. `table_markdown` — у блока с
+колонками: таблица документа целиком, markdown. У файла — имя и адрес; права
+на файл Frappe берёт у документа.
+
+**Отказы:** `team_not_available`, `course_not_in_organization` — организация
+этот курс не назначала, `artifact_not_found`.
 
 ---
 
