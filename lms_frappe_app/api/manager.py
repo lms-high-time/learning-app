@@ -21,6 +21,7 @@ from lms_frappe_app.agent_learning.structure import уроки_курса
 from lms_frappe_app.agent_learning import artifact_tables
 from lms_frappe_app.api.student import _заполненность, _схемы_курса
 from lms_frappe_app.agent_learning.permissions import (
+	видит_всё,
 	организации_менеджера,
 	свои_организации_пересекаются,
 )
@@ -57,7 +58,9 @@ def org_report(course: str | None = None, status: str | None = None) -> dict:
 		пройдено = _пройдено_по_участникам(назначение.course, участники, уроки)
 		имена = _имена(участники)
 		последняя_активность = _последняя_активность(назначение.course, участники)
-		всего_блоков, заполнено_блоков = _документ_по_участникам(назначение.course, участники)
+		всего_блоков, заполнено_блоков = _документ_по_участникам(
+			назначение.course, участники, назначение.organization
+		)
 
 		for участник in участники:
 			строка = _строка_отчёта(
@@ -100,8 +103,13 @@ def _пройдено_по_участникам(
 	return {участник: len(уроки) for участник, уроки in пройдено.items()}
 
 
-def _документ_по_участникам(курс: str, участники: list[str]) -> tuple[int, dict[str, int]]:
-	"""Сколько блоков в документах курса и сколько заполнил каждый.
+def _документ_по_участникам(
+	курс: str, участники: list[str], организация: str
+) -> tuple[int, dict[str, int]]:
+	"""Сколько блоков в документах курса и сколько заполнил каждый — в пространстве организации.
+
+	Личный документ по тому же курсу и документ для другой компании не
+	считаются: они не организации (learning-services#341).
 
 	Считаются блоки действующих схем: убранный из схемы блок не засчитывается,
 	даже если текст в базе остался. Два запроса на курс, не на участника.
@@ -117,7 +125,7 @@ def _документ_по_участникам(курс: str, участник�
 		запись.name: запись
 		for запись in frappe.get_all(
 			"Agent Student Artifact",
-			filters={"course": курс, "student": ("in", участники)},
+			filters={"course": курс, "student": ("in", участники), "organization": организация},
 			fields=["name", "student", "artifact", "data"],
 		)
 	}
@@ -214,20 +222,18 @@ def student_detail(user: str) -> dict:
 	]
 	названия = _названия_курсов([запись["course"] for запись in курсы])
 
+	# Занятия и попытки — только в пространствах организаций вызывающего:
+	# личную работу и работу для другой компании руководитель не видит
+	# (learning-services#344). Сотрудник платформы видит всё.
+	пространства = None if видит_всё(менеджер) else свои_организации
 	занятия = frappe.get_all(
 		"Agent Learning Session",
-		filters={"student": user},
+		filters={"student": user, **({"organization": ("in", пространства)} if пространства is not None else {})},
 		fields=["name", "lesson", "course", "status", "started_at", "finished_at"],
 		order_by="started_at desc",
 		limit=50,
 	)
-	попытки = frappe.get_all(
-		"Agent Quiz Attempt",
-		filters={"student": user},
-		fields=["quiz", "lesson", "attempt_number", "status", "score", "passed", "finished_at"],
-		order_by="finished_at desc",
-		limit=50,
-	)
+	попытки = _попытки_в_пространствах(user, пространства)
 	покрытие = _покрытие_целей([з.name for з in занятия])
 	return {
 		"user": user,
@@ -265,6 +271,32 @@ def student_detail(user: str) -> dict:
 			for п in попытки
 		],
 	}
+
+
+def _попытки_в_пространствах(user: str, организации: list[str] | None) -> list[dict]:
+	"""Попытки квиза ученика в занятиях этих организаций; `None` — все. Одним запросом."""
+	попытка = frappe.qb.DocType("Agent Quiz Attempt")
+	занятие = frappe.qb.DocType("Agent Learning Session")
+	запрос = (
+		frappe.qb.from_(попытка)
+		.select(
+			попытка.quiz,
+			попытка.lesson,
+			попытка.attempt_number,
+			попытка.status,
+			попытка.score,
+			попытка.passed,
+			попытка.finished_at,
+		)
+		.where(попытка.student == user)
+		.orderby(попытка.finished_at, order=frappe.qb.desc)
+		.limit(50)
+	)
+	if организации is not None:
+		запрос = запрос.join(занятие).on(попытка.session == занятие.name).where(
+			занятие.organization.isin(организации)
+		)
+	return запрос.run(as_dict=True)
 
 
 def _покрытие_целей(занятия: list[str]) -> dict[str, list[dict]]:

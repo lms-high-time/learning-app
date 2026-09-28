@@ -187,7 +187,10 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 
 		self.сотрудник = создать_ученика(f"emp-{суффикс}@example.com")
 		добавить_в_организацию(self.сотрудник, self.компания)
-		зачислить(self.сотрудник, self.урок)
+		# Курс даёт компания: руководителю видна работа в её пространстве (#344).
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.компания, "course": зачислить(self.сотрудник, self.урок)}
+		).insert(ignore_permissions=True)
 		self.руководитель = создать_менеджера(f"boss-{суффикс}@example.com", self.компания)
 
 		frappe.set_user(self.сотрудник)

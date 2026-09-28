@@ -88,6 +88,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 				"student": self.ученик_а,
 				"course": self.курс,
 				"artifact": "summary",
+				"organization": self.компания_а,
 				"blocks": [
 					{"block_key": "goal", "content": "Открыть кофейню"},
 					{"block_key": "sponsor", "content": "  "},

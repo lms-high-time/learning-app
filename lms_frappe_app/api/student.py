@@ -26,6 +26,7 @@ from lms_frappe_app.agent_learning.access import (
 	можно_записаться,
 	назначения_ученика,
 	политика_квиза_для_курса,
+	пространство_курса,
 )
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_ЗАМЕТОК,
@@ -40,6 +41,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ОТКРЫТЫЕ,
 	ПРОЙДЕН,
 	СОБЫТИЕ_ВЕРДИКТ,
+	ЧЛЕНСТВО_ДЕЙСТВУЕТ,
 	СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА,
 	СОБЫТИЕ_ОТМЕТКА,
 	СТАТУСЫ_РЕПОРТОВ,
@@ -124,6 +126,9 @@ def лимит_заметок() -> int:
 БЛОК_НЕ_НАЙДЕН = "artifact_block_not_found"
 ПУСТОЙ_БЛОК = "artifact_content_required"
 ОЧИСТКА_С_ТЕКСТОМ = "artifact_clear_with_content"
+
+#: Пространство не передано — вычислить; `None` занят: это личное пространство.
+_НЕ_ЗАДАНО = object()
 
 
 @frappe.whitelist()
@@ -275,6 +280,8 @@ def start_lesson(
 	if channel == "web":
 		_проверить_пробные_уроки(ученик, lesson)
 
+	# Одно на вызов: оно же нужно блокам документа в ответе ниже.
+	пространство = пространство_курса(ученик, курс, назначения)
 	# Продолжение урока не заводит второе занятие: иначе на один урок копились
 	# бы незакрытые сессии, которые потом закрывает фоновая задача.
 	занятие = _текущее_занятие(ученик, lesson) or frappe.get_doc(
@@ -283,6 +290,7 @@ def start_lesson(
 			"student": ученик,
 			"lesson": lesson,
 			"course": курс,
+			"organization": пространство,
 			"via_trusted_service": 1,
 		}
 	).insert(ignore_permissions=True)
@@ -347,7 +355,7 @@ def start_lesson(
 		},
 		# Подсказка «сегодня собираем резюме проекта», а не ограничение:
 		# update_artifact принимает любой ключ, и ученик волен забежать вперёд.
-		"artifact_blocks": _блоки_урока(ученик, курс, lesson),
+		"artifact_blocks": _блоки_урока(ученик, курс, lesson, пространство),
 	}
 	# Отметка — после сборки ответа: упади она раньше, итог пропал бы для
 	# ученика, так и не дойдя до агента.
@@ -462,7 +470,7 @@ def whoami() -> dict:
 	организации = []
 	for членство in frappe.get_all(
 		"Organization Membership",
-		filters={"user": ученик},
+		filters={"user": ученик, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
 		fields=["organization", "role"],
 		ignore_permissions=True,
 	):
@@ -636,7 +644,7 @@ def _записать_данные(ученик: str, course: str, схема, �
 	else:
 		# Без заметки строка блока не нужна: данные таблиц общие для блоков
 		# и живут в документе, а пустой текст блока doctype не примет.
-		документ = _экземпляр(ученик, course, схема.slug) or _новый_документ(ученик, course, схема)
+		документ = _документ_ученика(ученик, course, схема)
 	прежние = _данные(документ)
 	было = {с["id"] for т in прежние["tables"].values() for с in т}
 	новые = artifact_tables.записать(
@@ -683,8 +691,11 @@ def _положить_файл(ученик: str, course: str, artifact: str, ke
 	тип = artifact_files.проверить_файл(блок, имя, данные, artifact=схема.slug, key=ключ)
 
 	документ, строка = _строка_блока(ученик, course, схема, ключ)
-	if документ.is_new():
+	if not документ.name:
 		# Файл привязывается к документу по имени — оно появляется при записи.
+		# `Why:` не `is_new()`: у документа, собранного `frappe.get_doc({...})`,
+		# нет `__islocal`, и проверка отвечала «не новый» — файл вставлялся без
+		# имени документа, и Frappe снимал привязку (#343).
 		документ.schema_version = схема.name
 		документ.insert(ignore_permissions=True)
 		строка = next(с for с in документ.blocks if с.block_key == ключ)
@@ -749,20 +760,29 @@ def _блок_схемы(course: str, artifact: str, key: str):
 
 def _строка_блока(ученик: str, course: str, схема, ключ: str):
 	"""Документ ученика и строка блока в нём; чего нет — заводится, не записываясь."""
-	документ = _экземпляр(ученик, course, схема.slug) or _новый_документ(ученик, course, схема)
+	документ = _документ_ученика(ученик, course, схема)
 	строка = next((с for с in документ.blocks if с.block_key == ключ), None)
 	if строка is None:
 		строка = документ.append("blocks", {"block_key": ключ})
 	return документ, строка
 
 
-def _новый_документ(ученик: str, course: str, схема):
+def _документ_ученика(ученик: str, course: str, схема):
+	"""Документ ученика по схеме в его пространстве; нет — заводится, не записываясь."""
+	пространство = пространство_курса(ученик, course)
+	return _экземпляр(ученик, course, схема.slug, пространство) or _новый_документ(
+		ученик, course, схема, пространство
+	)
+
+
+def _новый_документ(ученик: str, course: str, схема, пространство: str | None):
 	return frappe.get_doc(
 		{
 			"doctype": "Agent Student Artifact",
 			"student": ученик,
 			"course": course,
 			"artifact": схема.slug,
+			"organization": пространство,
 		}
 	)
 
@@ -1198,10 +1218,21 @@ def _действующая_схема(course: str, artifact: str):
 	return frappe.get_doc("Agent Course Artifact", имя)
 
 
-def _экземпляр(ученик: str, course: str, artifact: str):
-	"""Документ ученика по этой схеме, если он уже заполнялся."""
+def _экземпляр(ученик: str, course: str, artifact: str, пространство=_НЕ_ЗАДАНО):
+	"""Документ ученика по этой схеме в его пространстве, если он уже заполнялся.
+
+	`пространство` — уже вычисленное (`None` — личное); без него вычисляется своё.
+	"""
+	if пространство is _НЕ_ЗАДАНО:
+		пространство = пространство_курса(ученик, course)
 	имя = frappe.db.get_value(
-		"Agent Student Artifact", {"student": ученик, "course": course, "artifact": artifact}
+		"Agent Student Artifact",
+		{
+			"student": ученик,
+			"course": course,
+			"artifact": artifact,
+			"organization": пространство or ("is", "not set"),
+		},
 	)
 	return frappe.get_doc("Agent Student Artifact", имя) if имя else None
 
@@ -1303,16 +1334,22 @@ def _заполнен(блок: dict) -> bool:
 
 
 def _содержимое_курса(
-	ученик: str, course: str
+	ученик: str, course: str, пространство=_НЕ_ЗАДАНО
 ) -> tuple[dict[str, dict[str, str]], dict[str, dict], dict[str, dict]]:
 	"""Содержимое и вложения всех документов ученика по курсу — по ключу документа.
 
 	`Why:` перечень и блоки урока спрашивали документ ученика отдельно на
 	каждую схему, а каждый такой вопрос стоил трёх обходов базы.
 	"""
+	if пространство is _НЕ_ЗАДАНО:
+		пространство = пространство_курса(ученик, course)
 	записи = frappe.get_all(
 		"Agent Student Artifact",
-		filters={"student": ученик, "course": course},
+		filters={
+			"student": ученик,
+			"course": course,
+			"organization": пространство or ("is", "not set"),
+		},
 		fields=["name", "artifact", "data"],
 	)
 	экземпляры = {запись.name: запись.artifact for запись in записи}
@@ -1387,7 +1424,7 @@ def _артефакт_целиком(ученик: str, course: str, artifact: s
 	}
 
 
-def _блоки_урока(ученик: str, курс: str, lesson: str) -> list[dict]:
+def _блоки_урока(ученик: str, курс: str, lesson: str, пространство=_НЕ_ЗАДАНО) -> list[dict]:
 	"""Блоки документов курса, привязанные к уроку, с содержимым ученика."""
 	по_схемам = [
 		(схема, [блок for блок in схема.blocks if блок.lesson == lesson])
@@ -1395,7 +1432,9 @@ def _блоки_урока(ученик: str, курс: str, lesson: str) -> lis
 	]
 	# Содержимое читается, только если уроку вообще принадлежит хоть один блок.
 	по_документам, вложения, данные = (
-		_содержимое_курса(ученик, курс) if any(свои for _, свои in по_схемам) else ({}, {}, {})
+		_содержимое_курса(ученик, курс, пространство)
+		if any(свои for _, свои in по_схемам)
+		else ({}, {}, {})
 	)
 	файлы = _файлы({f"{д}/{к}": в for д, блоки in вложения.items() for к, в in блоки.items()})
 	блоки = []

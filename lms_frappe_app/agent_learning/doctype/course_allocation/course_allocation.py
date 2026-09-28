@@ -4,6 +4,7 @@
 import frappe
 from frappe.model.document import Document
 
+from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
 	LearningOrganization,
 )
@@ -49,8 +50,6 @@ class CourseAllocation(Document):
 
 	def адресаты(self) -> list[str]:
 		"""Кому предназначено назначение."""
-		if self.audience == "Selected Members":
-			return [строка.user for строка in self.members]
 		return адресаты_назначения(self.name, self.organization, self.audience)
 
 	def выдать_зачисления(self, участники: list[str] | None = None) -> int:
@@ -106,7 +105,9 @@ def адресаты_назначений(назначения: list) -> dict[st
 	Правило при этом одно: одиночный случай ходит сюда же.
 	"""
 	поимённые = [н.name for н in назначения if н.audience == "Selected Members"]
-	организации = list({н.organization for н in назначения if н.audience != "Selected Members"})
+	# Состав нужен и поимённым: вписанный в список получает курс, только пока
+	# он действующий участник — ни ушедший, ни посторонний (#345).
+	организации = list({н.organization for н in назначения})
 
 	по_назначениям: dict[str, list[str]] = {}
 	if поимённые:
@@ -123,15 +124,20 @@ def адресаты_назначений(назначения: list) -> dict[st
 	if организации:
 		строки = frappe.get_all(
 			"Organization Membership",
-			filters={"organization": ("in", организации), "role": ("in", ВСЕ_РОЛИ_УЧАСТНИКОВ)},
+			filters={
+				"organization": ("in", организации),
+				"role": ("in", ВСЕ_РОЛИ_УЧАСТНИКОВ),
+				"status": ЧЛЕНСТВО_ДЕЙСТВУЕТ,
+			},
 			fields=["organization", "user"],
 		)
 		for строка in строки:
 			состав.setdefault(строка.organization, []).append(строка.user)
 
+	действующие = {организация: set(люди) for организация, люди in состав.items()}
 	return {
 		н.name: (
-			по_назначениям.get(н.name, [])
+			[у for у in по_назначениям.get(н.name, []) if у in действующие.get(н.organization, set())]
 			if н.audience == "Selected Members"
 			else состав.get(н.organization, [])
 		)
@@ -224,7 +230,7 @@ def назначения_пользователя(user: str, course: str | None 
 	назначения = frappe.get_all(
 		"Course Allocation",
 		filters=фильтры,
-		fields=["name", "organization", "course", "audience", "deadline", "mandatory"],
+		fields=["name", "organization", "course", "audience", "deadline", "mandatory", "creation"],
 	)
 	свои = []
 	for назначение in назначения:

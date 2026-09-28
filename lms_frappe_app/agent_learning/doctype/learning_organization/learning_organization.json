@@ -11,6 +11,7 @@
   "organization_name",
   "status",
   "email_domains",
+  "artifact_visibility",
   "sb_courses",
   "allowed_courses",
   "sb_quiz",
@@ -42,6 +43,15 @@
    "fieldname": "email_domains",
    "fieldtype": "Small Text",
    "label": "\u0414\u043e\u043c\u0435\u043d\u044b \u043f\u043e\u0447\u0442\u044b"
+  },
+  {
+   "default": "Managers",
+   "description": "\u0420\u0443\u043a\u043e\u0432\u043e\u0434\u0438\u0442\u0435\u043b\u0438 \u2014 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u0438 \u0441 \u0440\u043e\u043b\u044c\u044e Manager \u0438\u043b\u0438 Org Admin. \u0420\u0430\u0437\u0433\u043e\u0432\u043e\u0440\u044b \u0441 \u043d\u0430\u0441\u0442\u0430\u0432\u043d\u0438\u043a\u043e\u043c \u0438 \u0437\u0430\u043c\u0435\u0442\u043a\u0438 \u0430\u0433\u0435\u043d\u0442\u0430 \u043d\u0435 \u0432\u0438\u0434\u0438\u0442 \u043d\u0438\u043a\u0442\u043e.",
+   "fieldname": "artifact_visibility",
+   "fieldtype": "Select",
+   "label": "\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b \u043a\u0443\u0440\u0441\u043e\u0432 \u0432\u0438\u0434\u044f\u0442",
+   "options": "Managers\nAll Members",
+   "reqd": 1
   },
   {
    "fieldname": "sb_courses",
@@ -85,7 +95,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-01 22:33:24.907780",
+ "modified": "2026-09-28 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Learning Organization",
