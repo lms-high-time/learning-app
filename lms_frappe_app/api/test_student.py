@@ -174,6 +174,70 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		self.assertEqual(данные["lesson"]["id"], срочный_урок)
 
+	def _срочный_курс(self) -> str:
+		"""Второй курс с дедлайном раньше — его взял бы вызов без аргументов."""
+		frappe.set_user("Administrator")
+		урок = создать_урок(f"Срочный {frappe.generate_hash(length=6)}")
+		курс = frappe.db.get_value(
+			"Course Chapter", frappe.db.get_value("Course Lesson", урок, "chapter"), "course"
+		)
+		frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": self.организация,
+				"course": курс,
+				"deadline": "2026-06-30",
+				"mandatory": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		return курс
+
+	def test_с_курсом_берётся_урок_этого_курса(self):
+		# «Продолжим Lean Canvas» не должно открывать урок курса, который
+		# горит сильнее (lms-platform#337).
+		self._срочный_курс()
+
+		данные = student.start_lesson(course=self.курс)["data"]
+
+		self.assertEqual(данные["lesson"]["id"], self.урок)
+
+	def test_урок_важнее_курса(self):
+		срочный = self._срочный_курс()
+
+		данные = student.start_lesson(lesson=self.урок, course=срочный)["data"]
+
+		self.assertEqual(данные["lesson"]["id"], self.урок)
+
+	def test_пройденный_курс_отказ_нечего_учить(self):
+		frappe.set_user("Administrator")
+		frappe.get_doc(
+			{"doctype": "LMS Course Progress", "member": self.ученик, "lesson": self.урок, "status": "Complete"}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+
+		ответ = student.start_lesson(course=self.курс)
+
+		self.assertFalse(ответ["ok"])
+		self.assertEqual(ответ["error"]["code"], student.НЕЧЕГО_УЧИТЬ)
+		self.assertEqual(ответ["error"]["course"], self.курс)
+
+	def test_чужой_курс_отказ_по_доступу_а_не_по_пройденности(self):
+		frappe.set_user("Administrator")
+		чужой_урок = создать_урок(f"Чужой {frappe.generate_hash(length=6)}")
+		чужой = frappe.db.get_value(
+			"Course Chapter", frappe.db.get_value("Course Lesson", чужой_урок, "chapter"), "course"
+		)
+		frappe.set_user(self.ученик)
+
+		ответ = student.start_lesson(course=чужой)
+
+		self.assertFalse(ответ["ok"])
+		self.assertEqual(ответ["error"]["code"], НЕ_ЗАЧИСЛЕН)
+		self.assertFalse(
+			frappe.db.exists("Agent Learning Session", {"student": self.ученик, "course": чужой})
+		)
+
 	# --- квиз через методы ---
 
 	def test_полный_проход_квиза_через_методы(self):
