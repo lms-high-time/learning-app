@@ -50,8 +50,6 @@ class CourseAllocation(Document):
 
 	def адресаты(self) -> list[str]:
 		"""Кому предназначено назначение."""
-		if self.audience == "Selected Members":
-			return [строка.user for строка in self.members]
 		return адресаты_назначения(self.name, self.organization, self.audience)
 
 	def выдать_зачисления(self, участники: list[str] | None = None) -> int:
@@ -107,7 +105,9 @@ def адресаты_назначений(назначения: list) -> dict[st
 	Правило при этом одно: одиночный случай ходит сюда же.
 	"""
 	поимённые = [н.name for н in назначения if н.audience == "Selected Members"]
-	организации = list({н.organization for н in назначения if н.audience != "Selected Members"})
+	# Состав нужен и поимённым: вписанный в список получает курс, только пока
+	# он действующий участник — ни ушедший, ни посторонний (#345).
+	организации = list({н.organization for н in назначения})
 
 	по_назначениям: dict[str, list[str]] = {}
 	if поимённые:
@@ -134,9 +134,10 @@ def адресаты_назначений(назначения: list) -> dict[st
 		for строка in строки:
 			состав.setdefault(строка.organization, []).append(строка.user)
 
+	действующие = {организация: set(люди) for организация, люди in состав.items()}
 	return {
 		н.name: (
-			по_назначениям.get(н.name, [])
+			[у for у in по_назначениям.get(н.name, []) if у in действующие.get(н.organization, set())]
 			if н.audience == "Selected Members"
 			else состав.get(н.organization, [])
 		)

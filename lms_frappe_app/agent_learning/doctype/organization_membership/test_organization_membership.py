@@ -194,3 +194,40 @@ class IntegrationTestMembershipStatus(IntegrationTestCase):
 		членство.save(ignore_permissions=True)
 
 		self.assertIn("Organization Manager", self.роли())
+
+
+class IntegrationTestSelectedMembers(IntegrationTestCase):
+	"""Поимённое назначение — только действующим участникам (#345)."""
+
+	def setUp(self):
+		суффикс = frappe.generate_hash(length=6)
+		self.организация = создать_организацию(f"Компания {суффикс}")
+		self.курс = создать_курс(f"Курс {суффикс}")
+		self.действующий = создать_ученика(f"sel-a-{суффикс}@example.com")
+		self.ушедший = создать_ученика(f"sel-l-{суффикс}@example.com")
+		self.посторонний = создать_ученика(f"sel-o-{суффикс}@example.com")
+		добавить_в_организацию(self.действующий, self.организация)
+		членство = frappe.get_doc(
+			"Organization Membership", добавить_в_организацию(self.ушедший, self.организация)
+		)
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+
+	def записан(self, user: str) -> bool:
+		return bool(frappe.db.exists("LMS Enrollment", {"member": user, "course": self.курс}))
+
+	def test_курс_получает_только_действующий_участник(self):
+		frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": self.организация,
+				"course": self.курс,
+				"audience": "Selected Members",
+				"members": [{"user": u} for u in (self.действующий, self.ушедший, self.посторонний)],
+			}
+		).insert(ignore_permissions=True)
+		сверить_зачисления()
+
+		self.assertTrue(self.записан(self.действующий))
+		self.assertFalse(self.записан(self.ушедший))
+		self.assertFalse(self.записан(self.посторонний))
