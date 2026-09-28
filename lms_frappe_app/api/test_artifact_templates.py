@@ -5,8 +5,8 @@
 
 Правила правок проверяет `agent_learning/artifacts/test_overlay.py` без базы;
 здесь — что они дошли до методов автора: версии шаблона, собранная схема у
-ученика та же, что у схемы целиком, закреплённая версия и отвязка схемой
-целиком.
+ученика та же, что у схемы целиком, закреплённая версия, отвязка схемой
+целиком и патч, переводящий готовые документы на шаблоны.
 """
 
 import json
@@ -15,6 +15,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.api import authoring, student
+from lms_frappe_app.patches.v0_1 import artifact_templates
 from lms_frappe_app.tests.sample_data import зачислить, создать_куратора, создать_урок, создать_ученика
 
 БЛОКИ = [
@@ -310,3 +311,67 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		# Убранный блок назван в сетке холста — собранная схема не проходит проверку.
 		self.assertEqual(self.код(привязать(overlay={"blocks": {"outro": None}})), "artifact_invalid_spec")
 		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": self.курс}))
+
+	# --- патч ---
+
+	def test_патч_переводит_документ_на_шаблон(self):
+		frappe.set_user("Administrator")
+		ключ = f"log_{self.суффикс}"
+		блоки = [{**БЛОКИ[0], "lesson": self.урок}, *БЛОКИ[1:]]
+		записано = authoring.set_course_artifact(
+			course=self.курс, artifact=ключ, title="Журнал", blocks=блоки, canvas=ХОЛСТ
+		)["data"]
+		# Тот же ключ документа в другом курсе с другой схемой — свой шаблон.
+		соседний = зачислить(self.ученик, создать_урок(f"Сосед {self.суффикс}"))
+		authoring.set_course_artifact(course=соседний, artifact=ключ, title="Журнал", blocks=БЛОКИ[:1])
+		frappe.set_user(self.ученик)
+		до = student.artifact(self.курс, ключ)["data"]
+		frappe.set_user("Administrator")
+
+		artifact_templates.привязать_документы({"course": ("in", [self.курс, соседний])})
+
+		документ = frappe.get_doc("Agent Course Artifact", записано["id"])
+		шаблон = ключ.replace("_", "-")
+		self.assertEqual((документ.template, документ.template_version, документ.version), (шаблон, 1, 1))
+		self.assertEqual(json.loads(документ.overlay), {"blocks": {"intro": {"lesson": self.урок}}})
+		self.assertEqual(frappe.db.count("Agent Course Artifact", {"course": self.курс, "slug": ключ}), 1)
+		исходный = authoring.artifact_template(template=шаблон)["data"]
+		self.assertEqual([б["key"] for б in исходный["blocks"]], ["intro", "items", "outro"])
+		self.assertNotIn("lesson", исходный["blocks"][0])
+		self.assertEqual(
+			исходный["note"], "Из курса " + frappe.db.get_value("LMS Course", self.курс, "title")
+		)
+		сосед = frappe.db.get_value(
+			"Agent Course Artifact", {"course": соседний, "slug": ключ, "is_active": 1}, "template"
+		)
+		self.assertNotEqual(сосед, шаблон)
+		self.assertTrue(сосед.startswith(f"{шаблон}-"), сосед)
+		frappe.set_user(self.ученик)
+		self.assertEqual(student.artifact(self.курс, ключ)["data"], до)
+
+		# Повторный запуск ничего не меняет.
+		frappe.set_user("Administrator")
+		шаблонов = frappe.db.count("Agent Artifact Template", {"template": ("like", f"{шаблон}%")})
+		artifact_templates.привязать_документы({"course": ("in", [self.курс, соседний])})
+		self.assertEqual(
+			frappe.db.count("Agent Artifact Template", {"template": ("like", f"{шаблон}%")}), шаблонов
+		)
+		документ.reload()
+		self.assertEqual((документ.template, документ.template_version), (шаблон, 1))
+
+	def test_патч_берёт_готовый_шаблон_с_той_же_схемой(self):
+		frappe.set_user("Administrator")
+		ключ = f"log_{self.суффикс}"
+		второй = зачислить(self.ученик, создать_урок(f"Второй {self.суффикс}"))
+		for курс in (self.курс, второй):
+			authoring.set_course_artifact(course=курс, artifact=ключ, title="Журнал", blocks=БЛОКИ[:2])
+
+		artifact_templates.привязать_документы({"course": ("in", [self.курс, второй])})
+
+		шаблоны = frappe.get_all(
+			"Agent Course Artifact",
+			filters={"course": ("in", [self.курс, второй]), "slug": ключ},
+			pluck="template",
+		)
+		self.assertEqual(шаблоны, [ключ.replace("_", "-")] * 2)
+		self.assertEqual(frappe.db.count("Agent Artifact Template", {"template": ключ.replace("_", "-")}), 1)
