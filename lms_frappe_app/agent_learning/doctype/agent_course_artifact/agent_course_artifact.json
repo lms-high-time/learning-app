@@ -15,6 +15,10 @@
   "canvas",
   "version",
   "is_active",
+  "sb_template",
+  "template",
+  "template_version",
+  "overlay",
   "sb_blocks",
   "blocks"
  ],
@@ -72,6 +76,34 @@
    "label": "Действующая"
   },
   {
+   "collapsible": 1,
+   "fieldname": "sb_template",
+   "fieldtype": "Section Break",
+   "label": "Шаблон"
+  },
+  {
+   "description": "Ключ шаблона, из которого собрана схема; пусто — схема задана целиком (learning-services#370)",
+   "fieldname": "template",
+   "fieldtype": "Data",
+   "label": "Шаблон",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Версия шаблона, закреплённая за курсом",
+   "fieldname": "template_version",
+   "fieldtype": "Int",
+   "label": "Версия шаблона",
+   "read_only": 1
+  },
+  {
+   "description": "Правки курса к шаблону: уроки блоков, подсказки, добавленное и убранное",
+   "fieldname": "overlay",
+   "fieldtype": "JSON",
+   "label": "Правки курса",
+   "read_only": 1
+  },
+  {
    "fieldname": "sb_blocks",
    "fieldtype": "Section Break",
    "label": "Блоки"
@@ -87,7 +119,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-28 12:00:00.000000",
+ "modified": "2026-09-29 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Artifact",
