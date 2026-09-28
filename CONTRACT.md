@@ -1406,6 +1406,7 @@ ISO 8601 со смещением часового пояса сайта; при 
 ```json
 { "ok": true, "data": {
   "organization": "org-1", "title": "Кофейни", "can_see_report": true,
+  "can_manage": true, "can_change_roles": false,
   "members": [ { "user": "ivanov@example.com", "full_name": "Иван Иванов",
                  "role": "Member", "left": false, "left_on": null } ],
   "courses": [ { "id": "course-p3", "title": "Проекты по P3.express",
@@ -1415,7 +1416,9 @@ ISO 8601 со смещением часового пояса сайта; при 
 
 `members` — действующие, затем ушедшие (`left`, `left_on`): документы ушедших
 остаются у организации. `can_see_report` — зрителю открыт отчёт
-(`org_report` с `organization`): только руководителю.
+(`org_report` с `organization`): только руководителю. `can_manage` — зритель
+приглашает и отмечает уход (руководитель), `can_change_roles` — меняет роли
+(администратор организации, `Org Admin`).
 
 **Отказы:** `team_not_available`.
 
@@ -1446,6 +1449,108 @@ ISO 8601 со смещением часового пояса сайта; при 
 
 **Отказы:** `team_not_available`, `course_not_in_organization` — организация
 этот курс не назначала, `artifact_not_found`.
+
+## `lms_frappe_app.api.team.create_invite`
+
+Ссылка, по которой вступают в организацию участником (learning-services#363).
+Руководитель отправляет её сам — писем платформа не шлёт. Одна ссылка — на
+любое число людей. Только `POST`.
+
+**Параметры:** `organization`.
+
+```json
+{ "ok": true, "data": { "token": "k3…", "url": "https://lms.example.com/lms/join/k3…" } }
+```
+
+**Отказы:** `team_not_available`, `not_allowed` — зритель не руководитель.
+
+## `lms_frappe_app.api.team.invites`
+
+Действующие ссылки организации — чтобы отозвать ненужную.
+
+**Параметры:** `organization`.
+
+```json
+{ "ok": true, "data": { "invites": [
+  { "token": "k3…", "url": "https://lms.example.com/lms/join/k3…",
+    "created_by": "boss@example.com", "created": "2026-09-29T12:00:00" } ] } }
+```
+
+**Отказы:** `team_not_available`, `not_allowed`.
+
+## `lms_frappe_app.api.team.revoke_invite`
+
+Отзывает ссылку: по ней больше не вступить, вступившие остаются. Только `POST`.
+
+**Параметры:** `token`.
+
+```json
+{ "ok": true, "data": { "token": "k3…", "revoked": true } }
+```
+
+**Отказы:** `invite_not_found`, `team_not_available`, `not_allowed`.
+
+## `lms_frappe_app.api.team.invite_info`
+
+Куда ведёт ссылка — страница вступления показывает это до входа, гостю тоже:
+ключ — секрет ссылки.
+
+**Параметры:** `token`.
+
+```json
+{ "ok": true, "data": { "organization": "org-1", "title": "Кофейни",
+  "documents_visible_to": "managers", "suspended": false, "member": false } }
+```
+
+`documents_visible_to` — кто увидит документы по курсам компании; `member` —
+вошедший уже действующий участник.
+
+**Отказы:** `invite_not_found` — ссылки нет или она отозвана.
+
+## `lms_frappe_app.api.team.accept_invite`
+
+Вступает в организацию участником и выбирает её пространство. Ушедший раньше
+возвращается: членство снова действующее, курсы, назначенные без него,
+догоняют его сами. Только `POST`, нужен вход.
+
+**Параметры:** `token`.
+
+```json
+{ "ok": true, "data": { "organization": "org-1", "space": "org-1" } }
+```
+
+**Отказы:** `invite_not_found` — ссылки нет, она отозвана или организация
+приостановлена.
+
+## `lms_frappe_app.api.team.set_member_role`
+
+Меняет роль участника: `Member`, `Manager` или `Org Admin`. Только
+администратор организации: роль руководителя открывает документы и отчёт.
+Роль Frappe `Organization Manager` следует за членством сама. Только `POST`.
+
+**Параметры:** `organization`, `user`, `role`.
+
+```json
+{ "ok": true, "data": { "user": "ivanov@example.com", "role": "Manager" } }
+```
+
+**Отказы:** `team_not_available`, `not_allowed`, `not_a_member`,
+`last_org_admin` — у организации не осталось бы администратора.
+
+## `lms_frappe_app.api.team.remove_member`
+
+Отмечает уход: членство закрывается, документы остаются у организации.
+Участника отмечает руководитель, руководителя и администратора — только
+администратор. Только `POST`.
+
+**Параметры:** `organization`, `user`.
+
+```json
+{ "ok": true, "data": { "user": "ivanov@example.com", "left": true } }
+```
+
+**Отказы:** `team_not_available`, `not_allowed`, `not_a_member`,
+`last_org_admin`.
 
 ---
 
