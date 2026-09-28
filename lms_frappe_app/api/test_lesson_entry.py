@@ -112,11 +112,34 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		self.assertIsNone(пустой["hook"], "пустой зачин — null, а не пустая строка")
 		self.assertFalse(пустой["completed"])
 
+	def test_называет_блоки_документа_этого_урока(self):
+		"""Что из документа курса собирают на занятии (learning-services#340)."""
+		frappe.set_user("Administrator")
+		курс = frappe.db.get_value("Course Lesson", self.уроки[0], "course")
+		frappe.get_doc(
+			{
+				"doctype": "Agent Course Artifact",
+				"course": курс,
+				"slug": "summary",
+				"title": "Резюме проекта",
+				"blocks": [
+					{"block_key": "goal", "title": "Цель", "lesson": self.уроки[0]},
+					{"block_key": "sponsor", "title": "Спонсор"},
+				],
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+
+		self.assertEqual(
+			self.войти(self.уроки[0])["blocks"],
+			[{"artifact": "summary", "key": "goal", "title": "Цель", "filled": False}],
+		)
+
 	def test_материал_наружу_не_выходит(self):
 		вход = self.войти(self.уроки[0])
 
 		self.assertEqual(
-			set(вход), {"lesson", "course", "title", "hook", "completed", "study"}
+			set(вход), {"lesson", "course", "title", "hook", "completed", "study", "blocks"}
 		)
 
 	def test_неизвестный_урок(self):

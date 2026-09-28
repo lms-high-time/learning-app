@@ -144,17 +144,28 @@ Frappe заворачивает результат whitelisted-метода в �
 ```json
 { "ok": true, "data": {
   "course": "p3-express", "title": "P3.express", "next_lesson": "lesson-2",
+  "documents": [ { "artifact": "project_summary", "title": "Резюме проекта",
+                   "blocks_total": 6, "blocks_filled": 2 } ],
   "chapters": [
     { "title": "Запуск", "lessons": [
       { "id": "lesson-1", "number": 1, "title": "Запуск проекта",
         "hook": "Проект без спонсора глохнет на первом споре о деньгах.",
         "icon": "rocket", "completed": true,
+        "blocks": [ { "artifact": "project_summary", "key": "sponsor",
+                      "title": "Спонсор и менеджер", "filled": true } ],
         "objectives": [ { "text": "Назвать спонсора проекта", "status": "covered" },
                         { "text": "Отличить проект от операций" } ] } ] } ] } }
 ```
 
 `hook` — зачин урока, обращённый к ученику; виден всем, `null`, если автор
 его не задал.
+
+`documents` — документы, которые ученик собирает по ходу курса, у урока
+`blocks` — какие их блоки собирают на этом уроке (learning-services#340). Видны
+всем: что курс оставит после себя, — его обещание. Зачисленному — ещё
+`blocks_total` и `blocks_filled` у документа и `filled` у блока, по тем же
+правилам, что у `artifact`. Подсказки автора сюда не выходят: они адресованы
+агенту. У курса без документа — пустые списки.
 
 `completed` у урока и `next_lesson` у курса приходят **только зачисленному**,
 по тому же правилу, что `status` у цели: у прочих ключей нет. `completed` —
@@ -196,7 +207,9 @@ Frappe заворачивает результат whitelisted-метода в �
   "lesson": "lesson-1", "course": "p3-express", "title": "Запуск проекта",
   "hook": "Проект без спонсора глохнет на первом споре о деньгах — разберём, кто он у вас.",
   "completed": false,
-  "study": { "channel": "web", "url": "https://lms.example.com/chat?lesson=lesson-1", "demo_left": 2 } } }
+  "study": { "channel": "web", "url": "https://lms.example.com/chat?lesson=lesson-1", "demo_left": 2 },
+  "blocks": [ { "artifact": "project_summary", "key": "sponsor",
+                "title": "Спонсор и менеджер", "filled": false } ] } }
 ```
 
 `study.channel`:
@@ -213,6 +226,9 @@ Frappe заворачивает результат whitelisted-метода в �
 Материал и директива сюда не выходят: материал написан для агента.
 
 `completed` — урок закрыт квизом или `complete_lesson`.
+
+`blocks` — блоки документа курса, которые собирают на этом занятии, как у
+урока в `course_map`; у ученика курса — с `filled`.
 
 **Отказы:** `lesson_not_found` — урока нет, в курсе нет уроков или не передано ни `lesson`, ни `course`.
 

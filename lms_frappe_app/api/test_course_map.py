@@ -194,3 +194,62 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 			self.assertNotIn(поле, целиком)
 		self.assertNotIn("Начать с примера", целиком)
 		self.assertNotIn("Кто принимает решение", целиком)
+
+
+class IntegrationTestCourseMapDocuments(IntegrationTestCase):
+	"""Документ курса на карте: что соберёт курс и на каком уроке (#340)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.ученик = создать_ученика(f"map-doc-{суффикс}@example.com")
+		self.урок = создать_урок(f"Урок документа {суффикс}")
+		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
+		self.курс = frappe.db.get_value("Course Chapter", глава, "course")
+		frappe.db.set_value("LMS Course", self.курс, "published", 1)
+		frappe.get_doc(
+			{
+				"doctype": "Agent Course Artifact",
+				"course": self.курс,
+				"slug": "summary",
+				"title": "Резюме проекта",
+				"blocks": [
+					{"block_key": "goal", "title": "Цель", "hint": "Секрет для агента", "lesson": self.урок},
+					{"block_key": "sponsor", "title": "Спонсор"},
+				],
+			}
+		).insert(ignore_permissions=True)
+
+	def карта(self) -> dict:
+		return public.course_map(course=self.курс)["data"]
+
+	def test_гость_видит_документ_и_блоки_урока_без_заполненности(self):
+		frappe.set_user("Guest")
+		карта = self.карта()
+
+		self.assertEqual(карта["documents"], [{"artifact": "summary", "title": "Резюме проекта"}])
+		self.assertEqual(
+			карта["chapters"][0]["lessons"][0]["blocks"],
+			[{"artifact": "summary", "key": "goal", "title": "Цель"}],
+		)
+		self.assertNotIn("Секрет для агента", json.dumps(карта, ensure_ascii=False))
+
+	def test_ученик_видит_заполненность(self):
+		зачислить(self.ученик, self.урок)
+		frappe.set_user(self.ученик)
+		from lms_frappe_app.api import student
+
+		student.update_artifact(self.курс, "summary", "goal", "Открыть седьмую кофейню")
+		карта = self.карта()
+
+		документ = карта["documents"][0]
+		self.assertEqual((документ["blocks_filled"], документ["blocks_total"]), (1, 2))
+		self.assertTrue(карта["chapters"][0]["lessons"][0]["blocks"][0]["filled"])
+
+	def test_курс_без_документа(self):
+		frappe.db.delete("Agent Course Artifact", {"course": self.курс})
+		frappe.set_user("Guest")
+		карта = self.карта()
+
+		self.assertEqual(карта["documents"], [])
+		self.assertEqual(карта["chapters"][0]["lessons"][0]["blocks"], [])
