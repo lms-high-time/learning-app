@@ -135,6 +135,15 @@ class TestСхема(unittest.TestCase):
 		with self.assertRaises(Отказ):
 			т.проверить_спек({"columns": [{"key": "kind", "type": "select"}]}, "x")
 
+	def test_набор_колонок_с_названием(self):
+		спек = т.проверить_спек(
+			{"columns": [{"key": "a"}], "views": [{"type": "columns", "title": "Кратко", "columns": ["a"]}]},
+			"x",
+		)
+		self.assertEqual(спек["views"], [{"type": "columns", "title": "Кратко", "columns": ["a"]}])
+		with self.assertRaises(Отказ):
+			т.проверить_спек({"columns": [{"key": "a"}], "views": [{"type": "columns", "columns": ["a"]}]}, "x")
+
 	def test_колонка_id_занята(self):
 		with self.assertRaises(Отказ):
 			т.проверить_спек({"columns": [{"key": "id"}]}, "x")
