@@ -160,3 +160,18 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		)
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], "artifact_invalid_spec")
+
+	def test_время_и_версия_документа(self):
+		"""Сколько раз документ сохранялся и когда — без самой истории (#342)."""
+		пустой = student.artifact(self.курс, "risk_register")["data"]
+		self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
+
+		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
+		self.записать("assessment", fields={"threshold": 12})
+		документ = student.artifact(self.курс, "risk_register")["data"]
+
+		self.assertTrue(документ["modified"])
+		# Журнал `Version` Frappe пишет после коммита, а тест идёт в
+		# транзакции без него: здесь проверяется форма, число — на стенде.
+		self.assertIsInstance(документ["version"], int)
+		self.assertNotIn("versions", документ)

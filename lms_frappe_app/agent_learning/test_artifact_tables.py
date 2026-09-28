@@ -285,6 +285,12 @@ class TestВычисленияИЗаполненность(unittest.TestCase):
 		д = т.записать(self.блоки, "scales", self.д, rows=[{"id": "P1", "level": "На памяти не было"}])
 		self.assertTrue(т.заполнен(шкала, д, self.блоки))
 
+	def test_заготовка_помечена_пока_её_не_тронули(self):
+		self.assertTrue(т.таблицы_документа(self.блоки, self.д)["probability_scale"]["preset"])
+		self.assertFalse(т.таблицы_документа(self.блоки, self.д)["register"]["preset"])
+		д = т.записать(self.блоки, "scales", self.д, rows=[{"id": "P1", "level": "Никогда"}])
+		self.assertFalse(т.таблицы_документа(self.блоки, д)["probability_scale"]["preset"])
+
 	def test_заготовка_строк_видна_до_первой_правки(self):
 		шкала = т.таблицы_документа(self.блоки, self.д)["probability_scale"]
 		self.assertEqual([р["id"] for р in шкала["rows"]], ["P1", "P2"])

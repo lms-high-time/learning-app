@@ -772,6 +772,9 @@ def таблицы_документа(блоки: list, д: dict) -> dict[str, d
 			"columns": таблица["columns"],
 			"views": таблица["views"],
 			"rows": ряды,
+			# Строки — нетронутая заготовка автора: страница зовёт такую таблицу
+			# «заготовкой», а не «готово» (learning-services#342).
+			"preset": bool(таблица["rows"]) and имя not in д["tables"],
 			"markdown": markdown_таблицы(таблица["columns"], ряды),
 		}
 	return итог
