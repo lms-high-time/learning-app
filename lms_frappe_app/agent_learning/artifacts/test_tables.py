@@ -148,6 +148,15 @@ class TestСхема(unittest.TestCase):
 		with self.assertRaises(Отказ):
 			schema.проверить_спек({"columns": [{"key": "id"}]}, "x")
 
+	def test_ключ_блока_занят_видом_страницы(self):
+		for ключ in schema.ЗАНЯТЫЕ_КЛЮЧИ_БЛОКОВ:
+			блоки = [{"block_key": ключ.upper()}]
+			with self.assertRaises(Отказ) as отказ:
+				schema.проверить_документ(блоки)
+			self.assertEqual(отказ.exception.код, codes.НЕВЕРНАЯ_СХЕМА)
+			self.assertEqual(отказ.exception.подробности, {"key": ключ})
+		schema.проверить_документ([{"block_key": "tables"}])
+
 
 class TestЗапись(unittest.TestCase):
 	def setUp(self):

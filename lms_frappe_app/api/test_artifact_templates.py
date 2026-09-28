@@ -122,6 +122,29 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		)
 		self.assertFalse(frappe.db.exists("Agent Artifact Template", {"template": "плохой ключ"}))
 
+	def test_ключ_блока_не_занят_видом_страницы(self):
+		"""Вид страницы документа и блок делят сегмент адреса (#367): ключ вида
+		отклоняется и у схемы целиком, и у шаблона, и у собранной схемы."""
+		целиком = authoring.set_course_artifact(
+			course=self.курс, artifact="journal", title="Журнал", blocks=[{"key": "Report", "title": "О"}]
+		)
+		self.assertEqual((self.код(целиком), целиком["error"]["key"]), ("artifact_invalid_spec", "report"))
+		шаблон = authoring.set_artifact_template(
+			template=self.ключ, title="Т", blocks=[*БЛОКИ, {"key": "table", "title": "Т"}]
+		)
+		self.assertEqual((self.код(шаблон), шаблон["error"]["key"]), ("artifact_invalid_spec", "table"))
+		self.шаблон()
+		собранная = authoring.set_course_artifact_template(
+			course=self.курс,
+			artifact="journal",
+			template=self.ключ,
+			overlay={"add_blocks": [{"key": "compare", "title": "Сравнение"}]},
+		)
+		self.assertEqual(
+			(self.код(собранная), собранная["error"]["key"]), ("artifact_invalid_spec", "compare")
+		)
+		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": self.курс}))
+
 	def test_шаблоны_только_автору(self):
 		frappe.set_user(self.ученик)
 
