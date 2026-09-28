@@ -283,9 +283,15 @@ Frappe заворачивает результат whitelisted-метода в �
 
 ```json
 { "ok": true, "data": { "current": "org-1", "spaces": [
-  { "id": "personal", "title": null, "role": null, "suspended": false },
-  { "id": "org-1", "title": "Компания", "role": "Member", "suspended": false } ] } }
+  { "id": "personal", "title": null, "role": null, "suspended": false,
+    "documents_visible_to": "only_me" },
+  { "id": "org-1", "title": "Компания", "role": "Member", "suspended": false,
+    "documents_visible_to": "managers" } ] } }
 ```
+
+`documents_visible_to` — кто, кроме автора, читает документы пространства:
+`only_me` (личное), `managers` — руководители организации, `members` — все её
+участники. Интерфейс пишет это ученику на документе.
 
 Личное — всегда первым. Не выбирал — выбрана первая действующая организация,
 иначе личное: сотрудник приходит прежде всего за курсами компании. Выбор,

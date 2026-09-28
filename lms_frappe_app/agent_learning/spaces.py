@@ -24,7 +24,12 @@ from lms_frappe_app.agent_learning.access import (
 	назначения_ученика,
 	приостановленные_организации,
 )
-from lms_frappe_app.agent_learning.constants import ОТКРЫТЫЕ, ЧЛЕНСТВО_ДЕЙСТВУЕТ
+from lms_frappe_app.agent_learning.constants import (
+	ДОКУМЕНТЫ_ВИДЯТ_ВСЕ,
+	ДОКУМЕНТЫ_ВИДЯТ_РУКОВОДИТЕЛИ,
+	ОТКРЫТЫЕ,
+	ЧЛЕНСТВО_ДЕЙСТВУЕТ,
+)
 from lms_frappe_app.agent_learning.errors import Отказ
 
 #: Значение параметра `space` для личного пространства. Организация
@@ -35,6 +40,9 @@ from lms_frappe_app.agent_learning.errors import Отказ
 КЛЮЧ_ВЫБОРА = "agent_learning_space"
 
 ПРОСТРАНСТВО_НЕДОСТУПНО = "space_not_available"
+
+#: Настройка видимости организации — словом контракта.
+ВИДНО_КОМУ = {ДОКУМЕНТЫ_ВИДЯТ_РУКОВОДИТЕЛИ: "managers", ДОКУМЕНТЫ_ВИДЯТ_ВСЕ: "members"}
 КУРС_НЕ_В_ПРОСТРАНСТВЕ = "course_not_in_space"
 
 
@@ -48,21 +56,24 @@ def пространства(user: str) -> list[dict]:
 	)
 	if not членства:
 		return []
-	названия = dict(
-		frappe.get_all(
+	организации = {
+		о.name: о
+		for о in frappe.get_all(
 			"Learning Organization",
 			filters={"name": ("in", [ч.organization for ч in членства])},
-			fields=["name", "organization_name"],
-			as_list=True,
+			fields=["name", "organization_name", "artifact_visibility"],
 		)
-	)
+	}
 	приостановлены = приостановленные_организации(ч.organization for ч in членства)
 	return [
 		{
 			"id": ч.organization,
-			"title": названия.get(ч.organization),
+			"title": организации[ч.organization].organization_name,
 			"role": ч.role,
 			"suspended": ч.organization in приостановлены,
+			# Кто, кроме автора, читает документы этого пространства: интерфейс
+			# говорит это ученику прямо на документе (learning-services#347).
+			"documents_visible_to": ВИДНО_КОМУ[организации[ч.organization].artifact_visibility],
 		}
 		for ч in членства
 	]

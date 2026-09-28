@@ -484,7 +484,16 @@ def my_spaces() -> dict:
 	свои = пространства.пространства(ученик)
 	return {
 		"current": пространства.наружу(пространства.текущее(ученик, свои)),
-		"spaces": [{"id": пространства.ЛИЧНОЕ, "title": None, "role": None, "suspended": False}, *свои],
+		"spaces": [
+			{
+				"id": пространства.ЛИЧНОЕ,
+				"title": None,
+				"role": None,
+				"suspended": False,
+				"documents_visible_to": "only_me",
+			},
+			*свои,
+		],
 	}
 
 
