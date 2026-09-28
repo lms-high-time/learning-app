@@ -43,7 +43,10 @@ from lms_frappe_app.agent_learning.errors import Отказ
 
 ТИПЫ_КОЛОНОК = ("text", "longtext", "number", "scale", "date", "select", "ref", "check", "formula")
 ТИПЫ_ПОЛЕЙ = ("text", "longtext", "number", "date", "select")
-ВИДЫ_ПРЕДСТАВЛЕНИЙ = ("matrix", "report")
+#: Виды таблицы: матрица по двум шкалам, доклад по отмеченным строкам и набор
+#: колонок — готовый срез широкой таблицы, «Кратко» или «Признаки» у реестра
+#: (learning-services#342).
+ВИДЫ_ПРЕДСТАВЛЕНИЙ = ("matrix", "report", "columns")
 
 #: Документ курса — реестр или журнал, а не база: больше строк почти наверняка
 #: ошибка агента, и платить за неё контекстом незачем.
@@ -188,6 +191,10 @@ def _представление(описание, ключ: str) -> dict:
 			итог[ось] = описание[ось]
 		if описание.get("highlight"):
 			итог["highlight"] = описание["highlight"]
+	elif описание["type"] == "columns":
+		итог["columns"] = [str(к) for к in описание.get("columns") or []]
+		if not итог["title"] or not итог["columns"]:
+			raise Отказ(НЕВЕРНАЯ_СХЕМА, "Набору колонок нужны название и колонки", key=ключ)
 	else:
 		итог["columns"] = [str(к) for к in описание.get("columns") or []]
 		if описание.get("filter"):
