@@ -380,6 +380,28 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			),
 		)
 
+		# Тот же документ из шаблона: урок блока — в правках курса.
+		шаблон = self.сверить(
+			"authoring.set_artifact_template",
+			authoring.set_artifact_template(
+				template=f"summary-{суффикс}",
+				title="Резюме проекта",
+				blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой"}],
+				note="Первая версия",
+			),
+		)["template"]
+		self.сверить("authoring.list_artifact_templates", authoring.list_artifact_templates())
+		self.сверить("authoring.artifact_template", authoring.artifact_template(template=шаблон))
+		self.сверить(
+			"authoring.set_course_artifact_template",
+			authoring.set_course_artifact_template(
+				course=курс,
+				artifact="summary",
+				template=шаблон,
+				overlay={"blocks": {"goal": {"lesson": с_квизом}}},
+			),
+		)
+
 		self.сверить(
 			"authoring.add_quiz",
 			authoring.add_quiz(

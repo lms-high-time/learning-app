@@ -100,13 +100,15 @@ def _блок_схемы(course: str, artifact: str, key: str):
 
 def _действующие_артефакты(course: str) -> list[dict]:
 	"""Схемы документов курса, которые сейчас получает ученик, с версиями."""
-	собранное = []
-	for запись in frappe.get_all(
+	записи = frappe.get_all(
 		"Agent Course Artifact",
 		filters={"course": course, "is_active": 1},
-		fields=["name", "slug", "title", "layout", "version"],
+		fields=["name", "slug", "title", "layout", "version", "template", "template_version"],
 		order_by="creation asc",
-	):
+	)
+	последние = последние_версии_шаблонов({з.template for з in записи if з.template})
+	собранное = []
+	for запись in записи:
 		собранное.append(
 			{
 				"id": запись.name,
@@ -114,6 +116,11 @@ def _действующие_артефакты(course: str) -> list[dict]:
 				"artifact": запись.slug,
 				"title": запись.title,
 				"layout": запись.layout,
+				# Шаблон и закреплённая версия; `template_latest` — чтобы автор
+				# видел, что шаблон ушёл вперёд (learning-services#370).
+				"template": запись.template or None,
+				"template_version": запись.template_version or None,
+				"template_latest": последние.get(запись.template),
 				"blocks": [
 					{
 						"key": блок.block_key,
@@ -136,18 +143,29 @@ def _действующие_артефакты(course: str) -> list[dict]:
 	return собранное
 
 
-def записать_схему(course: str, artifact: str, title: str, блоки: list, layout: str, canvas) -> dict:
-	"""Схема документа курса новой версией; неверная — отказ до записи.
+def последние_версии_шаблонов(шаблоны: set[str]) -> dict[str, int]:
+	"""Последняя версия каждого названного шаблона — одним запросом."""
+	последние: dict[str, int] = {}
+	if not шаблоны:
+		return последние
+	for запись in frappe.get_all(
+		"Agent Artifact Template",
+		filters={"template": ("in", sorted(шаблоны))},
+		fields=["template", "version"],
+	):
+		последние[запись.template] = max(последние.get(запись.template, 0), запись.version)
+	return последние
 
-	Контракт — у `api.authoring.set_course_artifact`. `блоки` — как их прислал
-	автор: словари или JSON-строки.
+
+def строки_схемы(блоки: list) -> list[dict]:
+	"""Блоки от автора — строками схемы в каноническом виде; неверные — отказ.
+
+	Базу не трогает: так же проверяются блоки шаблона, у которого курса нет.
+	`блоки` — словари или JSON-строки.
 	"""
 	строки = []
 	for блок in блоки:
 		блок = json.loads(блок) if isinstance(блок, str) else dict(блок or {})
-		урок = блок.get("lesson") or None
-		if урок and not frappe.db.exists("Course Lesson", урок):
-			raise Отказ(УРОК_НЕ_НАЙДЕН, "Course Lesson не найден", id=урок)
 		# Вид блока: текст, файл ученика или ссылка на внешний документ (#315).
 		вид = блок.get("kind") or files.ТЕКСТ
 		if вид not in files.ВИДЫ:
@@ -163,7 +181,7 @@ def записать_схему(course: str, artifact: str, title: str, блок
 				"block_key": блок.get("key"),
 				"title": блок.get("title"),
 				"hint": блок.get("hint"),
-				"lesson": урок,
+				"lesson": блок.get("lesson") or None,
 				"span": блок.get("span") or 1,
 				"kind": вид,
 				"accept": ",".join(files.допустимые(блок)) or None,
@@ -171,7 +189,52 @@ def записать_схему(course: str, artifact: str, title: str, блок
 			}
 		)
 	schema.проверить_документ(строки)
+	return строки
+
+
+def блок_наружу(строка) -> dict:
+	"""Строка схемы — блоком в той форме, в какой его принимает `set_course_artifact`.
+
+	`Why:` шаблон отдаёт блоки автору и собирается с правками курса в схему,
+	которую пишет тот же `записать_схему`: форма у блока одна на все пути.
+	"""
+	return {
+		"key": schema.ключ_блока(строка),
+		"title": строка.get("title"),
+		"hint": строка.get("hint") or "",
+		"lesson": строка.get("lesson") or None,
+		"span": строка.get("span") or 1,
+		"kind": files.вид(строка),
+		"accept": files.допустимые(строка),
+		"spec": schema.спек(строка) or None,
+	}
+
+
+def записать_схему(
+	course: str,
+	artifact: str,
+	title: str,
+	блоки: list,
+	layout: str,
+	canvas,
+	привязка: dict | None = None,
+) -> dict:
+	"""Схема документа курса новой версией; неверная — отказ до записи.
+
+	Контракт — у `api.authoring.set_course_artifact`. `блоки` — как их прислал
+	автор: словари или JSON-строки. `привязка` — шаблон, его версия и правки
+	курса, из которых схема собрана (`set_course_artifact_template`); схема от
+	автора целиком — без неё, и новая версия шаблона не наследует.
+	"""
+	блоки = [json.loads(блок) if isinstance(блок, str) else dict(блок or {}) for блок in блоки]
+	for блок in блоки:
+		урок = блок.get("lesson") or None
+		if урок and not frappe.db.exists("Course Lesson", урок):
+			raise Отказ(УРОК_НЕ_НАЙДЕН, "Course Lesson не найден", id=урок)
+	строки = строки_схемы(блоки)
 	холст = проверить_холст(canvas, строки)
+	привязка = привязка or {}
+	правки = привязка.get("overlay")
 	return directives.записать(
 		"Agent Course Artifact",
 		{"course": course, "slug": нормализовать_ключ(artifact)},
@@ -180,5 +243,8 @@ def записать_схему(course: str, artifact: str, title: str, блок
 			"layout": layout,
 			"blocks": строки,
 			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
+			"template": привязка.get("template"),
+			"template_version": привязка.get("template_version"),
+			"overlay": json.dumps(правки, ensure_ascii=False) if правки is not None else None,
 		},
 	)
