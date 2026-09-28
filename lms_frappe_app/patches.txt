@@ -10,3 +10,4 @@ lms_frappe_app.patches.v0_1.enable_russian_language
 lms_frappe_app.patches.v0_1.chat_sidebar_route
 lms_frappe_app.patches.v0_1.hide_install_prompt
 lms_frappe_app.patches.v0_1.document_spaces
+lms_frappe_app.patches.v0_1.attach_artifact_files

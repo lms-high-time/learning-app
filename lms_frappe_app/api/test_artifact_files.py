@@ -195,6 +195,42 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 			with self.subTest(чужой=чужой):
 				self.assertFalse(frappe.has_permission("File", doc=файл, user=чужой))
 
+	def test_файл_первой_загрузки_привязан_к_документу(self):
+		"""Документ заводится до файла: иначе Frappe снимает привязку (#343)."""
+		self.загрузить()
+
+		файл = frappe.get_doc("File", self.запись_файла())
+		документ = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "course": self.курс})
+		self.assertEqual((файл.attached_to_doctype, файл.attached_to_name), ("Agent Student Artifact", документ))
+
+	def test_миграция_привязывает_потерянный_файл(self):
+		from lms_frappe_app.patches.v0_1 import attach_artifact_files
+
+		self.загрузить()
+		имя = self.запись_файла()
+		frappe.db.set_value("File", имя, {"attached_to_doctype": None, "attached_to_name": None})
+
+		attach_artifact_files.execute()
+
+		документ = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "course": self.курс})
+		self.assertEqual(frappe.db.get_value("File", имя, "attached_to_name"), документ)
+
+	def test_файл_документа_организации_открывает_её_руководитель(self):
+		"""Права на файл — от документа, документ курса от компании — её (#341, #343)."""
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		организация = создать_организацию(f"Компания {суффикс}")
+		добавить_в_организацию(self.ученик, организация)
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": организация, "course": self.курс}
+		).insert(ignore_permissions=True)
+		руководитель = создать_менеджера(f"mgf-{суффикс}@example.com", организация)
+		frappe.set_user(self.ученик)
+		self.загрузить()
+
+		файл = frappe.get_doc("File", self.запись_файла())
+		self.assertTrue(frappe.has_permission("File", doc=файл, user=руководитель))
+
 	# --- таблица от агента (#319) ---
 
 	def файл_блока(self, ключ: str = "money") -> bytes:
