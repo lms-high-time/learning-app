@@ -6,7 +6,8 @@ import io
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import artifact_files, course_builder
+from lms_frappe_app.agent_learning import course_builder
+from lms_frappe_app.agent_learning.artifacts import codes, write
 from lms_frappe_app.agent_learning.spaces import пространство_курса
 from lms_frappe_app.api import authoring, manager, student
 from lms_frappe_app.tests.sample_data import (
@@ -60,7 +61,7 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 
 	def загрузить(self, имя: str = "plan.csv", данные: bytes = CSV, ключ: str = "money") -> dict:
 		пространство = пространство_курса(self.ученик, self.курс)
-		return student.контракт(student._положить_файл)(
+		return student.контракт(write._положить_файл)(
 			self.ученик, self.курс, пространство, "plan", ключ, имя, данные
 		)
 
@@ -115,7 +116,7 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 			self.курс, "plan", "money", file_name="plan.csv", content="не base64!"
 		)
 
-		self.assertEqual(ответ["error"]["code"], artifact_files.ФАЙЛА_НЕТ)
+		self.assertEqual(ответ["error"]["code"], codes.ФАЙЛА_НЕТ)
 
 	def test_пустые_колонки_справа_в_срез_не_попадают(self):
 		from openpyxl import Workbook
@@ -147,12 +148,12 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 	def test_файл_не_того_типа_отказ(self):
 		ответ = self.загрузить("photo.png", b"\x89PNG")
 
-		self.assertEqual(ответ["error"]["code"], artifact_files.ФАЙЛ_НЕ_ТОГО_ТИПА)
+		self.assertEqual(ответ["error"]["code"], codes.ФАЙЛ_НЕ_ТОГО_ТИПА)
 		self.assertEqual(ответ["error"]["accept"], ["xlsx", "csv"])
 
 	def test_пустой_файл_и_текстовый_блок_отказ(self):
-		self.assertEqual(self.загрузить(данные=b"")["error"]["code"], artifact_files.ФАЙЛА_НЕТ)
-		self.assertEqual(self.загрузить(ключ="goal")["error"]["code"], artifact_files.ВИД_НЕ_ТОТ)
+		self.assertEqual(self.загрузить(данные=b"")["error"]["code"], codes.ФАЙЛА_НЕТ)
+		self.assertEqual(self.загрузить(ключ="goal")["error"]["code"], codes.ВИД_НЕ_ТОТ)
 
 	def test_слишком_большой_файл_отказ(self):
 		frappe.set_user("Administrator")
@@ -164,7 +165,7 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 
 		ответ = self.загрузить(данные=b"a;b\n" * 400_000)
 
-		self.assertEqual(ответ["error"]["code"], artifact_files.ФАЙЛ_СЛИШКОМ_БОЛЬШОЙ)
+		self.assertEqual(ответ["error"]["code"], codes.ФАЙЛ_СЛИШКОМ_БОЛЬШОЙ)
 
 	def test_очистка_удаляет_файл(self):
 		self.загрузить()
@@ -285,9 +286,9 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		кривая = student.update_artifact(self.курс, "plan", "money", table=["не строки"])
 		большая = student.update_artifact(self.курс, "plan", "money", table=[["x"]] * 501)
 
-		self.assertEqual(мимо["error"]["code"], artifact_files.ВИД_НЕ_ТОТ)
-		self.assertEqual(кривая["error"]["code"], artifact_files.НЕВЕРНАЯ_ТАБЛИЦА)
-		self.assertEqual(большая["error"]["code"], artifact_files.НЕВЕРНАЯ_ТАБЛИЦА)
+		self.assertEqual(мимо["error"]["code"], codes.ВИД_НЕ_ТОТ)
+		self.assertEqual(кривая["error"]["code"], codes.НЕВЕРНАЯ_ТАБЛИЦА)
+		self.assertEqual(большая["error"]["code"], codes.НЕВЕРНАЯ_ТАБЛИЦА)
 
 	def test_таблица_строкой_json_тоже_принимается(self):
 		ответ = student.update_artifact(self.курс, "plan", "money", table='[["Месяц"], ["Январь"]]')
@@ -308,8 +309,8 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		мимо = student.update_artifact(self.курс, "plan", "goal", url="https://example.com")
 		кривая = student.update_artifact(self.курс, "plan", "crm", url="javascript:alert(1)")
 
-		self.assertEqual(мимо["error"]["code"], artifact_files.ВИД_НЕ_ТОТ)
-		self.assertEqual(кривая["error"]["code"], artifact_files.НЕВЕРНАЯ_ССЫЛКА)
+		self.assertEqual(мимо["error"]["code"], codes.ВИД_НЕ_ТОТ)
+		self.assertEqual(кривая["error"]["code"], codes.НЕВЕРНАЯ_ССЫЛКА)
 
 	def test_текстовый_блок_как_прежде(self):
 		student.update_artifact(self.курс, "plan", "goal", "Открыть вторую кофейню")
@@ -362,7 +363,7 @@ class IntegrationTestArtifactKindsAuthoring(IntegrationTestCase):
 	def test_неизвестный_вид_отказ(self):
 		ответ = self.схема([{"key": "money", "title": "Финплан", "kind": "pdf"}])
 
-		self.assertEqual(ответ["error"]["code"], authoring.НЕВЕРНЫЙ_ВИД_БЛОКА)
+		self.assertEqual(ответ["error"]["code"], codes.НЕВЕРНЫЙ_ВИД_БЛОКА)
 
 	def test_готовность_предупреждает_о_файле_без_форматов(self):
 		self.схема([{"key": "money", "title": "Финплан", "kind": "file"}])

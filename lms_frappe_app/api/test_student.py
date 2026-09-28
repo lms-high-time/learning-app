@@ -7,6 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import quiz
+from lms_frappe_app.agent_learning.artifacts import codes
 from lms_frappe_app.tests.sample_data import (
 	привязать_урок,
 	создать_курс,
@@ -1235,7 +1236,7 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 		ответ = student.artifact(self.курс, "lean_canvas")
 
 		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.АРТЕФАКТ_НЕ_НАЙДЕН)
+		self.assertEqual(ответ["error"]["code"], codes.АРТЕФАКТ_НЕ_НАЙДЕН)
 
 	def test_документы_чужого_курса_недоступны(self):
 		frappe.set_user("Administrator")
@@ -1287,7 +1288,7 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 		ответ = student.update_artifact(self.курс, "summary", "budget", "Миллион")
 
 		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.БЛОК_НЕ_НАЙДЕН)
+		self.assertEqual(ответ["error"]["code"], codes.БЛОК_НЕ_НАЙДЕН)
 
 	def test_пустой_блок_отклоняется_и_не_стирает_записанное(self):
 		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
@@ -1295,7 +1296,7 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 		ответ = student.update_artifact(self.курс, "summary", "goal", "   ")
 
 		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ПУСТОЙ_БЛОК)
+		self.assertEqual(ответ["error"]["code"], codes.ПУСТОЙ_БЛОК)
 		блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
 		self.assertEqual(блоки[0]["content"], "Открыть кофейню")
 
@@ -1342,7 +1343,7 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 		ответ = student.update_artifact(self.курс, "summary", "goal", "Новый проект", clear=True)
 
 		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ОЧИСТКА_С_ТЕКСТОМ)
+		self.assertEqual(ответ["error"]["code"], codes.ОЧИСТКА_С_ТЕКСТОМ)
 		блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
 		self.assertEqual(блоки[0]["content"], "Старый проект")
 

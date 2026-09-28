@@ -14,21 +14,20 @@
 
 import frappe
 
-from lms_frappe_app.agent_learning import artifact_tables
+from lms_frappe_app.agent_learning.artifacts import export
+from lms_frappe_app.agent_learning.artifacts.course import _действующая_схема, _схемы_курса
+from lms_frappe_app.agent_learning.artifacts.document import (
+	_блок,
+	_вложения,
+	_данные,
+	_заполнен,
+	_содержимое,
+	_файлы,
+)
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
 from lms_frappe_app.api import контракт, текущий_пользователь
-from lms_frappe_app.api.student import (
-	_блок,
-	_вложения,
-	_данные,
-	_действующая_схема,
-	_заполнен,
-	_содержимое,
-	_схемы_курса,
-	_файлы,
-)
 
 КОМАНДА_НЕДОСТУПНА = "team_not_available"
 КУРС_НЕ_ОРГАНИЗАЦИИ = "course_not_in_organization"
@@ -153,7 +152,7 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 		участник = участники[экземпляр.student]
 		содержимое, вложения, данные = _содержимое(экземпляр), _вложения(экземпляр), _данные(экземпляр)
 		файлы = _файлы(вложения)
-		таблицы = artifact_tables.таблицы_документа(схема.blocks, данные)
+		таблицы = export.таблицы_документа(схема.blocks, данные)
 		заполнено = 0
 		for блок in схема.blocks:
 			описание = _блок(блок, содержимое, вложения, файлы, схема, данные)

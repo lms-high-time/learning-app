@@ -13,14 +13,15 @@ import frappe
 from frappe.query_builder.functions import Min
 
 from lms_frappe_app.agent_learning.access import курсы_ученика
+from lms_frappe_app.agent_learning.artifacts import data
+from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
+from lms_frappe_app.agent_learning.artifacts.document import _заполненность
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
 	адресаты_назначения,
 )
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса
-from lms_frappe_app.agent_learning import artifact_tables
-from lms_frappe_app.api.student import _заполненность, _схемы_курса
 from lms_frappe_app.agent_learning.permissions import (
 	видит_всё,
 	организации_менеджера,
@@ -164,7 +165,7 @@ def _документ_по_участникам(
 			continue
 		# Правило то же, что у ученика: блок с таблицей — по её строкам (#330).
 		сколько = _заполненность(
-			схема, содержимое.get(имя, {}), вложения.get(имя, {}), artifact_tables.данные(экземпляр.data)
+			схема, содержимое.get(имя, {}), вложения.get(имя, {}), data.данные(экземпляр.data)
 		)["blocks_filled"]
 		заполнено[экземпляр.student] = заполнено.get(экземпляр.student, 0) + сколько
 	return всего, заполнено
