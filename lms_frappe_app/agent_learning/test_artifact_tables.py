@@ -261,7 +261,7 @@ class TestВычисленияИЗаполненность(unittest.TestCase):
 		return next(б for б in self.блоки if б["block_key"] == ключ)
 
 	def test_ранг_и_в_работе_считаются(self):
-		ряды = т.вычисленные(т.таблицы_схемы(self.блоки)["register"], self.д)
+		ряды = т.вычисленные(т.таблицы_схемы(self.блоки)["register"], self.д, self.блоки)
 		self.assertEqual([(р["rank"], р["in_work"]) for р in ряды], [(16, True), (6, False)])
 
 	def test_ответ_обязателен_только_у_рисков_в_работе(self):
@@ -325,6 +325,212 @@ class TestВычисленияИЗаполненность(unittest.TestCase):
 		self.assertEqual(лист.cell(row=2, column=ранг + 1).value, "=E2*F2")
 		в_работе = лист.cell(row=2, column=шапка.index("В работе") + 1).value
 		self.assertEqual(в_работе, "=G2>='Шапка'!$B$2")
+
+
+# Экономика этапа из Lean Canvas (learning-services#351): сколько клиентов
+# нужно — вывод из цели этапа и цены, хватит ли сегмента — вывод из вывода.
+ЭКОНОМИКА = {
+	"block_key": "economics",
+	"spec": {
+		"fields": [
+			{"key": "stage_goal", "title": "Цель этапа", "type": "number"},
+			{"key": "price", "title": "Цена", "type": "number"},
+			{
+				"key": "clients_needed",
+				"title": "Клиентов нужно",
+				"type": "formula",
+				"formula": "stage_goal / price",
+			},
+			{
+				"key": "enough",
+				"title": "Сегмента хватит",
+				"type": "formula",
+				"formula": "segment_size >= clients_needed",
+			},
+		],
+	},
+}
+СЕГМЕНТ = {
+	"block_key": "segments",
+	"spec": {
+		"fields": [{"key": "segment_size", "title": "Размер сегмента", "type": "number"}],
+		"table": "segments",
+		"columns": [
+			{"key": "segment", "title": "Сегмент", "type": "text"},
+			{"key": "share", "title": "Доля плана", "type": "formula", "formula": "clients_needed / 10"},
+		],
+	},
+}
+
+
+def экономика():
+	блоки = [{**б, "spec": т.проверить_спек(б["spec"], б["block_key"])} for б in (ЭКОНОМИКА, СЕГМЕНТ)]
+	т.проверить_документ(блоки)
+	return блоки
+
+
+class TestФормулыПолей(unittest.TestCase):
+	def setUp(self):
+		self.блоки = экономика()
+		д = т.записать(self.блоки, "economics", {}, fields={"stage_goal": 300000, "price": 5000})
+		self.д = т.записать(self.блоки, "segments", д, fields={"segment_size": 40})
+
+	def test_формула_поля_считается_цепочкой_и_не_хранится(self):
+		self.assertEqual(
+			т.поля_документа(self.блоки, self.д),
+			{"stage_goal": 300000, "price": 5000, "clients_needed": 60, "enough": False, "segment_size": 40},
+		)
+		self.assertNotIn("clients_needed", self.д["fields"])
+
+	def test_дробь_формулы_поля_до_сотых(self):
+		д = т.записать(self.блоки, "economics", self.д, fields={"stage_goal": 1000000, "price": 30000})
+		self.assertEqual(т.поля_документа(self.блоки, д)["clients_needed"], 33.33)
+		д = т.записать(self.блоки, "economics", self.д, fields={"stage_goal": 10, "price": 4})
+		self.assertEqual(т.поля_документа(self.блоки, д)["clients_needed"], 2.5)
+
+	def test_пустой_операнд_пусто(self):
+		д = т.записать(self.блоки, "economics", {}, fields={"stage_goal": 300000})
+		значения = т.поля_документа(self.блоки, д)
+		self.assertIsNone(значения["clients_needed"])
+		self.assertIsNone(значения["enough"])
+
+	def test_формулу_поля_не_записать(self):
+		with self.assertRaises(Отказ) as отказ:
+			т.записать(self.блоки, "economics", self.д, fields={"clients_needed": 10})
+		self.assertEqual(отказ.exception.код, т.НЕВЕРНОЕ_ЗНАЧЕНИЕ)
+
+	def test_заполненность_не_смотрит_на_формулы(self):
+		блок = self.блоки[0]
+		self.assertTrue(т.заполнен(блок, self.д, self.блоки))
+		# Посчитанная формула — не ввод ученика: блок без ввода не тронут.
+		пустой = {"tables": {}, "fields": {}, "seq": {}}
+		self.assertFalse(т.заполнен(блок, пустой, self.блоки))
+		self.assertEqual(т.пустые_клетки(блок, пустой, self.блоки), [])
+
+	def test_колонка_видит_формулу_поля(self):
+		д = т.записать(self.блоки, "segments", self.д, rows=[{"segment": "Кофейни у вокзала"}])
+		ряды = т.таблицы_документа(self.блоки, д)["segments"]["rows"]
+		self.assertEqual(ряды[0]["share"], 6)
+
+	def test_markdown_и_xlsx_полей_со_значением_формулы(self):
+		from io import BytesIO
+
+		from openpyxl import load_workbook
+
+		значения = т.поля_документа(self.блоки, self.д)
+		self.assertIn("- Клиентов нужно: 60", т.markdown_полей(self.блоки[0]["spec"]["fields"], значения))
+		шапка = load_workbook(BytesIO(т.книга_xlsx("План", self.блоки, self.д)))["Шапка"]
+		self.assertEqual([шапка["A4"].value, шапка["B4"].value], ["Клиентов нужно", 60])
+
+	def test_required_у_формулы_поля_отказ(self):
+		with self.assertRaises(Отказ):
+			т.проверить_спек(
+				{"fields": [{"key": "a", "type": "formula", "formula": "b", "required": True}]}, "x"
+			)
+
+	def test_формула_поля_только_на_поля_документа(self):
+		блоки = экономика()
+		блоки[0]["spec"]["fields"][2]["formula"] = "stage_goal / segment"
+		with self.assertRaises(Отказ) as отказ:
+			т.проверить_документ(блоки)
+		self.assertEqual(отказ.exception.код, т.НЕВЕРНАЯ_СХЕМА)
+
+	def test_формула_поля_на_формулу_ниже_отказ(self):
+		блоки = экономика()
+		блоки[0]["spec"]["fields"][2]["formula"] = "enough"
+		with self.assertRaises(Отказ):
+			т.проверить_документ(блоки)
+
+
+def холст_документа():
+	блоки = [
+		{"block_key": ключ, "spec": None}
+		for ключ in ("problem", "solution", "uvp", "unfair", "segments", "metrics", "channels", "costs")
+	]
+	блоки.append(
+		{
+			"block_key": "revenue",
+			"spec": т.проверить_спек(
+				{
+					"columns": [{"key": "source", "title": "Источник"}],
+					"fields": [{"key": "price", "type": "number"}],
+				},
+				"revenue",
+			),
+		}
+	)
+	блоки.append(
+		{
+			"block_key": "first_sketch",
+			"spec": т.проверить_спек({"fields": [{"key": "problem"}, {"key": "uvp"}]}, "first_sketch"),
+		}
+	)
+	return блоки
+
+
+СЕТКА = [
+	"problem solution uvp unfair segments",
+	"problem metrics uvp channels segments",
+	"costs costs revenue revenue revenue",
+]
+
+
+class TestХолст(unittest.TestCase):
+	def проверить(self, **холст):
+		return т.проверить_холст({"grid": СЕТКА, **холст}, холст_документа())
+
+	def отказ(self, **холст):
+		with self.assertRaises(Отказ) as отказ:
+			self.проверить(**холст)
+		self.assertEqual(отказ.exception.код, т.НЕВЕРНАЯ_СХЕМА)
+		return отказ.exception
+
+	def test_холст_в_каноническом_виде(self):
+		self.assertEqual(
+			self.проверить(
+				grid=["Problem  solution uvp unfair segments", *СЕТКА[1:]],
+				labels={"uvp": " Обещание "},
+				sketch="first_sketch",
+				summary={"revenue": ["source", "price"]},
+			),
+			{
+				"grid": СЕТКА,
+				"labels": {"uvp": "Обещание"},
+				"sketch": "first_sketch",
+				"summary": {"revenue": ["source", "price"]},
+			},
+		)
+
+	def test_пустой_холст_нет_холста(self):
+		self.assertIsNone(т.проверить_холст(None, холст_документа()))
+		self.assertIsNone(т.проверить_холст("", холст_документа()))
+
+	def test_строки_разной_длины_отказ(self):
+		self.отказ(grid=[*СЕТКА[:2], "costs revenue"])
+
+	def test_неизвестный_блок_отказ(self):
+		self.assertEqual(
+			self.отказ(grid=[СЕТКА[0], СЕТКА[1], "costs costs revenue revenue nope"]).подробности["key"],
+			"nope",
+		)
+
+	def test_область_не_прямоугольник_отказ(self):
+		self.отказ(grid=["problem solution uvp", "problem problem uvp"])
+		self.отказ(grid=["problem solution problem", "metrics metrics uvp"])
+
+	def test_подписи_наброска_и_сводки_проверяются(self):
+		self.отказ(labels={"first_sketch": "Набросок"})
+		self.отказ(labels={"uvp": ""})
+		self.отказ(sketch="nope")
+		self.отказ(sketch="problem")
+		# У наброска нет полей — ему нечего держать.
+		self.отказ(grid=["problem solution", "problem solution"], sketch="uvp")
+		self.отказ(summary={"revenue": ["nope"]})
+		self.отказ(summary={"problem": ["source"]})
+		self.отказ(summary={"nope": ["price"]})
+
+	def test_набросок_не_ячейка(self):
+		self.отказ(grid=["problem first_sketch", "problem first_sketch"], sketch="first_sketch")
 
 
 if __name__ == "__main__":

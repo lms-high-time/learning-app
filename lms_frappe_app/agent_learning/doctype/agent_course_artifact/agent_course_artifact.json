@@ -12,6 +12,7 @@
   "slug",
   "title",
   "layout",
+  "canvas",
   "version",
   "is_active",
   "sb_blocks",
@@ -50,6 +51,12 @@
    "options": "sections\ncanvas"
   },
   {
+   "description": "Сетка холста из ключей блоков, подписи ячеек, набросок и сводка (learning-services#351)",
+   "fieldname": "canvas",
+   "fieldtype": "JSON",
+   "label": "Холст"
+  },
+  {
    "description": "Проставляется автоматически: следующий номер для этого курса и ключа",
    "fieldname": "version",
    "fieldtype": "Int",
@@ -80,7 +87,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-10 12:00:00.000000",
+ "modified": "2026-09-28 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Artifact",
