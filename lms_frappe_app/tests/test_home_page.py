@@ -13,7 +13,12 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.website.utils import get_home_page
 
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
+from lms_frappe_app.tests.sample_data import (
+	создать_куратора,
+	создать_менеджера,
+	создать_организацию,
+	создать_ученика,
+)
 
 ДОМАШНЯЯ = "lms"
 
@@ -49,6 +54,24 @@ class IntegrationTestHomePage(IntegrationTestCase):
 		from lms_frappe_app.www.home import домашняя_страница
 
 		self.assertEqual(домашняя_страница(self.ученик), ДОМАШНЯЯ)
+
+	def test_руководителя_организации_ведём_в_lms(self):
+		"""Роль по членству не открывает desk: с `desk_access` руководитель
+		становился System User и после входа попадал в воркспейс сотрудников
+		вместо «Команды» (learning-services#374)."""
+		from lms_frappe_app.www.home import домашняя_страница
+
+		for роль in ("Organization Manager", "Organization Admin"):
+			self.assertFalse(frappe.db.get_value("Role", роль, "desk_access"), роль)
+
+		организация = создать_организацию(f"home-{frappe.generate_hash(length=6)}")
+		руководитель = создать_менеджера(
+			f"home-mgr-{frappe.generate_hash(length=6)}@example.com", организация
+		)
+
+		self.assertIn("Organization Manager", frappe.get_roles(руководитель))
+		self.assertEqual(frappe.db.get_value("User", руководитель, "user_type"), "Website User")
+		self.assertEqual(домашняя_страница(руководитель), ДОМАШНЯЯ)
 
 	def test_хук_объявлен_приложением(self):
 		"""Значение приходит из hooks.py, а не из настроек сайта: настройка в
