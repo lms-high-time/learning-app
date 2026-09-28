@@ -25,6 +25,7 @@ from lms_frappe_app.agent_learning import (
 	snapshots,
 	structure,
 )
+from lms_frappe_app.agent_learning.artifacts import templates
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
@@ -455,12 +456,70 @@ def set_course_artifact(
 	`canvas` — холст документа (learning-services#351): `{grid, labels,
 	sketch, summary}`, сетка из ключей блоков. Проверяется так же до записи:
 	сетку, которую браузер не разложит, увидел бы каждый ученик.
+
+	Схема целиком отвязывает документ от шаблона: новая версия не хранит ни
+	шаблона, ни правок (learning-services#370).
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	версия = записать_схему(course, artifact, title, список(blocks), layout, canvas)
 	# Наружу ключ документа зовётся `artifact`, как в методах ученика.
 	return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def set_artifact_template(
+	template: str, title: str, blocks, layout: str = "sections", canvas=None, note: str | None = None
+) -> dict:
+	"""Заводит новую версию шаблона документа (learning-services#370).
+
+	Шаблон — схема документа без уроков, общая для курсов: `blocks` и
+	`canvas` — как у `set_course_artifact`, но урока у блока нет — урок
+	принадлежит курсу и задаётся в правках привязки. Каждый вызов — новая
+	версия; прежние не меняются, и курсы, закрепившие их, их и сохраняют.
+	`note` — что поменялось в версии: по нему автор курса решает, переходить ли.
+	"""
+	_автор()
+	return templates.записать_шаблон(template, title, список(blocks), layout, canvas, note)
+
+
+@frappe.whitelist()
+@контракт
+def list_artifact_templates() -> dict:
+	"""Шаблоны документов: последняя версия каждого и курсы на нём.
+
+	У курса — версия шаблона, которую он закрепил: новая версия шаблона
+	живые курсы не меняет, и автор видит, кто на какой остался.
+	"""
+	_автор()
+	return {"templates": templates.шаблоны()}
+
+
+@frappe.whitelist()
+@контракт
+def artifact_template(template: str, version: int | None = None) -> dict:
+	"""Версия шаблона целиком — последняя, если номер не назван."""
+	_автор()
+	return templates.шаблон(template, version)
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def set_course_artifact_template(
+	course: str, artifact: str, template: str, version: int | None = None, overlay=None
+) -> dict:
+	"""Документ курса из шаблона с правками курса — новой версией схемы.
+
+	`version` не назван — последняя версия шаблона. `overlay` — чем документ
+	курса отличается от шаблона: уроки блоков, подсказки, варианты, лишний
+	блок, подписи холста; по ключам, а не по позициям. Собранная схема
+	проверяется целиком, как у `set_course_artifact`, и пишется тем же путём:
+	ученик видит обычную схему документа.
+	"""
+	_автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	return templates.привязать(course, artifact, template, version, overlay)
 
 
 @frappe.whitelist(methods=["POST"])

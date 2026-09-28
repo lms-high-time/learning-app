@@ -2121,11 +2121,140 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 `field`) — схема полей и колонок не читается или холст не раскладывается (с
 `key` — ячейка или блок, где ошибка).
 
+Схема целиком отвязывает документ от шаблона: у новой версии нет ни
+шаблона, ни правок (`template` в `course_draft` — `null`). Документ из
+шаблона — `set_course_artifact_template`.
+
 Схема без блоков даёт предупреждение `artifact_without_blocks` в
 `readiness` — публикацию оно не блокирует: курс без документа — нормальный
 курс. Блок-файл без `accept` — предупреждение `artifact_file_without_accept`
 (с `key`): такой блок примет любой файл, и срез для агента может не
 построиться.
+
+## `lms_frappe_app.api.authoring.set_artifact_template`
+
+Новая версия шаблона документа (learning-services#370). Шаблон — схема
+документа без уроков, общая для курсов: реестр одного вида в курсах для
+разных отраслей — один шаблон и правки каждого курса к нему. Каждый вызов —
+новая версия; прежние не меняются, и курсы, закрепившие их, на них и
+остаются.
+
+**Параметры:** `template` — ключ шаблона: латиница в нижнем регистре, цифры,
+`_` и `-`, до 60 знаков (`risk-register`); `title` — название документа по
+умолчанию; `blocks`, `layout`, `canvas` — как у `set_course_artifact`, но
+без `lesson` у блоков: урок принадлежит курсу и задаётся в правках привязки;
+`note` (необязательно) — что поменялось в версии.
+
+Схема проверяется той же проверкой, что у `set_course_artifact`: вид блока,
+поля и колонки, формулы, холст. Сверх того у шаблона есть блоки, у каждого —
+ключ, и ключи не повторяются.
+
+```json
+{ "ok": true, "data": { "id": "ATPL-00001", "template": "risk-register", "version": 3 } }
+```
+
+**Отказы:** `artifact_invalid_template` (с `template`) — ключ не по форме или
+нет названия; `artifact_invalid_spec` (с `key`, `table`, `column`, `field`) —
+схема не читается, в ней нет блоков, ключ блока пуст или повторяется, у блока
+есть `lesson`; `invalid_block_kind` (с `key` и `kind`).
+
+## `lms_frappe_app.api.authoring.list_artifact_templates`
+
+Шаблоны документов: последняя версия каждого и курсы, чьи действующие
+документы на нём собраны. У курса — версия шаблона, которую он закрепил:
+новая версия шаблона живые курсы не меняет.
+
+**Параметры:** нет.
+
+```json
+{ "ok": true, "data": { "templates": [
+  { "template": "risk-register", "title": "Реестр рисков", "version": 3,
+    "note": "Колонка «Источник» стала выбором",
+    "courses": [ { "course": "course-basics", "course_title": "Основы",
+                   "artifact": "risk_register", "version": 2 } ] } ] } }
+```
+
+`version` у шаблона — последняя, у курса — закреплённая. `note` — `null`, если
+версию не пояснили.
+
+## `lms_frappe_app.api.authoring.artifact_template`
+
+Версия шаблона целиком.
+
+**Параметры:** `template`, `version` (необязательно) — без него последняя.
+
+```json
+{ "ok": true, "data": {
+  "template": "risk-register", "version": 3, "title": "Реестр рисков",
+  "layout": "sections",
+  "blocks": [ { "key": "risks", "title": "Риски", "hint": "…", "span": 1,
+                "kind": "text", "accept": [], "spec": { "table": "register",
+                "columns": [ { "key": "event", "title": "Событие", "type": "text" } ] } } ],
+  "canvas": null, "note": "Колонка «Источник» стала выбором",
+  "created": "2026-09-29T12:00:00.000000" } }
+```
+
+Блоки — в той форме, в какой их принимает `set_course_artifact`, без `lesson`;
+`spec` — `null` у блока без полей и колонок.
+
+**Отказы:** `artifact_template_not_found` (с `template` и `version`).
+
+## `lms_frappe_app.api.authoring.set_course_artifact_template`
+
+Документ курса из шаблона с правками курса — новой версией схемы документа
+курса. Итоговая схема = шаблон ⊕ правки; собирается при записи, проверяется
+целиком, как у `set_course_artifact`, и хранится так же: ученик, страница и
+выгрузка видят обычную схему документа и о шаблоне не знают. Новая версия
+шаблона курс не меняет — он остаётся на закреплённой.
+
+**Параметры:** `course`, `artifact` — ключ документа в курсе, `template`,
+`version` (необязательно) — версия шаблона, без него последняя, `overlay`
+(необязательно) — правки курса.
+
+```json
+{ "title": "Реестр рисков стройки",
+  "blocks": {
+    "risks": { "lesson": "lesson-2", "hint": "…",
+      "spec": {
+        "fields": { "threshold": { "title": "Порог" } },
+        "columns": { "source": { "options": [ "люди", "погода" ] }, "kind": null },
+        "add_columns": [ { "key": "permit", "title": "Разрешение",
+                           "type": "text", "after": "source" } ] } },
+    "issues": null },
+  "add_blocks": [ { "key": "site_log", "title": "Журнал площадки",
+                    "lesson": "lesson-4", "after": "status" } ],
+  "canvas": { "labels": { "uvp": "Обещание" } } }
+```
+
+Правило одно на все уровни: блок правится по ключу блока, поле и колонка — по
+своему ключу (в схеме они списком, в правках — объектом по ключам). Объект
+сливается с объектом, `null` удаляет (блок, поле, колонку, подпись, холст
+целиком), список заменяет список целиком (`options`, `views`, `rows`,
+`grid`, `summary` ячейки, `accept`). Новое — в `add_blocks`, `add_fields`,
+`add_columns`: встаёт после ключа из `after`, без него — в конец. Уроки
+блоков задаются только здесь: у шаблона их нет. В правке блока — `title`,
+`hint`, `lesson`, `span`, `kind`, `accept`, `spec`; в правке схемы блока —
+`fields`, `columns`, `add_fields`, `add_columns`, `table`, `prefix`, `title`,
+`rows`, `views`; в правке холста — `grid`, `labels`, `sketch`, `summary`.
+
+```json
+{ "ok": true, "data": { "id": "ACA-00007", "course": "course-basics",
+                        "artifact": "risk_register", "version": 2,
+                        "template": "risk-register", "template_version": 3 } }
+```
+
+`version` — версия схемы документа курса, как у `set_course_artifact`;
+`template_version` — закреплённая версия шаблона.
+
+**Отказы:** `course_not_found`; `artifact_template_not_found` (с `template` и
+`version`); `artifact_invalid_overlay` — правка называет блок, поле или
+колонку, которых в шаблоне нет (с `key` и `field` или `column`), добавляет
+ключ, который уже есть, ставит добавку после несуществующего ключа (с
+`after`), называет неизвестное свойство (с `name`) или не объект там, где
+нужен объект; `lesson_not_found` (с `id`) — урока нет в этом курсе;
+`artifact_invalid_spec`, `invalid_block_kind` — собранная схема не проходит
+проверку `set_course_artifact`: например, убран блок, который называет сетка
+холста.
 
 ## `lms_frappe_app.api.authoring.add_quiz`
 
@@ -2280,7 +2409,9 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
   "directive": null,
   "artifacts": [ { "id": "ACA-00001", "version": 1,
     "artifact": "project_summary", "title": "Резюме проекта",
-    "layout": "sections", "blocks": [ { "key": "goal_and_benefits",
+    "layout": "sections", "template": "project-summary",
+    "template_version": 2, "template_latest": 3,
+    "blocks": [ { "key": "goal_and_benefits",
       "title": "…", "hint": "…", "lesson": "lesson-1", "span": 1,
       "kind": "text", "accept": [] } ] } ],
   "readiness": { "blocking": [], "warnings": [
@@ -2301,6 +2432,10 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 `map_discrepancies` — сколько расхождений с картой декомпозиции нашёл
 `course_map_check`; `null`, если карты нет. Публикацию не блокирует.
 `open_notes` — сколько замечаний автора ждёт агента (см. `list_notes`).
+
+У документа курса `template` и `template_version` — шаблон и закреплённая
+версия, `template_latest` — последняя версия шаблона: больше закреплённой —
+шаблон ушёл вперёд. У документа со схемой целиком все три — `null`.
 
 ## `lms_frappe_app.api.authoring.course_revision`
 
