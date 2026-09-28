@@ -33,10 +33,19 @@ from lms_frappe_app.api import контракт, текущий_пользова
 
 @frappe.whitelist()
 @контракт
-def org_report(course: str | None = None, status: str | None = None) -> dict:
-	"""Обучение своей организации: кто на чём и что просрочено."""
+def org_report(
+	course: str | None = None, status: str | None = None, organization: str | None = None
+) -> dict:
+	"""Обучение своей организации: кто на чём и что просрочено.
+
+	`organization` — отчёт одной из своих организаций: страница «Команда»
+	показывает отчёт той, в чьём пространстве открыта (learning-services#355).
+	Чужая — пустой отчёт, как у руководителя без организаций.
+	"""
 	менеджер = текущий_пользователь()
 	организации = организации_менеджера(менеджер)
+	if organization:
+		организации = [organization] if organization in организации else []
 	if not организации:
 		return {"rows": []}
 

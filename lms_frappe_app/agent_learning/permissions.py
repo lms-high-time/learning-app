@@ -360,3 +360,18 @@ def доступен_desk(user: str | None = None) -> bool:
 	if user == "Administrator":
 		return True
 	return bool(set(frappe.get_roles(user)) & АДМИНИСТРАТИВНЫЕ_РОЛИ)
+
+
+def доступ_к_команде(user: str, organization: str) -> str | None:
+	"""Что пользователь видит на странице «Команда» организации.
+
+	`manager` — участники, документы и отчёт; `member` — участники и документы,
+	если организация открыла документы всем; `None` — ничего. Правило то же,
+	что у документов пространства (`организации_с_документами`): страница —
+	окно в них, а не второй доступ (learning-services#355).
+	"""
+	if видит_всё(user) or organization in организации_менеджера(user):
+		return "manager"
+	if organization in организации_с_документами(user):
+		return "member"
+	return None
