@@ -16,6 +16,7 @@ from urllib.parse import quote
 import frappe
 
 from lms_frappe_app.agent_learning import artifact_tables
+from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.api import student, текущий_пользователь
 
 no_cache = 1
@@ -69,14 +70,15 @@ def собрать_markdown(документ: dict) -> str:
 
 
 @frappe.whitelist()
-def download(course: str, artifact: str, format: str = "md"):
-	"""Отдаёт документ файлом: markdown или книга Excel."""
+def download(course: str, artifact: str, format: str = "md", space: str | None = None):
+	"""Отдаёт документ файлом: markdown или книга Excel — из пространства `space`."""
 	пользователь = текущий_пользователь()
 	student._требовать_доступ_к_курсу(пользователь, course)
-	документ = student._артефакт_целиком(пользователь, course, artifact)
+	пространство = пространства.пространство_курса(пользователь, course, space)
+	документ = student._артефакт_целиком(пользователь, course, пространство, artifact)
 	if format == "xlsx":
 		схема = student._действующая_схема(course, artifact)
-		экземпляр = student._экземпляр(пользователь, course, схема.slug)
+		экземпляр = student._экземпляр(пользователь, course, схема.slug, пространство)
 		frappe.response["filename"] = f"{документ['artifact']}.xlsx"
 		frappe.response["filecontent"] = artifact_tables.книга_xlsx(
 			документ["title"], схема.blocks, student._данные(экземпляр)

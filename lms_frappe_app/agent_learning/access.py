@@ -24,7 +24,6 @@ from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation i
 	назначения_пользователя,
 )
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
-	организации_пользователя,
 	политика_квиза,
 )
 
@@ -132,28 +131,6 @@ def политика_квиза_для_курса(user: str, course: str, наз
 	}
 
 
-def пространство_курса(user: str, course: str, назначения: list | None = None) -> str | None:
-	"""В чьём пространстве идёт работа ученика по курсу: организация или `None` — личное.
-
-	Документ, который уже начат, остаётся там, где начат. `Why:` пока
-	пространство не выбирают явно, назначение курса после личной работы
-	иначе увело бы ученика в пустой документ организации, а начатый пропал
-	бы из вида. Не начат — пространство той организации, что дала курс.
-
-	`назначения` — уже прочитанный список (`назначения_ученика`).
-	"""
-	начатый = frappe.get_all(
-		"Agent Student Artifact",
-		filters={"student": user, "course": course},
-		fields=["organization"],
-		order_by="modified desc",
-		limit=1,
-	)
-	if начатый:
-		return начатый[0].organization or None
-	return организация_курса(user, course, назначения)
-
-
 def организация_курса(user: str, course: str, назначения: list | None = None) -> str | None:
 	"""Организация, давшая ученику курс: самое раннее действующее назначение.
 
@@ -245,76 +222,3 @@ def организация_приостановлена(organization: str) -> bo
 	лишний запрос дешевле устаревших прав.
 	"""
 	return frappe.db.get_value("Learning Organization", organization, "status") != "Active"
-
-
-def каталог_для(user: str) -> list[dict]:
-	"""Опубликованные курсы, на которые ученик может записаться сам.
-
-	Участник организации видит только курсы, открытые хотя бы одной из его
-	компаний: обучение идёт за их счёт, и запись на произвольный курс каталога
-	означала бы трату чужого бюджета. У кого организаций нет — весь
-	опубликованный каталог.
-
-	Уже пройденные и начатые курсы в каталоге не показываются: они и так в
-	`list_my_courses`.
-	"""
-	записан = set(frappe.get_all("LMS Enrollment", filters={"member": user}, pluck="course"))
-	доступные = _открытые_курсы(user)
-
-	каталог = []
-	for курс in frappe.get_all(
-		"LMS Course",
-		filters={"published": 1},
-		fields=["name", "title", "short_introduction"],
-	):
-		if курс.name in записан:
-			continue
-		if доступные is not None and курс.name not in доступные:
-			continue
-		каталог.append(
-			{
-				"id": курс.name,
-				"title": курс.title,
-				"summary": курс.short_introduction,
-			}
-		)
-	return каталог
-
-
-def можно_записаться(user: str, course: str) -> tuple[bool, str | None]:
-	"""Проверка перед самозаписью; при отказе — машинный код причины."""
-	if not frappe.db.exists("LMS Course", course):
-		return False, КУРС_НЕ_ОПУБЛИКОВАН
-	if not frappe.db.get_value("LMS Course", course, "published"):
-		return False, КУРС_НЕ_ОПУБЛИКОВАН
-	if frappe.db.exists("LMS Enrollment", {"member": user, "course": course}):
-		return False, УЖЕ_ЗАПИСАН
-
-	доступные = _открытые_курсы(user)
-	if доступные is not None and course not in доступные:
-		return False, КУРС_НЕ_ОТКРЫТ
-	return True, None
-
-
-def _открытые_курсы(user: str) -> set[str] | None:
-	"""Курсы, открытые организациям ученика. `None` — ограничений нет.
-
-	`None` возвращается и когда организаций нет вовсе, и когда хотя бы одна из
-	них не ограничивает каталог: пустой список разрешённых курсов означает
-	«весь каталог», это правило уже действует при назначении.
-	"""
-	организации = организации_пользователя(user)
-	if not организации:
-		return None
-
-	открытые: set[str] = set()
-	for организация in организации:
-		if организация_приостановлена(организация):
-			continue
-		строки = frappe.get_all(
-			"Organization Course", filters={"parent": организация}, pluck="course"
-		)
-		if not строки:
-			return None
-		открытые.update(строки)
-	return открытые

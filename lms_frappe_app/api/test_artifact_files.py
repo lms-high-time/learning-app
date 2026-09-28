@@ -7,6 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import artifact_files, course_builder
+from lms_frappe_app.agent_learning.spaces import пространство_курса
 from lms_frappe_app.api import authoring, manager, student
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
@@ -58,7 +59,10 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 
 	def загрузить(self, имя: str = "plan.csv", данные: bytes = CSV, ключ: str = "money") -> dict:
-		return student.контракт(student._положить_файл)(self.ученик, self.курс, "plan", ключ, имя, данные)
+		пространство = пространство_курса(self.ученик, self.курс)
+		return student.контракт(student._положить_файл)(
+			self.ученик, self.курс, пространство, "plan", ключ, имя, данные
+		)
 
 	def запись_файла(self, ключ: str = "money") -> str | None:
 		"""Имя `File` в строке блока. По адресу искать нельзя: Frappe отдаёт
