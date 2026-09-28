@@ -397,6 +397,9 @@ class IntegrationTestSpaceChoice(IntegrationTestCase):
 
 		self.assertEqual(ответ["current"], self.компания)
 		self.assertEqual([п["id"] for п in ответ["spaces"]], ["personal", self.компания])
+		self.assertEqual(
+			[п["documents_visible_to"] for п in ответ["spaces"]], ["only_me", "managers"]
+		)
 
 	def test_выбор_запоминается_а_чужое_отклоняется(self):
 		self.assertEqual(student.set_space("personal")["data"]["current"], "personal")
