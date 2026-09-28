@@ -4,6 +4,7 @@
 import frappe
 from frappe.model.document import Document
 
+from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
 	LearningOrganization,
 )
@@ -123,7 +124,11 @@ def адресаты_назначений(назначения: list) -> dict[st
 	if организации:
 		строки = frappe.get_all(
 			"Organization Membership",
-			filters={"organization": ("in", организации), "role": ("in", ВСЕ_РОЛИ_УЧАСТНИКОВ)},
+			filters={
+				"organization": ("in", организации),
+				"role": ("in", ВСЕ_РОЛИ_УЧАСТНИКОВ),
+				"status": ЧЛЕНСТВО_ДЕЙСТВУЕТ,
+			},
 			fields=["organization", "user"],
 		)
 		for строка in строки:

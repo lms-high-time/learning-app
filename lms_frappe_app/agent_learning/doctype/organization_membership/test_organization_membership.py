@@ -7,6 +7,9 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
 	сверить_зачисления,
 )
+from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
+	организации_пользователя,
+)
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_курс,
@@ -94,3 +97,100 @@ class IntegrationTestOrganizationMembership(IntegrationTestCase):
 			"LMS Enrollment", filters={"member": НОВИЧОК, "course": self.курс}
 		)
 		self.assertEqual(len(записи), 1)
+
+
+class IntegrationTestMembershipStatus(IntegrationTestCase):
+	"""Членство закрывается, а не удаляется; роль Frappe следует за ним."""
+
+	def setUp(self):
+		суффикс = frappe.generate_hash(length=6)
+		self.организация = создать_организацию(f"Компания {суффикс}")
+		self.курс = создать_курс(f"Курс {суффикс}")
+		self.человек = создать_ученика(f"status-{суффикс}@example.com")
+
+	def членство(self, role: str = "Member"):
+		return frappe.get_doc(
+			"Organization Membership", добавить_в_организацию(self.человек, self.организация, role)
+		)
+
+	def роли(self) -> set[str]:
+		return set(frappe.get_roles(self.человек))
+
+	def test_выход_ставит_дату_а_возвращение_её_снимает(self):
+		членство = self.членство()
+
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+		self.assertEqual(str(членство.left_on), frappe.utils.nowdate())
+
+		членство.status = "Active"
+		членство.save(ignore_permissions=True)
+		self.assertFalse(членство.left_on)
+
+	def test_ушедший_не_числится_в_организации(self):
+		членство = self.членство()
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+
+		self.assertNotIn(self.организация, организации_пользователя(self.человек))
+
+	def test_назначение_не_достаётся_ушедшему(self):
+		членство = self.членство()
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
+		).insert(ignore_permissions=True)
+
+		self.assertFalse(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
+
+	def test_вернувшийся_получает_назначенное_без_него(self):
+		членство = self.членство()
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
+		).insert(ignore_permissions=True)
+
+		членство.status = "Active"
+		членство.save(ignore_permissions=True)
+
+		self.assertTrue(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
+
+	def test_роль_руководителя_выдаётся_по_членству(self):
+		self.assertNotIn("Organization Manager", self.роли())
+
+		self.членство("Manager")
+
+		self.assertIn("Organization Manager", self.роли())
+
+	def test_роль_снимается_при_выходе_понижении_и_удалении(self):
+		for как_снять in ("выход", "понижение", "удаление"):
+			with self.subTest(как_снять):
+				членство = self.членство("Org Admin")
+				self.assertIn("Organization Manager", self.роли())
+
+				if как_снять == "выход":
+					членство.status = "Left"
+					членство.save(ignore_permissions=True)
+				elif как_снять == "понижение":
+					членство.role = "Member"
+					членство.save(ignore_permissions=True)
+				else:
+					членство.delete(ignore_permissions=True)
+
+				self.assertNotIn("Organization Manager", self.роли())
+				# Следующий случай заводит членство заново: повтор отвергается.
+				if frappe.db.exists("Organization Membership", членство.name):
+					frappe.delete_doc("Organization Membership", членство.name, ignore_permissions=True)
+
+	def test_роль_остаётся_пока_руководит_хоть_одной_организацией(self):
+		другая = создать_организацию(f"Другая {frappe.generate_hash(length=6)}")
+		добавить_в_организацию(self.человек, другая, "Manager")
+		членство = self.членство("Manager")
+
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+
+		self.assertIn("Organization Manager", self.роли())

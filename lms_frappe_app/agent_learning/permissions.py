@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import frappe
 
+from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
+
 ВСЕВИДЯЩИЕ_РОЛИ = frozenset({"System Manager", "Administrator", "Agent Service"})
 
 #: Кому разрешено заводить и править записи из интерфейса. `Why:` хук
@@ -65,7 +67,7 @@ def организации_менеджера(user: str) -> list[str]:
 		return []
 	return frappe.get_all(
 		"Organization Membership",
-		filters={"user": user, "role": ("in", РОЛИ_МЕНЕДЖЕРА)},
+		filters={"user": user, "role": ("in", РОЛИ_МЕНЕДЖЕРА), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
 		pluck="organization",
 	)
 
@@ -119,7 +121,7 @@ def условие_занятия(user: str | None = None) -> str:
 		return свои
 	подзапрос = (
 		"select user from `tabOrganization Membership` "
-		f"where organization in ({_список(организации)})"
+		f"where organization in ({_список(организации)}) and status = '{ЧЛЕНСТВО_ДЕЙСТВУЕТ}'"
 	)
 	return f"({свои} or `tabAgent Learning Session`.`student` in ({подзапрос}))"
 
@@ -141,7 +143,7 @@ def доступно_занятие(doc, ptype: str = "read", user: str | None =
 	return bool(
 		frappe.db.exists(
 			"Organization Membership",
-			{"user": doc.student, "organization": ("in", организации)},
+			{"user": doc.student, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
 		)
 	)
 
@@ -201,7 +203,7 @@ def условие_попытки(user: str | None = None) -> str:
 		return свои
 	подзапрос = (
 		"select user from `tabOrganization Membership` "
-		f"where organization in ({_список(организации)})"
+		f"where organization in ({_список(организации)}) and status = '{ЧЛЕНСТВО_ДЕЙСТВУЕТ}'"
 	)
 	return f"({свои} or `tabAgent Quiz Attempt`.`student` in ({подзапрос}))"
 
@@ -221,7 +223,7 @@ def доступна_попытка(doc, ptype: str = "read", user: str | None =
 	return bool(организации) and bool(
 		frappe.db.exists(
 			"Organization Membership",
-			{"user": doc.student, "organization": ("in", организации)},
+			{"user": doc.student, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
 		)
 	)
 
@@ -270,7 +272,8 @@ def свои_организации_пересекаются(менеджер: s
 		return False
 	return bool(
 		frappe.db.exists(
-			"Organization Membership", {"user": ученик, "organization": ("in", организации)}
+			"Organization Membership",
+			{"user": ученик, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
 		)
 	)
 

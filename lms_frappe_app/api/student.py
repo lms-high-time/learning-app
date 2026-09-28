@@ -40,6 +40,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ОТКРЫТЫЕ,
 	ПРОЙДЕН,
 	СОБЫТИЕ_ВЕРДИКТ,
+	ЧЛЕНСТВО_ДЕЙСТВУЕТ,
 	СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА,
 	СОБЫТИЕ_ОТМЕТКА,
 	СТАТУСЫ_РЕПОРТОВ,
@@ -462,7 +463,7 @@ def whoami() -> dict:
 	организации = []
 	for членство in frappe.get_all(
 		"Organization Membership",
-		filters={"user": ученик},
+		filters={"user": ученик, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
 		fields=["organization", "role"],
 		ignore_permissions=True,
 	):

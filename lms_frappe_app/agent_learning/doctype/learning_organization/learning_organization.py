@@ -83,8 +83,10 @@ def политика_квиза(organization: str | None = None) -> dict:
 
 
 def организации_пользователя(user: str, роли: tuple[str, ...] | None = None) -> list[str]:
-	"""Организации, в которых пользователь состоит."""
-	фильтры = {"user": user}
+	"""Организации, в которых пользователь состоит сейчас; ушедший — не состоит."""
+	from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
+
+	фильтры = {"user": user, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ}
 	if роли:
 		фильтры["role"] = ("in", роли)
 	return frappe.get_all("Organization Membership", filters=фильтры, pluck="organization")
