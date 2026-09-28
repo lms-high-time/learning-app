@@ -72,3 +72,20 @@ class IntegrationTestOwnOrganization(IntegrationTestCase):
 		организация = создать_организацию(f"Наша {self.суффикс}")
 
 		self.assertEqual(frappe.db.get_value("Learning Organization", организация, "verified"), 1)
+
+	def test_условия_называют_числа_до_создания(self):
+		"""Страница создания говорит лимиты числом, а не отказом (#379)."""
+		условия = self.от_имени(self.создатель, team.organization_terms)["data"]
+		self.assertEqual(условия, {"member_limit": 2, "organizations_left": 1})
+
+		организация = self.создать(f"Числа {self.суффикс}")["data"]["organization"]
+		условия = self.от_имени(self.создатель, team.organization_terms)["data"]
+		self.assertEqual(условия["organizations_left"], 0)
+
+		self.assertEqual(
+			self.от_имени(self.создатель, team.team, organization=организация)["data"]["member_limit"], 2
+		)
+		frappe.db.set_value("Learning Organization", организация, "verified", 1)
+		self.assertIsNone(
+			self.от_имени(self.создатель, team.team, organization=организация)["data"]["member_limit"]
+		)

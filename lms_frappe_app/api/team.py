@@ -107,6 +107,8 @@ def team(organization: str) -> dict:
 		# организации (#363).
 		"can_manage": доступ == "manager",
 		"can_change_roles": доступ == "manager" and _админ_ли(зритель, organization),
+		# Руководитель видит, сколько мест осталось, до отказа при вступлении (#379).
+		"member_limit": лимит_участников(organization),
 		"members": _участники(organization),
 		"courses": [
 			{
@@ -554,8 +556,8 @@ def remove_allocation(allocation: str) -> dict:
 ОРГАНИЗАЦИЯ_ЗАПОЛНЕНА = "organization_full"
 
 
-def места_кончились(organization: str) -> bool:
-	"""У неподтверждённой организации кончились места участников.
+def лимит_участников(organization: str) -> int | None:
+	"""Сколько участников может быть в организации; `None` — без лимита.
 
 	`Why:` организацию может завести кто угодно; лимит не даёт собрать в
 	неподтверждённой «компании» толпу, которой открыты документы друг друга,
@@ -566,14 +568,41 @@ def места_кончились(organization: str) -> bool:
 	)
 
 	if frappe.db.get_value("Learning Organization", organization, "verified"):
-		return False
-	лимит = настройка("own_org_member_limit", 25)
+		return None
+	return настройка("own_org_member_limit", 25) or None
+
+
+def места_кончились(organization: str) -> bool:
+	"""У неподтверждённой организации кончились места участников."""
+	лимит = лимит_участников(organization)
 	if not лимит:
 		return False
 	занято = frappe.db.count(
 		"Organization Membership", {"organization": organization, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ}
 	)
 	return занято >= лимит
+
+
+@frappe.whitelist()
+@контракт
+def organization_terms() -> dict:
+	"""Условия своей организации до её создания: лимит участников и сколько ещё можно создать.
+
+	`Why:` страница создания обещала «ограниченное число участников», не
+	называя числа, а про лимит организаций человек узнавал отказом (#379).
+	"""
+	from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
+		настройка,
+	)
+
+	лимит = настройка("own_org_limit", 3)
+	создано = frappe.db.count(
+		"Learning Organization", {"created_by": текущий_пользователь(), "verified": 0}
+	)
+	return {
+		"member_limit": настройка("own_org_member_limit", 25) or None,
+		"organizations_left": max(лимит - создано, 0) if лимит else None,
+	}
 
 
 @frappe.whitelist(methods=["POST"])
