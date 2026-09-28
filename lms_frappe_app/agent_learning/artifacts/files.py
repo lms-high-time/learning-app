@@ -23,6 +23,14 @@ from urllib.parse import urlparse
 
 import frappe
 
+from lms_frappe_app.agent_learning.artifacts.codes import (
+	ВИД_НЕ_ТОТ,
+	НЕВЕРНАЯ_ССЫЛКА,
+	НЕВЕРНАЯ_ТАБЛИЦА,
+	ФАЙЛ_НЕ_ТОГО_ТИПА,
+	ФАЙЛ_СЛИШКОМ_БОЛЬШОЙ,
+	ФАЙЛА_НЕТ,
+)
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	настройка,
 )
@@ -30,13 +38,6 @@ from lms_frappe_app.agent_learning.errors import Отказ
 
 ТЕКСТ, ФАЙЛ, ССЫЛКА = "text", "file", "link"
 ВИДЫ = (ТЕКСТ, ФАЙЛ, ССЫЛКА)
-
-ВИД_НЕ_ТОТ = "artifact_kind_mismatch"
-ФАЙЛ_НЕ_ТОГО_ТИПА = "artifact_file_type"
-ФАЙЛ_СЛИШКОМ_БОЛЬШОЙ = "artifact_file_too_large"
-ФАЙЛА_НЕТ = "artifact_file_missing"
-НЕВЕРНАЯ_ССЫЛКА = "artifact_invalid_url"
-НЕВЕРНАЯ_ТАБЛИЦА = "artifact_invalid_table"
 
 #: Пределы таблицы от агента. Документ курса — финплан или журнал, а не выгрузка
 #: базы: больше — почти наверняка ошибка агента, и платить за неё контекстом

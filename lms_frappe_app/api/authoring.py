@@ -16,8 +16,6 @@ from urllib.parse import quote
 import frappe
 
 from lms_frappe_app.agent_learning import (
-	artifact_files,
-	artifact_tables,
 	course_builder,
 	course_map,
 	directives,
@@ -27,6 +25,8 @@ from lms_frappe_app.agent_learning import (
 	snapshots,
 	structure,
 )
+from lms_frappe_app.agent_learning.artifacts import files, schema
+from lms_frappe_app.agent_learning.artifacts.canvas import проверить_холст
 from lms_frappe_app.agent_learning.doctype.agent_course_artifact.agent_course_artifact import (
 	нормализовать_ключ,
 )
@@ -470,15 +470,15 @@ def set_course_artifact(
 		if урок:
 			_должен_существовать("Course Lesson", урок, УРОК_НЕ_НАЙДЕН)
 		# Вид блока: текст, файл ученика или ссылка на внешний документ (#315).
-		вид = блок.get("kind") or artifact_files.ТЕКСТ
-		if вид not in artifact_files.ВИДЫ:
+		вид = блок.get("kind") or files.ТЕКСТ
+		if вид not in files.ВИДЫ:
 			raise Отказ(
 				НЕВЕРНЫЙ_ВИД_БЛОКА,
-				"Вид блока: " + ", ".join(artifact_files.ВИДЫ),
+				"Вид блока: " + ", ".join(files.ВИДЫ),
 				key=блок.get("key"),
 				kind=вид,
 			)
-		спек = artifact_tables.проверить_спек(блок.get("spec"), блок.get("key"))
+		спек = schema.проверить_спек(блок.get("spec"), блок.get("key"))
 		строки.append(
 			{
 				"block_key": блок.get("key"),
@@ -487,12 +487,12 @@ def set_course_artifact(
 				"lesson": урок,
 				"span": блок.get("span") or 1,
 				"kind": вид,
-				"accept": ",".join(artifact_files.допустимые(блок)) or None,
+				"accept": ",".join(files.допустимые(блок)) or None,
 				"spec": json.dumps(спек, ensure_ascii=False) if спек else None,
 			}
 		)
-	artifact_tables.проверить_документ(строки)
-	холст = artifact_tables.проверить_холст(canvas, строки)
+	schema.проверить_документ(строки)
+	холст = проверить_холст(canvas, строки)
 	версия = directives.записать(
 		"Agent Course Artifact",
 		{"course": course, "slug": нормализовать_ключ(artifact)},
@@ -1332,8 +1332,8 @@ def _действующие_артефакты(course: str) -> list[dict]:
 						"hint": блок.hint or "",
 						"lesson": блок.lesson or None,
 						"span": блок.span or 1,
-						"kind": artifact_files.вид(блок),
-						"accept": artifact_files.допустимые(блок),
+						"kind": files.вид(блок),
+						"accept": files.допустимые(блок),
 					}
 					for блок in frappe.get_all(
 						"Agent Artifact Block",

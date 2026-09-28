@@ -14,7 +14,7 @@
 
 import frappe
 
-from lms_frappe_app.agent_learning import artifact_tables
+from lms_frappe_app.agent_learning.artifacts import export
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
@@ -149,7 +149,7 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 		участник = участники[экземпляр.student]
 		содержимое, вложения, данные = _содержимое(экземпляр), _вложения(экземпляр), _данные(экземпляр)
 		файлы = _файлы(вложения)
-		таблицы = artifact_tables.таблицы_документа(схема.blocks, данные)
+		таблицы = export.таблицы_документа(схема.blocks, данные)
 		заполнено = 0
 		for блок in схема.blocks:
 			описание = _блок(блок, содержимое, вложения, файлы, схема, данные)

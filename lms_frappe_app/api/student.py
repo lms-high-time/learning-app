@@ -15,7 +15,7 @@ import frappe
 from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning import artifact_files, artifact_tables, directives, quiz
+from lms_frappe_app.agent_learning import directives, quiz
 from lms_frappe_app.agent_learning.access import (
 	НЕ_ЗАЧИСЛЕН,
 	организация_приостановлена,
@@ -25,6 +25,7 @@ from lms_frappe_app.agent_learning.access import (
 	назначения_ученика,
 	политика_квиза_для_курса,
 )
+from lms_frappe_app.agent_learning.artifacts import canvas, codes, data, export, files, fill, schema
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_ЗАМЕТОК,
@@ -653,15 +654,15 @@ def update_artifact(
 
 	адрес = None
 	if (url or "").strip():
-		if artifact_files.вид(блок) != artifact_files.ССЫЛКА:
+		if files.вид(блок) != files.ССЫЛКА:
 			raise Отказ(
-				artifact_files.ВИД_НЕ_ТОТ,
+				codes.ВИД_НЕ_ТОТ,
 				"Ссылку принимает только блок-ссылка",
 				artifact=схема.slug,
 				key=ключ,
-				kind=artifact_files.вид(блок),
+				kind=files.вид(блок),
 			)
-		адрес = artifact_files.проверить_ссылку(url)
+		адрес = files.проверить_ссылку(url)
 	if table:
 		return _положить_таблицу(ученик, course, пространство, схема, блок, table, file_name, content)
 	if rows or delete_rows or fields:
@@ -692,7 +693,7 @@ def _ответ_записи(схема, ключ: str, документ, соз
 		"artifact": схема.slug,
 		"key": ключ,
 		**_заполненность(схема, _содержимое(документ), _вложения(документ), данные),
-		"empty_cells": artifact_tables.пустые_клетки(блок, данные, схема.blocks),
+		"empty_cells": fill.пустые_клетки(блок, данные, схема.blocks),
 		"created": созданы or [],
 	}
 
@@ -708,7 +709,7 @@ def _записать_данные(ученик: str, course: str, простр�
 		документ = _документ_ученика(ученик, course, пространство, схема)
 	прежние = _данные(документ)
 	было = {с["id"] for т in прежние["tables"].values() for с in т}
-	новые = artifact_tables.записать(
+	новые = data.записать(
 		схема.blocks, ключ, прежние, rows=rows, delete_rows=delete_rows, fields=fields
 	)
 	документ.data = json.dumps(новые, ensure_ascii=False)
@@ -742,7 +743,7 @@ def upload_artifact_file(
 	if файл:
 		имя, данные = файл.filename or "", файл.stream.read()
 	else:
-		имя, данные = file_name or "", artifact_files.из_base64(content)
+		имя, данные = file_name or "", files.из_base64(content)
 	пространство = пространства.пространство_курса(ученик, course, space)
 	return _положить_файл(ученик, course, пространство, artifact, key, имя, данные)
 
@@ -751,7 +752,7 @@ def _положить_файл(ученик: str, course: str, простран�
 	_требовать_доступ_к_курсу(ученик, course)
 	схема, блок = _блок_схемы(course, artifact, key)
 	ключ = блок.block_key
-	тип = artifact_files.проверить_файл(блок, имя, данные, artifact=схема.slug, key=ключ)
+	тип = files.проверить_файл(блок, имя, данные, artifact=схема.slug, key=ключ)
 
 	документ, строка = _строка_блока(ученик, course, пространство, схема, ключ)
 	if not документ.name:
@@ -763,18 +764,18 @@ def _положить_файл(ученик: str, course: str, простран�
 		документ.insert(ignore_permissions=True)
 		строка = next(с for с in документ.blocks if с.block_key == ключ)
 	прежний = строка.file
-	новый = artifact_files.сохранить_файл(документ, имя, данные)
+	новый = files.сохранить_файл(документ, имя, данные)
 	строка.file = новый.name
-	строка.preview = artifact_files.срез(данные, тип)
+	строка.preview = files.срез(данные, тип)
 	документ.schema_version = схема.name
 	документ.save(ignore_permissions=True)
-	artifact_files.удалить_файл(прежний)
+	files.удалить_файл(прежний)
 
 	заполнено = _заполненность(схема, _содержимое(документ), _вложения(документ), _данные(документ))
 	return {
 		"artifact": схема.slug,
 		"key": ключ,
-		"file": artifact_files.сведения_о_файлах([новый.name])[новый.name],
+		"file": files.сведения_о_файлах([новый.name])[новый.name],
 		"preview": строка.preview or None,
 		**заполнено,
 	}
@@ -792,21 +793,21 @@ def _положить_таблицу(
 ) -> dict:
 	"""Таблица агента — файлом в блок-файл; текст рядом, если передан."""
 	ключ = блок.block_key
-	if artifact_files.вид(блок) != artifact_files.ФАЙЛ:
+	if files.вид(блок) != files.ФАЙЛ:
 		raise Отказ(
-			artifact_files.ВИД_НЕ_ТОТ,
+			codes.ВИД_НЕ_ТОТ,
 			"Таблицу файлом принимает только блок-файл",
 			artifact=схема.slug,
 			key=ключ,
-			kind=artifact_files.вид(блок),
+			kind=files.вид(блок),
 		)
-	тип = artifact_files.тип_для_таблицы(блок)
-	строки = artifact_files.строки_таблицы(table)
+	тип = files.тип_для_таблицы(блок)
+	строки = files.строки_таблицы(table)
 	имя = (file_name or "").strip() or ключ
-	if artifact_files.расширение(имя) != тип:
+	if files.расширение(имя) != тип:
 		имя = f"{имя}.{тип}"
 	_положить_файл(
-		ученик, course, пространство, схема.slug, ключ, имя, artifact_files.собрать_таблицу(строки, тип)
+		ученик, course, пространство, схема.slug, ключ, имя, files.собрать_таблицу(строки, тип)
 	)
 	документ, строка = _строка_блока(ученик, course, пространство, схема, ключ)
 	if (content or "").strip():
@@ -869,14 +870,14 @@ def _очистить_блок(ученик: str, course: str, простран�
 	if строка:
 		файл = строка.file
 		документ.remove(строка)
-	if документ and artifact_tables.спек(блок):
+	if документ and schema.спек(блок):
 		документ.data = json.dumps(
-			artifact_tables.очистить(схема.blocks, ключ, документ.data), ensure_ascii=False
+			data.очистить(схема.blocks, ключ, документ.data), ensure_ascii=False
 		)
-	if документ and (строка or artifact_tables.спек(блок)):
+	if документ and (строка or schema.спек(блок)):
 		документ.schema_version = схема.name
 		документ.save(ignore_permissions=True)
-		artifact_files.удалить_файл(файл)
+		files.удалить_файл(файл)
 	if документ:
 		return _ответ_записи(схема, ключ, документ)
 	return {
@@ -1320,7 +1321,7 @@ def _содержимое(экземпляр) -> dict[str, str]:
 
 def _данные(экземпляр) -> dict:
 	"""Строки таблиц и значения полей документа ученика (#330)."""
-	return artifact_tables.данные(экземпляр.data if экземпляр else None)
+	return data.данные(экземпляр.data if экземпляр else None)
 
 
 def _вложения(экземпляр) -> dict[str, dict]:
@@ -1338,9 +1339,9 @@ def _заполненность(
 	схема, содержимое: dict[str, str], вложения: dict | None = None, данные: dict | None = None
 ) -> dict:
 	"""Заполнен блок, где есть текст, файл или ссылка; блок с полями и
-	колонками — по их правилам (`artifact_tables.заполнен`)."""
+	колонками — по их правилам (`fill.заполнен`)."""
 	вложения = вложения or {}
-	данные = данные or artifact_tables.данные(None)
+	данные = данные or data.данные(None)
 	return {
 		"blocks_total": len(схема.blocks),
 		"blocks_filled": sum(
@@ -1351,7 +1352,7 @@ def _заполненность(
 
 def _блок_заполнен(схема, блок, содержимое: dict, вложения: dict, данные: dict) -> bool:
 	текст = содержимое.get(блок.block_key, "")
-	по_таблице = artifact_tables.заполнен(блок, данные, схема.blocks, текст)
+	по_таблице = fill.заполнен(блок, данные, схема.blocks, текст)
 	if по_таблице is not None:
 		return по_таблице
 	return bool(текст.strip() or блок.block_key in вложения)
@@ -1380,25 +1381,25 @@ def _блок(
 		"hint": блок.hint or "",
 		"lesson": блок.lesson or None,
 		"span": блок.span or 1,
-		"kind": artifact_files.вид(блок),
-		"accept": artifact_files.допустимые(блок),
+		"kind": files.вид(блок),
+		"accept": files.допустимые(блок),
 		"content": содержимое.get(блок.block_key, ""),
 		"file": (файлы or {}).get(вложение.get("file")) if вложение.get("file") else None,
 		"url": вложение.get("url") or None,
 		"preview": вложение.get("preview") or None,
 	}
-	спек = artifact_tables.спек(блок)
+	спек = schema.спек(блок)
 	if спек and схема is not None:
 		# Поля со значениями и колонки блока; строки таблицы — в `tables`
 		# документа, у блока — только чего ему не хватает (#330). Формулы полей
 		# — посчитанными: их значение не хранится (#351).
-		данные = данные or artifact_tables.данные(None)
-		значения = artifact_tables.поля_документа(схема.blocks, данные)
+		данные = данные or data.данные(None)
+		значения = data.поля_документа(схема.blocks, данные)
 		итог["fields"] = [{**поле, "value": значения.get(поле["key"])} for поле in спек.get("fields", [])]
 		итог["table"] = спек.get("table")
 		итог["columns"] = спек.get("columns", [])
 		итог["filled"] = _блок_заполнен(схема, блок, содержимое, вложения or {}, данные)
-		итог["empty_cells"] = artifact_tables.пустые_клетки(блок, данные, схема.blocks)
+		итог["empty_cells"] = fill.пустые_клетки(блок, данные, схема.blocks)
 	return итог
 
 
@@ -1426,7 +1427,7 @@ def _содержимое_курса(
 		fields=["name", "artifact", "data"],
 	)
 	экземпляры = {запись.name: запись.artifact for запись in записи}
-	данные = {запись.artifact: artifact_tables.данные(запись.data) for запись in записи}
+	данные = {запись.artifact: data.данные(запись.data) for запись in записи}
 	if not экземпляры:
 		return {}, {}, {}
 
@@ -1450,7 +1451,7 @@ def _содержимое_курса(
 
 def _файлы(вложения: dict) -> dict[str, dict]:
 	"""Сведения о файлах блоков — одним запросом на вызов."""
-	return artifact_files.сведения_о_файлах(
+	return files.сведения_о_файлах(
 		[в["file"] for в in вложения.values() if в.get("file")]
 	)
 
@@ -1492,7 +1493,7 @@ def _артефакт_целиком(ученик: str, course: str, прост�
 		"blocks": [_блок(блок, содержимое, вложения, файлы, схема, данные) for блок in схема.blocks],
 		# Таблицы документа целиком: колонки всех блоков, строки с формулами
 		# и markdown для агента; значения полей по ключам (#330).
-		"tables": artifact_tables.таблицы_документа(схема.blocks, данные),
+		"tables": export.таблицы_документа(схема.blocks, данные),
 		# Когда документ менялся и сколько раз сохранялся — по журналу `Version`,
 		# который Frappe ведёт у документа ученика (`track_changes`). История
 		# наружу не выходит, только её длина (learning-services#342).
@@ -1502,10 +1503,10 @@ def _артефакт_целиком(ученик: str, course: str, прост�
 		)
 		if экземпляр
 		else 0,
-		"fields": artifact_tables.поля_документа(схема.blocks, данные),
+		"fields": data.поля_документа(схема.blocks, данные),
 		# Холст документа — сетка блоков, подписи, набросок и сводка ячеек;
 		# у документа без холста — `null` (learning-services#351).
-		"canvas": artifact_tables.холст(схема.canvas),
+		"canvas": canvas.холст(схема.canvas),
 	}
 
 
@@ -1525,8 +1526,8 @@ def _блоки_урока(ученик: str, курс: str, lesson: str, про
 	блоки = []
 	for схема, свои in по_схемам:
 		содержимое = по_документам.get(схема.slug, {})
-		данные_документа = данные.get(схема.slug) or artifact_tables.данные(None)
-		таблицы = artifact_tables.таблицы_документа(схема.blocks, данные_документа) if свои else {}
+		данные_документа = данные.get(схема.slug) or data.данные(None)
+		таблицы = export.таблицы_документа(схема.blocks, данные_документа) if свои else {}
 		for блок in свои:
 			описание = _блок(
 				блок, содержимое, вложения.get(схема.slug, {}), файлы, схема, данные_документа

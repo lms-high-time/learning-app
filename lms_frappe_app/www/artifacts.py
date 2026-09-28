@@ -15,8 +15,8 @@ from urllib.parse import quote
 
 import frappe
 
-from lms_frappe_app.agent_learning import artifact_tables
 from lms_frappe_app.agent_learning import spaces as пространства
+from lms_frappe_app.agent_learning.artifacts import export, values
 from lms_frappe_app.api import student, текущий_пользователь
 
 no_cache = 1
@@ -48,9 +48,9 @@ def собрать_markdown(документ: dict) -> str:
 		части.append(f"## {блок['title']}")
 		куски = []
 		значения = [
-			f"- {поле['title']}: {artifact_tables.ячейка_текстом(поле, поля.get(поле['key']))}"
+			f"- {поле['title']}: {export.ячейка_текстом(поле, поля.get(поле['key']))}"
 			for поле in блок.get("fields") or []
-			if not artifact_tables.пусто(поля.get(поле["key"]))
+			if not values.пусто(поля.get(поле["key"]))
 		]
 		if значения:
 			куски.append("\n".join(значения))
@@ -80,7 +80,7 @@ def download(course: str, artifact: str, format: str = "md", space: str | None =
 		схема = student._действующая_схема(course, artifact)
 		экземпляр = student._экземпляр(пользователь, course, схема.slug, пространство)
 		frappe.response["filename"] = f"{документ['artifact']}.xlsx"
-		frappe.response["filecontent"] = artifact_tables.книга_xlsx(
+		frappe.response["filecontent"] = export.книга_xlsx(
 			документ["title"], схема.blocks, student._данные(экземпляр)
 		)
 	else:
