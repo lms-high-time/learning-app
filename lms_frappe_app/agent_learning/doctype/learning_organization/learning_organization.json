@@ -15,10 +15,7 @@
   "sb_courses",
   "allowed_courses",
   "sb_quiz",
-  "quiz_required",
-  "pass_threshold",
-  "max_attempts",
-  "retry_delay_hours"
+  "quiz_required"
  ],
  "fields": [
   {
@@ -75,27 +72,12 @@
    "fieldtype": "Select",
    "label": "\u041a\u0432\u0438\u0437 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u0435\u043d",
    "options": "\nYes\nNo"
-  },
-  {
-   "fieldname": "pass_threshold",
-   "fieldtype": "Float",
-   "label": "\u041f\u043e\u0440\u043e\u0433 \u043f\u0440\u043e\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u044f"
-  },
-  {
-   "fieldname": "max_attempts",
-   "fieldtype": "Int",
-   "label": "\u041f\u043e\u043f\u044b\u0442\u043e\u043a \u043d\u0430 \u043a\u0432\u0438\u0437"
-  },
-  {
-   "fieldname": "retry_delay_hours",
-   "fieldtype": "Int",
-   "label": "\u041f\u0430\u0443\u0437\u0430 \u043f\u0435\u0440\u0435\u0434 \u043f\u043e\u0432\u0442\u043e\u0440\u043e\u043c, \u0447\u0430\u0441\u043e\u0432"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-28 12:00:00.000000",
+ "modified": "2026-09-29 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Learning Organization",

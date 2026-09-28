@@ -92,19 +92,20 @@ class IntegrationTestAccess(IntegrationTestCase):
 
 	# --- 2. две организации ---
 
-	def test_из_двух_политик_берётся_строжайшая(self):
-		мягкая = self.организация(pass_threshold=0.6, max_attempts=5, retry_delay_hours=1)
-		строгая = self.организация(pass_threshold=0.95, max_attempts=2, retry_delay_hours=24)
-		добавить_в_организацию(self.ученик, мягкая)
-		добавить_в_организацию(self.ученик, строгая)
-		self.назначить(мягкая)
-		self.назначить(строгая)
+	def test_квиз_обязателен_если_требует_хоть_одна_из_двух(self):
+		"""Порог и попытки у всех одни — платформы; различается только обязательность (#353)."""
+		снисходительная = self.организация(quiz_required="No")
+		требовательная = self.организация(quiz_required="Yes")
+		добавить_в_организацию(self.ученик, снисходительная)
+		добавить_в_организацию(self.ученик, требовательная)
+		self.назначить(снисходительная)
+		self.назначить(требовательная)
 
 		политика = политика_квиза_для_курса(self.ученик, self.курс)
 
-		self.assertEqual(политика["pass_threshold"], 0.95)
-		self.assertEqual(политика["max_attempts"], 2)
-		self.assertEqual(политика["retry_delay_hours"], 24)
+		self.assertTrue(политика["quiz_required"])
+		self.assertEqual(политика["pass_threshold"], 0.8)
+		self.assertEqual(политика["max_attempts"], 3)
 
 	def test_ближайший_дедлайн_из_двух_назначений(self):
 		первая = self.организация()

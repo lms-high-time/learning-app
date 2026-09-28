@@ -7,6 +7,8 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.tests.sample_data import (
+	создать_вопрос,
+	создать_квиз,
 	добавить_в_организацию,
 	создать_занятие,
 	создать_менеджера,
@@ -67,6 +69,29 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		self.assertEqual(str(строка["deadline"]), "2026-12-31")
 		self.assertTrue(строка["mandatory"])
 		self.assertFalse(строка["overdue"])
+
+	def test_отчёт_показывает_с_какой_попытки_сдан_урок(self):
+		"""Зачёт — за 100% без лимита: «сдан» не отличает понявшего от перебравшего (#353)."""
+		квиз = создать_квиз(self.урок, [создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])])
+		занятие = создать_занятие(self.ученик_а, self.урок)
+		for номер, сдана in ((1, 0), (2, 1)):
+			frappe.get_doc(
+				{
+					"doctype": "Agent Quiz Attempt",
+					"session": занятие,
+					"student": self.ученик_а,
+					"quiz": квиз,
+					"lesson": self.урок,
+					"course": self.курс,
+					"attempt_number": номер,
+					"status": "Passed" if сдана else "Failed",
+					"passed": сдана,
+				}
+			).insert(ignore_permissions=True)
+
+		строка = next(с for с in self.отчёт() if с["user"] == self.ученик_а)
+
+		self.assertEqual(строка["quiz"], {"passed": 1, "first_try": 0})
 
 	def test_отчёт_показывает_заполненность_документа(self):
 		"""Урок засчитывает квиз — документ виден отдельно (learning-services#296)."""
