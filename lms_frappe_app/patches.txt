@@ -13,3 +13,4 @@ lms_frappe_app.patches.v0_1.document_spaces
 lms_frappe_app.patches.v0_1.attach_artifact_files
 lms_frappe_app.patches.v0_1.quiz_full_score
 lms_frappe_app.patches.v0_1.artifact_templates
+lms_frappe_app.patches.v0_1.org_roles_without_desk
