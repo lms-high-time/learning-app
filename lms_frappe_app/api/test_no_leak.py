@@ -105,7 +105,6 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.assertIn("Спросить, какие города", выдано)
 
 		занятие = урок["data"]["session"]
-		self.проверить("report_checkpoint", student.report_checkpoint(занятие, "разобрали"))
 		self.проверить(
 			"report_issue",
 			student.report_issue(занятие, kind="stuck", text="Ученик встал на примере"),
@@ -221,9 +220,23 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 
 	def test_отчёт_руководителя_не_несёт_ответов_ученика(self):
 		# Отчёт про результат, а не про содержание диалога.
+		frappe.set_user("Administrator")
+		frappe.db.set_value(
+			"Agent Lesson Directive",
+			{"lesson": self.урок},
+			"objectives",
+			"Отличать столицу от крупнейшего города",
+		)
 		frappe.set_user(self.ученик)
 		занятие = student.start_lesson()["data"]["session"]
-		student.report_checkpoint(занятие, "ученик перепутал столицу с крупнейшим городом")
+		# Заметка агента о том, что сделал ученик, — ровно то, что отчёт
+		# руководителя не имеет права раскрывать (learning-services#409).
+		self.проверить(
+			"mark_objective",
+			student.mark_objective(
+				занятие, 1, "covered", "ученик перепутал столицу с крупнейшим городом"
+			),
+		)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 		student.submit_answer(попытка, self.вопрос, "2")
 

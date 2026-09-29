@@ -528,6 +528,8 @@ learning-services#405).
   "content": { "markdown": "…", "segment_index": 1, "total_segments": 3 },
   "media": [ { "kind": "video", "title": "Разбор", "url": "https://…" } ],
   "objectives": [ "Понимать разницу между while и for" ],
+  "objectives_progress": { "marked": 0, "total": 1,
+    "open": [ { "number": 1, "text": "Понимать разницу между while и for" } ] },
   "course_promise": "К концу курса вы пишете программы с циклами и функциями",
   "lesson_hook": "Повторять одно и то же вручную — первое, что надоедает",
   "start": { "opening": "new_lesson", "last_session_at": "2026-09-01T13:05:00" },
@@ -544,6 +546,9 @@ learning-services#405).
     "facts": [ { "key": "role", "text": "Руководитель отдела",
                  "since": "2026-09-01T12:20:00", "updated": "2026-09-01T12:20:00" } ],
     "observations": [], "project": [], "projects_elsewhere": [],
+    "recent_work": [ { "objective": "Читать условие цикла",
+                       "evidence": "Разобрал цикл в своём отчёте по продажам",
+                       "lesson": "lesson-4", "when": "2026-08-30T18:00:00" } ],
     "carried_over": [ { "objective": "Считать сроки по критическому пути",
                         "status": "touched", "lesson": "lesson-5",
                         "when": "2026-09-01T13:05:00",
@@ -641,6 +646,13 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 Заметки идут отдельным полем от директивы: они ведутся об ученике и доступны
 ему, грифа «не показывать» на них нет.
 
+`objectives_progress` — отметки целей этого занятия, как у `mark_objective`;
+у продолженного занятия они уже могут быть.
+
+`student_context.recent_work` — что ученик сделал по разобранным целям прошлых
+уроков курса: заметки `covered` из `mark_objective`. Глубина та же, что у
+`carried_over`; брошенные занятия в счёт — отметки в них ставились по ходу.
+
 `student_context.closed_reports` — репорты ученика по этому курсу, получившие
 итог (`fixed`, `rejected`, `duplicate`), о котором он ещё не узнал. Элемент —
 тот же, что в `my_reports`. Отдаются **один раз**: вызов отмечает их
@@ -722,8 +734,12 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
   "lesson": "lesson-6", "title": "Циклы",
   "session": "sess-01H…", "status": "Completed", "has_chat_state": true,
   "completed": true,
-  "next_lesson": { "id": "lesson-7", "title": "Функции" } } }
+  "next_lesson": { "id": "lesson-7", "title": "Функции" },
+  "objectives_progress": { "marked": 2, "total": 2, "open": [] } } }
 ```
+
+`objectives_progress` — отметки целей этого занятия, как у `mark_objective`;
+`null`, если занятий по уроку не было.
 
 Занятий по уроку ещё не было — `session` и `status` приходят `null`,
 `has_chat_state` — `false`. `next_lesson` считается по курсу, а не по
@@ -741,15 +757,16 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 
 ## `lms_frappe_app.api.student.report_outcomes`
 
-Отчёт о том, как прошли цели урока. **Сдаётся до квиза и до закрытия урока:**
-`request_quiz` и `complete_lesson` без отчёта отказывают кодом
-`outcomes_required`.
+Итог по целям урока. **Все цели урока должны иметь статус до квиза и до
+закрытия урока:** `request_quiz` и `complete_lesson` иначе отказывают кодом
+`outcomes_required` со списком `missing`. Статус ставят отметки
+`mark_objective` по ходу и этот итог.
 
 **Параметры:** `session`, `outcomes` — список `{ "objective": …, "status": …,
 "resume_from": … }`; `resume_from` необязателен.
 
 `objective` — цель урока дословно, как она пришла в `objectives` от
-`start_lesson`. `status` — `covered`, `touched` или `skipped`; набор закрыт.
+`start_lesson`, или её номер с единицы. `status` — `covered`, `touched` или `skipped`; набор закрыт.
 
 `resume_from` — одна фраза агента к незакрытой цели: с чего продолжать на
 следующем занятии. Сервер вернёт её в `carried_over` у `start_lesson`, и мостик
@@ -757,12 +774,15 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 объяснение, которое ученика запутало. Длиннее 500 знаков — `objectives_mismatch`
 с `field: "resume_from"`.
 
-Состав сверяется с целями действующей директивы: отчёт обязан покрывать
-**ровно** цели урока — без пропущенных и без лишних. Без сверки обязательный
-отчёт вырождается в пустой список.
+Итог **дополняет отметки**: пункт замещает отметку той же цели, цели без
+пункта остаются с отметкой. Вместе с отметками итог обязан покрыть **ровно**
+цели урока — без пропущенных и без лишних; иначе `objectives_mismatch` с
+`missing` и `unexpected`. Заметка о сделанном у разобранной цели итогом
+`covered` не стирается.
 
 ```json
 { "ok": true, "data": { "session": "sess-01H…", "reported": 3,
+  "progress": { "marked": 3, "total": 3, "open": [] },
   "empty_blocks": [ { "artifact": "risk_register", "key": "goals",
                       "title": "Цели проекта" } ] } }
 ```
@@ -775,9 +795,9 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 незаметно; запрет давал бы обход — «непустой» ещё не значит «готов», а блок
 часто доводят после занятия (решение владельца, learning-services#296).
 
-Отчёт замещается целиком: повторный вызов переписывает прежний. Поэтому
+Повторный итог замещает статусы названных целей. Поэтому
 `objectives_skipped` у `request_quiz` не создаёт тупика — разобрали
-пропущенное, сдали отчёт заново, квиз открыт.
+пропущенное, отметили или сдали итог заново, квиз открыт.
 
 Урок, у которого целей нет — директивы нет вовсе или в ней пустой
 `objectives`, — отчёта не требует: `request_quiz` и `complete_lesson`
@@ -791,17 +811,36 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 (с `objective` и `status`) либо состав не совпал с целями урока (с `missing`
 и `unexpected`).
 
-## `lms_frappe_app.api.student.report_checkpoint`
+## `lms_frappe_app.api.student.mark_objective`
 
-Отметка о пройденном по ходу занятия. Телеметрия и антифрод-сигнал, **не зачёт**.
+Отметка одной цели урока по ходу занятия (learning-services#409). Только `POST`.
 
-**Параметры:** `session`, `note`.
-
-**Отказы:** `not_your_session`.
+**Параметры:** `session`, `objective` — номер цели в `objectives` от
+`start_lesson`, с единицы; `status` — `covered` или `touched`; `note` — одна
+фраза: у `covered` обязательна — что ученик сделал на своей задаче, у
+`touched` — с чего продолжать.
 
 ```json
-{ "ok": true, "data": { "recorded_at": "2026-09-01T12:20:00Z" } }
+{ "ok": true, "data": { "session": "sess-01H…", "objective": 2,
+  "text": "Уметь читать код", "status": "covered",
+  "progress": { "marked": 1, "total": 3,
+                "open": [ { "number": 1, "text": "Понимать цикл" },
+                          { "number": 3, "text": "Писать цикл с условием" } ] } } }
 ```
+
+Отметка сразу пишется в занятие: страница курса показывает её, а перенос на
+следующее занятие берёт её и из брошенного занятия. Повторная отметка той же
+цели замещает прежнюю. `skipped` отметкой не ставится — только итогом урока
+`report_outcomes`. Номер сопоставляется с целями действующей директивы урока.
+
+`progress` — сколько целей урока отмечено и какие ещё нет, с номерами; тот же
+объект приходит как `objectives_progress` в `start_lesson`, `remember` и
+`update_artifact` посреди занятия.
+
+**Отказы:** `not_your_session`; `session_closed` — занятие закрыто;
+`objectives_mismatch` — нет цели с таким номером (с `total`), статус не
+`covered`/`touched`, у `covered` нет `note` или заметка длиннее 500 знаков
+(с `field: "note"`).
 
 ## `lms_frappe_app.api.student.report_issue`
 
@@ -1173,6 +1212,17 @@ ISO 8601 со смещением часового пояса сайта; при 
                         "empty_cells": [], "created": [] } }
 ```
 
+Посреди занятия — у ученика есть открытое занятие по курсу — в ответе ещё
+`objectives_progress`, как у `mark_objective`: документ собирают на занятии, и
+это место напомнить об отметках целей (learning-services#409).
+
+```json
+{ "ok": true, "data": { "artifact": "project_summary", "key": "goal_and_benefits",
+                        "blocks_total": 6, "blocks_filled": 3,
+                        "empty_cells": [], "created": [],
+                        "objectives_progress": { "marked": 1, "total": 3, "open": [] } } }
+```
+
 `empty_cells` — чего не хватает блоку с полями и колонками после записи
 (`{row, column}` или `{field}`), у прочих блоков пусто. `created` — ID строк,
 которые завела эта запись.
@@ -1297,6 +1347,14 @@ ISO 8601 со смещением часового пояса сайта; при 
 
 ```json
 { "ok": true, "data": { "key": "role", "kind": "fact" } }
+```
+
+С `session` открытого занятия в ответе ещё `objectives_progress`, как у
+`mark_objective`: запоминают посреди занятия, там же напоминание об отметках.
+
+```json
+{ "ok": true, "data": { "key": "pace", "kind": "observation",
+                        "objectives_progress": { "marked": 0, "total": 2, "open": [] } } }
 ```
 
 Запись по существующему ключу **замещает** текст, а не заводит вторую: ключ и

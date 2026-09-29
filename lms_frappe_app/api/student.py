@@ -93,6 +93,8 @@ from lms_frappe_app.api import контракт, список, текущий_п
 #: `objectives_mismatch`, а `skipped` в отчёте закрывает квиз
 #: (`_требовать_покрытие`).
 СТАТУСЫ_ЦЕЛЕЙ = ("covered", "touched", "skipped")
+СТАТУС_РАЗОБРАНА = "covered"
+СТАТУС_ЗАДЕТА = "touched"
 
 ПЕРЕПОЛНЕНО = "note_limit_reached"
 ЗАМЕТКА_НЕ_НАЙДЕНА = "note_not_found"
@@ -362,7 +364,7 @@ def start_lesson(
 
 	политика = политика_квиза_для_курса(ученик, курс, назначения)
 	сведения = доступные[курс]
-	перенос = _незакрытые_цели(ученик, курс, кроме=lesson)
+	перенос, сделанное = _незакрытые_цели(ученик, курс, кроме=lesson)
 	сегмент = min(segment, материал.total_segments or 1)
 	# Итоги репортов — один раз: агент говорит о них на ближайшем занятии
 	# курса, а повтор на каждом старте превратил бы новость в шум.
@@ -386,6 +388,8 @@ def start_lesson(
 			{"kind": м.kind, "title": м.title, "url": м.url} for м in материал.media
 		],
 		"objectives": директива.get("objectives", []),
+		# Продолженное занятие уже может нести отметки — агент видит их сразу.
+		"objectives_progress": _прогресс(занятие, директива.get("objectives", [])),
 		"directive": директива.get("directive"),
 		# Зачин и обещание — верхним уровнем, а не внутри директивы с грифом
 		# «только преподавателю»: их адресат — ученик (#238).
@@ -405,6 +409,7 @@ def start_lesson(
 		"student_context": {
 			**_заметки(ученик, курс),
 			"carried_over": перенос,
+			"recent_work": сделанное,
 			"closed_reports": итоги,
 		},
 		# Подсказка «сегодня собираем резюме проекта», а не ограничение:
@@ -494,7 +499,11 @@ def remember(kind: str, key: str, text: str, session: str | None = None) -> dict
 			}
 		).insert(ignore_permissions=True)
 
-	return {"key": запись.note_key, "kind": kind}
+	ответ = {"key": запись.note_key, "kind": kind}
+	if занятие is not None and занятие.status not in ЗАВЕРШЁННЫЕ:
+		# Запоминают посреди занятия — там же напоминание об отметках (#409).
+		ответ["objectives_progress"] = _прогресс(занятие)
+	return ответ
 
 
 @frappe.whitelist(methods=["POST"])
@@ -685,9 +694,15 @@ def update_artifact(
 	ученик = текущий_пользователь()
 	_требовать_доступ_к_курсу(ученик, course)
 	пространство = пространства.пространство_курса(ученик, course, space)
-	return записать_блок(
+	ответ = записать_блок(
 		ученик, course, пространство, artifact, key, content, clear, url, table, file_name, rows, delete_rows, fields
 	)
+	# Документ собирают посреди занятия — лучший момент напомнить об
+	# отметках (learning-services#409). Вне занятия ключа нет.
+	прогресс = _прогресс_курса(ученик, course)
+	if прогресс is not None:
+		ответ["objectives_progress"] = прогресс
+	return ответ
 
 
 @frappe.whitelist(methods=["POST"])
@@ -723,17 +738,21 @@ def upload_artifact_file(
 @frappe.whitelist(methods=["POST"])
 @контракт
 def report_outcomes(session: str, outcomes) -> dict:
-	"""Отчёт о покрытии целей урока.
+	"""Итог по целям урока.
 
 	Сдаётся до квиза и до закрытия урока: `request_quiz` и `complete_lesson`
-	без него отказывают. Состав сверяется с целями действующей директивы —
-	без сверки обязательный отчёт вырождается в пустой список.
+	отказывают, пока у какой-то цели нет статуса. Дополняет отметки
+	`mark_objective`: пункт итога замещает отметку той же цели, цели без
+	пункта остаются с отметкой. Цель — текстом или номером из `objectives`.
+	Вместе с отметками итог обязан покрыть все цели урока — без сверки
+	обязательный отчёт вырождается в пустой список.
 	"""
 	занятие = _своё_занятие(session)
 	цели = _цели_урока(занятие.lesson)
 	сданные = {}
+	чужие = []
 	for пункт in список(outcomes):
-		цель = (пункт.get("objective") or "").strip()
+		цель = _цель_пункта(пункт.get("objective"), цели)
 		статус = (пункт.get("status") or "").strip()
 		if статус not in СТАТУСЫ_ЦЕЛЕЙ:
 			raise Отказ(
@@ -750,28 +769,36 @@ def report_outcomes(session: str, outcomes) -> dict:
 				objective=цель,
 				field="resume_from",
 			)
+		if цель not in цели:
+			чужие.append(цель)
 		сданные[цель] = (статус, продолжить or None)
 
-	if set(сданные) != set(цели):
+	прежние = {с.objective: с for с in занятие.outcomes if с.objective in цели}
+	итог = {
+		цель: (с.status, с.resume_from or None, с.evidence or None) for цель, с in прежние.items()
+	}
+	for цель, (статус, продолжить) in сданные.items():
+		# Свидетельство разбора переживает итог, пока цель остаётся разобранной:
+		# итог «covered» не должен стирать, что ученик сделал.
+		было = итог.get(цель)
+		итог[цель] = (статус, продолжить, было[2] if было and статус == "covered" else None)
+
+	нет = [цель for цель in цели if цель not in итог]
+	if чужие or нет:
 		raise Отказ(
 			ЦЕЛИ_НЕ_СОВПАЛИ,
-			"Отчёт должен покрывать ровно цели урока",
-			missing=sorted(set(цели) - set(сданные)),
-			unexpected=sorted(set(сданные) - set(цели)),
+			"Вместе с отметками итог должен покрывать ровно цели урока",
+			missing=нет,
+			unexpected=sorted(чужие),
 		)
 
-	# Порядок целей — из директивы, а не из отчёта: строки таблицы читаются в
-	# том же порядке, в каком автор задумывал урок.
-	занятие.outcomes = []
-	for цель in цели:
-		статус, продолжить = сданные[цель]
-		занятие.append("outcomes", {"objective": цель, "status": статус, "resume_from": продолжить})
-	занятие.save(ignore_permissions=True)
-	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, "отчёт по целям урока")
+	_записать_цели(занятие, цели, итог)
+	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, "итог по целям урока")
 
 	return {
 		"session": session,
 		"reported": len(цели),
+		"progress": _прогресс(занятие, цели),
 		"empty_blocks": _пустые_блоки_урока(
 			занятие.student, занятие.course, занятие.lesson, занятие.organization or None
 		),
@@ -780,11 +807,75 @@ def report_outcomes(session: str, outcomes) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def report_checkpoint(session: str, note: str) -> dict:
-	"""Отметка о пройденном по ходу занятия. Телеметрия, не зачёт."""
+def mark_objective(session: str, objective, status: str, note: str | None = None) -> dict:
+	"""Отметка одной цели урока по ходу занятия.
+
+	Цель — номером из `objectives`, с единицы. `covered` — разобрали, и
+	ученик применил на своей задаче: `note` обязательна — что он сделал.
+	`touched` — затронули, не проверили: `note` — с чего продолжать.
+	`skipped` ставится только итогом урока. Отметка сразу видна на
+	странице курса и в переносе на следующее занятие, даже если это
+	занятие потом бросят (learning-services#409).
+	"""
 	занятие = _своё_занятие(session)
-	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, note)
-	return {"recorded_at": now_datetime().isoformat()}
+	if занятие.status in ЗАВЕРШЁННЫЕ:
+		raise Отказ(ЗАНЯТИЕ_ЗАКРЫТО, "Занятие уже закрыто", session=session)
+	цели = _цели_урока(занятие.lesson)
+	try:
+		номер = int(objective)
+	except (TypeError, ValueError):
+		номер = 0
+	if not 1 <= номер <= len(цели):
+		raise Отказ(
+			ЦЕЛИ_НЕ_СОВПАЛИ,
+			"Нет цели с таким номером: цели нумеруются с единицы в порядке objectives",
+			objective=objective,
+			total=len(цели),
+		)
+	статус = (status or "").strip()
+	if статус not in (СТАТУС_РАЗОБРАНА, СТАТУС_ЗАДЕТА):
+		raise Отказ(
+			ЦЕЛИ_НЕ_СОВПАЛИ,
+			"Отметка по ходу — covered или touched; skipped ставится итогом урока",
+			objective=номер,
+			status=статус,
+		)
+	заметка = (note or "").strip()
+	if len(заметка) > ДЛИНА_ПРОДОЛЖЕНИЯ:
+		raise Отказ(
+			ЦЕЛИ_НЕ_СОВПАЛИ,
+			f"Заметка к отметке — одна фраза, не длиннее {ДЛИНА_ПРОДОЛЖЕНИЯ} знаков",
+			objective=номер,
+			field="note",
+		)
+	if статус == СТАТУС_РАЗОБРАНА and not заметка:
+		raise Отказ(
+			ЦЕЛИ_НЕ_СОВПАЛИ,
+			"К разобранной цели нужна заметка: что ученик сделал на своей задаче",
+			objective=номер,
+			field="note",
+		)
+
+	цель = цели[номер - 1]
+	итог = {
+		с.objective: (с.status, с.resume_from or None, с.evidence or None)
+		for с in занятие.outcomes
+		if с.objective in цели
+	}
+	итог[цель] = (
+		статус,
+		заметка if статус == СТАТУС_ЗАДЕТА else None,
+		заметка if статус == СТАТУС_РАЗОБРАНА else None,
+	)
+	_записать_цели(занятие, цели, итог)
+	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, f"цель {номер}: {статус}")
+	return {
+		"session": session,
+		"objective": номер,
+		"text": цель,
+		"status": статус,
+		"progress": _прогресс(занятие, цели),
+	}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -960,6 +1051,12 @@ def lesson_session(lesson: str) -> dict:
 		),
 		"completed": lesson in _пройденные(ученик, курс),
 		"next_lesson": _следующий_урок(ученик, курс),
+		# Шапке веб-чата «темы урока: 2 из 5» и сторожу отметок (#409).
+		"objectives_progress": (
+			_прогресс(frappe.get_doc("Agent Learning Session", занятие["name"]))
+			if занятие
+			else None
+		),
 	}
 
 
@@ -1369,51 +1466,130 @@ def _состояние_старта(
 	return {"opening": opening, "last_session_at": последнее.isoformat() if последнее else None}
 
 
-def _незакрытые_цели(ученик: str, курс: str, кроме: str) -> list[dict]:
-	"""Цели прошлых уроков курса, до которых не дошли или дошли вскользь."""
+def _незакрытые_цели(ученик: str, курс: str, кроме: str) -> tuple[list[dict], list[dict]]:
+	"""Цели прошлых уроков курса: незакрытые — и что ученик сделал по разобранным.
+
+	Первое — перенос: цели `touched` и `skipped`, от них строится мостик.
+	Второе — `recent_work`: заметки `evidence` к разобранным целям, чтобы
+	следующее занятие опиралось на сделанное, а не только на недоделанное.
+
+	Брошенные занятия в счёт: отметки теперь ставятся по ходу, и занятие,
+	прерванное на середине, оставляет их (learning-services#409).
+	"""
 	занятия = frappe.get_all(
 		"Agent Learning Session",
-		filters={"student": ученик, "course": курс, "status": ЗАНЯТИЕ_ЗАВЕРШЕНО},
-		fields=["name", "lesson", "finished_at"],
+		filters={"student": ученик, "course": курс, "status": ("in", ЗАВЕРШЁННЫЕ)},
+		fields=["name", "lesson", "finished_at", "last_activity_at"],
 		order_by="finished_at desc",
 		ignore_permissions=True,
 	)
-	перенос = []
+	перенос, работа = [], []
 	увиденные = set()
 	глубина = глубина_переноса()
 	for занятие in занятия:
 		# Урок мог проходиться дважды: значим последний отчёт по нему.
 		if занятие.lesson == кроме or занятие.lesson in увиденные:
 			continue
+		строки = frappe.get_all(
+			"Agent Objective Outcome",
+			filters={"parent": занятие.name, "parenttype": "Agent Learning Session"},
+			fields=["objective", "status", "resume_from", "evidence"],
+			order_by="idx asc",
+			ignore_permissions=True,
+		)
+		if not строки:
+			# Занятие без отметок урока не описывает: брошенная попытка не
+			# должна заслонить прежнее занятие по тому же уроку.
+			continue
 		увиденные.add(занятие.lesson)
 		if len(увиденные) > глубина:
 			break
-		for строка in frappe.get_all(
-			"Agent Objective Outcome",
-			filters={
-				"parent": занятие.name,
-				"parenttype": "Agent Learning Session",
-				"status": ("in", ("touched", "skipped")),
-			},
-			fields=["objective", "status", "resume_from"],
-			order_by="idx asc",
-			ignore_permissions=True,
-		):
-			перенос.append(
-				{
-					"objective": строка.objective,
-					"status": строка.status,
-					"resume_from": строка.resume_from or None,
-					"lesson": занятие.lesson,
-					"when": занятие.finished_at.isoformat() if занятие.finished_at else None,
-				}
-			)
-	return перенос
+		когда = занятие.finished_at or занятие.last_activity_at
+		for строка in строки:
+			if строка.status in ("touched", "skipped"):
+				перенос.append(
+					{
+						"objective": строка.objective,
+						"status": строка.status,
+						"resume_from": строка.resume_from or None,
+						"lesson": занятие.lesson,
+						"when": когда.isoformat() if когда else None,
+					}
+				)
+			elif строка.evidence:
+				работа.append(
+					{
+						"objective": строка.objective,
+						"evidence": строка.evidence,
+						"lesson": занятие.lesson,
+						"when": когда.isoformat() if когда else None,
+					}
+				)
+	return перенос, работа
 
 
 def _цели_урока(lesson: str) -> list[str]:
 	"""Цели действующей директивы урока, в порядке автора."""
 	return _директива(lesson).get("objectives", [])
+
+
+def _цель_пункта(значение, цели: list[str]) -> str:
+	"""Цель пункта итога: текст как есть, номер — цель с этим номером."""
+	if isinstance(значение, int) or (isinstance(значение, str) and значение.strip().isdigit()):
+		номер = int(значение)
+		if 1 <= номер <= len(цели):
+			return цели[номер - 1]
+	return str(значение or "").strip()
+
+
+def _записать_цели(занятие, цели: list[str], итог: dict) -> None:
+	"""Строки отметок в порядке директивы, а не в порядке прихода.
+
+	Порядок из директивы: строки читаются так, как автор задумывал урок.
+	"""
+	занятие.outcomes = []
+	for цель in цели:
+		if цель in итог:
+			статус, продолжить, сделано = итог[цель]
+			занятие.append(
+				"outcomes",
+				{
+					"objective": цель,
+					"status": статус,
+					"resume_from": продолжить,
+					"evidence": сделано,
+				},
+			)
+	занятие.save(ignore_permissions=True)
+
+
+def _прогресс_курса(ученик: str, course: str) -> dict | None:
+	"""Прогресс открытого занятия ученика по курсу; `None`, если занятия нет."""
+	открытые = frappe.get_all(
+		"Agent Learning Session",
+		filters={"student": ученик, "course": course, "status": ("in", ОТКРЫТЫЕ)},
+		pluck="name",
+		order_by="last_activity_at desc",
+		limit=1,
+		ignore_permissions=True,
+	)
+	return _прогресс(frappe.get_doc("Agent Learning Session", открытые[0])) if открытые else None
+
+
+def _прогресс(занятие, цели: list[str] | None = None) -> dict:
+	"""Сколько целей урока отмечено и какие ещё нет — с номерами.
+
+	Отмеченной считается цель с любым статусом: так её видит страница
+	курса. Номера — те же, которыми отмечает `mark_objective`.
+	"""
+	цели = _цели_урока(занятие.lesson) if цели is None else цели
+	отмечены = {с.objective for с in занятие.outcomes}
+	открытые = [
+		{"number": номер, "text": цель}
+		for номер, цель in enumerate(цели, start=1)
+		if цель not in отмечены
+	]
+	return {"marked": len(цели) - len(открытые), "total": len(цели), "open": открытые}
 
 
 def _требовать_отчёт(занятие) -> None:
@@ -1422,12 +1598,18 @@ def _требовать_отчёт(занятие) -> None:
 	Урок без целей отчёта не требует: требовать нечего, и отказ загнал бы
 	агента в тупик без способа из него выйти.
 	"""
-	if not _цели_урока(занятие.lesson) or занятие.outcomes:
+	цели = _цели_урока(занятие.lesson)
+	отмечены = {с.objective for с in занятие.outcomes}
+	нет = [цель for цель in цели if цель not in отмечены]
+	if not нет:
 		return
+	# Все цели, а не хотя бы одна: отметки по ходу копятся по одной, и
+	# «строка есть» больше не значит «итог сдан» (learning-services#409).
 	raise Отказ(
 		НЕТ_ОТЧЁТА,
-		"Сначала сдайте отчёт по целям урока: report_outcomes",
+		"Сначала отметьте все цели урока: mark_objective или report_outcomes",
 		session=занятие.name,
+		missing=нет,
 	)
 
 

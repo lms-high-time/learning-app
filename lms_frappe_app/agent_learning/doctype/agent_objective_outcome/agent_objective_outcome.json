@@ -9,6 +9,7 @@
  "field_order": [
   "objective",
   "status",
+  "evidence",
   "resume_from"
  ],
  "fields": [
@@ -27,6 +28,12 @@
    "label": "Как прошло",
    "options": "covered\ntouched\nskipped",
    "reqd": 1
+  },
+  {
+   "fieldname": "evidence",
+   "fieldtype": "Small Text",
+   "label": "Что сделал ученик",
+   "description": "Одна фраза агента к разобранной цели: что ученик сделал на своей задаче. Приходит в контекст следующих занятий (learning-services#409)."
   },
   {
    "fieldname": "resume_from",
