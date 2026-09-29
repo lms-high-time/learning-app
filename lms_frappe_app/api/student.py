@@ -1326,26 +1326,28 @@ def _состояние_старта(
 	Брошенная в начале попытка — не занятие: по ней агент выдал бы `repeat` и
 	начал «сразу к делу» с человеком, который урока не видел (#408).
 	"""
-	все_прочие = frappe.get_all(
-		"Agent Learning Session",
-		filters={"student": ученик, "course": курс, "name": ("!=", занятие)},
-		fields=["name", "lesson", "started_at", "last_activity_at"],
-		ignore_permissions=True,
+	# Одним запросом, со следом сразу: три выборки подряд — занятия, отчёты,
+	# закрытые уроки — стоили бы лишних обращений на каждом старте.
+	прочие = frappe.db.sql(
+		"""
+		select s.lesson, s.started_at, s.last_activity_at
+		from `tabAgent Learning Session` s
+		where s.student = %(student)s and s.course = %(course)s and s.name != %(session)s
+			and (
+				exists (
+					select 1 from `tabAgent Objective Outcome` o
+					where o.parent = s.name and o.parenttype = 'Agent Learning Session'
+				)
+				or exists (
+					select 1 from `tabLMS Course Progress` p
+					where p.member = s.student and p.course = s.course
+						and p.lesson = s.lesson and p.status = %(done)s
+				)
+			)
+		""",
+		{"student": ученик, "course": курс, "session": занятие, "done": ПРОЙДЕН},
+		as_dict=True,
 	)
-	с_отчётом = set(
-		frappe.get_all(
-			"Agent Objective Outcome",
-			filters={
-				"parenttype": "Agent Learning Session",
-				"parent": ("in", [з.name for з in все_прочие] or [""]),
-			},
-			pluck="parent",
-			distinct=True,
-			ignore_permissions=True,
-		)
-	)
-	пройдены = _пройденные(ученик, курс)
-	прочие = [з for з in все_прочие if з.name in с_отчётом or з.lesson in пройдены]
 	последнее = max((з.last_activity_at or з.started_at for з in прочие if з.last_activity_at or з.started_at), default=None)
 	if сегмент > 1:
 		opening = "next_segment"
