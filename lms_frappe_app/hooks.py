@@ -162,9 +162,21 @@ fixtures = [
 	# поэтому поля живут на самих DocType Learning, а не в директивах (#238,
 	# решение 1Б). Цена: это первые наши поля на чужих DocType, и
 	# версионируются они вместе с уроком, а не с редакцией директивы.
+	# Тестовая запись — отметка на самой записи на курс: доступ по-прежнему даёт
+	# запись, второго основания доступа нет (learning-services#393).
 	{
 		"dt": "Custom Field",
-		"filters": [["name", "in", ["Course Lesson-lesson_hook", "LMS Course-course_promise"]]],
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Course Lesson-lesson_hook",
+					"LMS Course-course_promise",
+					"LMS Enrollment-agent_tester",
+				],
+			]
+		],
 	},
 ]
 

@@ -207,6 +207,8 @@
 	.author-page .tab:hover { color: var(--ink); }
 	.author-page .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
 	.author-page .tab .n.warn { background: var(--warn-soft); color: var(--warn); }
+	/* Счётчик без тревоги: тестеры — не проблема курса (learning-services#393). */
+	.author-page .tab .n.calm { background: var(--ch1s); color: var(--ch1); }
 	.author-page .tab .n {
 		min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center;
 		font-family: "IBM Plex Mono", monospace; font-size: 12px; background: var(--gap-soft); color: var(--gap);
@@ -578,10 +580,14 @@
 			{% if course.map_discrepancies %}<span class="n">{{ course.map_discrepancies }}</span>{% endif %}</a>
 		<a class="tab{% if view == 'notes' %} active{% endif %}" href="{{ course.url }}&view=notes"{% if view == 'notes' %} aria-current="page"{% endif %}>Замечания
 			{% if course.notes_attention %}<span class="n warn">{{ course.notes_attention }}</span>{% endif %}</a>
+		<a class="tab{% if view == 'testers' %} active{% endif %}" href="{{ course.url }}&view=testers"{% if view == 'testers' %} aria-current="page"{% endif %}>Тестеры
+			{% if course.testers_count %}<span class="n calm">{{ course.testers_count }}</span>{% endif %}</a>
 	</nav>
 
 	{% if view == "map" %}
 	{% include "lms_frappe_app/templates/includes/author_map.html" %}
+	{% elif view == "testers" %}
+	{% include "lms_frappe_app/templates/includes/author_testers.html" %}
 	{% elif view == "notes" %}
 	{% set q = notes_queue %}
 	<p class="intro">Замечания к курсу. Агент берёт те, что ждут его, правит курс и отмечает «сделано»; вы принимаете или возвращаете с ответом.</p>

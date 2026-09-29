@@ -26,6 +26,7 @@ from lms_frappe_app.agent_learning import (
 	quiz,
 	snapshots,
 	structure,
+	testers,
 )
 from lms_frappe_app.agent_learning.artifacts import templates
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
@@ -74,6 +75,8 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ГЛАВА_НЕ_ПУСТА = "chapter_not_empty"
 НЕВЕРНЫЙ_ВОПРОС = "invalid_question"
 НЕТ_ЦЕЛЕЙ_КУРСА = "course_objectives_missing"
+НЕТ_АДРЕСОВ = "users_required"
+ТЕСТЕР_НЕ_НАЙДЕН = "tester_not_found"
 КУРС_УЖЕ_ОТКРЫТ = "course_already_published"
 
 
@@ -1328,6 +1331,52 @@ def unpublish_course(course: str) -> dict:
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	frappe.db.set_value("LMS Course", course, {"published": 0, "upcoming": 0})
 	return {"id": course, "published": False}
+
+
+# --- тестеры курса (learning-services#393) ---
+#
+# Зовёт кабинет автора. Агентам этих действий нет: доступ к черновику выдаёт
+# человек, и в MCP методы не выставляются.
+
+
+@frappe.whitelist()
+@контракт
+def course_testers(course: str) -> dict:
+	"""Тестеры курса: кому автор открыл курс до публикации."""
+	_автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	return {"course": course, "testers": testers.тестеры(course)}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def add_testers(course: str, users) -> dict:
+	"""Записывает тестерами курса людей с учётной записью на платформе.
+
+	`users` — список адресов или текст, где они разделены запятыми, пробелами
+	или переводами строк. Каждому записанному уходит приглашение; кого
+	записать нельзя — в `skipped` с причиной.
+	"""
+	_автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	if isinstance(users, str) and users.strip().startswith("["):
+		users = frappe.parse_json(users)
+	адреса = testers.адреса(users)
+	if not адреса:
+		raise Отказ(НЕТ_АДРЕСОВ, "Укажите хотя бы один адрес", course=course)
+	итог = testers.добавить(course, адреса)
+	return {"course": course, **итог, "testers": testers.тестеры(course)}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def remove_tester(course: str, user: str) -> dict:
+	"""Закрывает тестеру доступ: занятия и документ уходят в архив, запись удаляется."""
+	кто = _автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	if not testers.убрать(course, user, кто):
+		raise Отказ(ТЕСТЕР_НЕ_НАЙДЕН, "Этот человек не тестер курса", course=course, user=user)
+	return {"course": course, "user": user, "testers": testers.тестеры(course)}
 
 
 # --- вспомогательное ---

@@ -476,6 +476,13 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			authoring.set_note_status(note=замечание, status="done", text="Поправил", via="agent"),
 		)
 		self.сверить("authoring.list_notes", authoring.list_notes(course=курс))
+		# Тестеры до публикации: методы кабинета автора (learning-services#393).
+		тестер = создать_ученика(f"contract-tester-{суффикс}@example.com")
+		self.сверить("authoring.add_testers", authoring.add_testers(course=курс, users=тестер))
+		self.сверить("authoring.course_testers", authoring.course_testers(course=курс))
+		self.сверить(
+			"authoring.remove_tester", authoring.remove_tester(course=курс, user=тестер)
+		)
 		# Анонс до выхода: у него своя карта и подписка на письмо о выходе.
 		self.сверить("authoring.announce_course", authoring.announce_course(course=курс))
 		frappe.set_user(self.ученик)

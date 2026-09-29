@@ -20,5 +20,17 @@
   "insert_after": "short_introduction",
   "module": "Agent Learning",
   "description": "Что человек получит к концу курса — так, чтобы это можно было проверить. Звучит на первом занятии по курсу."
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "LMS Enrollment-agent_tester",
+  "dt": "LMS Enrollment",
+  "fieldname": "agent_tester",
+  "fieldtype": "Check",
+  "label": "Тестовая запись",
+  "default": "0",
+  "insert_after": "member_type",
+  "module": "Agent Learning",
+  "description": "Тестер курса: записан автором из кабинета, чтобы проверить курс до публикации."
  }
 ]
