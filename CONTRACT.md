@@ -210,6 +210,35 @@ Frappe заворачивает результат whitelisted-метода в �
 **Отказы:** `course_not_found` — курса нет или он не опубликован, а вызывающий
 на него не зачислен. Непубликованный курс для постороннего не существует.
 
+## `lms_frappe_app.api.public.course_programs`
+
+В какие программы Learning входит курс и заперт ли он программой
+(learning-services#405). Зовёт страница курса: «курс 2 из 3 программы …», а у
+запертого курса — «сначала пройдите …» вместо записи. В MCP не выставляется.
+Доступен и гостю.
+
+**Параметры:** `course`. Только `GET`.
+
+```json
+{ "ok": true, "data": {
+  "course": "course-early-signals",
+  "programs": [ {
+    "program": "Работа между отделами", "title": "Работа между отделами",
+    "number": 2, "total": 3, "enforce_order": true, "member": true,
+    "previous": { "id": "course-handoffs", "title": "Где теряется работа между отделами" },
+    "locked_by": { "id": "course-handoffs", "title": "Где теряется работа между отделами" } } ] } }
+```
+
+Видны опубликованные программы и те, где вызывающий участник. `previous` —
+курс перед этим в программе, у первого — `null`. `locked_by` — курс, который
+пройти раньше: только участнику программы с обязательным порядком
+(`enforce_order`), пока предыдущий курс не пройден целиком; прочим — `null`.
+Порядок действует только для участников: второй курс напрямую из каталога
+берётся без условий (решение владельца).
+
+**Отказы:** `course_not_found` — курса нет или он не опубликован, а вызывающий
+на него не записан.
+
 ## `lms_frappe_app.api.public.lesson_entry`
 
 Вход в урок: зачин, пройден ли урок и куда вести ученика на занятие. Зовёт
@@ -229,6 +258,7 @@ Frappe заворачивает результат whitelisted-метода в �
   "hook": "Проект без спонсора глохнет на первом споре о деньгах — разберём, кто он у вас.",
   "completed": false,
   "study": { "channel": "web", "url": "https://lms.example.com/chat?lesson=lesson-1", "demo_left": 2 },
+  "program_lock": null,
   "blocks": [ { "artifact": "project_summary", "key": "sponsor",
                 "title": "Спонсор и менеджер", "filled": false } ] } }
 ```
@@ -247,6 +277,12 @@ Frappe заворачивает результат whitelisted-метода в �
 Материал и директива сюда не выходят: материал написан для агента.
 
 `completed` — урок закрыт квизом или `complete_lesson`.
+
+`program_lock` — курс заперт программой (learning-services#405): ученик —
+участник программы с обязательным порядком, а предыдущий курс не пройден
+целиком. Тогда `{ "program": "…", "program_title": "…", "previous": { "id": "…",
+"title": "…" } }`, и страница ведёт к предыдущему курсу, а не на занятие;
+иначе `null`.
 
 `blocks` — блоки документа курса, которые собирают на этом занятии, как у
 урока в `course_map`; у ученика курса — с `filled`.
@@ -406,7 +442,10 @@ Frappe заворачивает результат whitelisted-метода в �
 
 **Отказы:** `course_not_published`, `course_upcoming` — курс анонсирован и
 ещё готовится, `already_enrolled` — курс уже в этом пространстве,
-`course_not_allowed` — организация его не открыла, `space_not_available`.
+`course_not_allowed` — организация его не открыла, `space_not_available`,
+`program_order` — ученик участник программы с обязательным порядком, а
+предыдущий курс не пройден целиком (с `program`, `program_title` и `previous`,
+learning-services#405).
 
 ## `lms_frappe_app.api.student.notify_when_released`
 
@@ -612,7 +651,8 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 `lesson_not_found`; `nothing_to_study` — незакрытых уроков не осталось (только
 при вызове без `lesson`; с `course` — в этом курсе, с полем `course`); `web_demo_exhausted` (с `lessons_used` и
 `lessons_limit`) — пробные уроки веб-чата пройдены, занятие не заводится;
-`unknown_channel`.
+`program_order` — курс заперт программой, как у `enroll`: запись могла
+появиться раньше вступления в программу; `unknown_channel`.
 
 **Поверхность MCP-инструмента у `start_lesson` другая, чем у метода.**
 Контракт

@@ -33,6 +33,7 @@ from lms_frappe_app.agent_learning.artifacts.document import (
 	_пустые_блоки_урока,
 )
 from lms_frappe_app.agent_learning.artifacts.write import _положить_файл, записать_блок
+from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_ЗАМЕТОК,
@@ -189,6 +190,9 @@ def enroll(course: str, space: str | None = None) -> dict:
 	можно, причина = пространства.можно_записаться(ученик, course, организация)
 	if not можно:
 		raise Отказ(причина, "На этот курс записаться нельзя", course=course)
+	# Участник программы с обязательным порядком не записывается через голову
+	# предыдущего курса (learning-services#405).
+	программы.требовать_порядок(ученик, course)
 	пространства.записать(ученик, course, организация)
 
 	return {
@@ -319,6 +323,9 @@ def start_lesson(
 			else НЕ_ЗАЧИСЛЕН
 		)
 		raise Отказ(причина, "Этот курс сейчас недоступен", course=курс)
+	# Запись могла появиться раньше вступления в программу: порядок
+	# проверяется и на занятии, а не только при записи (#405).
+	программы.требовать_порядок(ученик, курс)
 
 	if channel == "web":
 		_проверить_пробные_уроки(ученик, lesson)
@@ -1458,6 +1465,10 @@ def _кандидаты(ученик: str, организация: str | None) -
 	)
 	итог = []
 	for номер_курса, курс in enumerate(порядок):
+		# Курс, запертый программой, не предлагается: `start_lesson` на нём
+		# откажет (#405).
+		if программы.замок(ученик, курс["course"]):
+			continue
 		уроки = уроки_курса(курс["course"])
 		пройдены = _пройденные(ученик, курс["course"])
 		урок, причина = None, None

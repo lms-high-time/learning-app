@@ -139,7 +139,7 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		вход = self.войти(self.уроки[0])
 
 		self.assertEqual(
-			set(вход), {"lesson", "course", "title", "hook", "completed", "study", "blocks"}
+			set(вход), {"lesson", "course", "title", "hook", "completed", "study", "program_lock", "blocks"}
 		)
 
 	def test_неизвестный_урок(self):
