@@ -162,7 +162,7 @@
 	document.querySelectorAll('[data-remove]').forEach(button => {
 		button.addEventListener('click', async () => {
 			const name = button.dataset.name;
-			if (!confirm('Закрыть доступ: ' + name + '?\n\nЕго занятия и документ по курсу уйдут в архив, курс у него пропадёт.')) return;
+			if (!confirm('Закрыть доступ: ' + name + '?\n\nЗанятия и документ по курсу уйдут в архив, доступ к курсу закроется.')) return;
 			button.disabled = true;
 			try {
 				await call(cfg.methods.remove, { course: cfg.course, user: button.dataset.remove });
