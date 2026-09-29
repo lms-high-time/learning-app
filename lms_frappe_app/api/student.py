@@ -16,6 +16,7 @@ from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import announcements, directives, quiz
+from lms_frappe_app.agent_learning import signals as сигналы
 from lms_frappe_app.agent_learning.access import (
 	НЕ_ЗАЧИСЛЕН,
 	организация_приостановлена,
@@ -29,6 +30,7 @@ from lms_frappe_app.agent_learning.artifacts import files
 from lms_frappe_app.agent_learning.artifacts.document import (
 	_артефакт_целиком,
 	_блоки_урока,
+	_заполнен,
 	_перечень_артефактов,
 	_пустые_блоки_урока,
 )
@@ -415,6 +417,9 @@ def start_lesson(
 		# Подсказка «сегодня собираем резюме проекта», а не ограничение:
 		# update_artifact принимает любой ключ, и ученик волен забежать вперёд.
 		"artifact_blocks": _блоки_урока(ученик, курс, lesson, пространство),
+		# Выводы сервера из истории ученика — коды, фразы складывает сервис
+		# (learning-services#416).
+		"signals": _сигналы_старта(ученик, курс, lesson, занятие, директива, сведения),
 	}
 	if channel == "web":
 		# Шапке веб-чата — место урока в курсе и остаток пробы
@@ -869,13 +874,47 @@ def mark_objective(session: str, objective, status: str, note: str | None = None
 	)
 	_записать_цели(занятие, цели, итог)
 	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, f"цель {номер}: {статус}")
+	прогресс = _прогресс(занятие, цели)
 	return {
 		"session": session,
 		"objective": номер,
 		"text": цель,
 		"status": статус,
-		"progress": _прогресс(занятие, цели),
+		"progress": прогресс,
+		"signals": сигналы.отобрать(занятие, _сигналы_отметки(занятие, цели, цель, статус, прогресс)),
 	}
+
+
+def _сигналы_старта(ученик: str, курс: str, lesson: str, занятие, директива: dict, сведения: dict) -> list[dict]:
+	"""Сигналы старта урока: трудные цели, брошенные попытки, темп к сроку."""
+	история = сигналы.история_урока(ученик, lesson, занятие.name)
+	return сигналы.отобрать(
+		занятие,
+		сигналы.цели_не_даются(история, директива.get("objectives", []))
+		+ сигналы.брошены_подряд(история)
+		+ сигналы.темп_к_сроку(
+			сведения.get("deadline"),
+			bool(сведения.get("overdue")),
+			сигналы.осталось_уроков(ученик, курс) if сведения.get("deadline") else 0,
+		),
+	)
+
+
+def _сигналы_отметки(занятие, цели: list[str], цель: str, статус: str, прогресс: dict) -> list[dict]:
+	"""Кандидаты в сигналы после отметки: итог урока, пустой документ, трудная цель."""
+	пространство = занятие.organization or None
+	if not прогресс["open"]:
+		return сигналы.итог_урока(
+			прогресс,
+			lambda: _пустые_блоки_урока(занятие.student, занятие.course, занятие.lesson, пространство),
+		)
+	if статус == СТАТУС_ЗАДЕТА:
+		история = сигналы.история_урока(занятие.student, занятие.lesson, занятие.name)
+		return сигналы.цели_не_даются(история, цели, текущее=цель)
+	if 2 * прогресс["marked"] < прогресс["total"]:
+		return []
+	блоки = _блоки_урока(занятие.student, занятие.course, занятие.lesson, пространство)
+	return сигналы.документ_пуст(прогресс, блоки, [б for б in блоки if not _заполнен(б)])
 
 
 @frappe.whitelist(methods=["POST"])
