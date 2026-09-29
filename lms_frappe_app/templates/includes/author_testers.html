@@ -1,0 +1,179 @@
+{# Тестеры курса: кому автор открыл курс до публикации (learning-services#393). #}
+<style>
+	.author-page .testers-form { display: grid; gap: 8px; max-width: 560px; }
+	.author-page .testers-form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+	.author-page .testers-form textarea {
+		font: inherit; font-size: 15px; color: var(--ink); background: var(--paper);
+		border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical;
+	}
+	.author-page .testers-form textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+	.author-page .testers-form .hint { margin: 0; font-size: 13px; color: var(--muted); }
+	.author-page .testers-form [data-error] { margin: 0; color: var(--gap); font-size: 13px; }
+	.author-page .testers-form [data-error]:empty { display: none; }
+	.author-page .testers-actions { display: flex; gap: 8px; }
+	.author-page .testers-primary {
+		font: inherit; font-size: 14px; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+		border: 1px solid var(--accent); background: var(--accent); color: var(--paper);
+	}
+	.author-page .testers-primary:disabled { opacity: .6; cursor: default; }
+	.author-page .testers-result { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); font-size: 14px; }
+	.author-page .testers-result:empty { display: none; }
+	.author-page .testers-result ul { margin: 6px 0 0; padding-left: 18px; }
+	.author-page .testers-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+	.author-page .testers-list li {
+		display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
+		padding: 10px 0; border-top: 1px solid var(--line);
+	}
+	.author-page .testers-list li:first-child { border-top: 0; }
+	.author-page .testers-list .who { display: grid; gap: 2px; min-width: 0; }
+	.author-page .testers-list .who strong { font-weight: 500; }
+	.author-page .testers-list .who span { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+	.author-page .testers-remove {
+		font: inherit; font-size: 13px; background: none; border: 0; padding: 4px 0; cursor: pointer;
+		color: var(--gap); text-decoration: underline; text-underline-offset: 2px;
+	}
+	.author-page .testers-remove:disabled { opacity: .6; cursor: default; }
+</style>
+
+<p class="intro">
+	Тестеры проходят курс до публикации: в каталоге его нет, а у них он открыт. Занятие идёт с наставником, как у учеников.
+	Что покажется неверным или неудобным, тестер говорит наставнику, и замечание приходит в репорты курса.
+</p>
+{% if course.published %}
+<p class="muted">Курс уже {{ "в каталоге как анонс" if course.upcoming else "опубликован" }}. Тестеры остаются записанными, пока вы не закроете им доступ.</p>
+{% endif %}
+
+<section class="panel">
+	<h2>Открыть доступ</h2>
+	<form class="testers-form" id="testers-form" novalidate>
+		<label for="testers-users">Почта тестеров
+			<textarea id="testers-users" name="users" rows="3" placeholder="anna@example.com, ivan@example.com" required></textarea>
+		</label>
+		<p class="hint">Можно несколько адресов через запятую или с новой строки. У человека должна быть учётная запись на платформе: приглашение со ссылкой на курс придёт ему на почту.</p>
+		<p data-error role="alert"></p>
+		<div class="testers-actions"><button type="submit" class="testers-primary">Открыть доступ</button></div>
+	</form>
+	<div class="testers-result" id="testers-result" role="status"></div>
+</section>
+
+<section class="panel">
+	<h2>Тестеры <span class="muted num">{{ testers | length }}</span></h2>
+	{% if testers %}
+	<ul class="testers-list">
+		{% for т in testers %}
+		<li>
+			<div class="who">
+				<strong>{{ т.name | e }}</strong>
+				<span>{{ т.user | e }}{% if т.since %} · с {{ frappe.utils.formatdate(т.since, "dd.MM.yyyy") }}{% endif %} · пройдено {{ т.progress }}%</span>
+			</div>
+			<button type="button" class="testers-remove" data-remove="{{ т.user | e }}" data-name="{{ т.name | e }}">Закрыть доступ</button>
+		</li>
+		{% endfor %}
+	</ul>
+	{% else %}
+	<p class="muted">Тестеров пока нет.</p>
+	{% endif %}
+</section>
+
+<script type="application/json" id="testers-config">{{ {"course": course.id, "csrf": csrf_token, "methods": tester_methods} | tojson }}</script>
+<script>
+{% raw %}
+(function () {
+	const cfg = JSON.parse(document.getElementById('testers-config').textContent);
+	const form = document.getElementById('testers-form');
+	const result = document.getElementById('testers-result');
+	const errorEl = form.querySelector('[data-error]');
+	const KEY = 'author-testers-result';
+	const REASONS = {
+		user_not_found: 'нет учётной записи — пусть зарегистрируется, и добавьте снова',
+		already_tester: 'уже тестер',
+		already_enrolled: 'уже учится на курсе, тестером не станет',
+	};
+
+	async function call(method, params) {
+		const r = await fetch('/api/method/' + method, {
+			method: 'POST', credentials: 'same-origin', body: new URLSearchParams(params),
+			headers: { 'X-Frappe-CSRF-Token': cfg.csrf, Accept: 'application/json' },
+		});
+		let body = null;
+		try { body = await r.json(); } catch (e) { /* пусто */ }
+		const answer = body && body.message;
+		if (r.status === 401 || r.status === 403) throw new Error('Нет доступа — войдите заново и повторите.');
+		if (!r.ok || !answer) throw new Error('Не удалось сохранить. Повторите через минуту.');
+		if (!answer.ok) throw new Error(answer.error.message);
+		return answer.data;
+	}
+
+	function escape(text) {
+		const div = document.createElement('div');
+		div.textContent = text;
+		return div.innerHTML;
+	}
+
+	// Итог добавления переживает перезагрузку: список на странице — серверный.
+	function show(html) {
+		result.innerHTML = html;
+	}
+	try {
+		const saved = sessionStorage.getItem(KEY);
+		if (saved) { show(saved); sessionStorage.removeItem(KEY); }
+	} catch (e) { /* хранилище недоступно — итог просто не покажется */ }
+
+	function summary(data) {
+		const parts = [];
+		const added = data.added || [];
+		if (added.length) {
+			const silent = added.filter(a => !a.notified);
+			parts.push('<strong>Доступ открыт: ' + added.length + '.</strong> ' + (silent.length
+				? 'Почта на платформе не настроена — сообщите тестерам сами и пришлите ссылку на курс.'
+				: 'Приглашения ушли на почту.'));
+		}
+		const skipped = data.skipped || [];
+		if (skipped.length) {
+			parts.push((added.length ? 'Не добавлены:' : '<strong>Никого не добавили:</strong>')
+				+ '<ul>' + skipped.map(s => '<li>' + escape(s.user) + ' — ' + escape(REASONS[s.reason] || s.reason) + '</li>').join('') + '</ul>');
+		}
+		return parts.join(' ');
+	}
+
+	form.addEventListener('submit', async e => {
+		e.preventDefault();
+		errorEl.textContent = '';
+		const users = form.elements.users.value.trim();
+		if (!users) { errorEl.textContent = 'Впишите хотя бы один адрес.'; form.elements.users.focus(); return; }
+		const button = form.querySelector('button[type="submit"]');
+		button.disabled = true;
+		try {
+			const data = await call(cfg.methods.add, { course: cfg.course, users });
+			const text = summary(data);
+			if ((data.added || []).length) {
+				try { sessionStorage.setItem(KEY, text); } catch (err) { /* без итога после перезагрузки */ }
+				location.reload();
+				return;
+			}
+			show(text);
+		} catch (err) {
+			errorEl.textContent = err.message;
+		} finally {
+			button.disabled = false;
+		}
+	});
+
+	document.querySelectorAll('[data-remove]').forEach(button => {
+		button.addEventListener('click', async () => {
+			const name = button.dataset.name;
+			if (!confirm('Закрыть доступ: ' + name + '?\n\nЕго занятия и документ по курсу уйдут в архив, курс у него пропадёт.')) return;
+			button.disabled = true;
+			try {
+				await call(cfg.methods.remove, { course: cfg.course, user: button.dataset.remove });
+				try { sessionStorage.setItem(KEY, 'Доступ закрыт: ' + escape(name) + '.'); } catch (err) { /* пусто */ }
+				location.reload();
+			} catch (err) {
+				button.disabled = false;
+				show(escape(err.message));
+			}
+		});
+	});
+})();
+{% endraw %}
+</script>

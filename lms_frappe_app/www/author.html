@@ -578,10 +578,14 @@
 			{% if course.map_discrepancies %}<span class="n">{{ course.map_discrepancies }}</span>{% endif %}</a>
 		<a class="tab{% if view == 'notes' %} active{% endif %}" href="{{ course.url }}&view=notes"{% if view == 'notes' %} aria-current="page"{% endif %}>Замечания
 			{% if course.notes_attention %}<span class="n warn">{{ course.notes_attention }}</span>{% endif %}</a>
+		<a class="tab{% if view == 'testers' %} active{% endif %}" href="{{ course.url }}&view=testers"{% if view == 'testers' %} aria-current="page"{% endif %}>Тестеры
+			{% if course.testers_count %}<span class="n">{{ course.testers_count }}</span>{% endif %}</a>
 	</nav>
 
 	{% if view == "map" %}
 	{% include "lms_frappe_app/templates/includes/author_map.html" %}
+	{% elif view == "testers" %}
+	{% include "lms_frappe_app/templates/includes/author_testers.html" %}
 	{% elif view == "notes" %}
 	{% set q = notes_queue %}
 	<p class="intro">Замечания к курсу. Агент берёт те, что ждут его, правит курс и отмечает «сделано»; вы принимаете или возвращаете с ответом.</p>

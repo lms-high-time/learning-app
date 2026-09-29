@@ -18,7 +18,7 @@ from urllib.parse import quote
 import frappe
 from frappe.utils import get_datetime, md_to_html, now_datetime, sanitize_html
 
-from lms_frappe_app.agent_learning import diffs, directives, normalizer, notes, snapshots
+from lms_frappe_app.agent_learning import diffs, directives, normalizer, notes, snapshots, testers
 from lms_frappe_app.agent_learning.artifacts import overlay
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.api import authoring, контракт
@@ -34,11 +34,17 @@ no_cache = 1
 	"status": "lms_frappe_app.api.authoring.set_note_status",
 }
 
+#: Методы вкладки «Тестеры» (learning-services#393).
+МЕТОДЫ_ТЕСТЕРОВ = {
+	"add": "lms_frappe_app.api.authoring.add_testers",
+	"remove": "lms_frappe_app.api.authoring.remove_tester",
+}
+
 #: Цветов глав в палитре страницы; дальше они идут по кругу.
 ЦВЕТОВ_ГЛАВ = 5
 
 #: Вкладки экрана курса: собранное, сверка с картой декомпозиции, замечания.
-СБОРКА, КАРТА, ЗАМЕЧАНИЯ = "build", "map", "notes"
+СБОРКА, КАРТА, ЗАМЕЧАНИЯ, ТЕСТЕРЫ = "build", "map", "notes", "testers"
 
 #: Порядок групп очереди: сначала то, что ждёт человека.
 ГРУППЫ_ОЧЕРЕДИ = ("check", "question", "agent", "accepted")
@@ -102,6 +108,8 @@ def сведения(
 		"map_check": None,
 		"map_notes": {},
 		"notes_queue": None,
+		"testers": None,
+		"tester_methods": МЕТОДЫ_ТЕСТЕРОВ,
 		"note_methods": МЕТОДЫ_ЗАМЕЧАНИЙ,
 		"field_labels": ПОДПИСИ_ПОЛЕЙ,
 		"seen_method": "lms_frappe_app.www.author.mark_lesson_seen",
@@ -121,6 +129,10 @@ def сведения(
 		основа["missing"] = True
 		return основа
 	основа["course"] = _курс(черновик["data"])
+	# Число тестеров — на ярлыке вкладки, поэтому и на других вкладках.
+	основа["course"]["testers_count"] = frappe.db.count(
+		"LMS Enrollment", {"course": course, "agent_tester": 1}
+	)
 	замечания = _замечания(course)
 	_замечания_курса(основа["course"], замечания)
 	сверка = _сверка(course)
@@ -149,6 +161,9 @@ def сведения(
 	elif view == ЗАМЕЧАНИЯ:
 		основа["view"] = ЗАМЕЧАНИЯ
 		основа["notes_queue"] = _очередь(замечания)
+	elif view == ТЕСТЕРЫ:
+		основа["view"] = ТЕСТЕРЫ
+		основа["testers"] = testers.тестеры(course)
 	return основа
 
 
@@ -666,6 +681,8 @@ def get_context(context):
 		context.title = f"{context.course['title']} — карта — кабинет автора"
 	elif context.course and context.view == ЗАМЕЧАНИЯ:
 		context.title = f"{context.course['title']} — замечания — кабинет автора"
+	elif context.course and context.view == ТЕСТЕРЫ:
+		context.title = f"{context.course['title']} — тестеры — кабинет автора"
 	elif context.course:
 		context.title = f"{context.course['title']} — кабинет автора"
 	else:

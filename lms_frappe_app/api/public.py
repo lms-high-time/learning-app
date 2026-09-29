@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import frappe
 
-from lms_frappe_app.agent_learning import announcements, directives
+from lms_frappe_app.agent_learning import announcements, directives, testers
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
@@ -80,6 +80,10 @@ def course_map(course: str, space: str | None = None) -> dict:
 		пройдены = _пройденные(frappe.session.user, course)
 		следующий = _следующий_урок(frappe.session.user, course)
 		ученику = {"next_lesson": следующий["id"] if следующий else None}
+		# Тестер проверяет курс до публикации: страница говорит ему об этом
+		# (learning-services#393). У остальных ключа нет.
+		if testers.тестер(frappe.session.user, course):
+			ученику["tester"] = True
 
 	def _урок(урок: str) -> dict:
 		данные = {
