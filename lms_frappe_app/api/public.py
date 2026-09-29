@@ -14,6 +14,7 @@ from urllib.parse import quote
 import frappe
 
 from lms_frappe_app.agent_learning import announcements, directives, testers
+from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
@@ -117,6 +118,22 @@ def course_map(course: str, space: str | None = None) -> dict:
 	}
 
 
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+@контракт
+def course_programs(course: str) -> dict:
+	"""В какие программы входит курс и заперт ли он программой (learning-services#405).
+
+	Зовёт страница курса: «курс 2 из 3 программы …», а у запертого курса —
+	«сначала пройдите …» вместо записи. Видны опубликованные программы и те,
+	где вызывающий участник. `locked_by` — курс, который пройти раньше: только
+	участнику программы с обязательным порядком, пока предыдущий курс не
+	пройден целиком; прочим — `null`.
+	"""
+	if not _зачислен(course) and not frappe.db.get_value("LMS Course", course, "published"):
+		raise Отказ(КУРС_НЕ_НАЙДЕН, "Курс не найден", id=course)
+	return {"course": course, "programs": программы.программы_курса(course, frappe.session.user)}
+
+
 @frappe.whitelist(methods=["GET"])
 @контракт
 def lesson_entry(lesson: str | None = None, course: str | None = None, space: str | None = None) -> dict:
@@ -155,6 +172,9 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 		"hook": (урок.lesson_hook or "").strip() or None,
 		"completed": bool(пройден),
 		"study": _куда_на_занятие(ученик, lesson),
+		# Курс заперт программой — страница урока ведёт к предыдущему курсу, а
+		# не на занятие, которое откажет (#405).
+		"program_lock": программы.замок(ученик, урок.course),
 		# Что из документа курса собирают на этом занятии (#340); ученику
 		# курса — с отметкой, готов ли блок.
 		"blocks": _документы_курса(урок.course, ученик if _зачислен(урок.course) else None, space)[1].get(
