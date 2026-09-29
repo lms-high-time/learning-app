@@ -12,6 +12,7 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	ПУТЬ_ЧАТА,
 	адрес_сервиса,
 	настройка,
+	пробные_уроки_ученика,
 	пробных_уроков,
 )
 from lms_frappe_app.site_navigation import шапка_платформы
@@ -67,6 +68,9 @@ def сведения(пользователь: str) -> dict:
 		# настройки, которой лимит проверяет `start_lesson`.
 		"chat_url": f"{сервис}{ПУТЬ_ЧАТА}" if сервис else "",
 		"web_demo_lessons": пробных_уроков(),
+		# Вошедшему — сколько осталось: обещание «два урока» у того, кто оба
+		# уже начал, звало бы в чат, который откажет (learning-services#404).
+		"web_demo_left": None if гость else пробные_уроки_ученика(пользователь)["left"],
 	}
 
 

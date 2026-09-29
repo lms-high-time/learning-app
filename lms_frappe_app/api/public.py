@@ -23,12 +23,13 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	ПУТЬ_ЧАТА,
 	адрес_сервиса,
 	пробных_уроков,
+	веб_уроки_ученика,
 )
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 from lms_frappe_app.api import контракт, текущий_пользователь
 from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН
-from lms_frappe_app.api.student import _пройденные, _следующий_урок, веб_уроки_ученика
+from lms_frappe_app.api.student import _пройденные, _следующий_урок
 
 #: Куда вести ученика, когда веб-чат недоступен: там шаги подключения агента.
 СТРАНИЦА_АГЕНТА = "/agent"

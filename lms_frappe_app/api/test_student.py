@@ -9,6 +9,7 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.artifacts import codes
 from lms_frappe_app.tests.sample_data import (
+	настроить_квиз,
 	привязать_урок,
 	создать_курс,
 	создать_занятие,
@@ -174,6 +175,83 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		данные = student.start_lesson()["data"]
 
 		self.assertEqual(данные["lesson"]["id"], срочный_урок)
+
+	def test_без_аргумента_продолжается_курс_последнего_занятия(self):
+		# Кто занимается курсом, продолжает его, а не попадает в чужой курс
+		# со сроком (learning-services#403).
+		self._срочный_курс()
+		создать_занятие(self.ученик, self.урок)
+
+		данные = student.start_lesson()["data"]
+
+		self.assertEqual(данные["lesson"]["id"], self.урок)
+
+	def _второй_урок(self) -> str:
+		"""Второй урок того же курса, после первого."""
+		frappe.set_user("Administrator")
+		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
+		урок = frappe.get_doc(
+			{"doctype": "Course Lesson", "title": "Второй", "chapter": глава}
+		).insert(ignore_permissions=True).name
+		привязать_урок(глава, урок)
+		frappe.set_user(self.ученик)
+		return урок
+
+	def test_развилка_ставит_урок_последнего_занятия_первым(self):
+		второй = self._второй_урок()
+		срочный = self._срочный_курс()
+		создать_занятие(self.ученик, второй)
+
+		ответ = student.study_options()["data"]
+
+		рекомендация = ответ["recommended"]
+		self.assertEqual(рекомендация["lesson"]["id"], второй)
+		self.assertEqual((рекомендация["lesson"]["number"], рекомендация["lesson"]["total"]), (2, 2))
+		self.assertEqual(рекомендация["reason"], "last_lesson")
+		self.assertEqual(рекомендация["course"]["id"], self.курс)
+		self.assertEqual([д["course"]["id"] for д in ответ["others"]], [срочный])
+		self.assertEqual(ответ["others"][0]["reason"], "deadline")
+		self.assertEqual(ответ["others"][0]["deadline"], "2026-06-30")
+
+	def test_развилка_говорит_куда_пустит_браузер(self):
+		# Проба кончилась — в браузере можно только уроки, уже начатые там.
+		self.addCleanup(настроить_квиз, web_demo_lessons=2)
+		frappe.set_user("Administrator")
+		настроить_квиз(web_demo_lessons=1)
+		frappe.set_user(self.ученик)
+		self._срочный_курс()
+		занятие = создать_занятие(self.ученик, self.урок)
+		frappe.db.set_value("Agent Learning Session", занятие, "web_chat", 1)
+
+		ответ = student.study_options()["data"]
+
+		self.assertEqual(ответ["web_demo"], {"used": 1, "limit": 1, "left": 0})
+		self.assertTrue(ответ["recommended"]["web"])
+		self.assertFalse(ответ["others"][0]["web"])
+
+	def test_урок_знает_своё_место_а_веб_чат_остаток_пробы(self):
+		# Шапка веб-чата: «курс · урок 2 из 2 · пробных осталось» (#404).
+		второй = self._второй_урок()
+
+		урок = student.start_lesson(lesson=второй)["data"]
+		в_браузере = student.start_lesson(lesson=self.урок, channel="web")["data"]
+
+		self.assertEqual((урок["lesson"]["number"], урок["lesson"]["total"]), (2, 2))
+		self.assertEqual(
+			урок["lesson"]["course_title"], frappe.db.get_value("LMS Course", self.курс, "title")
+		)
+		self.assertNotIn("web_demo", урок)
+		self.assertEqual(в_браузере["web_demo"]["used"], 1)
+
+	def test_развилка_без_курсов_пуста(self):
+		frappe.set_user("Administrator")
+		одинокий = создать_ученика(f"api-solo-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(одинокий)
+
+		ответ = student.study_options()["data"]
+
+		self.assertIsNone(ответ["recommended"])
+		self.assertEqual(ответ["others"], [])
 
 	def _срочный_курс(self) -> str:
 		"""Второй курс с дедлайном раньше — его взял бы вызов без аргументов."""
