@@ -52,7 +52,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Вид",
-   "options": "Fact\nObservation",
+   "options": "Fact\nObservation\nProject",
    "read_only": 1,
    "reqd": 1
   },

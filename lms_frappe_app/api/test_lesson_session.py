@@ -208,6 +208,43 @@ class IntegrationTestStartState(IntegrationTestCase):
 		self.прошлое(self.урок, часов_назад=48, незакрыто=True)
 		self.assertEqual(self.начало(self.урок)["start"]["opening"], "repeat")
 
+	def брошенная_попытка(self, урок: str) -> None:
+		"""Занятие без следа: ни отчёта по целям, ни закрытого урока."""
+		frappe.set_user("Administrator")
+		frappe.get_doc(
+			{
+				"doctype": "Agent Learning Session",
+				"student": self.ученик,
+				"lesson": урок,
+				"status": "Abandoned",
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+
+	def test_брошенная_попытка_не_повтор_и_не_прошлое_занятие(self):
+		"""#408: две брошенные попытки своим агентом, потом веб-чат — человек
+		урока не видел, начинать надо как с первого занятия по курсу."""
+		self.брошенная_попытка(self.урок)
+		self.брошенная_попытка(self.урок)
+		данные = self.начало(self.урок)
+		self.assertEqual(данные["start"]["opening"], "first_in_course")
+		self.assertIsNone(данные["start"]["last_session_at"])
+
+	def test_закрытый_урок_без_отчёта_это_повтор(self):
+		self.брошенная_попытка(self.урок)
+		frappe.set_user("Administrator")
+		frappe.get_doc(
+			{
+				"doctype": "LMS Course Progress",
+				"member": self.ученик,
+				"course": self.курс,
+				"lesson": self.урок,
+				"status": "Complete",
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		self.assertEqual(self.начало(self.урок)["start"]["opening"], "repeat")
+
 	def test_продолжение_занятия_не_повтор(self):
 		"""Незакрытое занятие того же урока переиспользуется — продолжение не
 		должно выглядеть повтором."""
