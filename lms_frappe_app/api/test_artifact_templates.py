@@ -7,8 +7,8 @@
 здесь — что они дошли до методов автора: версии шаблона, собранная схема у
 ученика та же, что у схемы целиком, закреплённая версия, отвязка схемой
 целиком и патч, переводящий готовые документы на шаблоны. Дальше —
-наследник (#375), переход на новую версию с переименованиями (#376) и
-проверка каталога (#377).
+наследник (#375), переход на новую версию с переименованиями (#376), его
+предпросмотр и правки курса в черновике (#383), проверка каталога (#377).
 """
 
 import json
@@ -635,6 +635,119 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		frappe.set_user(self.куратор)
 		предупреждения = authoring.course_draft(course=self.курс)["data"]["readiness"]["warnings"]
 		self.assertNotIn("artifact_template_outdated", [п["code"] for п in предупреждения])
+
+	def test_черновик_отдаёт_правки_курса(self):
+		"""Перепривязка заменяет правки целиком: агент читает их в черновике."""
+		self.курс_с_данными()
+		authoring.set_course_artifact(course=self.курс, artifact="plain", title="П", blocks=БЛОКИ[:1])
+
+		документы = {д["artifact"]: д for д in authoring.course_draft(course=self.курс)["data"]["artifacts"]}
+
+		self.assertEqual(
+			документы["journal"]["overlay"],
+			json.loads(
+				frappe.db.get_value(
+					"Agent Course Artifact",
+					{"course": self.курс, "slug": "journal", "is_active": 1},
+					"overlay",
+				)
+			),
+		)
+		self.assertEqual(документы["journal"]["overlay"]["blocks"]["intro"], {"lesson": self.урок})
+		self.assertIsNone(документы["plain"]["overlay"])
+		authoring.set_course_artifact_template(course=self.курс, artifact="plain", template=self.ключ)
+		документы = {д["artifact"]: д for д in authoring.course_draft(course=self.курс)["data"]["artifacts"]}
+		self.assertEqual(документы["plain"]["overlay"], {})
+
+	def снимок_записей(self) -> dict:
+		"""Всё, что переход пишет: версии схемы курса, данные и тексты блоков учеников."""
+		документы = frappe.get_all(
+			"Agent Student Artifact", filters={"course": self.курс}, fields=["name", "data", "modified"]
+		)
+		return {
+			"схемы": frappe.get_all(
+				"Agent Course Artifact",
+				filters={"course": self.курс},
+				fields=["name", "version", "is_active", "overlay"],
+				order_by="version asc",
+			),
+			"данные": {д.name: (д.data, д.modified) for д in документы},
+			"блоки": sorted(
+				frappe.get_all(
+					"Agent Artifact Content",
+					filters={"parent": ("in", [д.name for д in документы])},
+					fields=["name", "block_key"],
+					as_list=True,
+				)
+			),
+		}
+
+	def test_предпросмотр_перехода_ничего_не_пишет(self):
+		self.курс_с_данными()
+		self.вторая_версия()
+		до = self.снимок_записей()
+
+		предпросмотр = authoring.upgrade_course_artifact(course=self.курс, artifact="journal", dry_run=True)
+
+		self.assertTrue(предпросмотр["ok"], предпросмотр)
+		self.assertEqual(self.снимок_записей(), до)
+		self.assertEqual(
+			предпросмотр["data"],
+			{
+				"id": None,
+				"course": self.курс,
+				"artifact": "journal",
+				"version": 1,
+				"template": self.ключ,
+				"template_version": 2,
+				"from_version": 1,
+				"diff": {
+					"blocks": {"added": ["extra"], "removed": [], "changed": ["entries"]},
+					"fields": {"added": [], "removed": []},
+					"columns": {"added": ["log.owner"], "removed": []},
+				},
+				"students": 1,
+				"dry_run": True,
+			},
+		)
+		# Строкой, как параметр приходит по HTTP, — тоже предпросмотр.
+		self.assertTrue(
+			authoring.upgrade_course_artifact(course=self.курс, artifact="journal", dry_run="true")["data"][
+				"dry_run"
+			]
+		)
+		self.assertEqual(self.снимок_записей(), до)
+
+		# Переход называет то же, что предпросмотр.
+		переход = authoring.upgrade_course_artifact(course=self.курс, artifact="journal")["data"]
+		self.assertNotIn("dry_run", переход)
+		self.assertEqual(
+			(переход["diff"], переход["students"], переход["version"]),
+			(предпросмотр["data"]["diff"], 1, 2),
+		)
+		self.assertNotEqual(self.снимок_записей(), до)
+
+	def test_предпросмотр_отказывает_как_переход(self):
+		self.курс_с_данными()
+
+		def предпросмотр(**поля):
+			return authoring.upgrade_course_artifact(
+				**{"course": self.курс, "artifact": "journal", "dry_run": True, **поля}
+			)
+
+		self.assertEqual(self.код(предпросмотр()), "artifact_template_same_version")
+		self.assertEqual(self.код(предпросмотр(artifact="nope")), "artifact_not_found")
+		# Колонку, которую правят правки курса, новая версия убрала.
+		v2 = authoring.artifact_template(template=self.ключ)["data"]
+		del v2["blocks"][1]["spec"]["columns"][1]
+		self.шаблон(blocks=v2["blocks"], canvas=v2["canvas"])
+		до = self.снимок_записей()
+
+		ответ = предпросмотр()
+
+		self.assertEqual(self.код(ответ), "artifact_invalid_overlay")
+		self.assertEqual((ответ["error"]["key"], ответ["error"]["column"]), ("items", "source"))
+		self.assertEqual(self.снимок_записей(), до)
 
 	def test_переход_на_названную_версию(self):
 		self.курс_с_данными()

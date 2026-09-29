@@ -97,6 +97,11 @@ jobs:
           bench --site test.local install-app lms_frappe_app
           bench setup requirements --dev
           bench --site test.local set-config allow_tests true
+          # Тесты заводят учеников и кураторов сотнями за прогон, а Frappe
+          # отказывает в создании пользователя сверх 60 за час («Throttled»).
+          # Лимит — защита живого сайта от регистрационного спама, тестовому
+          # сайту она только роняет прогон (learning-services#383).
+          bench --site test.local set-config --parse throttle_user_limit 100000
 
       - name: Прогнать тесты
         working-directory: /home/runner/frappe-bench

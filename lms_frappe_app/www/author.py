@@ -19,6 +19,7 @@ import frappe
 from frappe.utils import get_datetime, md_to_html, now_datetime, sanitize_html
 
 from lms_frappe_app.agent_learning import diffs, directives, normalizer, notes, snapshots
+from lms_frappe_app.agent_learning.artifacts import overlay
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.api import authoring, контракт
 from lms_frappe_app.site_navigation import шапка_платформы
@@ -541,9 +542,32 @@ def _курс(курс: dict) -> dict:
 			блок["artifact"] = документ["artifact"]
 			блок["lesson_title"] = названия.get(блок["lesson"]) if блок["lesson"] else None
 			блок["lesson_url"] = адрес(курс["id"], блок["lesson"]) if блок["lesson"] else None
+	for документ in курс["artifacts"]:
+		документ["binding"] = _привязка(документ)
 	курс["directive_fields"] = _поля(курс["directive"], ПОЛЯ_КУРСА)
 	курс["url"] = адрес(курс["id"])
 	return курс
+
+
+def _привязка(документ: dict) -> dict | None:
+	"""Шаблон документа, его версия у курса и правки курса словами; схема целиком — `None`.
+
+	`Why:` у документа куратор видел только «ключ · v4»: ни шаблона, ни того,
+	что вышла его новая версия, ни того, чем курс от шаблона отличается
+	(learning-services#384). Шаблон берётся тем же методом, что у агента.
+	"""
+	if not документ["template"]:
+		return None
+	шаблон = authoring.artifact_template(template=документ["template"], version=документ["template_version"])
+	шаблон = шаблон["data"] if шаблон["ok"] else None
+	последняя = документ["template_latest"]
+	return {
+		"template": документ["template"],
+		"version": документ["template_version"],
+		"latest": последняя if последняя and последняя > документ["template_version"] else None,
+		"extends": шаблон["extends"] if шаблон else None,
+		"edits": overlay.описать_правки(шаблон, документ["overlay"]) if шаблон else [],
+	}
 
 
 def _урок(курс: dict, lesson: str) -> dict | None:
