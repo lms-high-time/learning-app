@@ -16,11 +16,13 @@ from urllib.parse import quote
 import frappe
 
 from lms_frappe_app.agent_learning import (
+	announcements,
 	course_builder,
 	course_map,
 	directives,
 	normalizer,
 	notes,
+	notices,
 	quiz,
 	snapshots,
 	structure,
@@ -71,6 +73,8 @@ from lms_frappe_app.api import контракт, список, текущий_п
 УРОК_В_РАБОТЕ = "lesson_in_use"
 ГЛАВА_НЕ_ПУСТА = "chapter_not_empty"
 НЕВЕРНЫЙ_ВОПРОС = "invalid_question"
+НЕТ_ЦЕЛЕЙ_КУРСА = "course_objectives_missing"
+КУРС_УЖЕ_ОТКРЫТ = "course_already_published"
 
 
 def _автор() -> str:
@@ -129,7 +133,7 @@ def list_courses(published: bool | None = None) -> dict:
 	курсы = frappe.get_all(
 		"LMS Course",
 		filters=отбор,
-		fields=["name", "title", "short_introduction", "published", "modified"],
+		fields=["name", "title", "short_introduction", "published", "upcoming", "modified"],
 		order_by="modified desc",
 	)
 	# Число уроков — одним обходом на весь список: порядок глав и уроков,
@@ -142,6 +146,7 @@ def list_courses(published: bool | None = None) -> dict:
 				"title": курс.title,
 				"summary": курс.short_introduction,
 				"published": bool(курс.published),
+				"upcoming": bool(курс.published and курс.upcoming),
 				"lessons_total": уроков.get(курс.name, 0),
 				"updated_at": курс.modified.isoformat() if курс.modified else None,
 			}
@@ -1156,7 +1161,7 @@ def course_draft(course: str) -> dict:
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	сведения = frappe.db.get_value(
-		"LMS Course", course, ["title", "short_introduction", "published"], as_dict=True
+		"LMS Course", course, ["title", "short_introduction", "published", "upcoming"], as_dict=True
 	)
 	предел = normalizer.предел_сегмента()
 	return {
@@ -1164,6 +1169,7 @@ def course_draft(course: str) -> dict:
 		"title": сведения.title,
 		"summary": сведения.short_introduction,
 		"published": bool(сведения.published),
+		"upcoming": bool(сведения.published and сведения.upcoming),
 		"chapters": [
 			{"id": глава["name"], "title": глава["title"], "lessons": _уроки_главы(глава["name"], предел)}
 			for глава in structure.главы_курса(course)
@@ -1277,17 +1283,50 @@ def publish_course(course: str) -> dict:
 			course=course,
 			problems=готовность["blocking"],
 		)
-	frappe.db.set_value("LMS Course", course, "published", 1)
-	return {"id": course, "published": True, "warnings": готовность["warnings"]}
+	# Анонс выходит той же публикацией: флаг снимается, и тем, кто просил
+	# сообщить о выходе, уходит письмо (learning-services#389).
+	frappe.db.set_value("LMS Course", course, {"published": 1, "upcoming": 0})
+	return {
+		"id": course,
+		"published": True,
+		"warnings": готовность["warnings"],
+		"notified": notices.уведомить_о_выходе(course),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def announce_course(course: str) -> dict:
+	"""Показывает курс в каталоге как анонс: записаться нельзя, можно
+	попросить сообщить о выходе.
+
+	Готовности курса анонс не требует — уроков может ещё не быть. Требует
+	целей курса: у анонса наружу выходят только они (learning-services#389).
+	Открытый курс анонсом не становится: на него уже записаны ученики.
+	"""
+	_автор()
+	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	сведения = frappe.db.get_value("LMS Course", course, ["published", "upcoming"], as_dict=True)
+	if сведения.published and not сведения.upcoming:
+		raise Отказ(КУРС_УЖЕ_ОТКРЫТ, "Курс уже открыт ученикам", course=course)
+	цели = announcements.цели_курса(course)
+	if not цели:
+		raise Отказ(
+			НЕТ_ЦЕЛЕЙ_КУРСА,
+			"У курса нет целей: задайте их в директиве курса (objectives)",
+			course=course,
+		)
+	frappe.db.set_value("LMS Course", course, {"published": 1, "upcoming": 1})
+	return {"id": course, "published": True, "upcoming": True, "objectives": цели}
 
 
 @frappe.whitelist(methods=["POST"])
 @контракт
 def unpublish_course(course: str) -> dict:
-	"""Снимает курс с публикации. Прогресс учеников остаётся."""
+	"""Снимает курс с публикации — и анонс тоже. Прогресс учеников остаётся."""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	frappe.db.set_value("LMS Course", course, "published", 0)
+	frappe.db.set_value("LMS Course", course, {"published": 0, "upcoming": 0})
 	return {"id": course, "published": False}
 
 

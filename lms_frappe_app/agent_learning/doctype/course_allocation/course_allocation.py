@@ -25,6 +25,7 @@ class CourseAllocation(Document):
 
 	def validate(self):
 		self._проверить_курс_разрешён()
+		self._проверить_курс_не_анонс()
 		if self.audience == "Whole Organization":
 			# Список адресатов при назначении на всю организацию только
 			# вводит в заблуждение: состав считается на момент выдачи.
@@ -52,6 +53,19 @@ class CourseAllocation(Document):
 					self.course, self.organization
 				)
 			)
+
+	def _проверить_курс_не_анонс(self) -> None:
+		"""Анонсированный курс не назначается: учиться в нём пока нечему.
+
+		Проверяется при выборе курса, а не при каждом сохранении: правка срока
+		у старого назначения не должна упираться в состояние курса.
+		"""
+		if not (self.is_new() or self.has_value_changed("course")):
+			return
+		from lms_frappe_app.agent_learning.announcements import анонсирован
+
+		if анонсирован(self.course):
+			frappe.throw(frappe._("Курс {0} ещё готовится").format(self.course))
 
 	def адресаты(self) -> list[str]:
 		"""Кому предназначено назначение."""

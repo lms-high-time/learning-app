@@ -14,6 +14,8 @@
 
 import frappe
 
+from lms_frappe_app.agent_learning.access import КУРС_ГОТОВИТСЯ
+from lms_frappe_app.agent_learning.announcements import анонсирован
 from lms_frappe_app.agent_learning.artifacts import export
 from lms_frappe_app.agent_learning.artifacts.course import _действующая_схема, _схемы_курса
 from lms_frappe_app.agent_learning.artifacts.document import (
@@ -448,8 +450,13 @@ def allocations(organization: str) -> dict:
 	"""Назначения организации и курсы, которые она может назначить."""
 	_руководитель(organization)
 	организация = frappe.get_doc("Learning Organization", organization)
+	# Анонсы назначить нельзя, но их назначения, если они есть, называются
+	# по-прежнему: название берётся отдельным запросом ниже.
 	курсы = frappe.get_all(
-		"LMS Course", filters={"published": 1}, fields=["name", "title"], order_by="title asc"
+		"LMS Course",
+		filters={"published": 1, "upcoming": 0},
+		fields=["name", "title"],
+		order_by="title asc",
 	)
 	назначения = frappe.get_all(
 		"Course Allocation",
@@ -502,6 +509,8 @@ def assign_course(
 	_руководитель(organization)
 	if not frappe.get_doc("Learning Organization", organization).разрешает_курс(course):
 		raise Отказ(КУРС_НЕ_ОТКРЫТ, "Этот курс организации не открыт", course=course)
+	if анонсирован(course):
+		raise Отказ(КУРС_ГОТОВИТСЯ, "Курс ещё готовится, назначить его нельзя", course=course)
 	люди = _список(members)
 	назначение = frappe.get_doc(
 		{

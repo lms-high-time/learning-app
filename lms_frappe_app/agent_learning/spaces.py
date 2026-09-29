@@ -16,7 +16,9 @@ from __future__ import annotations
 import frappe
 from frappe.utils import getdate
 
+from lms_frappe_app.agent_learning import announcements
 from lms_frappe_app.agent_learning.access import (
+	КУРС_ГОТОВИТСЯ,
 	КУРС_НЕ_ОПУБЛИКОВАН,
 	КУРС_НЕ_ОТКРЫТ,
 	УЖЕ_ЗАПИСАН,
@@ -198,7 +200,8 @@ def пространство_курса(user: str, course: str, space: str | Non
 
 
 def каталог(user: str, организация: str | None) -> list[dict]:
-	"""Опубликованные курсы, на которые можно записаться в этом пространстве.
+	"""Опубликованные курсы, на которые можно записаться в этом пространстве,
+	и анонсы — курсы, которые готовятся.
 
 	Личное — весь каталог без курсов, на которые человек уже записан. Сотрудник
 	учится и для себя, а за свой счёт каталог не сужается (learning-services#346).
@@ -211,21 +214,43 @@ def каталог(user: str, организация: str | None) -> list[dict]:
 	else:
 		занято = {запись["course"] for запись in курсы(user, организация)}
 	открытые = _открытые(организация)
-	return [
-		{"id": курс.name, "title": курс.title, "summary": курс.short_introduction}
+	доступные = [
+		курс
 		for курс in frappe.get_all(
 			"LMS Course",
 			filters={"published": 1},
-			fields=["name", "title", "short_introduction"],
+			fields=["name", "title", "short_introduction", "upcoming"],
 		)
 		if курс.name not in занято and (открытые is None or курс.name in открытые)
 	]
+	подписки = announcements.подписки(user, [курс.name for курс in доступные if курс.upcoming])
+	return [_строка_каталога(курс, подписки) for курс in доступные]
+
+
+def _строка_каталога(курс, подписки: set[str]) -> dict:
+	"""Курс каталога. У анонса — цели курса и подписан ли человек на выход.
+
+	Анонс в каталоге остаётся: агент рассказывает, о чём будет курс, и
+	предлагает сообщить о выходе вместо записи (learning-services#389).
+	"""
+	строка = {
+		"id": курс.name,
+		"title": курс.title,
+		"summary": курс.short_introduction,
+		"upcoming": bool(курс.upcoming),
+	}
+	if курс.upcoming:
+		строка["objectives"] = announcements.цели_курса(курс.name)
+		строка["notify"] = курс.name in подписки
+	return строка
 
 
 def можно_записаться(user: str, course: str, организация: str | None) -> tuple[bool, str | None]:
 	"""Проверка перед записью в пространстве; при отказе — машинный код причины."""
 	if not frappe.db.get_value("LMS Course", course, "published"):
 		return False, КУРС_НЕ_ОПУБЛИКОВАН
+	if announcements.анонсирован(course):
+		return False, КУРС_ГОТОВИТСЯ
 	if организация is None:
 		if frappe.db.exists("LMS Enrollment", {"member": user, "course": course}):
 			return False, УЖЕ_ЗАПИСАН

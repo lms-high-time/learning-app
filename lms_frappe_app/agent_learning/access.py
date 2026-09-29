@@ -33,6 +33,7 @@ from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organi
 ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА = "organization_suspended"
 КУРС_НЕ_ОТКРЫТ = "course_not_allowed"
 КУРС_НЕ_ОПУБЛИКОВАН = "course_not_published"
+КУРС_ГОТОВИТСЯ = "course_upcoming"
 УЖЕ_ЗАПИСАН = "already_enrolled"
 
 

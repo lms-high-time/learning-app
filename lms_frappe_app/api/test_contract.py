@@ -360,6 +360,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			authoring.set_course_directive(
 				course=курс,
 				teaching_directive="Говорить примерами из работы",
+				objectives="Писать циклы\nВыделять функции",
 				remember_about_student="Чем занимается на работе",
 			),
 		)
@@ -475,6 +476,14 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			authoring.set_note_status(note=замечание, status="done", text="Поправил", via="agent"),
 		)
 		self.сверить("authoring.list_notes", authoring.list_notes(course=курс))
+		# Анонс до выхода: у него своя карта и подписка на письмо о выходе.
+		self.сверить("authoring.announce_course", authoring.announce_course(course=курс))
+		frappe.set_user(self.ученик)
+		self.сверить(
+			"student.notify_when_released", student.notify_when_released(course=курс)
+		)
+		self.сверить("public.course_map", public.course_map(course=курс))
+		frappe.set_user(self.куратор)
 		self.сверить("authoring.publish_course", authoring.publish_course(course=курс))
 		self.сверить("authoring.unpublish_course", authoring.unpublish_course(course=курс))
 		authoring.publish_course(course=курс)
