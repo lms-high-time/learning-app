@@ -367,9 +367,6 @@ def start_lesson(
 			"title": материал.title,
 			"course": курс,
 			"overdue": bool(сведения.get("overdue")),
-			# Где урок в курсе — «урок 2 из 8» в шапке веб-чата и у агента
-			# (learning-services#404).
-			**_место_урока(lesson, курс),
 		},
 		"content": {
 			"markdown": материал.сегмент(segment),
@@ -406,8 +403,11 @@ def start_lesson(
 		"artifact_blocks": _блоки_урока(ученик, курс, lesson, пространство),
 	}
 	if channel == "web":
-		# Остаток пробы — в шапку веб-чата (learning-services#404); своему
-		# агенту он ни к чему: там уроки не считаются.
+		# Шапке веб-чата — место урока в курсе и остаток пробы
+		# (learning-services#404). Своему агенту — нет: пробы у него не
+		# считаются, программу он берёт `course_outline`, а порядок уроков стоит
+		# запросов на каждую главу, и платить за них на каждом старте незачем.
+		ответ["lesson"].update(_место_урока(lesson, курс))
 		ответ["web_demo"] = пробные_уроки_ученика(ученик)
 	# Отметка — после сборки ответа: упади она раньше, итог пропал бы для
 	# ученика, так и не дойдя до агента.
@@ -1411,7 +1411,7 @@ def _место_урока(lesson: str, курс: str) -> dict:
 	return {
 		"number": уроки.index(lesson) + 1 if lesson in уроки else None,
 		"total": len(уроки),
-		"course_title": frappe.db.get_value("LMS Course", курс, "title"),
+		"course_title": frappe.get_cached_value("LMS Course", курс, "title"),
 	}
 
 

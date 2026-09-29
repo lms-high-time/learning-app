@@ -233,15 +233,16 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		# Шапка веб-чата: «курс · урок 2 из 2 · пробных осталось» (#404).
 		второй = self._второй_урок()
 
-		урок = student.start_lesson(lesson=второй)["data"]
-		в_браузере = student.start_lesson(lesson=self.урок, channel="web")["data"]
+		у_агента = student.start_lesson(lesson=второй)["data"]
+		в_браузере = student.start_lesson(lesson=второй, channel="web")["data"]
 
-		self.assertEqual((урок["lesson"]["number"], урок["lesson"]["total"]), (2, 2))
-		self.assertEqual(
-			урок["lesson"]["course_title"], frappe.db.get_value("LMS Course", self.курс, "title")
-		)
-		self.assertNotIn("web_demo", урок)
+		урок = в_браузере["lesson"]
+		self.assertEqual((урок["number"], урок["total"]), (2, 2))
+		self.assertEqual(урок["course_title"], frappe.db.get_value("LMS Course", self.курс, "title"))
 		self.assertEqual(в_браузере["web_demo"]["used"], 1)
+		# Своему агенту — ни места урока, ни пробы: порядок уроков стоит запросов.
+		self.assertNotIn("number", у_агента["lesson"])
+		self.assertNotIn("web_demo", у_агента)
 
 	def test_развилка_без_курсов_пуста(self):
 		frappe.set_user("Administrator")

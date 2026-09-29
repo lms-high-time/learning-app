@@ -485,8 +485,7 @@ Frappe заворачивает результат whitelisted-метода в �
 { "ok": true, "data": {
   "session": "sess-01H…", "space": "org-1",
   "lesson": { "id": "lesson-6", "title": "Циклы", "course": "course-basics",
-              "overdue": false, "number": 6, "total": 12,
-              "course_title": "Основы программирования" },
+              "overdue": false },
   "content": { "markdown": "…", "segment_index": 1, "total_segments": 3 },
   "media": [ { "kind": "video", "title": "Разбор", "url": "https://…" } ],
   "objectives": [ "Понимать разницу между while и for" ],
@@ -525,10 +524,11 @@ Frappe заворачивает результат whitelisted-метода в �
       "preview": null } ] } }
 ```
 
-`lesson.number` и `lesson.total` — место урока в курсе («урок 6 из 12»),
-`lesson.course_title` — название курса. С `channel: web` в ответе ещё
-`web_demo` — пробные уроки веб-чата: `{ "used": 1, "limit": 2, "left": 1 }`;
-своему агенту поле не приходит (learning-services#404).
+С `channel: web` — для шапки веб-чата (learning-services#404) — в `lesson`
+ещё место урока в курсе и название курса (`"number": 6, "total": 12,
+"course_title": "Основы программирования"`), а в ответе `web_demo` — пробные
+уроки: `{ "used": 1, "limit": 2, "left": 1 }`. Своему агенту их нет: пробы у
+него не считаются, программу он берёт `course_outline`.
 
 `course_promise` и `lesson_hook` — обещание курса и зачин урока, `null`, если
 автор их не задал. Адресат — ученик, поэтому они лежат верхним уровнем рядом с
