@@ -15,7 +15,7 @@ import frappe
 from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning import directives, quiz
+from lms_frappe_app.agent_learning import announcements, directives, quiz
 from lms_frappe_app.agent_learning.access import (
 	НЕ_ЗАЧИСЛЕН,
 	организация_приостановлена,
@@ -77,6 +77,7 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ЗАНЯТИЕ_ЗАКРЫТО = "session_closed"
 НЕВЕРНОЕ_СОСТОЯНИЕ = "invalid_chat_state"
 ДЕМО_ИСЧЕРПАНО = "web_demo_exhausted"
+КУРС_НЕ_АНОНС = "course_not_upcoming"
 НЕИЗВЕСТНЫЙ_КАНАЛ = "unknown_channel"
 
 #: Откуда пришёл вызов: свой агент ученика или веб-чат платформы. Канал `web`
@@ -193,6 +194,26 @@ def enroll(course: str, space: str | None = None) -> dict:
 		"course": course,
 		"title": frappe.db.get_value("LMS Course", course, "title"),
 		"first_lesson": _следующий_урок(ученик, course),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def notify_when_released(course: str) -> dict:
+	"""Подписывает ученика на письмо о выходе анонсированного курса.
+
+	На анонс записаться нельзя (`enroll` отказывает `course_upcoming`), и это
+	то, что можно сделать вместо записи. Повторный вызов ничего не меняет.
+	Письмо уходит, когда куратор открывает курс (learning-services#389).
+	"""
+	ученик = текущий_пользователь()
+	if not announcements.анонсирован(course):
+		raise Отказ(КУРС_НЕ_АНОНС, "Этот курс не готовится к выходу", course=course)
+	announcements.подписать(ученик, course)
+	return {
+		"course": course,
+		"title": frappe.db.get_value("LMS Course", course, "title"),
+		"notify": True,
 	}
 
 

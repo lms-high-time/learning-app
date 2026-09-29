@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import frappe
 
-from lms_frappe_app.agent_learning import directives
+from lms_frappe_app.agent_learning import announcements, directives
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
@@ -64,6 +64,8 @@ def course_map(course: str, space: str | None = None) -> dict:
 		# Непубликованный курс для постороннего не существует. Отказ доменный,
 		# а не 404: тем же кодом отвечают методы авторинга на чужой курс.
 		raise Отказ(КУРС_НЕ_НАЙДЕН, "Курс не найден", id=course)
+	if not зачислен and announcements.анонсирован(course):
+		return _анонс(course)
 
 	структура = уроки_по_главам(course)
 	порядок = [урок for глава in структура for урок in глава["lessons"]]
@@ -219,6 +221,26 @@ def _зачины(уроки: list[str]) -> dict[str, str | None]:
 			"Course Lesson", filters={"name": ("in", уроки)}, fields=["name", "lesson_hook"]
 		)
 	}
+
+
+def _анонс(course: str) -> dict:
+	"""Карта анонсированного курса: только цели курса, без программы.
+
+	Главы, уроки и документы анонса остаются закрытыми: курс ещё собирается,
+	и его состав меняется (learning-services#389). `notify` — подписан ли
+	вызывающий на письмо о выходе; гостю ключа нет, как `status` у цели.
+	"""
+	данные = {
+		"course": course,
+		"title": frappe.db.get_value("LMS Course", course, "title"),
+		"upcoming": True,
+		"objectives": announcements.цели_курса(course),
+		"documents": [],
+		"chapters": [],
+	}
+	if frappe.session.user != "Guest":
+		данные["notify"] = announcements.подписан(frappe.session.user, course)
+	return данные
 
 
 def _директива_карты(урок: str) -> dict:

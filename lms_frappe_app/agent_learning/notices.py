@@ -1,7 +1,8 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Письма по назначениям: о новом курсе и о приближении срока (learning-services#365).
+"""Письма по назначениям: о новом курсе и о приближении срока (learning-services#365),
+и письмо о выходе анонсированного курса (learning-services#389).
 
 Руководитель назначает курс на странице «Команда», а сотрудник об этом
 узнаёт письмом: без него назначение дожидалось бы, пока человек сам откроет
@@ -76,6 +77,46 @@ def напомнить_о_сроках() -> int:
 			if адресат not in прошли:
 				отправлено += _отправить(назначение, адресат, СРОК)
 	return отправлено
+
+
+def уведомить_о_выходе(course: str) -> int:
+	"""Письмо о выходе анонсированного курса всем, кто просил сообщить.
+
+	Журнал — отметка `email_sent` у подписки: второй выход того же курса
+	(сняли и открыли снова) писем не повторяет. Письмо Learning для этого не
+	годится: его тема не переводится. Почты нет — подписки остаются
+	неотмеченными, писем не будет.
+	"""
+	if not почта_есть():
+		return 0
+	подписки = frappe.get_all(
+		"LMS Course Interest",
+		filters={"course": course, "email_sent": 0},
+		fields=["name", "user"],
+	)
+	if not подписки:
+		return 0
+	курс = frappe.db.get_value("LMS Course", course, "title") or course
+	адрес = get_url(f"/lms/courses/{course}")
+	тема = f"Курс «{курс}» вышел"
+	текст = (
+		f"<p>Курс «{frappe.utils.escape_html(курс)}», о выходе которого вы просили сообщить, "
+		f"открыт для записи.</p>"
+		f'<p><a href="{адрес}">Открыть курс</a> — занятие идёт с наставником: в браузере '
+		f"или с вашим агентом.</p>"
+	)
+	for подписка in подписки:
+		# Отметка — до отправки, в той же транзакции: очередь писем Frappe
+		# отправляет только закоммиченное.
+		frappe.db.set_value("LMS Course Interest", подписка.name, "email_sent", 1)
+		frappe.sendmail(
+			recipients=[подписка.user],
+			subject=тема,
+			message=текст,
+			reference_doctype="LMS Course",
+			reference_name=course,
+		)
+	return len(подписки)
 
 
 def почта_есть() -> bool:
