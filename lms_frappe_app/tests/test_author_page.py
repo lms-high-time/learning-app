@@ -107,6 +107,60 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		блоки = курс["artifacts"][0]["blocks"]
 		self.assertEqual([(б["key"], б["lesson_title"]) for б in блоки], [("risks", "Первый"), ("review", None)])
 
+	def test_документ_показывает_шаблон_и_правки_курса(self):
+		"""Шаблон, его версия у курса, вышедшая новая, база наследника и правки
+		курса словами; у схемы целиком — ни шаблона, ни правок (learning-services#384)."""
+		база = f"base-{frappe.generate_hash(length=6)}"
+		authoring.set_artifact_template(
+			template=база,
+			title="Реестр",
+			blocks=[
+				{"key": "risks", "title": "Риски", "hint": "Пять записей"},
+				{"key": "review", "title": "Сверка"},
+				{"key": "extra", "title": "Лишнее"},
+			],
+		)
+		наследник = f"child-{frappe.generate_hash(length=6)}"
+		authoring.set_artifact_template(
+			template=наследник,
+			title="Реестр",
+			extends=база,
+			overlay={"blocks": {"review": {"hint": "Сверьте"}}},
+		)
+		привязка = authoring.set_course_artifact_template(
+			course=self.курс,
+			artifact="journal",
+			template=наследник,
+			overlay={
+				"blocks": {"risks": {"lesson": self.уроки[0], "hint": "Три записи"}, "extra": None},
+				"add_blocks": [{"key": "photo", "title": "Фото", "lesson": self.уроки[2]}],
+			},
+		)
+		self.assertTrue(привязка["ok"], привязка)
+		authoring.set_artifact_template(
+			template=наследник, title="Реестр", extends=база, overlay={}, note="Без подсказки сверки"
+		)
+
+		с = self.сведения_для(self.куратор, course=self.курс)
+
+		документы = {д["artifact"]: д for д in с["course"]["artifacts"]}
+		self.assertIsNone(документы["register"]["binding"])
+		self.assertEqual(
+			документы["journal"]["binding"],
+			{
+				"template": наследник,
+				"version": 1,
+				"latest": 2,
+				"extends": {"template": база, "version": 1},
+				"edits": [
+					"Уроки заданы у 2 блоков",
+					"Подсказки изменены: «Риски»",
+					"Убран блок «Лишнее»",
+					"Добавлен блок «Фото»",
+				],
+			},
+		)
+
 	def test_готовность_ссылается_на_урок(self):
 		с = self.сведения_для(self.куратор, course=self.курс)
 

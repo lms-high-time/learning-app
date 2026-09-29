@@ -7,7 +7,7 @@ import copy
 import unittest
 
 from lms_frappe_app.agent_learning.artifacts import codes
-from lms_frappe_app.agent_learning.artifacts.overlay import без_уроков_в_правках, собрать
+from lms_frappe_app.agent_learning.artifacts.overlay import без_уроков_в_правках, описать_правки, собрать
 from lms_frappe_app.agent_learning.errors import Отказ
 
 ШАБЛОН = {
@@ -275,6 +275,84 @@ class TestПравкиНаследника(unittest.TestCase):
 		)
 		# Не та форма — не здесь: её отклонит `собрать`.
 		без_уроков_в_правках({"blocks": ["intro"], "add_blocks": {"key": "x"}})
+
+
+class TestОписаниеПравок(unittest.TestCase):
+	"""Правки курса словами для кабинета автора (#384)."""
+
+	def test_без_правок_пусто(self):
+		self.assertEqual(описать_правки(ШАБЛОН, {}), [])
+		self.assertEqual(описать_правки(ШАБЛОН, None), [])
+
+	def test_уроки_числом_а_не_списком(self):
+		# Только уроки — и ни слова о схемах блоков: их правка не называла.
+		for правки, строки in (
+			({"blocks": {"items": {"lesson": "L-1"}}}, ["Уроки заданы у 1 блока"]),
+			(
+				{
+					"blocks": {"intro": {"lesson": "L-1"}, "items": {"lesson": "L-2"}},
+					"add_blocks": [{"key": "log", "title": "Журнал", "lesson": "L-3"}],
+				},
+				["Уроки заданы у 3 блоков", "Добавлен блок «Журнал»"],
+			),
+		):
+			with self.subTest(строки=строки):
+				self.assertEqual(описать_правки(ШАБЛОН, правки), строки)
+
+	def test_все_виды_правок(self):
+		правки = {
+			"title": "Журнал площадки",
+			"blocks": {
+				"intro": {"lesson": "L-1", "hint": "Двумя фразами", "title": "Начало"},
+				"items": {
+					"lesson": "L-2",
+					"hint": None,
+					"span": 2,
+					"spec": {
+						"fields": {"limit": {"title": "Порог"}},
+						"columns": {"source": {"options": ["люди"]}, "kind": None},
+						"add_columns": [
+							{"key": "permit", "title": "Разрешение", "after": "event"},
+							{"key": "owner", "after": "permit"},
+						],
+						"views": None,
+					},
+				},
+				"outro": None,
+			},
+			"add_blocks": [{"key": "log", "title": "Журнал", "after": "items"}, {"key": "photo"}],
+			"canvas": {"labels": {"items": "Что было", "log": "Журнал"}, "grid": ["intro items"]},
+		}
+		# Собирается: сводка описывает правки, которые правила пропускают.
+		собрать(ШАБЛОН, правки)
+
+		self.assertEqual(
+			описать_правки(ШАБЛОН, правки),
+			[
+				"Название документа: «Журнал площадки»",
+				"Уроки заданы у 2 блоков",
+				"Подсказки изменены: «Начало», «Записи»",
+				"Блоки переименованы: «Вступление» → «Начало»",
+				"«Записи»: изменено поле «Предел»; добавлены колонки «Разрешение», «owner»; "
+				"убрана колонка «Вид»; изменена колонка «Источник»; изменено: ширина, представления",
+				"Убран блок «Итог»",
+				"Добавлены блоки «Журнал», «photo»",
+				"Холст изменён: подписи «Записи», «Журнал», сетка",
+			],
+		)
+
+	def test_холст_убран_и_схема_блока_убрана(self):
+		self.assertEqual(
+			описать_правки(ШАБЛОН, {"blocks": {"items": {"spec": None}}, "canvas": None}),
+			["«Записи»: убраны поля и колонки", "Холст убран"],
+		)
+
+	def test_чужое_пропускается(self):
+		"""Правки проверены при записи: сводка не отказывает, а молчит о непонятном."""
+		self.assertEqual(
+			описать_правки(ШАБЛОН, {"blocks": {"nope": {"hint": "…"}, "intro": "текст"}, "add_blocks": "x"}),
+			[],
+		)
 
 
 if __name__ == "__main__":
