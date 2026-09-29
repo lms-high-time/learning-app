@@ -220,6 +220,8 @@ class IntegrationTestAgentPage(IntegrationTestCase):
 
 		self.assertEqual(с["chat_url"], f"{с['service_url']}/chat")
 		self.assertEqual(с["web_demo_lessons"], 3)
+		self.assertEqual(с["web_demo_left"], 3)
+		self.assertIsNone(self.сведения_для("Guest")["web_demo_left"])
 
 	# --- адреса сервиса агента (lms-platform#198) ---
 
