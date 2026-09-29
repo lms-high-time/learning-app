@@ -40,7 +40,9 @@ from lms_frappe_app.agent_learning.constants import (
 	ЗАВЕРШЁННЫЕ,
 	ЗАКРЫТЫЕ_РЕПОРТЫ,
 	ЗАМЕТКА_НАБЛЮДЕНИЕ,
+	ЗАМЕТКА_ПРОЕКТ,
 	ЗАМЕТКА_ФАКТ,
+	ЗАМЕТКИ_КУРСА,
 	ЗАНЯТИЕ_ЗАВЕРШЕНО,
 	ИМЯ_ВИДА_РЕПОРТА,
 	ИМЯ_СТАТУСА_РЕПОРТА,
@@ -421,23 +423,24 @@ def remember(kind: str, key: str, text: str, session: str | None = None) -> dict
 	"""Записывает об ученике то, что пригодится на следующих занятиях.
 
 	Ключ короткий и повторяемый: запись по существующему ключу замещает
-	текст. Наблюдение привязывается к курсу занятия, факт живёт у ученика
-	целиком — роль и отрасль от предмета не зависят.
+	текст. Факт живёт у ученика целиком — роль и отрасль от предмета не
+	зависят. Наблюдение и проект привязываются к курсу занятия: учебный
+	сценарий одного курса не должен молча приходить в другой (#408).
 	"""
 	ученик = текущий_пользователь()
 	вид = ВИДЫ_ЗАМЕТОК.get((kind or "").strip().lower())
 	if not вид:
-		raise Отказ(НЕИЗВЕСТНЫЙ_ВИД, "Вид заметки — fact или observation", kind=kind)
+		raise Отказ(НЕИЗВЕСТНЫЙ_ВИД, "Вид заметки — fact, observation или project", kind=kind)
 
 	# Пустая строка, а не None: ею Frappe хранит незаполненный Link, и фильтр
 	# по None искал бы `course is null`, не находя ни одной записи.
 	курс = ""
 	занятие = None
-	if вид == ЗАМЕТКА_НАБЛЮДЕНИЕ:
+	if вид in ЗАМЕТКИ_КУРСА:
 		if not session:
 			raise Отказ(
 				ЧУЖОЕ_ЗАНЯТИЕ,
-				"Наблюдение записывается в рамках занятия: передайте session",
+				"Наблюдение и проект записываются в рамках занятия: передайте session",
 			)
 		занятие = _своё_занятие(session)
 		курс = занятие.course
@@ -1107,7 +1110,11 @@ def _своё_занятие(session: str):
 
 
 def _заметки(ученик: str, course: str | None) -> dict:
-	"""Факты и наблюдения курса — с датами.
+	"""Факты, наблюдения и проект курса — с датами.
+
+	`projects_elsewhere` — проекты других курсов, пока у этого курса своего
+	нет: агент спрашивает, берём ли тот же, а не подставляет его молча
+	(#408). Без курса все проекты — «в других курсах».
 
 	Даты наружу не для красоты: наблюдение трёхмесячной давности и вчерашнее
 	— разные утверждения, и без даты агент примет старое за текущее и станет
@@ -1119,23 +1126,49 @@ def _заметки(ученик: str, course: str | None) -> dict:
 	записи = frappe.get_all(
 		"Agent Student Note",
 		filters={"student": ученик},
-		or_filters=[["course", "=", ""], ["course", "=", course or ""]],
-		fields=["note_key", "text", "kind", "creation", "modified"],
+		fields=["note_key", "text", "kind", "course", "creation", "modified"],
 		order_by="modified desc",
 		ignore_permissions=True,
 	)
-	факты, наблюдения = [], []
+	курс = course or ""
+	факты, наблюдения, проект, другие = [], [], [], []
 	for з in записи:
-		если_факт = з.kind == ЗАМЕТКА_ФАКТ
-		(факты if если_факт else наблюдения).append(
-			{
-				"key": з.note_key,
-				"text": з.text,
-				"since": з.creation.isoformat() if если_факт else None,
-				"updated": з.modified.isoformat(),
-			}
+		запись = {
+			"key": з.note_key,
+			"text": з.text,
+			"since": з.creation.isoformat() if з.kind == ЗАМЕТКА_ФАКТ else None,
+			"updated": з.modified.isoformat(),
+		}
+		if з.kind == ЗАМЕТКА_ФАКТ:
+			факты.append(запись)
+		elif з.kind == ЗАМЕТКА_ПРОЕКТ and з.course == курс and курс:
+			проект.append(запись)
+		elif з.kind == ЗАМЕТКА_ПРОЕКТ:
+			другие.append({**запись, "course": з.course})
+		elif з.course == курс:
+			наблюдения.append(запись)
+	if проект:
+		другие = []
+	названия = (
+		dict(
+			frappe.get_all(
+				"LMS Course",
+				filters={"name": ("in", sorted({д["course"] for д in другие}))},
+				fields=["name", "title"],
+				as_list=True,
+			)
 		)
-	return {"facts": факты, "observations": наблюдения}
+		if другие
+		else {}
+	)
+	for д in другие:
+		д["course_title"] = названия.get(д["course"])
+	return {
+		"facts": факты,
+		"observations": наблюдения,
+		"project": проект,
+		"projects_elsewhere": другие,
+	}
 
 
 def _репорты_ученика(
@@ -1288,12 +1321,32 @@ def _состояние_старта(
 
 	«Другое занятие» — любое, кроме текущего: незакрытое занятие того же урока
 	переиспользуется, и продолжение не должно выглядеть повтором.
+
+	Считаются только занятия со следом: отчётом по целям или закрытым уроком.
+	Брошенная в начале попытка — не занятие: по ней агент выдал бы `repeat` и
+	начал «сразу к делу» с человеком, который урока не видел (#408).
 	"""
-	прочие = frappe.get_all(
-		"Agent Learning Session",
-		filters={"student": ученик, "course": курс, "name": ("!=", занятие)},
-		fields=["lesson", "started_at", "last_activity_at"],
-		ignore_permissions=True,
+	# Одним запросом, со следом сразу: три выборки подряд — занятия, отчёты,
+	# закрытые уроки — стоили бы лишних обращений на каждом старте.
+	прочие = frappe.db.sql(
+		"""
+		select s.lesson, s.started_at, s.last_activity_at
+		from `tabAgent Learning Session` s
+		where s.student = %(student)s and s.course = %(course)s and s.name != %(session)s
+			and (
+				exists (
+					select 1 from `tabAgent Objective Outcome` o
+					where o.parent = s.name and o.parenttype = 'Agent Learning Session'
+				)
+				or exists (
+					select 1 from `tabLMS Course Progress` p
+					where p.member = s.student and p.course = s.course
+						and p.lesson = s.lesson and p.status = %(done)s
+				)
+			)
+		""",
+		{"student": ученик, "course": курс, "session": занятие, "done": ПРОЙДЕН},
+		as_dict=True,
 	)
 	последнее = max((з.last_activity_at or з.started_at for з in прочие if з.last_activity_at or з.started_at), default=None)
 	if сегмент > 1:

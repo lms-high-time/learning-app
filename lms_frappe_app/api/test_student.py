@@ -610,6 +610,42 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(запись.source_session, занятие)
 		self.assertEqual(запись.kind, "Observation")
 
+	def test_проект_живёт_при_курсе_и_в_другом_курсе_приходит_вопросом(self):
+		"""#408: учебный сценарий одного курса не подставляется в другой молча."""
+		занятие = student.start_lesson()["data"]["session"]
+		ответ = student.remember(
+			kind="project", key="scenario", text="Учебный сценарий «Северный склад»", session=занятие
+		)
+		self.assertTrue(ответ["ok"], ответ)
+		запись = frappe.get_doc("Agent Student Note", {"student": self.ученик, "note_key": "scenario"})
+		self.assertEqual((запись.kind, запись.course), ("Project", self.курс))
+
+		свои = student.my_notes(course=self.курс)["data"]
+		self.assertEqual([з["key"] for з in свои["project"]], ["scenario"])
+		self.assertEqual(свои["projects_elsewhere"], [])
+		self.assertEqual(свои["facts"], [])
+
+		frappe.set_user("Administrator")
+		другой_урок = создать_урок(f"Другой курс {frappe.generate_hash(length=6)}")
+		другой_курс = зачислить(self.ученик, другой_урок)
+		frappe.set_user(self.ученик)
+		чужие = student.start_lesson(lesson=другой_урок)["data"]["student_context"]
+		self.assertEqual(чужие["project"], [])
+		self.assertEqual(
+			[(з["key"], з["course"]) for з in чужие["projects_elsewhere"]], [("scenario", self.курс)]
+		)
+		self.assertTrue(чужие["projects_elsewhere"][0]["course_title"])
+
+		своё = student.start_lesson(lesson=другой_урок)["data"]["session"]
+		student.remember(kind="project", key="project", text="Свой проект", session=своё)
+		теперь = student.my_notes(course=другой_курс)["data"]
+		self.assertEqual([з["key"] for з in теперь["project"]], ["project"])
+		self.assertEqual(теперь["projects_elsewhere"], [], "свой проект есть — чужие не предлагаются")
+
+	def test_проект_без_занятия_отклоняется(self):
+		ответ = student.remember(kind="project", key="scenario", text="Склад")
+		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
+
 	def test_наблюдение_без_занятия_отклоняется(self):
 		ответ = student.remember(kind="observation", key="pace", text="Торопится")
 
