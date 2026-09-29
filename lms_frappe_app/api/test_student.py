@@ -376,10 +376,101 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 			self.assertNotIn(поле, выдано)
 		self.assertNotIn("Так исторически", выдано)
 
-	def test_чекпоинт_пишется_в_журнал(self):
-		занятие = student.start_lesson()["data"]["session"]
-		student.report_checkpoint(занятие, "разобрали пример с циклом")
+	# --- отметки целей по ходу (learning-services#409) ---
 
+	def test_отметка_по_номеру_с_прогрессом_и_следом_на_странице_курса(self):
+		from lms_frappe_app.api import public
+
+		занятие = student.start_lesson()["data"]["session"]
+		ответ = student.mark_objective(занятие, 2, "covered", "Прочитал цикл в своём скрипте")
+		self.assertTrue(ответ["ok"], ответ)
+		данные = ответ["data"]
+		self.assertEqual((данные["objective"], данные["text"]), (2, "Уметь читать код"))
+		self.assertEqual(данные["progress"]["marked"], 1)
+		self.assertEqual(данные["progress"]["open"], [{"number": 1, "text": "Понимать цикл"}])
+
+		цели = public.course_map(course=self.курс)["data"]["chapters"][0]["lessons"][0]["objectives"]
+		self.assertEqual(
+			{ц["text"]: ц.get("status") for ц in цели},
+			{"Понимать цикл": None, "Уметь читать код": "covered"},
+			"отметка видна на странице курса сразу, без итога урока",
+		)
+
+	def test_разобранная_цель_без_заметки_и_skipped_по_ходу_отклоняются(self):
+		занятие = student.start_lesson()["data"]["session"]
+		без_заметки = student.mark_objective(занятие, 1, "covered")
+		self.assertEqual(без_заметки["error"]["code"], student.ЦЕЛИ_НЕ_СОВПАЛИ)
+		пропуск = student.mark_objective(занятие, 1, "skipped", "не дошли")
+		self.assertEqual(пропуск["error"]["code"], student.ЦЕЛИ_НЕ_СОВПАЛИ)
+		мимо = student.mark_objective(занятие, 3, "touched", "нет такой")
+		self.assertEqual(мимо["error"]["code"], student.ЦЕЛИ_НЕ_СОВПАЛИ)
+
+	def test_квиз_ждёт_отметки_всех_целей(self):
+		frappe.set_user("Administrator")
+		создать_квиз(self.урок, [создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])])
+		frappe.set_user(self.ученик)
+		занятие = student.start_lesson()["data"]["session"]
+		student.mark_objective(занятие, 1, "covered", "Объяснил цикл своими словами")
+		рано = student.request_quiz(занятие)
+		self.assertEqual(рано["error"]["code"], student.НЕТ_ОТЧЁТА)
+		self.assertEqual(рано["error"]["missing"], ["Уметь читать код"])
+
+		student.mark_objective(занятие, 2, "covered", "Прочитал чужой цикл вслух")
+		self.assertTrue(student.request_quiz(занятие)["ok"])
+
+	def test_итог_дополняет_отметки_и_не_стирает_сделанное(self):
+		занятие = student.start_lesson()["data"]["session"]
+		student.mark_objective(занятие, 1, "covered", "Объяснил цикл своими словами")
+		ответ = student.report_outcomes(занятие, [{"objective": 2, "status": "touched", "resume_from": "с чтения"}])
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(ответ["data"]["progress"]["marked"], 2)
+
+		строки = {
+			с.objective: (с.status, с.evidence, с.resume_from)
+			for с in frappe.get_doc("Agent Learning Session", занятие).outcomes
+		}
+		self.assertEqual(строки["Понимать цикл"], ("covered", "Объяснил цикл своими словами", None))
+		self.assertEqual(строки["Уметь читать код"], ("touched", None, "с чтения"))
+
+		неполный = student.report_outcomes(
+			student.start_lesson()["data"]["session"], [{"objective": 1, "status": "covered"}]
+		)
+		self.assertTrue(неполный["ok"], "то же занятие: вторая цель уже отмечена")
+
+	def test_отметки_брошенного_занятия_доходят_до_следующего_урока(self):
+		занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		student.mark_objective(занятие, 1, "covered", "Объяснил цикл своими словами")
+		student.mark_objective(занятие, 2, "touched", "начать с чтения чужого кода")
+		frappe.set_user("Administrator")
+		frappe.db.set_value("Agent Learning Session", занятие, {"status": "Abandoned", "finished_at": frappe.utils.now_datetime()})
+		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
+		второй = frappe.get_doc({"doctype": "Course Lesson", "title": "Второй", "chapter": глава}).insert(ignore_permissions=True).name
+		привязать_урок(глава, второй)
+		frappe.set_user(self.ученик)
+
+		контекст = student.start_lesson(lesson=второй)["data"]["student_context"]
+		self.assertEqual(
+			[(п["objective"], п["resume_from"]) for п in контекст["carried_over"]],
+			[("Уметь читать код", "начать с чтения чужого кода")],
+		)
+		self.assertEqual(
+			[(р["objective"], р["evidence"]) for р in контекст["recent_work"]],
+			[("Понимать цикл", "Объяснил цикл своими словами")],
+		)
+
+	def test_напоминание_об_отметках_в_ответах_посреди_занятия(self):
+		занятие = student.start_lesson()["data"]["session"]
+		старт = student.start_lesson()["data"]
+		self.assertEqual(старт["objectives_progress"]["total"], 2)
+		ответ = student.remember(kind="observation", key="pace", text="Торопится", session=занятие)
+		self.assertEqual(ответ["data"]["objectives_progress"]["marked"], 0)
+		факт = student.remember(kind="fact", key="role", text="Руководитель")
+		self.assertNotIn("objectives_progress", факт["data"], "вне занятия ключа нет")
+
+	def test_отметка_цели_пишется_в_журнал(self):
+		занятие = student.start_lesson()["data"]["session"]
+		ответ = student.mark_objective(занятие, 1, "touched", "начать с примера")
+		self.assertTrue(ответ["ok"], ответ)
 		self.assertTrue(
 			frappe.db.exists(
 				"Agent Session Event", {"session": занятие, "kind": "Checkpoint Reported"}

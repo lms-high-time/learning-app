@@ -535,8 +535,8 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		)["session"]
 		self.сверить("student.lesson_session", student.lesson_session(lesson=с_квизом))
 		self.сверить(
-			"student.report_checkpoint",
-			student.report_checkpoint(session=занятие, note="разобрали пример"),
+			"student.mark_objective",
+			student.mark_objective(session=занятие, objective=1, status="touched", note="с примера"),
 		)
 		репорт = self.сверить(
 			"student.report_issue",
