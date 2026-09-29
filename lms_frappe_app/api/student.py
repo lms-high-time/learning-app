@@ -1044,6 +1044,12 @@ def lesson_session(lesson: str) -> dict:
 		),
 		"completed": lesson in _пройденные(ученик, курс),
 		"next_lesson": _следующий_урок(ученик, курс),
+		# Шапке веб-чата «темы урока: 2 из 5» и сторожу отметок (#409).
+		"objectives_progress": (
+			_прогресс(frappe.get_doc("Agent Learning Session", занятие["name"]))
+			if занятие
+			else None
+		),
 	}
 
 

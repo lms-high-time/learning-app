@@ -694,8 +694,12 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
   "lesson": "lesson-6", "title": "Циклы",
   "session": "sess-01H…", "status": "Completed", "has_chat_state": true,
   "completed": true,
-  "next_lesson": { "id": "lesson-7", "title": "Функции" } } }
+  "next_lesson": { "id": "lesson-7", "title": "Функции" },
+  "objectives_progress": { "marked": 2, "total": 2, "open": [] } } }
 ```
+
+`objectives_progress` — отметки целей этого занятия, как у `mark_objective`;
+`null`, если занятий по уроку не было.
 
 Занятий по уроку ещё не было — `session` и `status` приходят `null`,
 `has_chat_state` — `false`. `next_lesson` считается по курсу, а не по
