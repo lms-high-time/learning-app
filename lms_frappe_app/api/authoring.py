@@ -559,7 +559,9 @@ def set_course_artifact_template(
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def upgrade_course_artifact(course: str, artifact: str, version: int | None = None) -> dict:
+def upgrade_course_artifact(
+	course: str, artifact: str, version: int | None = None, dry_run: bool = False
+) -> dict:
 	"""Документ курса — на новую версию своего шаблона (learning-services#376).
 
 	`version` не назван — последняя. Правки курса переносятся на ключи новой
@@ -567,10 +569,14 @@ def upgrade_course_artifact(course: str, artifact: str, version: int | None = No
 	данные учеников переносятся на новые ключи в той же транзакции. Отвечает
 	разницей схем: что автор должен проверить, прежде чем публиковать.
 	Назад — не переход: откат — `set_course_artifact_template` с версией.
+
+	`dry_run` (learning-services#383) — та же разница и число документов
+	учеников, которые поменялись бы, без записи: переход необратим, и
+	куратору показывают разницу до него. Отказы — те же.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	return templates.перейти(course, artifact, version)
+	return templates.перейти(course, artifact, version, dry_run=dry_run in (True, 1, "1", "true"))
 
 
 @frappe.whitelist(methods=["POST"])

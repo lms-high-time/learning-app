@@ -42,6 +42,7 @@ from lms_frappe_app.agent_learning.artifacts.course import (
 	_блоки_схем,
 	блок_наружу,
 	записать_схему,
+	проверить_схему,
 	строки_схемы,
 )
 from lms_frappe_app.agent_learning.doctype.agent_course_artifact.agent_course_artifact import (
@@ -315,6 +316,15 @@ def привязать(course: str, artifact: str, template: str, version, пр�
 	`записать_схему`, что и схема от автора целиком: собранное проверяется и
 	хранится так же, и чтение ученика не пересобирает схему на каждый запрос.
 	"""
+	исходный, правки, собранное = _собрать_привязку(course, template, version, правки)
+	return _записать_привязку(course, artifact, исходный, правки, собранное)
+
+
+def _собрать_привязку(course: str, template: str, version, правки) -> tuple[dict, dict, dict]:
+	"""Версия шаблона, правки курса и собранная из них схема; урок не этого курса — отказ.
+
+	Ничего не пишет: так же собирает схему предпросмотр перехода.
+	"""
 	исходный = шаблон(template, version)
 	правки = разобрать_правки(правки)
 	собранное = overlay.собрать(исходный, правки)
@@ -326,6 +336,10 @@ def привязать(course: str, artifact: str, template: str, version, пр�
 			not isinstance(урок, str) or frappe.db.get_value("Course Lesson", урок, "course") != course
 		):
 			raise Отказ(УРОК_НЕ_НАЙДЕН, "В этом курсе нет такого урока", id=урок)
+	return исходный, правки, собранное
+
+
+def _записать_привязку(course: str, artifact: str, исходный: dict, правки: dict, собранное: dict) -> dict:
 	версия = записать_схему(
 		course,
 		artifact,
@@ -349,7 +363,7 @@ def привязать(course: str, artifact: str, template: str, version, пр�
 	}
 
 
-def перейти(course: str, artifact: str, version=None) -> dict:
+def перейти(course: str, artifact: str, version=None, dry_run: bool = False) -> dict:
 	"""Документ курса — на новую версию своего шаблона, с данными учеников.
 
 	Контракт — у `api.authoring.upgrade_course_artifact`. Переименования
@@ -358,12 +372,18 @@ def перейти(course: str, artifact: str, version=None) -> dict:
 	`привязать`. Всё проверяется до записи: правки, которые не собрались с
 	новой версией, — отказ, и ничего не меняется. Данные учеников переносятся
 	на новые ключи в той же транзакции, что и новая схема.
+
+	`dry_run` (learning-services#383) — всё то же до записи: собранная схема
+	проверена, разница посчитана, документы учеников, которые поменялись бы,
+	сосчитаны, — но не пишется ничего, и не откатом транзакции, а потому, что
+	запись не вызывается. `Why:` переход необратим, и куратор должен увидеть
+	разницу до него.
 	"""
 	ключ = нормализовать_ключ(artifact)
 	действующая = frappe.db.get_value(
 		"Agent Course Artifact",
 		{"course": course, "slug": ключ, "is_active": 1},
-		["name", "slug", "template", "template_version", "overlay"],
+		["name", "slug", "version", "template", "template_version", "overlay"],
 		as_dict=True,
 	)
 	if not действующая:
@@ -413,22 +433,40 @@ def перейти(course: str, artifact: str, version=None) -> dict:
 	)
 	было = [блок_наружу(с) for с in _блоки_схем([действующая.name]).get(действующая.name, [])]
 
-	записано = привязать(course, ключ, цель["template"], цель["version"], правки)
+	исходный, правки, собранное = _собрать_привязку(course, цель["template"], цель["version"], правки)
+	строки, _ = проверить_схему(собранное["blocks"], собранное["canvas"])
+	стало = [блок_наружу(с) for с in строки]
+	разница = upgrade.разница(upgrade.переименовать_схему(было, переименования), стало)
 
-	стало = [блок_наружу(с) for с in _блоки_схем([записано["id"]]).get(записано["id"], [])]
+	if dry_run:
+		return {
+			"id": None,
+			"course": course,
+			"artifact": ключ,
+			"version": действующая.version,
+			"template": цель["template"],
+			"template_version": цель["version"],
+			"from_version": было_версия,
+			"diff": разница,
+			"students": _перенести_данные(course, ключ, переименования, записать=False),
+			"dry_run": True,
+		}
+	записано = _записать_привязку(course, ключ, исходный, правки, собранное)
 	return {
 		**записано,
 		"from_version": было_версия,
-		"diff": upgrade.разница(upgrade.переименовать_схему(было, переименования), стало),
+		"diff": разница,
 		"students": _перенести_данные(course, ключ, переименования),
 	}
 
 
-def _перенести_данные(course: str, artifact: str, переименования: dict) -> int:
+def _перенести_данные(course: str, artifact: str, переименования: dict, записать: bool = True) -> int:
 	"""Документы учеников по курсу и ключу — на ключи новой версии; сколько поменялось.
 
 	Пишется в обход контроллера и без отметки изменения: ученик ничего не
-	правил, и документ не должен выглядеть тронутым им.
+	правил, и документ не должен выглядеть тронутым им. Без `записать` —
+	только считается, теми же переименованиями: так предпросмотр называет
+	то же число, что назовёт переход.
 	"""
 	if not переименования:
 		return 0
@@ -443,7 +481,8 @@ def _перенести_данные(course: str, artifact: str, переиме�
 		if документ.data:
 			прежние = data.данные(документ.data)
 			новые = upgrade.переименовать_данные(прежние, переименования)
-			if новые != прежние:
+			тронут = новые != прежние
+			if тронут and записать:
 				frappe.db.set_value(
 					"Agent Student Artifact",
 					документ.name,
@@ -451,7 +490,6 @@ def _перенести_данные(course: str, artifact: str, переиме�
 					json.dumps(новые, ensure_ascii=False),
 					update_modified=False,
 				)
-				тронут = True
 		if блоки:
 			строки = frappe.get_all(
 				"Agent Artifact Content",
@@ -459,24 +497,30 @@ def _перенести_данные(course: str, artifact: str, переиме�
 				fields=["name", "block_key"],
 			)
 			переименовать = [с for с in строки if с.block_key in блоки]
-			занятые = {блоки[с.block_key] for с in переименовать}
-			for строка in строки:
-				# Под новым ключом — текст блока, давно убранного из схемы:
-				# ученик его не видит, а ключ теперь у того, что он заполнял.
-				if строка.block_key in занятые and строка.block_key not in блоки:
-					frappe.db.delete("Agent Artifact Content", {"name": строка.name})
-			for строка in переименовать:
-				frappe.db.set_value(
-					"Agent Artifact Content",
-					строка.name,
-					"block_key",
-					блоки[строка.block_key],
-					update_modified=False,
-				)
 			тронут = тронут or bool(переименовать)
+			if записать:
+				_переименовать_блоки(строки, переименовать, блоки)
 		if тронут:
 			перенесено += 1
 	return перенесено
+
+
+def _переименовать_блоки(строки: list, переименовать: list, блоки: dict) -> None:
+	"""Тексты блоков ученика — под новые ключи блоков."""
+	занятые = {блоки[с.block_key] for с in переименовать}
+	for строка in строки:
+		# Под новым ключом — текст блока, давно убранного из схемы:
+		# ученик его не видит, а ключ теперь у того, что он заполнял.
+		if строка.block_key in занятые and строка.block_key not in блоки:
+			frappe.db.delete("Agent Artifact Content", {"name": строка.name})
+	for строка in переименовать:
+		frappe.db.set_value(
+			"Agent Artifact Content",
+			строка.name,
+			"block_key",
+			блоки[строка.block_key],
+			update_modified=False,
+		)
 
 
 def последние_версии(шаблоны: set[str]) -> dict[str, dict]:

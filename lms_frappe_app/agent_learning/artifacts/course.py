@@ -103,7 +103,7 @@ def _действующие_артефакты(course: str) -> list[dict]:
 	записи = frappe.get_all(
 		"Agent Course Artifact",
 		filters={"course": course, "is_active": 1},
-		fields=["name", "slug", "title", "layout", "version", "template", "template_version"],
+		fields=["name", "slug", "title", "layout", "version", "template", "template_version", "overlay"],
 		order_by="creation asc",
 	)
 	последние = последние_версии_шаблонов({з.template for з in записи if з.template})
@@ -121,6 +121,10 @@ def _действующие_артефакты(course: str) -> list[dict]:
 				"template": запись.template or None,
 				"template_version": запись.template_version or None,
 				"template_latest": последние.get(запись.template),
+				# Правки курса к шаблону; у схемы целиком — `null`. `Why:`
+				# перепривязка заменяет правки целиком, и агент, не видя их,
+				# восстанавливал бы уроки всех блоков по памяти (learning-services#383).
+				"overlay": правки_привязки(запись),
 				"blocks": [
 					{
 						"key": блок.block_key,
@@ -141,6 +145,17 @@ def _действующие_артефакты(course: str) -> list[dict]:
 			}
 		)
 	return собранное
+
+
+def правки_привязки(запись) -> dict | None:
+	"""Правки курса к шаблону словарём; документ со схемой целиком — `None`."""
+	if not запись.template:
+		return None
+	try:
+		правки = json.loads(запись.overlay or "{}")
+	except ValueError:
+		return {}
+	return правки if isinstance(правки, dict) else {}
 
 
 def последние_версии_шаблонов(шаблоны: set[str]) -> dict[str, int]:
@@ -210,6 +225,27 @@ def блок_наружу(строка) -> dict:
 	}
 
 
+def проверить_схему(блоки: list, canvas) -> tuple[list[dict], dict | None]:
+	"""Строки схемы документа и холст — такими, какими их запишет `записать_схему`;
+	неверные — отказ. Ничего не пишет.
+
+	`Why:` предпросмотр перехода на новую версию шаблона (learning-services#383)
+	проверяет схему тем же кодом, что и запись, и отказывает там же, где
+	отказала бы запись. Ключ блока и ширина — как их приводит контроллер.
+	"""
+	блоки = [json.loads(блок) if isinstance(блок, str) else dict(блок or {}) for блок in блоки]
+	for блок in блоки:
+		урок = блок.get("lesson") or None
+		if урок and not frappe.db.exists("Course Lesson", урок):
+			raise Отказ(УРОК_НЕ_НАЙДЕН, "Course Lesson не найден", id=урок)
+	строки = строки_схемы(блоки)
+	холст = проверить_холст(canvas, строки)
+	for строка in строки:
+		строка["block_key"] = нормализовать_ключ(строка["block_key"])
+		строка["span"] = max(1, int(строка["span"] or 1))
+	return строки, холст
+
+
 def записать_схему(
 	course: str,
 	artifact: str,
@@ -226,13 +262,7 @@ def записать_схему(
 	курса, из которых схема собрана (`set_course_artifact_template`); схема от
 	автора целиком — без неё, и новая версия шаблона не наследует.
 	"""
-	блоки = [json.loads(блок) if isinstance(блок, str) else dict(блок or {}) for блок in блоки]
-	for блок in блоки:
-		урок = блок.get("lesson") or None
-		if урок and not frappe.db.exists("Course Lesson", урок):
-			raise Отказ(УРОК_НЕ_НАЙДЕН, "Course Lesson не найден", id=урок)
-	строки = строки_схемы(блоки)
-	холст = проверить_холст(canvas, строки)
+	строки, холст = проверить_схему(блоки, canvas)
 	привязка = привязка or {}
 	правки = привязка.get("overlay")
 	return directives.записать(

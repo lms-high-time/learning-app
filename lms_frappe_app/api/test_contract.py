@@ -409,6 +409,10 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		)
 		self.сверить(
 			"authoring.upgrade_course_artifact",
+			authoring.upgrade_course_artifact(course=курс, artifact="summary", dry_run=True),
+		)
+		self.сверить(
+			"authoring.upgrade_course_artifact",
 			authoring.upgrade_course_artifact(course=курс, artifact="summary"),
 		)
 
