@@ -480,6 +480,7 @@ def set_artifact_template(
 	extends_version: int | None = None,
 	overlay=None,
 	renamed=None,
+	description: str | None = None,
 ) -> dict:
 	"""Заводит новую версию шаблона документа (learning-services#370).
 
@@ -500,6 +501,11 @@ def set_artifact_template(
 	шаблона стали какими: `{blocks, fields, tables, columns: {таблица: …}}`.
 	По нему `upgrade_course_artifact` переносит правки курса и данные
 	учеников; без него новое имя — удалённое старое и новое пустое.
+
+	`description` (learning-services#387) — для какого документа шаблон, у
+	наследника — чем он отличается от базы; у версии своё, от родителя не
+	наследуется. `Why:` агент выбирает шаблон из перечня, и по названию и
+	заметке к версии «реестр рисков» и «реестр рисков стройки» не различить.
 	"""
 	_автор()
 	return templates.записать_шаблон(
@@ -513,13 +519,14 @@ def set_artifact_template(
 		extends_version=extends_version,
 		правки=overlay,
 		renamed=renamed,
+		description=description,
 	)
 
 
 @frappe.whitelist()
 @контракт
 def list_artifact_templates() -> dict:
-	"""Шаблоны документов: последняя версия каждого и курсы на нём.
+	"""Шаблоны документов: последняя версия каждого с описанием и курсы на нём.
 
 	У курса — версия шаблона, которую он закрепил: новая версия шаблона
 	живые курсы не меняет, и автор видит, кто на какой остался.

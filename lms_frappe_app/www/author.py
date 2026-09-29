@@ -555,6 +555,8 @@ def _привязка(документ: dict) -> dict | None:
 	`Why:` у документа куратор видел только «ключ · v4»: ни шаблона, ни того,
 	что вышла его новая версия, ни того, чем курс от шаблона отличается
 	(learning-services#384). Шаблон берётся тем же методом, что у агента.
+	Описание — закреплённой версии (learning-services#387): куратор читает то
+	же, по чему агент шаблон выбрал.
 	"""
 	if not документ["template"]:
 		return None
@@ -564,6 +566,7 @@ def _привязка(документ: dict) -> dict | None:
 	return {
 		"template": документ["template"],
 		"version": документ["template_version"],
+		"description": шаблон["description"] if шаблон else None,
 		"latest": последняя if последняя and последняя > документ["template_version"] else None,
 		"extends": шаблон["extends"] if шаблон else None,
 		"edits": overlay.описать_правки(шаблон, документ["overlay"]) if шаблон else [],

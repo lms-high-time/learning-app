@@ -332,6 +332,7 @@
 	.author-page .more-link { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 0; padding: 0; margin-top: 2px; cursor: pointer; }
 	.author-page .gap-text { color: var(--gap); }
 	.author-page .doc-binding { margin: -6px 0 8px; font-size: 14px; }
+	.author-page .doc-description { margin: -4px 0 8px; font-size: 14px; max-width: 72ch; }
 	.author-page .doc-edits { margin: 0 0 12px; padding-left: 20px; font-size: 14px; color: var(--muted); }
 
 	.author-page .note-index { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
@@ -664,6 +665,7 @@
 		<p class="doc-binding">Шаблон <span class="mono">{{ п.template | e }}</span> <span class="num">v{{ п.version }}</span>
 			{%- if п.latest %}<span class="changed-mark" title="Новая версия шаблона: перевести документ на неё — просьбой агенту">вышла v{{ п.latest }}</span>{% endif %}
 			{%- if п.extends %} <span class="muted">· на основе <span class="mono">{{ п.extends.template | e }}</span> <span class="num">v{{ п.extends.version }}</span></span>{% endif %}</p>
+		{% if п.description %}<p class="doc-description muted">{{ п.description | e }}</p>{% endif %}
 		{% if п.edits %}<ul class="doc-edits">{% for строка in п.edits %}<li>{{ строка | e }}</li>{% endfor %}</ul>
 		{% else %}<p class="doc-binding muted">Правок курса нет: документ как в шаблоне.</p>{% endif %}
 		{% else %}<p class="doc-binding muted">Своя схема, без шаблона.</p>{% endif %}
