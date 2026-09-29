@@ -199,21 +199,28 @@ def enroll(course: str, space: str | None = None) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def notify_when_released(course: str) -> dict:
-	"""Подписывает ученика на письмо о выходе анонсированного курса.
+def notify_when_released(course: str, notify: bool | int | str = True) -> dict:
+	"""Подписывает ученика на письмо о выходе анонсированного курса — или,
+	с `notify=false`, снимает подписку.
 
 	На анонс записаться нельзя (`enroll` отказывает `course_upcoming`), и это
 	то, что можно сделать вместо записи. Повторный вызов ничего не меняет.
 	Письмо уходит, когда куратор открывает курс (learning-services#389).
+	Отписаться можно и от курса, который уже не анонс: подписка без анонса
+	никому не нужна (learning-services#391).
 	"""
 	ученик = текущий_пользователь()
-	if not announcements.анонсирован(course):
-		raise Отказ(КУРС_НЕ_АНОНС, "Этот курс не готовится к выходу", course=course)
-	announcements.подписать(ученик, course)
+	подписать = notify not in (False, 0, "0", "false", "False")
+	if подписать:
+		if not announcements.анонсирован(course):
+			raise Отказ(КУРС_НЕ_АНОНС, "Этот курс не готовится к выходу", course=course)
+		announcements.подписать(ученик, course)
+	else:
+		announcements.отписать(ученик, course)
 	return {
 		"course": course,
 		"title": frappe.db.get_value("LMS Course", course, "title"),
-		"notify": True,
+		"notify": подписать,
 	}
 
 

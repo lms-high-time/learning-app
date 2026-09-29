@@ -91,6 +91,17 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 
 		self.assertIn(self.курс, [к["id"] for к in с["courses"]])
 
+	def test_анонс_отмечен_на_экране_курса_и_в_списке(self):
+		"""Анонс — не «опубликован»: он в каталоге, но записи нет (learning-services#391)."""
+		authoring.set_course_directive(
+			course=self.курс, teaching_directive="Вести на проекте", objectives="Цель курса"
+		)
+		authoring.announce_course(course=self.курс)
+		с = self.сведения_для(self.куратор, course=self.курс)
+		self.assertTrue(с["course"]["upcoming"])
+		с = self.сведения_для(self.куратор)
+		self.assertTrue(next(к for к in с["courses"] if к["id"] == self.курс)["upcoming"])
+
 	def test_экран_курса_показывает_наполненность_и_блоки(self):
 		с = self.сведения_для(self.куратор, course=self.курс)
 

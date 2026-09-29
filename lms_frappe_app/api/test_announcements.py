@@ -123,6 +123,20 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
 		self.assertTrue(next(к for к in курсы if к["id"] == self.курс)["notify"])
 
+	def test_отписка_снимает_подписку_и_повторяется_без_ошибки(self):
+		self.анонсировать()
+		self.от_имени(self.ученик, student.notify_when_released, course=self.курс)
+		for _ in range(2):
+			ответ = self.от_имени(
+				self.ученик, student.notify_when_released, course=self.курс, notify="false"
+			)
+			self.assertFalse(ответ["data"]["notify"])
+		self.assertFalse(
+			frappe.db.exists("LMS Course Interest", {"user": self.ученик, "course": self.курс})
+		)
+		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
+		self.assertFalse(next(к for к in курсы if к["id"] == self.курс)["notify"])
+
 	def test_подписка_только_на_анонс(self):
 		frappe.db.set_value("LMS Course", self.курс, "published", 1)
 		ответ = self.от_имени(self.ученик, student.notify_when_released, course=self.курс)
