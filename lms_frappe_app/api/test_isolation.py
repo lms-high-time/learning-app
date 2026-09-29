@@ -97,6 +97,11 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 			"репорт": lambda: student.report_issue(
 				session=self.чужое_занятие, kind="stuck", text="не моё занятие"
 			),
+			# Контекст по запросу (#410): заметки и указания чужого занятия —
+			# чужие данные, а контекст ещё и отмечает итоги репортов.
+			"материал": lambda: student.lesson_material(self.чужое_занятие),
+			"указания": lambda: student.teaching_notes(self.чужое_занятие),
+			"контекст": lambda: student.student_context(self.чужое_занятие),
 		}
 
 		for имя, действие in действия.items():

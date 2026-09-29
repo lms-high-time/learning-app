@@ -494,7 +494,8 @@ learning-services#405).
 
 Начинает занятие: создаёт учебную сессию и отдаёт всё нужное для урока.
 
-**Параметры:** `lesson` (необязательный) — без него берётся следующий
+**Параметры:** `brief` (необязательный, по умолчанию `false`) — лёгкий
+старт, см. ниже; `lesson` (необязательный) — без него берётся следующий
 незакрытый урок; `course` (необязательный) — выбирать только в этом курсе,
 без него — по всем курсам ученика: урок последнего занятия, если он не
 пройден, иначе следующий урок его курса, а без занятий — курс с ближайшим
@@ -662,6 +663,35 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 снова закрытый репорт приходит снова — это другой итог. Пусто, если нового
 нет.
 
+**Лёгкий старт** — `brief: true` (learning-services#410). Ответ — занятие,
+урок, цели, зачин и обещание, `start`, квиз и сигналы, без материала, указаний
+и контекста ученика: их агент берёт `lesson_material`, `teaching_notes` и
+`student_context`, когда они нужны. `context` говорит, сколько ждёт в
+`student_context`, — по нулям туда незачем ходить. Итоги репортов лёгкий старт
+доставленными не отмечает: их доставит `student_context`. Событие «указания
+выданы» не пишется — его пишет `teaching_notes`.
+
+```json
+{ "ok": true, "data": {
+  "session": "sess-01H…", "space": "org-1",
+  "lesson": { "id": "lesson-6", "title": "Циклы", "course": "course-basics",
+              "overdue": false },
+  "content": { "segment_index": 1, "total_segments": 3 },
+  "objectives": [ "Понимать разницу между while и for" ],
+  "objectives_progress": { "marked": 0, "total": 1,
+    "open": [ { "number": 1, "text": "Понимать разницу между while и for" } ] },
+  "course_promise": "К концу курса вы пишете программы с циклами и функциями",
+  "lesson_hook": "Повторять одно и то же вручную — первое, что надоедает",
+  "start": { "opening": "new_lesson", "last_session_at": "2026-09-01T13:05:00" },
+  "course_objectives": [ "Вести проект по системе" ],
+  "quiz": { "required": true, "pass_threshold": 1.0, "attempts_left": null },
+  "context": { "notes": 2, "carried_over": 1, "recent_work": 0, "closed_reports": 0 },
+  "signals": [] } }
+```
+
+Без `brief` — прежний полный ответ. `Why:` подключения с кэшем инструментов не
+знают новых методов, и лёгкий ответ послал бы их к тому, чего у них нет.
+
 `signals` — выводы сервера из истории ученика (learning-services#416); здесь
 приходят `objective_struggling`, `abandoned_in_row` и `deadline_pace`, описание
 кодов — в разделе «Сигналы» у `mark_objective`.
@@ -694,6 +724,64 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 зачисление она не снимает.
 Прошедший дедлайн отказом **не является**: урок отдаётся, в ответе
 `overdue: true`, зачёт фиксируется как поздний.
+
+## `lms_frappe_app.api.student.lesson_material`
+
+Материал урока по занятию — второй шаг лёгкого старта (learning-services#410).
+Только `POST`: пишет в журнал занятия событие «материал выдан».
+
+**Параметры:** `session`; `segment` (по умолчанию 1) — часть длинного урока,
+больше последней — последняя.
+
+```json
+{ "ok": true, "data": { "session": "sess-01H…", "lesson": "lesson-6",
+  "content": { "markdown": "…", "segment_index": 1, "total_segments": 3 },
+  "media": [ { "kind": "video", "title": "Разбор", "url": "https://…" } ],
+  "artifact_blocks": [] } }
+```
+
+`content`, `media` и `artifact_blocks` — те же, что в полном `start_lesson`,
+со структурными маркерами мест урока.
+
+**Отказы:** `not_your_session`.
+
+## `lms_frappe_app.api.student.teaching_notes`
+
+Указания автора агенту по занятию: директива урока и сквозная директива курса
+(learning-services#410). Только `POST`: пишет событие «указания выданы».
+
+**Параметры:** `session`.
+
+```json
+{ "ok": true, "data": { "session": "sess-01H…",
+  "directive": { "audience": "teacher_only", "teaching_directive": "…",
+                 "probing_questions": [ "…" ], "common_misconceptions": [ "…" ],
+                 "success_criteria": [ "…" ] },
+  "course_directive": { "audience": "teacher_only", "teaching_directive": "…",
+                        "student_profile": "…", "glossary": [ "…" ],
+                        "remember_about_student": [ "…" ] } } }
+```
+
+Обе директивы — те же, что в полном `start_lesson`, с грифом `teacher_only`;
+директивы курса нет — `course_directive` пустое.
+
+**Отказы:** `not_your_session`.
+
+## `lms_frappe_app.api.student.student_context`
+
+Контекст ученика по занятию — тот же, что `student_context` полного
+`start_lesson` (learning-services#410). Только `POST`: итоги репортов
+отмечаются доставленными.
+
+**Параметры:** `session`.
+
+```json
+{ "ok": true, "data": { "session": "sess-01H…",
+  "facts": [], "observations": [], "project": [], "projects_elsewhere": [],
+  "carried_over": [], "recent_work": [], "closed_reports": [] } }
+```
+
+**Отказы:** `not_your_session`.
 
 ## `lms_frappe_app.api.student.study_options`
 
@@ -832,8 +920,14 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
   "progress": { "marked": 1, "total": 3,
                 "open": [ { "number": 1, "text": "Понимать цикл" },
                           { "number": 3, "text": "Писать цикл с условием" } ] },
-  "signals": [] } }
+  "signals": [], "warnings": [ "teaching_notes_not_taken" ] } }
 ```
+
+`warnings` — мягкие проверки порядка у занятия лёгкого старта: отметки идут,
+а указания (`teaching_notes_not_taken`) или материал
+(`lesson_material_not_taken`) не взяты. Это не отказ: отметка записана
+(решение владельца, learning-services#407). У полного старта всё выдано сразу,
+и список пуст.
 
 Отметка сразу пишется в занятие: страница курса показывает её, а перенос на
 следующее занятие берёт её и из брошенного занятия. Повторная отметка той же

@@ -534,6 +534,11 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			"student.start_lesson", student.start_lesson(lesson=с_квизом)
 		)["session"]
 		self.сверить("student.lesson_session", student.lesson_session(lesson=с_квизом))
+		# Лёгкий старт по тому же уроку продолжает то же занятие (#410).
+		self.сверить("student.start_lesson", student.start_lesson(lesson=с_квизом, brief=True))
+		self.сверить("student.lesson_material", student.lesson_material(session=занятие))
+		self.сверить("student.teaching_notes", student.teaching_notes(session=занятие))
+		self.сверить("student.student_context", student.student_context(session=занятие))
 		self.сверить(
 			"student.mark_objective",
 			student.mark_objective(session=занятие, objective=1, status="touched", note="с примера"),
