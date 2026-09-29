@@ -75,3 +75,8 @@ def подписать(user: str, course: str) -> None:
 	frappe.get_doc({"doctype": "LMS Course Interest", "user": user, "course": course}).insert(
 		ignore_permissions=True
 	)
+
+
+def отписать(user: str, course: str) -> None:
+	"""Снимает подписку на письмо о выходе. Нет подписки — ничего не меняет."""
+	frappe.db.delete("LMS Course Interest", {"user": user, "course": course})

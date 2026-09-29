@@ -175,6 +175,8 @@
 
 	.author-page .status { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--ch1s); color: var(--ch1); }
 	.author-page .status.live { background: var(--accent-soft); color: var(--accent); }
+	/* Анонс: в каталоге, но не открыт (learning-services#391). */
+	.author-page .status.soon { background: var(--warn-soft); color: var(--warn); }
 
 	.author-page .notice {
 		position: sticky; top: 8px; z-index: 5; display: none; align-items: center; gap: 12px;
@@ -565,7 +567,7 @@
 		<button type="button" class="more-link" id="course-summary-more" aria-controls="course-summary" aria-expanded="false" hidden>Описание целиком</button>
 		{% endif %}
 		<p class="muted" style="margin: 6px 0 0; font-size: 13px;">
-			<span class="status{% if course.published %} live{% endif %}">{{ "опубликован" if course.published else "черновик" }}</span>
+			<span class="status{% if course.upcoming %} soon{% elif course.published %} live{% endif %}">{{ "анонс" if course.upcoming else ("опубликован" if course.published else "черновик") }}</span>
 			изменён {{ frappe.utils.pretty_date(course.revision) }}
 		</p>
 	</div>
@@ -694,7 +696,7 @@
 		{% for к in courses %}
 		<li><a href="{{ page_url }}?course={{ к.id | urlencode }}">
 			<strong>{{ к.title | e }}</strong>
-			<span class="status{% if к.published %} live{% endif %}">{{ "опубликован" if к.published else "черновик" }}</span>
+			<span class="status{% if к.upcoming %} soon{% elif к.published %} live{% endif %}">{{ "анонс" if к.upcoming else ("опубликован" if к.published else "черновик") }}</span>
 			<span class="muted" style="font-size: 14px;">{{ (к.summary or "") | e }}</span>
 			<span class="muted num" style="font-size: 13px;">уроков {{ к.lessons_total }}</span>
 			<span class="course-attention">

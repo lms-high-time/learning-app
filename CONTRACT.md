@@ -408,9 +408,11 @@ Frappe заворачивает результат whitelisted-метода в �
 ## `lms_frappe_app.api.student.notify_when_released`
 
 Подписывает ученика на письмо о выходе анонсированного курса
-(learning-services#389). Только `POST`.
+(learning-services#389) или снимает подписку (learning-services#391). Только
+`POST`.
 
-**Параметры:** `course`.
+**Параметры:** `course`, `notify` (необязательный, по умолчанию `true`) —
+`false` снимает подписку.
 
 ```json
 { "ok": true, "data": { "course": "ops-junctions",
@@ -418,10 +420,11 @@ Frappe заворачивает результат whitelisted-метода в �
 ```
 
 Повторный вызов ничего не меняет. Письмо уходит один раз, когда куратор
-открывает курс `publish_course`.
+открывает курс `publish_course`. Отписаться можно и от курса, который уже не
+анонс; в ответе тогда `notify: false`.
 
-**Отказы:** `course_not_upcoming` — курс не анонсирован: он открыт, снят или
-его нет.
+**Отказы:** `course_not_upcoming` — подписка на курс, который не анонсирован:
+он открыт, снят или его нет.
 
 ## `lms_frappe_app.api.student.course_outline`
 
