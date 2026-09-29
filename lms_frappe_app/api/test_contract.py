@@ -388,6 +388,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 				title="Резюме проекта",
 				blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой"}],
 				note="Первая версия",
+				description="Резюме проекта: цель одной фразой",
 			),
 		)["template"]
 		self.сверить("authoring.list_artifact_templates", authoring.list_artifact_templates())

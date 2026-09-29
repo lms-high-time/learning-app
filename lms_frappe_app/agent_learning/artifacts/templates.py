@@ -103,8 +103,14 @@ def записать_шаблон(
 	extends_version=None,
 	правки=None,
 	renamed=None,
+	description=None,
 ) -> dict:
-	"""Новая версия шаблона. Контракт — у `api.authoring.set_artifact_template`."""
+	"""Новая версия шаблона. Контракт — у `api.authoring.set_artifact_template`.
+
+	Описание у версии своё и от родителя не наследуется. `Why:` у наследника
+	оно говорит, чем он отличается от базы, а базовое описание сказало бы
+	про другой документ.
+	"""
 	ключ = ключ_шаблона(template)
 	if not КЛЮЧ_ШАБЛОНА.match(ключ):
 		raise Отказ(
@@ -142,6 +148,7 @@ def записать_шаблон(
 			"doctype": DOCTYPE,
 			"template": ключ,
 			"title": str(title).strip(),
+			"description": str(description or "").strip() or None,
 			"layout": layout or "sections",
 			"blocks": json.dumps(блоки, ensure_ascii=False),
 			"canvas": json.dumps(холст_шаблона, ensure_ascii=False) if холст_шаблона else None,
@@ -217,6 +224,7 @@ def шаблон(template: str, version=None) -> dict:
 			"template",
 			"version",
 			"title",
+			"description",
 			"layout",
 			"blocks",
 			"canvas",
@@ -237,6 +245,7 @@ def шаблон(template: str, version=None) -> dict:
 		"template": запись.template,
 		"version": запись.version,
 		"title": запись.title,
+		"description": запись.description or None,
 		"layout": запись.layout or "sections",
 		"blocks": _json(запись.blocks) or [],
 		"canvas": холст(запись.canvas),
@@ -259,13 +268,16 @@ def _наследует(запись) -> dict | None:
 def шаблоны() -> list[dict]:
 	"""Последняя версия каждого шаблона и курсы, привязанные к нему.
 
+	Описание — у каждого: по нему агент выбирает шаблон, когда названия
+	похожи, — «реестр рисков» и «реестр рисков стройки».
+
 	Курсы — по действующим схемам документов, с версией шаблона, которую
 	каждый закрепил: по ним автор видит, кого затронет новая версия.
 	"""
 	последние: dict[str, dict] = {}
 	for запись in frappe.get_all(
 		DOCTYPE,
-		fields=["template", "version", "title", "note", "extends", "extends_version"],
+		fields=["template", "version", "title", "description", "note", "extends", "extends_version"],
 		order_by="template asc, version desc",
 	):
 		последние.setdefault(запись.template, запись)
@@ -300,6 +312,7 @@ def шаблоны() -> list[dict]:
 		{
 			"template": ключ,
 			"title": запись.title,
+			"description": запись.description or None,
 			"version": запись.version,
 			"note": запись.note or None,
 			"extends": _наследует(запись),

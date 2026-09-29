@@ -109,7 +109,8 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 
 	def test_документ_показывает_шаблон_и_правки_курса(self):
 		"""Шаблон, его версия у курса, вышедшая новая, база наследника и правки
-		курса словами; у схемы целиком — ни шаблона, ни правок (learning-services#384)."""
+		курса словами; у схемы целиком — ни шаблона, ни правок (learning-services#384).
+		Описание — закреплённой версии, а не последней (learning-services#387)."""
 		база = f"base-{frappe.generate_hash(length=6)}"
 		authoring.set_artifact_template(
 			template=база,
@@ -126,6 +127,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 			title="Реестр",
 			extends=база,
 			overlay={"blocks": {"review": {"hint": "Сверьте"}}},
+			description="Реестр со сверкой: подсказка сверки своя",
 		)
 		привязка = authoring.set_course_artifact_template(
 			course=self.курс,
@@ -138,7 +140,12 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		)
 		self.assertTrue(привязка["ok"], привязка)
 		authoring.set_artifact_template(
-			template=наследник, title="Реестр", extends=база, overlay={}, note="Без подсказки сверки"
+			template=наследник,
+			title="Реестр",
+			extends=база,
+			overlay={},
+			note="Без подсказки сверки",
+			description="Реестр как в базе",
 		)
 
 		с = self.сведения_для(self.куратор, course=self.курс)
@@ -150,6 +157,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 			{
 				"template": наследник,
 				"version": 1,
+				"description": "Реестр со сверкой: подсказка сверки своя",
 				"latest": 2,
 				"extends": {"template": база, "version": 1},
 				"edits": [

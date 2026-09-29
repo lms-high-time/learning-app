@@ -8,7 +8,8 @@
 ученика та же, что у схемы целиком, закреплённая версия, отвязка схемой
 целиком и патч, переводящий готовые документы на шаблоны. Дальше —
 наследник (#375), переход на новую версию с переименованиями (#376), его
-предпросмотр и правки курса в черновике (#383), проверка каталога (#377).
+предпросмотр и правки курса в черновике (#383), проверка каталога (#377),
+описание версии (#387).
 """
 
 import json
@@ -100,6 +101,36 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		документ = frappe.get_doc("Agent Artifact Template", self.шаблон()["id"])
 		документ.title = "Другое"
 
+		with self.assertRaises(frappe.ValidationError):
+			документ.save()
+
+	def test_описание_у_версии_своё(self):
+		"""Описание хранится без пробелов по краям, отдаётся обоими чтениями,
+		пустое — `null`, после записи не меняется, и наследник его от родителя
+		не получает (learning-services#387)."""
+		первая = self.шаблон(description="  Журнал событий: что случилось и откуда \n")
+		вторая = self.шаблон(description="   ")
+		наследник = self.наследник()
+		описание = "Журнал событий: что случилось и откуда"
+
+		self.assertEqual(
+			frappe.db.get_value("Agent Artifact Template", первая["id"], "description"), описание
+		)
+		self.assertIsNone(frappe.db.get_value("Agent Artifact Template", вторая["id"], "description"))
+		прежняя = authoring.artifact_template(template=self.ключ, version=1)["data"]
+		self.assertEqual(прежняя["description"], описание)
+		self.assertIsNone(authoring.artifact_template(template=self.ключ)["data"]["description"])
+		self.assertIsNone(authoring.artifact_template(template=наследник["template"])["data"]["description"])
+
+		self.наследник(description="Журнал объекта: без итога, события на объекте")
+		шаблоны = {т["template"]: т for т in authoring.list_artifact_templates()["data"]["templates"]}
+		self.assertIsNone(шаблоны[self.ключ]["description"])
+		self.assertEqual(
+			шаблоны[наследник["template"]]["description"], "Журнал объекта: без итога, события на объекте"
+		)
+
+		документ = frappe.get_doc("Agent Artifact Template", первая["id"])
+		документ.description = "Другое"
 		with self.assertRaises(frappe.ValidationError):
 			документ.save()
 

@@ -8,6 +8,7 @@
   "template",
   "version",
   "title",
+  "description",
   "layout",
   "note",
   "blocks",
@@ -44,6 +45,12 @@
    "in_list_view": 1,
    "label": "Название",
    "reqd": 1
+  },
+  {
+   "description": "Для какого документа шаблон, у наследника — чем он отличается от базы; агент выбирает шаблон по нему. От базы не наследуется",
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Описание"
   },
   {
    "default": "sections",
@@ -110,7 +117,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-29 19:00:00.000000",
+ "modified": "2026-09-29 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Artifact Template",
