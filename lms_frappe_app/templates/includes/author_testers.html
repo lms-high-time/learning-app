@@ -75,7 +75,7 @@
 	{% endif %}
 </section>
 
-<script type="application/json" id="testers-config">{{ {"course": course.id, "csrf": csrf_token, "methods": tester_methods} | tojson }}</script>
+<script type="application/json" id="testers-config">{{ {"course": course.id, "csrf": csrf_token, "methods": tester_methods, "course_url": frappe.utils.get_url("/lms/courses/" ~ course.id)} | tojson }}</script>
 <script>
 {% raw %}
 (function () {
@@ -85,7 +85,7 @@
 	const errorEl = form.querySelector('[data-error]');
 	const KEY = 'author-testers-result';
 	const REASONS = {
-		user_not_found: 'нет учётной записи — пусть зарегистрируется, и добавьте снова',
+		user_not_found: 'нет учётной записи: пусть зарегистрируется, потом добавьте снова',
 		already_tester: 'уже тестер',
 		already_enrolled: 'уже учится на курсе, тестером не станет',
 	};
@@ -125,7 +125,7 @@
 		if (added.length) {
 			const silent = added.filter(a => !a.notified);
 			parts.push('<strong>Доступ открыт: ' + added.length + '.</strong> ' + (silent.length
-				? 'Почта на платформе не настроена — сообщите тестерам сами и пришлите ссылку на курс.'
+				? 'Почта на платформе не настроена, приглашения не ушли. Пришлите тестерам ссылку на курс сами: <code>' + escape(cfg.course_url) + '</code>'
 				: 'Приглашения ушли на почту.'));
 		}
 		const skipped = data.skipped || [];
