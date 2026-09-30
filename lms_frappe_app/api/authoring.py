@@ -14,12 +14,14 @@ import json
 from urllib.parse import quote
 
 import frappe
+from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import (
 	announcements,
 	course_builder,
 	course_map,
 	directives,
+	homework,
 	normalizer,
 	notes,
 	notices,
@@ -323,7 +325,7 @@ def remove_lesson(lesson: str) -> dict:
 		frappe.delete_doc("Agent Lesson Directive", директива, ignore_permissions=True)
 	# Сдач по уроку нет — проверено следами выше, задание уходит вместе с уроком.
 	if задание := _имя_задания(lesson):
-		frappe.delete_doc("Agent Lesson Homework", задание, ignore_permissions=True)
+		frappe.delete_doc(homework.ЗАДАНИЕ, задание, ignore_permissions=True)
 	frappe.delete_doc("Course Lesson", lesson)
 	return {"removed": lesson, "chapter": глава, "lessons": structure.уроки_главы(глава)}
 
@@ -743,7 +745,7 @@ def remove_question(lesson: str, question: str) -> dict:
 # --- домашнее задание (learning-services#439) ---
 
 ЗАДАНИЕ_УЖЕ_ЕСТЬ = "homework_exists"
-ЗАДАНИЯ_НЕТ = "homework_missing"
+ЗАДАНИЯ_У_УРОКА_НЕТ = "homework_missing"
 ЗАДАНИЕ_СДАЮТ = "homework_in_use"
 ПОЛЯ_ЗАДАНИЯ_АВТОРА = ("title", "description", "answer_mode", "due_mode", "due_days", "due_date")
 
@@ -753,13 +755,13 @@ def _задание_автора(документ) -> dict:
 
 
 def _имя_задания(lesson: str) -> str | None:
-	return frappe.db.get_value("Agent Lesson Homework", {"lesson": lesson})
+	return frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson})
 
 
 def _задание_урока(lesson: str):
 	if имя := _имя_задания(lesson):
-		return frappe.get_doc("Agent Lesson Homework", имя)
-	raise Отказ(ЗАДАНИЯ_НЕТ, "У урока нет домашнего задания", lesson=lesson)
+		return frappe.get_doc(homework.ЗАДАНИЕ, имя)
+	raise Отказ(ЗАДАНИЯ_У_УРОКА_НЕТ, "У урока нет домашнего задания", lesson=lesson)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -784,7 +786,7 @@ def add_homework(
 		raise Отказ(ЗАДАНИЕ_УЖЕ_ЕСТЬ, "У урока уже есть домашнее задание: правьте его", lesson=lesson, homework=имя)
 	документ = frappe.get_doc(
 		{
-			"doctype": "Agent Lesson Homework",
+			"doctype": homework.ЗАДАНИЕ,
 			"lesson": lesson,
 			"title": title,
 			"description": description,
@@ -842,10 +844,12 @@ def remove_homework(lesson: str) -> dict:
 		raise Отказ(
 			ЗАДАНИЕ_СДАЮТ, "По заданию уже есть сдачи: его можно только переписать", lesson=lesson, submissions=сдач
 		)
-	frappe.delete_doc("Agent Lesson Homework", документ.name)
+	frappe.delete_doc(homework.ЗАДАНИЕ, документ.name)
 	# Why: удаление записи не двигает ничьего `modified`, и `ревизия` не заметила
-	# бы, что задания больше нет, — зеркало автора осталось бы старым.
-	frappe.get_doc("Course Lesson", lesson).save()
+	# бы, что задания больше нет, — зеркало автора осталось бы старым. Отметка
+	# `modified`, а не `save()` урока: сохранение гоняло бы проверки и хуки
+	# Frappe Learning ради одной метки времени.
+	frappe.db.set_value("Course Lesson", lesson, "modified", now_datetime())
 	return {"lesson": lesson, "removed": True}
 
 
@@ -1344,7 +1348,7 @@ def ревизия(course: str) -> str:
 		источники.append(("LMS Question", {"name": ["in", вопросы]}))
 	if уроки:
 		источники.append(("Agent Lesson Directive", {"lesson": ["in", уроки]}))
-		источники.append(("Agent Lesson Homework", {"lesson": ["in", уроки]}))
+		источники.append((homework.ЗАДАНИЕ, {"lesson": ["in", уроки]}))
 	отметки = [
 		отметка
 		for doctype, фильтры in источники
@@ -1382,7 +1386,7 @@ def get_lesson(lesson: str) -> dict:
 		"directive": _действующая_директива(lesson),
 		"course_directive": _действующая_директива_курса(сведения.course),
 		"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
-		"homework": _задание_автора(frappe.get_doc("Agent Lesson Homework", задание))
+		"homework": _задание_автора(frappe.get_doc(homework.ЗАДАНИЕ, задание))
 		if (задание := _имя_задания(lesson))
 		else None,
 	}
@@ -1512,7 +1516,7 @@ def _уроки_главы(глава: str, предел: int) -> list[dict]:
 		{
 			запись.lesson: {"title": запись.title, "answer_mode": запись.answer_mode, "due_mode": запись.due_mode}
 			for запись in frappe.get_all(
-				"Agent Lesson Homework",
+				homework.ЗАДАНИЕ,
 				filters={"lesson": ("in", уроки)},
 				fields=["lesson", "title", "answer_mode", "due_mode"],
 			)
