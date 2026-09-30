@@ -16,6 +16,7 @@ from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import announcements, directives, quiz
+from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import signals as сигналы
 from lms_frappe_app.agent_learning.access import (
 	НЕ_ЗАЧИСЛЕН,
@@ -27,6 +28,8 @@ from lms_frappe_app.agent_learning.access import (
 	политика_квиза_для_курса,
 )
 from lms_frappe_app.agent_learning.artifacts import files
+# Отдельным именем: параметр `files` в `submit_homework` затеняет модуль.
+from lms_frappe_app.agent_learning.artifacts.files import из_base64
 from lms_frappe_app.agent_learning.artifacts.document import (
 	_артефакт_целиком,
 	_блоки_урока,
@@ -807,6 +810,117 @@ def upload_artifact_file(
 	пространство = пространства.пространство_курса(ученик, course, space)
 	_требовать_доступ_к_курсу(ученик, course)
 	return _положить_файл(ученик, course, пространство, artifact, key, имя, данные)
+
+
+# --- домашние задания (learning-services#439) ---
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def homework(lesson: str, space: str | None = None) -> dict:
+	"""Задание урока и сдача ученика в пространстве — для страницы урока и окна файлов.
+
+	У урока без задания — `homework: null`, а не отказ: страница урока зовёт
+	метод всегда.
+	"""
+	ученик = текущий_пользователь()
+	курс = _курс_урока(lesson)
+	_требовать_доступ_к_курсу(ученик, курс)
+	пространство = пространства.пространство_курса(ученик, курс, space)
+	задание = домашка.задание_урока(lesson)
+	сдача = None
+	if задание and (имя := домашка.найти_сдачу(задание.name, ученик, пространство)):
+		сдача = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, имя), с_версиями=True)
+	return {
+		"space": пространства.наружу(пространство),
+		"lesson_url": домашка.адрес_урока(lesson, курс),
+		"homework": домашка.описание_задания(задание) if задание else None,
+		"submission": сдача,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def my_homework(course: str | None = None, lesson: str | None = None, space: str | None = None) -> dict:
+	"""Домашки ученика в пространстве. С `lesson` — одна, с заданием, ответом и журналом."""
+	ученик = текущий_пользователь()
+	курс_фильтра = _курс_урока(lesson) if lesson else course
+	if курс_фильтра:
+		_требовать_доступ_к_курсу(ученик, курс_фильтра)
+		пространство = пространства.пространство_курса(ученик, курс_фильтра, space)
+	else:
+		пространство = _названное_или_текущее(ученик, space)
+	фильтры = {"member": ученик, "organization": пространство or ("is", "not set")}
+	if lesson:
+		фильтры["lesson"] = lesson
+	elif course:
+		уроки = frappe.get_all("Course Lesson", filters={"course": course}, pluck="name")
+		if not уроки:
+			return {"space": пространства.наружу(пространство), "items": []}
+		фильтры["lesson"] = ("in", уроки)
+	строки = []
+	адреса: dict[str, str | None] = {}
+	доступ: dict[str, bool] = {}
+	for имя in frappe.get_all(домашка.СДАЧА, filters=фильтры, pluck="name", order_by="modified desc"):
+		сдача = frappe.get_doc(домашка.СДАЧА, имя)
+		курс = курс_урока(сдача.lesson)
+		# Why: без записи на курс задания не видно нигде — и в общем списке тоже,
+		# хотя сдача по курсу осталась.
+		if курс not in доступ:
+			доступ[курс] = доступен_курс(ученик, курс)[0]
+		if not доступ[курс]:
+			continue
+		if сдача.lesson not in адреса:
+			адреса[сдача.lesson] = домашка.адрес_урока(сдача.lesson, курс)
+		задание = frappe.get_doc(домашка.ЗАДАНИЕ, сдача.homework)
+		строка = {
+			"course": курс,
+			"course_title": frappe.get_cached_value("LMS Course", курс, "title"),
+			"lesson": сдача.lesson,
+			"lesson_title": frappe.get_cached_value("Course Lesson", сдача.lesson, "title"),
+			"lesson_url": адреса[сдача.lesson],
+			"title": задание.title,
+			**домашка.описание_сдачи(сдача, полное=False),
+			"last_comment": домашка.последний_комментарий(сдача),
+		}
+		if lesson:
+			строка["homework"] = домашка.описание_задания(задание)
+			строка["submission"] = домашка.описание_сдачи(сдача)
+		строки.append(строка)
+	return {"space": пространства.наружу(пространство), "items": строки}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def submit_homework(
+	lesson: str,
+	answer: str | None = None,
+	space: str | None = None,
+	remove_files=None,
+	files=None,
+) -> dict:
+	"""Сохраняет ответ на домашку: одна версия на вызов.
+
+	`answer` не передан — текст остаётся прежним: окно файлов агента текст не
+	трогает. Новые файлы — полями `file` формы (страница урока) или списком
+	`files` из `{name, data}` в base64 (окно загрузки MCP); `remove_files` —
+	`id` файлов, которые убрать из ответа. Убранные файлы не удаляются: на них
+	ссылаются прежние версии.
+	"""
+	ученик = текущий_пользователь()
+	курс = _курс_урока(lesson)
+	_требовать_доступ_к_курсу(ученик, курс)
+	пространство = пространства.пространство_курса(ученик, курс, space)
+	новые = [(ф.get("name") or "file", из_base64(ф.get("data"))) for ф in список(files)]
+	if frappe.request and frappe.request.files:
+		новые += [(ф.filename or "file", ф.stream.read()) for ф in frappe.request.files.getlist("file")]
+	документ = домашка.сохранить(
+		ученик, lesson, пространство, answer=answer, новые=новые, убрать=список(remove_files)
+	)
+	return {
+		"space": пространства.наружу(пространство),
+		"submission": домашка.описание_сдачи(документ, с_версиями=True),
+	}
 
 
 @frappe.whitelist(methods=["POST"])

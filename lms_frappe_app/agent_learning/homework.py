@@ -254,7 +254,8 @@ def _файлы(имена: list[str]) -> list[dict]:
 
 
 def _время(значение) -> str | None:
-	return str(значение) if значение else None
+	"""Метка времени, как во всём контракте: ISO, без зоны, в поясе сайта."""
+	return get_datetime(значение).isoformat() if значение else None
 
 
 def просрочена(документ) -> bool:

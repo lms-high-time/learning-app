@@ -300,9 +300,11 @@ Frappe заворачивает результат whitelisted-метода в �
 документы — у пространства: личного или организации, в которой он состоит.
 Параметр `space` — имя организации или `personal`; чужое или приостановленное
 пространство — отказ `space_not_available`. Без `space` методы списков
-(`list_my_courses`, `list_catalog`, `enroll`, `get_my_progress`) работают в
+(`list_my_courses`, `list_catalog`, `enroll`, `get_my_progress`, `my_homework`
+без курса и урока) работают в
 **выбранном** пространстве (`my_spaces`, `set_space`), а методы курса
 (`start_lesson`, `artifact`, `update_artifact`, `upload_artifact_file`,
+`homework`, `submit_homework`, `my_homework` с `course` или `lesson`,
 `course_map`, `lesson_entry`) — в пространстве открытого занятия по курсу,
 иначе в выбранном, если курс в нём есть, иначе в личном. `Why:` агент, начавший
 урок в компании, пишет документ туда же, не повторяя `space`. Названное
@@ -1493,6 +1495,126 @@ ISO 8601 со смещением часового пояса сайта; при 
 `artifact_file_type` (с `accept` и `received`) — расширение не из допустимых;
 `artifact_file_too_large` (с `max_bytes` и `size`) — больше
 `artifact_file_max_mb` из `Agent Learning Settings`.
+
+## `lms_frappe_app.api.student.homework`
+
+Домашнее задание урока и сдача ученика в пространстве (learning-services#439).
+Зовут страница урока и окно загрузки файлов в чате.
+
+**Параметры:** `lesson`, `space` (необязательный) — чья сдача.
+
+```json
+{ "ok": true, "data": {
+  "space": "org-1", "lesson_url": "/lms/courses/course-p3/learn/2-1",
+  "homework": { "lesson": "lesson-6", "title": "Встреча со спонсором",
+    "description": "Проведите встречу и опишите итог…", "answer_mode": "text_and_files",
+    "due": { "mode": "relative", "days": 5, "date": null } },
+  "submission": { "id": "a1b2c3d4e5", "status": "Submitted",
+    "due_at": "2026-10-06T14:02:11", "overdue": false, "version": 2,
+    "assigned_at": "2026-10-01T14:02:11", "submitted_at": "2026-10-02T09:15:40",
+    "answer": "Встретился, договорились о бюджете…",
+    "files": [ { "id": "f1a2b3c4d5", "name": "protocol.pdf", "type": "pdf", "size": 48213,
+                 "uploaded_at": "2026-10-02T09:15:40", "url": "/private/files/protocol.pdf" } ],
+    "history": [
+      { "event": "assigned", "by": "pupil@example.com", "at": "2026-10-01T14:02:11",
+        "version": null, "comment": null, "due_at": "2026-10-06T14:02:11" },
+      { "event": "submitted", "by": "pupil@example.com", "at": "2026-10-02T09:15:40",
+        "version": 2, "comment": null, "due_at": null } ],
+    "versions": [ { "version": 1, "saved_at": "2026-10-01T20:00:00",
+                    "answer": "Черновик…", "files": [] },
+                  { "version": 2, "saved_at": "2026-10-02T09:15:40",
+                    "answer": "Встретился, договорились о бюджете…", "files": [ { "id": "f1a2b3c4d5",
+                      "name": "protocol.pdf", "type": "pdf", "size": 48213,
+                      "uploaded_at": "2026-10-02T09:15:40", "url": "/private/files/protocol.pdf" } ] } ] } } }
+```
+
+**Задание** — одно на урок, от автора, одинаковое для всех. `answer_mode` —
+какие поля есть у ответа: `text`, `files` или `text_and_files`. `due.mode` —
+`none` (без срока), `relative` (`days` дней после закрытия урока) или
+`absolute` (до конца дня `date` по времени платформы). У урока без задания
+`homework: null` — это не отказ: страница урока зовёт метод всегда.
+
+**Сдача** — одна на задание, ученика и пространство; `null`, пока ученик не
+сохранял ответ и урок не закрывался. Задание выдаётся закрытием урока — сданным
+квизом или `complete_lesson`: появляется сдача `Assigned` с `assigned_at` и
+сроком. Статусы: `Assigned` — выдана, `Submitted` — сдана, `Returned` — на
+доработке, `Accepted` — принята. `due_at` — выставленный срок; относительный
+считается при выдаче и потом не пересчитывается. `overdue` — признак, а не
+статус: срок прошёл, а статус `Assigned` или `Returned`. `history` — журнал
+событий `assigned`, `submitted`, `returned`, `accepted`, `reopened`; `comment`
+— у действий куратора. `versions` — снимок ответа на каждое сохранение, файлы
+старых версий остаются доступными. `id` файла передаётся в `remove_files`
+метода `submit_homework`.
+
+Домашка ничего не блокирует: ни следующий урок, ни завершение курса.
+
+**Отказы:** `lesson_not_found`, `not_enrolled`, `organization_suspended`,
+`space_not_available`, `course_not_in_space`.
+
+## `lms_frappe_app.api.student.my_homework`
+
+Домашки ученика в пространстве — со статусами, сроками и последним
+комментарием куратора.
+
+**Параметры:** `course` (необязательный) — только этого курса; `lesson`
+(необязательный) — одна домашка урока целиком; `space` (необязательный).
+
+```json
+{ "ok": true, "data": { "space": "org-1", "items": [
+  { "id": "a1b2c3d4e5", "course": "course-p3", "course_title": "Управление проектами",
+    "lesson": "lesson-6", "lesson_title": "Спонсор проекта",
+    "lesson_url": "/lms/courses/course-p3/learn/2-1", "title": "Встреча со спонсором",
+    "status": "Returned", "due_at": "2026-10-06T14:02:11", "overdue": false,
+    "version": 2, "last_comment": "Не хватает решения по бюджету" } ] } }
+```
+
+Свежие сверху. С `lesson` строка одна и несёт ещё `homework` — задание, как у
+`homework`, — и `submission` — сдачу целиком, без `versions`. Домашки курсов,
+на которые ученик больше не записан, в перечень не попадают.
+
+**Отказы:** `lesson_not_found`, `not_enrolled`, `organization_suspended`,
+`space_not_available`, `course_not_in_space`.
+
+## `lms_frappe_app.api.student.submit_homework`
+
+Сохраняет ответ на домашку — сдаёт или правит. Каждый вызов — новая версия и
+статус `Submitted`; сохранение до закрытия урока заводит сдачу сразу в
+`Submitted`.
+
+**Параметры:** `lesson`; `answer` (необязательный) — текст ответа целиком, не
+передан — остаётся прежним; `space` (необязательный); `remove_files`
+(необязательный) — `id` файлов, которые убрать из ответа; новые файлы — полями
+`file` формы `multipart/form-data` (так шлёт страница урока) или списком
+`files` из `{ "name": "protocol.pdf", "data": "<base64>" }` (так передаёт
+MCP-сервис из окна загрузки в чате). Убранный файл не удаляется: на него
+ссылаются прежние версии.
+
+```json
+{ "ok": true, "data": { "space": "org-1",
+  "submission": { "id": "a1b2c3d4e5", "status": "Submitted", "due_at": null,
+    "overdue": false, "version": 1, "assigned_at": null,
+    "submitted_at": "2026-10-02T09:15:40", "answer": "Встретился…",
+    "files": [],
+    "history": [ { "event": "submitted", "by": "pupil@example.com", "at": "2026-10-02T09:15:40",
+                   "version": 1, "comment": null, "due_at": null } ],
+    "versions": [ { "version": 1, "saved_at": "2026-10-02T09:15:40",
+                    "answer": "Встретился…", "files": [] } ] } } }
+```
+
+Ответ не пустой — есть текст или файл — и несёт только поля из `answer_mode`.
+Неполный ответ (`text_and_files` без файлов) принимается: оценки нет, его
+видит и возвращает куратор. Пределы: не больше 10 файлов в ответе, размер
+файла — `artifact_file_max_mb` из `Agent Learning Settings`, за одно
+сохранение — не больше 30 МБ новых файлов; тип — любой, кроме запрещённых
+Frappe.
+
+**Отказы:** `lesson_not_found`, `not_enrolled`, `organization_suspended`,
+`space_not_available`, `course_not_in_space`; `no_homework` — у урока нет
+задания; `empty_answer` — нет ни текста, ни файлов; `answer_mode` (с
+`answer_mode`) — в ответе поле, которого у задания нет; `too_many_files` (с
+`limit`); `file_too_large` (с `file` и `limit_mb`); `answer_too_large` (с
+`limit_mb`) — новых файлов больше предела сохранения; `file_rejected` (с
+`file`) — Frappe не принял файл; `accepted_locked` — домашку уже приняли.
 
 ## `lms_frappe_app.api.student.remember`
 
