@@ -1,6 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
+import re
 from datetime import date
 
 from frappe.model.document import Document
@@ -11,6 +12,7 @@ from lms_frappe_app.agent_learning.errors import Отказ
 
 НЕВЕРНЫЙ_ВИД_ОТВЕТА = "invalid_answer_mode"
 НЕВЕРНЫЙ_СРОК = "invalid_due"
+ФОРМАТ_ДАТЫ = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 class AgentLessonHomework(Document):
@@ -55,7 +57,11 @@ def _дата(значение) -> str:
 	`getdate` не годится: он угадывает формат и принимает то, чего контракт не
 	обещает.
 	"""
+	текст = str(значение)
+	# Why: `fromisoformat` с Python 3.11 принимает и `20300501`, и `2030-W01-1`.
+	if not ФОРМАТ_ДАТЫ.fullmatch(текст):
+		raise Отказ(НЕВЕРНЫЙ_СРОК, "Дата — ГГГГ-ММ-ДД", due_date=текст)
 	try:
-		return date.fromisoformat(str(значение)).isoformat()
-	except (TypeError, ValueError):
-		raise Отказ(НЕВЕРНЫЙ_СРОК, "Дата — ГГГГ-ММ-ДД", due_date=str(значение))
+		return date.fromisoformat(текст).isoformat()
+	except ValueError:
+		raise Отказ(НЕВЕРНЫЙ_СРОК, "Дата — ГГГГ-ММ-ДД", due_date=текст)
