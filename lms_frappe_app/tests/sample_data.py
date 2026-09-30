@@ -222,6 +222,19 @@ def создать_занятие(student: str, lesson: str) -> str:
 	).insert(ignore_permissions=True).name
 
 
+def создать_домашку(lesson: str, **поля):
+	"""Домашнее задание урока (learning-services#439); поля по умолчанию — без срока."""
+	return frappe.get_doc(
+		{
+			"doctype": "Agent Lesson Homework",
+			"lesson": lesson,
+			"title": "Встреча со спонсором",
+			"description": "Проведите встречу и опишите итог.",
+			**поля,
+		}
+	).insert(ignore_permissions=True)
+
+
 def сдать_отчёт(session: str) -> dict:
 	"""Закрывает границу занятия: `covered` по всем целям урока.
 

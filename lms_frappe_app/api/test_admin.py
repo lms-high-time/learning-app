@@ -9,6 +9,7 @@ from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
 	создать_вопрос,
+	создать_домашку,
 	создать_квиз,
 	создать_куратора,
 	создать_организацию,
@@ -83,9 +84,7 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 
 	def test_сдачи_домашки_уходят_в_архив(self):
 		"""Повторное прохождение начинается с чистого листа (learning-services#439)."""
-		from lms_frappe_app.agent_learning.test_homework import задание
-
-		задание(self.урок)
+		создать_домашку(self.урок)
 		frappe.set_user(self.ученик)
 		сдача = student.submit_homework(lesson=self.урок, answer="Сделал")["data"]["submission"]["id"]
 		итог = self.сбросить()["data"]

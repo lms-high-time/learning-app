@@ -6,10 +6,10 @@ import base64
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning.test_homework import задание
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
+	создать_домашку,
 	привязать_урок,
 	создать_организацию,
 	создать_ученика,
@@ -30,7 +30,7 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.ученик = создать_ученика(f"hwa-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок {суффикс}")
 		self.курс = зачислить(self.ученик, self.урок)
-		задание(self.урок)
+		создать_домашку(self.урок)
 		frappe.set_user(self.ученик)
 
 	def test_сдача_текстом_и_файлом(self):
@@ -97,7 +97,7 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 	def test_без_записи_на_курс_задания_не_видно(self):
 		frappe.set_user("Administrator")
 		чужой = создать_урок(f"Чужой {frappe.generate_hash(length=4)}")
-		задание(чужой)
+		создать_домашку(чужой)
 		frappe.set_user(self.ученик)
 		for ответ in (
 			student.homework(lesson=чужой),
@@ -150,7 +150,7 @@ class IntegrationTestHomeworkStart(IntegrationTestCase):
 			{"doctype": "Course Lesson", "title": f"Урок 2 {суффикс}", "chapter": глава}
 		).insert(ignore_permissions=True).name
 		привязать_урок(глава, self.второй)
-		задание(self.первый, due_mode="relative", due_days=3)
+		создать_домашку(self.первый, due_mode="relative", due_days=3)
 		frappe.set_user(self.ученик)
 
 	def test_первый_урок_отдаёт_своё_задание(self):

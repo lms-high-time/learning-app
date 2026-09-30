@@ -5,10 +5,10 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import homework as домашка
-from lms_frappe_app.agent_learning.test_homework import задание
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
+	создать_домашку,
 	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
@@ -26,7 +26,7 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 		self.ученик = создать_ученика(f"hwp-{с}@example.com")
 		self.урок = создать_урок(f"Урок {с}")
 		зачислить(self.ученик, self.урок)
-		задание(self.урок)
+		создать_домашку(self.урок)
 		self.организация = создать_организацию(f"Орг {с}")
 		добавить_в_организацию(self.ученик, self.организация)
 		чужая = создать_организацию(f"Чужая {с}")
