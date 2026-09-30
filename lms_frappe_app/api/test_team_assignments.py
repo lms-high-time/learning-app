@@ -11,6 +11,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, nowdate
 
 from lms_frappe_app.agent_learning import notices
+from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import authoring, team
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
@@ -273,6 +274,17 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 		) as проверка:
 			self.задать([{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1}])
 		self.assertEqual(проверка.call_count, 1)
+
+	def test_повторное_сохранение_снова_проверяет_сроки(self):
+		"""Отметка «проверено» живёт одно сохранение: второй `save()` того же
+		объекта чужое задание не пропускает."""
+		назначение = frappe.get_doc("Course Allocation", self.назначение)
+		назначение.save(ignore_permissions=True)
+		чужое = создать_домашку(создать_урок(f"Чужой {frappe.generate_hash(length=6)}"))
+		назначение.set("homework_due", [{"homework": чужое.name, "due_mode": "relative", "due_days": 1}])
+		with self.assertRaises(Отказ) as отказ:
+			назначение.save(ignore_permissions=True)
+		self.assertEqual(отказ.exception.код, "homework_not_in_course")
 
 	def test_неверные_сроки(self):
 		for неверное in (

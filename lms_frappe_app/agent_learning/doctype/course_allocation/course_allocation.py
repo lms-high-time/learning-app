@@ -52,7 +52,8 @@ class CourseAllocation(Document):
 			# Список адресатов при назначении на всю организацию только
 			# вводит в заблуждение: состав считается на момент выдачи.
 			self.members = []
-		if not self.flags.сроки_домашек_проверены:
+		# Отметка метода — на одно сохранение: следующий `save()` проверяет снова.
+		if not self.flags.pop("сроки_домашек_проверены", False):
 			self.проверить_сроки_домашек()
 
 	def on_update(self):
@@ -102,10 +103,9 @@ class CourseAllocation(Document):
 
 		Зовётся и методом `team.update_allocation` до сохранения: у задания,
 		которого нет вовсе, Frappe иначе отказал бы проверкой ссылки раньше
-		`validate` — без кода контракта. Проверенное помечается флагом, и
-		`validate` второй раз не проверяет.
+		`validate` — без кода контракта. Метод помечает проверку флагом
+		`сроки_домашек_проверены`, и `validate` этого сохранения её не повторяет.
 		"""
-		self.flags.сроки_домашек_проверены = True
 		if not self.homework_due:
 			return
 		уроки_курса = frappe.get_all("Course Lesson", filters={"course": self.course}, pluck="name")

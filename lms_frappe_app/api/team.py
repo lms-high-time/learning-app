@@ -568,6 +568,7 @@ def update_allocation(
 	if сроки is not None:
 		назначение.set("homework_due", сроки)
 		назначение.проверить_сроки_домашек()
+		назначение.flags.сроки_домашек_проверены = True
 	назначение.save(ignore_permissions=True)
 	return {"id": назначение.name}
 
