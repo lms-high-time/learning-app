@@ -632,14 +632,20 @@ def отметить_урок_пройденным(запись) -> None:
 	# после коммита — зачёт квиза и закрытие урока не зависят от домашки: гонка
 	# за сдачу на MariaDB со снимочной изоляцией откатывает транзакцию целиком.
 	# В тестах — сразу: `now` Frappe выполняет вызов синхронно, мимо очереди.
-	frappe.enqueue(
-		"lms_frappe_app.agent_learning.homework.выдать_по_записи",
-		queue="short",
-		enqueue_after_commit=True,
-		now=frappe.in_test,
-		doctype=запись.doctype,
-		name=запись.name,
-	)
+	# Задача ставится только уроку с заданием, и сбой постановки не срывает
+	# закрытие: `enqueue` синхронно проверяет размер очереди (`QueueOverloaded`).
+	if frappe.db.exists("Agent Lesson Homework", {"lesson": запись.lesson}):
+		try:
+			frappe.enqueue(
+				"lms_frappe_app.agent_learning.homework.выдать_по_записи",
+				queue="short",
+				enqueue_after_commit=True,
+				now=frappe.in_test,
+				doctype=запись.doctype,
+				name=запись.name,
+			)
+		except Exception:
+			frappe.log_error(title="Домашка не поставлена в очередь выдачи (learning-services#439)")
 	уже = frappe.db.exists(
 		"LMS Course Progress", {"member": запись.student, "lesson": запись.lesson}
 	)

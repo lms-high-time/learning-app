@@ -157,6 +157,7 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 
 		from lms_frappe_app.agent_learning import quiz
 
+		создать_домашку(self.урок)
 		запись = занятие(self.ученик, self.урок)
 		with patch.object(frappe, "enqueue") as очередь:
 			quiz.отметить_урок_пройденным(запись)
@@ -165,6 +166,32 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		self.assertEqual(
 			{к: очередь.call_args.kwargs[к] for к in ("enqueue_after_commit", "doctype", "name")},
 			{"enqueue_after_commit": True, "doctype": "Agent Learning Session", "name": запись.name},
+		)
+
+	def test_урок_без_задания_не_ставит_задачу(self):
+		from unittest.mock import patch
+
+		from lms_frappe_app.agent_learning import quiz
+
+		with patch.object(frappe, "enqueue") as очередь:
+			quiz.отметить_урок_пройденным(занятие(self.ученик, self.урок))
+		очередь.assert_not_called()
+
+	def test_сбой_очереди_не_срывает_закрытие_урока(self):
+		from unittest.mock import patch
+
+		from lms_frappe_app.agent_learning import quiz
+
+		создать_домашку(self.урок)
+		with (
+			patch.object(frappe, "enqueue", side_effect=RuntimeError("очередь переполнена")),
+			patch.object(frappe, "log_error") as журнал,
+		):
+			quiz.отметить_урок_пройденным(занятие(self.ученик, self.урок))
+		журнал.assert_called_once()
+		self.assertEqual(
+			frappe.db.get_value("LMS Course Progress", {"member": self.ученик, "lesson": self.урок}, "status"),
+			"Complete",
 		)
 
 	def test_фоновая_выдача_повторяет_после_взаимоблокировки(self):
