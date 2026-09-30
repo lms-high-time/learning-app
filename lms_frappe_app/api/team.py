@@ -12,8 +12,11 @@
 Проверка — явная в каждом методе: `frappe.get_all` права не применяет.
 """
 
+import json
+
 import frappe
 
+from lms_frappe_app.agent_learning import homework
 from lms_frappe_app.agent_learning.access import КУРС_ГОТОВИТСЯ
 from lms_frappe_app.agent_learning.announcements import анонсирован
 from lms_frappe_app.agent_learning.artifacts import export
@@ -27,8 +30,11 @@ from lms_frappe_app.agent_learning.artifacts.document import (
 	_файлы,
 )
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
+from lms_frappe_app.agent_learning.doctype.agent_lesson_homework.agent_lesson_homework import НЕВЕРНЫЙ_СРОК
+from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import СРОКИ_ДОМАШЕК
 from lms_frappe_app.agent_learning.errors import НЕТ_ПРАВА, Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
+from lms_frappe_app.agent_learning.structure import уроки_курса
 from lms_frappe_app.api import контракт, текущий_пользователь
 
 КОМАНДА_НЕДОСТУПНА = "team_not_available"
@@ -471,6 +477,14 @@ def allocations(organization: str) -> dict:
 	):
 		поимённые.setdefault(строка.parent, []).append(строка.user)
 	названия = {к.name: к.title for к in курсы}
+	задания = {курс: _задания_по_порядку(курс) for курс in {н.course for н in назначения}}
+	правила: dict[str, dict] = {}
+	for строка in frappe.get_all(
+		СРОКИ_ДОМАШЕК,
+		filters={"parent": ("in", [н.name for н in назначения] or [""]), "parenttype": "Course Allocation"},
+		fields=["parent", "homework", "due_mode", "due_days", "due_date"],
+	):
+		правила.setdefault(строка.parent, {})[строка.homework] = _срок(строка)
 	return {
 		"allocations": [
 			{
@@ -483,6 +497,10 @@ def allocations(organization: str) -> dict:
 				"deadline": str(н.deadline) if н.deadline else None,
 				"mandatory": bool(н.mandatory),
 				"chosen_by_member": bool(н.chosen_by_member),
+				"homework": [
+					{**задание, "due": правила.get(н.name, {}).get(задание["homework"])}
+					for задание in задания[н.course]
+				],
 			}
 			for н in назначения
 		],
@@ -528,12 +546,14 @@ def assign_course(
 @frappe.whitelist(methods=["POST"])
 @контракт
 def update_allocation(
-	allocation: str, deadline: str | None = None, mandatory=None, members=None
+	allocation: str, deadline: str | None = None, mandatory=None, members=None, homework_due=None
 ) -> dict:
-	"""Правит срок, обязательность и — у поимённого — список людей.
+	"""Правит срок, обязательность, сроки домашек и — у поимённого — список людей.
 
 	`deadline` пустой строкой снимает срок; не передан — остаётся. Дописанным
 	людям уходит письмо; вычеркнутые остаются зачисленными — прогресс у них.
+	`homework_due` заменяет сроки домашек целиком; `[]` снимает все, не
+	передан — остаются.
 	"""
 	назначение = _назначение(allocation)
 	if deadline is not None:
@@ -542,8 +562,66 @@ def update_allocation(
 		назначение.mandatory = 1 if mandatory in (True, 1, "1", "true") else 0
 	if members is not None and назначение.audience == ВЫБРАННЫЕ:
 		назначение.set("members", [{"user": человек} for человек in _список(members)])
+	сроки = _сроки_домашек(homework_due)
+	if сроки is not None:
+		назначение.set("homework_due", сроки)
+		назначение.проверить_сроки_домашек()
 	назначение.save(ignore_permissions=True)
 	return {"id": назначение.name}
+
+
+# --- сроки домашек в назначении (learning-services#452) ---
+
+ПОЛЯ_СРОКА = ("homework", "due_mode", "due_days", "due_date")
+
+
+def _срок(правило) -> dict:
+	return {
+		"mode": правило.due_mode,
+		"days": правило.due_days or None,
+		"date": str(правило.due_date) if правило.due_date else None,
+	}
+
+
+def _задания_по_порядку(курс: str) -> list[dict]:
+	"""Задания уроков курса в порядке уроков, со сроком автора."""
+	задания = homework.задания_курса(курс)
+	if not задания:
+		return []
+	названия = dict(
+		frappe.get_all(
+			"Course Lesson", filters={"name": ("in", list(задания))}, fields=["name", "title"], as_list=True
+		)
+	)
+	return [
+		{
+			"homework": задания[урок].name,
+			"lesson": урок,
+			"lesson_title": названия.get(урок),
+			"title": задания[урок].title,
+			"author_due": _срок(задания[урок]),
+		}
+		for урок in уроки_курса(курс)
+		if урок in задания
+	]
+
+
+def _сроки_домашек(значение) -> list[dict] | None:
+	"""`homework_due` — списком строк таблицы; `None` — не трогать.
+
+	`Why:` список приезжает и строкой JSON (форма), и от клиента бывает чем
+	угодно — не-JSON и не-объект роняли бы метод 500 мимо контракта.
+	"""
+	if isinstance(значение, str):
+		try:
+			значение = json.loads(значение) if значение.strip() else None
+		except ValueError:
+			raise Отказ(НЕВЕРНЫЙ_СРОК, "homework_due — список объектов { homework, due_mode, … }")
+	if значение is None:
+		return None
+	if not isinstance(значение, list | tuple) or not all(isinstance(строка, dict) for строка in значение):
+		raise Отказ(НЕВЕРНЫЙ_СРОК, "homework_due — список объектов { homework, due_mode, … }")
+	return [{поле: строка.get(поле) for поле in ПОЛЯ_СРОКА} for строка in значение]
 
 
 @frappe.whitelist(methods=["POST"])

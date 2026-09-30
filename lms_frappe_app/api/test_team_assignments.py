@@ -3,6 +3,7 @@
 
 """Назначения руководителем и письма о назначении и сроке (#365)."""
 
+import json
 from unittest.mock import patch
 
 import frappe
@@ -10,13 +11,17 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, nowdate
 
 from lms_frappe_app.agent_learning import notices
-from lms_frappe_app.api import team
+from lms_frappe_app.api import authoring, team
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
+	привязать_урок,
+	создать_домашку,
 	создать_курс,
+	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
+	создать_урок,
 )
 
 
@@ -156,3 +161,138 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		self.assertEqual(ответ["allocations"][0]["members"], [self.сотрудник])
 		self.assertFalse(ответ["allocations"][0]["whole_team"])
 		self.assertIn(self.курс, {к["id"] for к in ответ["courses"]})
+
+
+class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
+	"""Сроки домашек в назначении курса (learning-services#452)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		patch.object(notices, "почта_есть", return_value=False).start()
+		self.addCleanup(patch.stopall)
+		с = frappe.generate_hash(length=6)
+		self.компания = создать_организацию(f"Компания {с}")
+		self.руководитель = создать_менеджера(f"hd-m-{с}@example.com", self.компания)
+		self.первый = создать_урок(f"Урок 1 {с}")
+		глава = frappe.db.get_value("Course Lesson", self.первый, "chapter")
+		self.курс = frappe.db.get_value("Course Chapter", глава, "course")
+		frappe.db.set_value("LMS Course", self.курс, "published", 1)
+		self.без_задания = self._урок(глава, f"Урок 2 {с}")
+		self.третий = self._урок(глава, f"Урок 3 {с}")
+		# Задание третьего урока заводится раньше первого: порядок в ответе —
+		# по урокам курса, а не по созданию заданий.
+		self.задание_3 = создать_домашку(self.третий, title="Третье", due_mode="absolute", due_date="2030-05-01")
+		self.задание_1 = создать_домашку(self.первый, title="Первое", due_mode="relative", due_days=5)
+		ответ = self.от_имени(team.assign_course, organization=self.компания, course=self.курс)
+		self.assertTrue(ответ["ok"], ответ)
+		self.назначение = ответ["data"]["id"]
+
+	def _урок(self, глава: str, название: str) -> str:
+		урок = frappe.get_doc({"doctype": "Course Lesson", "title": название, "chapter": глава}).insert(
+			ignore_permissions=True
+		)
+		привязать_урок(глава, урок.name)
+		return урок.name
+
+	def от_имени(self, метод, кто=None, **аргументы):
+		frappe.set_user(кто or self.руководитель)
+		try:
+			return метод(**аргументы)
+		finally:
+			frappe.set_user("Administrator")
+
+	def задать(self, homework_due, **аргументы) -> dict:
+		return self.от_имени(
+			team.update_allocation, allocation=self.назначение, homework_due=homework_due, **аргументы
+		)
+
+	def сроки(self) -> list[dict]:
+		ответ = self.от_имени(team.allocations, organization=self.компания)["data"]
+		[назначение] = [н for н in ответ["allocations"] if н["id"] == self.назначение]
+		return назначение["homework"]
+
+	def код(self, ответ) -> str:
+		self.assertFalse(ответ["ok"], ответ)
+		return ответ["error"]["code"]
+
+	def test_перечень_заданий_по_порядку_уроков(self):
+		сроки = self.сроки()
+		self.assertEqual([с["homework"] for с in сроки], [self.задание_1.name, self.задание_3.name])
+		первое = сроки[0]
+		self.assertEqual(
+			(первое["lesson"], первое["title"], первое["lesson_title"]),
+			(self.первый, "Первое", frappe.db.get_value("Course Lesson", self.первый, "title")),
+		)
+		self.assertEqual(первое["author_due"], {"mode": "relative", "days": 5, "date": None})
+		self.assertIsNone(первое["due"])
+
+	def test_правило_назначения_и_снятие(self):
+		ответ = self.задать(
+			[
+				{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "2030-02-01", "due_days": 9},
+				{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 2},
+			]
+		)
+		self.assertTrue(ответ["ok"], ответ)
+		первое, третье = self.сроки()
+		self.assertEqual(первое["due"], {"mode": "absolute", "days": None, "date": "2030-02-01"})
+		self.assertEqual(третье["due"], {"mode": "relative", "days": 2, "date": None})
+
+		# Не передан — не трогать.
+		self.assertTrue(self.от_имени(team.update_allocation, allocation=self.назначение, mandatory=0)["ok"])
+		self.assertIsNotNone(self.сроки()[0]["due"])
+		self.assertTrue(self.задать("null")["ok"])
+		self.assertIsNotNone(self.сроки()[0]["due"])
+
+		# Список заменяет таблицу целиком; пустой снимает все правила.
+		self.assertTrue(self.задать(json.dumps([{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1}]))["ok"])
+		self.assertEqual([с["due"] is None for с in self.сроки()], [True, False])
+		self.assertTrue(self.задать([])["ok"])
+		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
+
+	def test_неверные_сроки(self):
+		for неверное in (
+			[{"homework": self.задание_1.name, "due_mode": "none"}],
+			[{"homework": self.задание_1.name, "due_mode": "relative"}],
+			[{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 0}],
+			[{"homework": self.задание_1.name, "due_mode": "absolute"}],
+			[
+				{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1},
+				{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 2},
+			],
+			"{не json",
+			[self.задание_1.name],
+			{"homework": self.задание_1.name},
+		):
+			self.assertEqual(self.код(self.задать(неверное)), "invalid_due", неверное)
+		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
+
+	def test_задание_чужого_курса(self):
+		чужое = создать_домашку(создать_урок(f"Чужой {frappe.generate_hash(length=6)}"))
+		for задание in (чужое.name, "нет-такого"):
+			ответ = self.задать([{"homework": задание, "due_mode": "relative", "due_days": 1}])
+			self.assertEqual(self.код(ответ), "homework_not_in_course")
+
+	def test_после_переноса_урока_срок_назначения_правится(self):
+		self.задать([{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1}])
+		другой = создать_урок(f"Другой {frappe.generate_hash(length=6)}")
+		куда = frappe.db.get_value("Course Lesson", другой, "chapter")
+		модератор = создать_куратора(f"hd-mod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator")
+		self.assertTrue(self.от_имени(authoring.move_lesson, кто=модератор, lesson=self.первый, chapter=куда)["ok"])
+
+		ответ = self.от_имени(team.update_allocation, allocation=self.назначение, deadline="2030-12-31")
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertFalse(frappe.db.exists("Course Allocation Homework Due", {"parent": self.назначение}))
+
+	def test_удаление_задания_и_урока_снимает_правила(self):
+		self.задать(
+			[
+				{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1},
+				{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1},
+			]
+		)
+		модератор = создать_куратора(f"hd-mod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator")
+		self.assertTrue(self.от_имени(authoring.remove_homework, кто=модератор, lesson=self.первый)["ok"])
+		self.assertTrue(self.от_имени(authoring.remove_lesson, кто=модератор, lesson=self.третий)["ok"])
+		self.assertFalse(frappe.db.exists("Course Allocation Homework Due", {"parent": self.назначение}))

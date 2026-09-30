@@ -497,3 +497,105 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		документ = домашка.сохранить(self.ученик, self.урок, None, answer="сам нашёл")
 		self.assertIsNone(документ.due_at)
 		self.assertIsNone(документ.assigned_at)
+
+
+class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
+	"""Срок домашки из назначения курса перекрывает срок автора (learning-services#452)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		с = frappe.generate_hash(length=6)
+		self.ученик = создать_ученика(f"hwa-{с}@example.com")
+		self.урок = создать_урок(f"Урок {с}")
+		self.курс = зачислить(self.ученик, self.урок)
+		self.задание = создать_домашку(self.урок, due_mode="relative", due_days=5)
+		self.организация = создать_организацию(f"Орг {с}")
+		добавить_в_организацию(self.ученик, self.организация)
+
+	def назначить(self, *сроки, организация=None, **поля):
+		return frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": организация or self.организация,
+				"course": self.курс,
+				"homework_due": [{"homework": self.задание.name, **срок} for срок in сроки],
+				**поля,
+			}
+		).insert(ignore_permissions=True)
+
+	def выдать(self, организация):
+		имя = создать_занятие(self.ученик, self.урок)
+		frappe.db.set_value("Agent Learning Session", имя, "organization", организация)
+		домашка.выдать(frappe.get_doc("Agent Learning Session", имя))
+		имя = домашка.найти_сдачу(self.задание.name, self.ученик, организация)
+		return frappe.get_doc(домашка.СДАЧА, имя)
+
+	def дней_до_срока(self, сдача) -> timedelta:
+		return get_datetime(сдача.due_at) - get_datetime(сдача.assigned_at)
+
+	def test_правило_назначения_перекрывает_автора(self):
+		self.назначить({"due_mode": "relative", "due_days": 2})
+		сдача = self.выдать(self.организация)
+		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=2))
+		self.assertEqual(сдача.history[-1].due_source, "allocation")
+
+	def test_два_назначения_ближайший_срок(self):
+		self.назначить({"due_mode": "relative", "due_days": 4})
+		self.назначить({"due_mode": "absolute", "due_date": "2020-01-01"}, audience="Selected Members",
+			members=[{"user": self.ученик}])
+		сдача = self.выдать(self.организация)
+		self.assertEqual(str(сдача.due_at), "2020-01-01 23:59:59")
+
+	def test_назначение_другой_организации_не_действует(self):
+		другая = создать_организацию(f"Другая {frappe.generate_hash(length=6)}")
+		добавить_в_организацию(self.ученик, другая)
+		self.назначить({"due_mode": "relative", "due_days": 1}, организация=другая)
+		сдача = self.выдать(self.организация)
+		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=5))
+		self.assertEqual(сдача.history[-1].due_source, "author")
+
+	def test_личная_сдача_только_автор(self):
+		self.назначить({"due_mode": "relative", "due_days": 1})
+		сдача = self.выдать(None)
+		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=5))
+
+	def test_выбранный_самим_курс_тоже_действует(self):
+		self.назначить(
+			{"due_mode": "relative", "due_days": 3},
+			audience="Selected Members",
+			members=[{"user": self.ученик}],
+			chosen_by_member=1,
+		)
+		self.assertEqual(self.дней_до_срока(self.выдать(self.организация)), timedelta(days=3))
+
+	def test_назначение_не_адресату_не_действует(self):
+		коллега = создать_ученика(f"hwa-c-{frappe.generate_hash(length=6)}@example.com")
+		добавить_в_организацию(коллега, self.организация)
+		self.назначить({"due_mode": "relative", "due_days": 1}, audience="Selected Members",
+			members=[{"user": коллега}])
+		self.assertEqual(self.дней_до_срока(self.выдать(self.организация)), timedelta(days=5))
+
+	def test_правка_назначения_не_меняет_выставленный_срок(self):
+		назначение = self.назначить({"due_mode": "relative", "due_days": 2})
+		было = self.выдать(self.организация).due_at
+		назначение.set("homework_due", [{"homework": self.задание.name, "due_mode": "absolute", "due_date": "2020-01-01"}])
+		назначение.save(ignore_permissions=True)
+		домашка.сохранить(self.ученик, self.урок, self.организация, answer="сделал")
+		стало = frappe.db.get_value(домашка.СДАЧА, {"member": self.ученик}, "due_at")
+		self.assertEqual(стало, было)
+
+	def test_сохранение_до_выдачи_ставит_абсолютный_срок_назначения(self):
+		self.назначить({"due_mode": "absolute", "due_date": "2030-03-01"})
+		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
+		self.assertEqual(str(документ.due_at), "2030-03-01 23:59:59")
+
+	def test_сохранение_до_выдачи_при_относительном_правиле_без_срока(self):
+		"""Правило назначения относительное — срок выставит выдача, хотя автор
+		и задал бы абсолютный: действуют правила назначения, а не автора."""
+		self.задание.update({"due_mode": "absolute", "due_date": "2030-01-15"})
+		self.задание.save(ignore_permissions=True)
+		self.назначить({"due_mode": "relative", "due_days": 2})
+		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
+		self.assertIsNone(документ.due_at)
+		сдача = self.выдать(self.организация)
+		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=2))

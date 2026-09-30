@@ -3,6 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils import cint, getdate
 
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
@@ -10,6 +11,21 @@ from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organi
 )
 
 ВСЕ_РОЛИ_УЧАСТНИКОВ = ("Member", "Manager", "Org Admin")
+
+СРОКИ_ДОМАШЕК = "Course Allocation Homework Due"
+ЗАДАНИЕ_НЕ_ИЗ_КУРСА = "homework_not_in_course"
+#: «Как у автора» — отсутствие строки, а не режим `none`.
+РЕЖИМЫ_СРОКА_НАЗНАЧЕНИЯ = ("relative", "absolute")
+
+
+def _правило(строка) -> tuple:
+	"""Строка срока как значение — чтобы узнать неизменённую среди прежних."""
+	return (
+		строка.homework,
+		строка.due_mode,
+		cint(строка.due_days) or None,
+		str(getdate(строка.due_date)) if строка.due_date else None,
+	)
 
 
 class CourseAllocation(Document):
@@ -30,6 +46,7 @@ class CourseAllocation(Document):
 			# Список адресатов при назначении на всю организацию только
 			# вводит в заблуждение: состав считается на момент выдачи.
 			self.members = []
+		self.проверить_сроки_домашек()
 
 	def on_update(self):
 		self.выдать_зачисления()
@@ -66,6 +83,64 @@ class CourseAllocation(Document):
 
 		if анонсирован(self.course):
 			frappe.throw(frappe._("Курс {0} ещё готовится").format(self.course))
+
+	def проверить_сроки_домашек(self) -> None:
+		"""Сроки домашек назначения: задание — урока этого курса, без повторов,
+		правило — как у автора, но без `none` (learning-services#452).
+
+		Чужое задание отклоняется только в новой или изменённой строке. Строку,
+		чьё задание ушло из курса вместе с уроком (`move_lesson`), назначение
+		молча выбрасывает. `Why:` иначе после переноса урока руководитель не
+		поправил бы у назначения ничего — даже дедлайн курса.
+
+		Зовётся и методом `team.update_allocation` до сохранения: у задания,
+		которого нет вовсе, Frappe иначе отказал бы проверкой ссылки раньше
+		`validate` — без кода контракта.
+		"""
+		from lms_frappe_app.agent_learning.doctype.agent_lesson_homework.agent_lesson_homework import (
+			НЕВЕРНЫЙ_СРОК,
+			проверить_срок,
+		)
+		from lms_frappe_app.agent_learning.errors import Отказ
+		from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
+
+		if not self.homework_due:
+			return
+		задания_курса = set(
+			frappe.get_all(
+				ЗАДАНИЕ,
+				filters={"lesson": ("in", frappe.get_all("Course Lesson", filters={"course": self.course}, pluck="name") or [""])},
+				pluck="name",
+			)
+		)
+		прежние = (
+			set()
+			if self.is_new()
+			else {
+				_правило(строка)
+				for строка in frappe.get_all(
+					СРОКИ_ДОМАШЕК,
+					filters={"parent": self.name, "parenttype": self.doctype, "parentfield": "homework_due"},
+					fields=["homework", "due_mode", "due_days", "due_date"],
+				)
+			}
+		)
+		оставить = []
+		встречены = set()
+		for строка in self.homework_due:
+			if строка.homework not in задания_курса:
+				if _правило(строка) in прежние:
+					continue
+				raise Отказ(ЗАДАНИЕ_НЕ_ИЗ_КУРСА, "Это задание не из курса назначения", homework=строка.homework)
+			if строка.homework in встречены:
+				raise Отказ(НЕВЕРНЫЙ_СРОК, "У задания в назначении один срок", homework=строка.homework)
+			встречены.add(строка.homework)
+			строка.due_days, строка.due_date = проверить_срок(
+				строка.due_mode, строка.due_days, строка.due_date, режимы=РЕЖИМЫ_СРОКА_НАЗНАЧЕНИЯ
+			)
+			оставить.append(строка)
+		if len(оставить) != len(self.homework_due):
+			self.set("homework_due", оставить)
 
 	def адресаты(self) -> list[str]:
 		"""Кому предназначено назначение."""
