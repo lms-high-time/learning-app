@@ -137,7 +137,8 @@ def обеспечить_индекс_артефактов() -> None:
 
 
 def обеспечить_индекс_домашек() -> None:
-	"""Живая сдача домашки одна на «задание + ученик + пространство» (learning-services#439).
+	"""Индексы сдач домашки: живая сдача одна на «задание + ученик + пространство»
+	(learning-services#439), отбор по статусу и сроку (learning-services#452).
 
 	`Why:` та же гонка, что у документов: выдача и сохранение ищут сдачу перед
 	созданием, а два вызова подряд держит только база. Пространство — через
@@ -156,6 +157,14 @@ def обеспечить_индекс_домашек() -> None:
 		"""
 		CREATE UNIQUE INDEX IF NOT EXISTS `agent_homework_submission_space_key`
 		ON `tabAgent Homework Submission` (`homework`, `member`, `space_key`)
+		"""
+	)
+	# Why: очередь куратора, счётчик меню и ежечасные письма отбирают сдачи по
+	# статусу, напоминания — ещё и по сроку (learning-services#452).
+	frappe.db.sql_ddl(
+		"""
+		CREATE INDEX IF NOT EXISTS `agent_homework_submission_status_due`
+		ON `tabAgent Homework Submission` (`status`, `due_at`)
 		"""
 	)
 

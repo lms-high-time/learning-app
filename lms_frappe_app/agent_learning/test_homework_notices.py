@@ -35,6 +35,9 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.отправка = patch("frappe.sendmail").start()
 		self.почта = patch.object(notices, "почта_есть", return_value=True).start()
 		self.сейчас = patch.object(письма, "now_datetime", return_value=УТРО).start()
+		# Why: рассылка коммитит каждое письмо; настоящий коммит в тесте
+		# зафиксировал бы его данные на стенде, и откат их бы не снял.
+		self.коммит = patch.object(frappe.db, "commit").start()
 		self.addCleanup(patch.stopall)
 		self.addCleanup(frappe.db.set_single_value, "Agent Learning Settings", "deadline_reminder_days", 3)
 		frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 3)
@@ -257,7 +260,7 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.отправка.side_effect = отправить
 		with patch.object(frappe, "log_error") as лог:
 			письма.разослать()
-		лог.assert_called()
+		лог.assert_any_call(title="Письмо домашки не отправлено", reference_doctype="Homework Notice")
 		self.assertEqual(self.журнал(submission=сдача), [], "журнал откатан вместе с письмом")
 		self.assertEqual(len(self.дайджест(self.менеджер)), 1)
 
@@ -271,7 +274,132 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 				"recipient": self.менеджер,
 			}
 		).insert(ignore_permissions=True)
-		# Уже записанный ключ «не виден» выборке — как у параллельного запуска.
+		# Why: так выглядит параллельный запуск — ключ записан после того, как
+		# эта рассылка выбрала записанные; уникальный индекс ловит повтор.
 		with patch.object(письма, "_записанные", return_value=set()):
 			письма.разослать()
 		self.assertEqual(self.письма_к(self.менеджер), [])
+
+	def test_новый_срок_новое_напоминание(self):
+		сдача = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+		письма.разослать()
+		frappe.db.set_value(домашка.СДАЧА, сдача, "due_at", УТРО + timedelta(days=2))
+		письма.разослать()
+		self.assertEqual(len(self.журнал(submission=сдача, kind="reminder")), 2)
+
+	def test_каждое_письмо_коммитится(self):
+		self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+		письма.разослать()
+		self.assertGreaterEqual(self.коммит.call_count, self.отправка.call_count)
+		self.assertGreaterEqual(self.отправка.call_count, 1)
+
+	def test_сбой_сборки_одной_сдачи_не_валит_остальные(self):
+		второй = создать_урок(f"Урок {frappe.generate_hash(length=6)}")
+		зачислить(self.ученик, второй)
+		создать_домашку(второй)
+		сломанная = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+		домашка.сохранить(self.ученик, второй, None, answer="сделал")
+		целая = домашка.найти_сдачу(домашка.задание_урока(второй).name, self.ученик, None)
+		frappe.db.set_value(
+			домашка.СДАЧА,
+			целая,
+			{
+				"status": "Assigned",
+				"assigned_at": УТРО - timedelta(days=5),
+				"due_at": УТРО + timedelta(days=1),
+			},
+		)
+		настоящая = письма._Получатели.ученику_можно
+
+		def можно(получатели, сдача, курс):
+			if сдача.name == сломанная:
+				raise RuntimeError("битая сдача")
+			return настоящая(получатели, сдача, курс)
+
+		with (
+			patch.object(письма._Получатели, "ученику_можно", autospec=True, side_effect=можно),
+			patch.object(frappe, "log_error") as лог,
+		):
+			письма.разослать()
+		лог.assert_called()
+		self.assertEqual(self.журнал(submission=сломанная), [])
+		self.assertEqual(len(self.журнал(submission=целая, kind="reminder")), 1)
+
+	def test_сбой_сборщика_не_валит_остальные_письма(self):
+		сдача = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+		self.сдать(self.организация)
+		with (
+			patch.object(письма, "_возвраты", side_effect=RuntimeError("сломался")),
+			patch.object(frappe, "log_error") as лог,
+		):
+			письма.разослать()
+		лог.assert_called()
+		self.assertEqual(len(self.журнал(submission=сдача, kind="reminder")), 1)
+		self.assertEqual(len(self.дайджест(self.менеджер)), 1)
+
+	def test_потерянная_транзакция_откатывается_целиком(self):
+		"""Взаимоблокировка MariaDB откатывает транзакцию целиком — точки
+		сохранения больше нет, и откат к ней падает сам."""
+		self.сдать(self.организация)
+		self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+
+		def отправить(**письмо):
+			if письмо["recipients"] == [self.ученик]:
+				raise frappe.QueryDeadlockError("1213")
+
+		откаты = []
+
+		def откатить(*, save_point=None, **_):
+			if save_point:
+				raise frappe.db.InternalError("SAVEPOINT homework_notice does not exist")
+			откаты.append("весь")
+
+		self.отправка.side_effect = отправить
+		with patch.object(frappe.db, "rollback", side_effect=откатить), patch.object(frappe, "log_error"):
+			письма.разослать()
+		self.assertEqual(откаты, ["весь"])
+		self.assertTrue(self.письма_к(self.менеджер), "письмо после сбоя всё равно ушло")
+
+	def test_дайджест_без_повторов_при_нескольких_ролях(self):
+		методист = создать_менеджера(f"hnx-{frappe.generate_hash(length=6)}@example.com", self.организация)
+		frappe.get_doc("User", методист).add_roles("Course Creator")
+		курс = frappe.get_doc("LMS Course", self.курс)
+		курс.append("instructors", {"instructor": методист})
+		курс.save(ignore_permissions=True)
+		модератор = создать_менеджера(f"hny-{frappe.generate_hash(length=6)}@example.com", self.организация)
+		frappe.get_doc("User", модератор).add_roles("Moderator")
+		self.сдать(self.организация)
+		письма.разослать()
+		[письмо] = self.письма_к(методист)
+		self.assertIn("1 домашка", письмо["subject"])
+		# Модератор видит все ожидающие стенда — сколько их, тест не знает.
+		self.assertEqual(len(self.письма_к(модератор)), 1)
+
+	def test_дайджест_автору_про_его_курсы(self):
+		методист = создать_куратора(f"hnz-{frappe.generate_hash(length=6)}@example.com")
+		курс = frappe.get_doc("LMS Course", self.курс)
+		курс.append("instructors", {"instructor": методист})
+		курс.save(ignore_permissions=True)
+		self.сдать(None)
+		письма.разослать()
+		[письмо] = self.письма_к(методист)
+		self.assertIn("в курсах, где вы автор", письмо["message"])
+
+	def test_записанный_дайджест_не_выбирает_сдачи(self):
+		self.сдать(self.организация)
+		# Why: кураторы стенда без ожидающих дайджеста не получают и ключа не
+		# пишут — в тесте куратор один.
+		with patch.object(письма, "_кураторы", return_value={self.менеджер: {"Organization Manager"}}):
+			письма.разослать()
+			with patch.object(письма, "_ждут_проверки") as ждут:
+				письма.разослать()
+		self.assertEqual(len(self.дайджест(self.менеджер)), 1)
+		ждут.assert_not_called()
+
+	def test_индекс_статуса_и_срока(self):
+		self.assertTrue(
+			frappe.db.sql(
+				"show index from `tabAgent Homework Submission` where Key_name = %s",
+				"agent_homework_submission_status_due",
+			)
+		)

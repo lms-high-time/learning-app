@@ -32,6 +32,8 @@ from lms_frappe_app.agent_learning.constants import (
 )
 from lms_frappe_app.agent_learning.permissions import МЕТОДИСТЫ, РОЛИ_МЕНЕДЖЕРА
 
+РУКОВОДИТЕЛЬ = "Organization Manager"
+
 ЖУРНАЛ = "Homework Notice"
 НАПОМИНАНИЕ = "reminder"
 ВЕРНУЛИ = "returned"
@@ -47,16 +49,36 @@ from lms_frappe_app.agent_learning.permissions import МЕТОДИСТЫ, РОЛ
 
 
 def разослать() -> None:
-	"""Ежечасная задача: напоминания, «вернули» и дайджест."""
+	"""Ежечасная задача: напоминания, «вернули» и дайджест.
+
+	Сбой одного вида писем не останавливает остальные, сбой одного письма —
+	остальные письма того же вида. `Why:` одна битая сдача иначе молча
+	оставляла бы без писем всю платформу — час за часом.
+	"""
 	if not notices.почта_есть():
 		return
 	сейчас = now_datetime()
 	получатели = _Получатели()
-	письма = [*_напоминания(сейчас, получатели), *_возвраты(сейчас, получатели), *_дайджесты(сейчас)]
-	записаны = _записанные([п["key"] for п in письма])
-	for письмо in письма:
-		if письмо["key"] not in записаны:
+	for сборщик in (_напоминания, _возвраты, _дайджесты):
+		try:
+			письма = сборщик(сейчас, получатели)
+		except Exception:
+			frappe.log_error(title="Письма домашки не собраны", reference_doctype=ЖУРНАЛ)
+			continue
+		for письмо in письма:
 			_отправить(письмо)
+
+
+def _по_одному(записи, построить) -> list[dict]:
+	"""Письма по записям; запись, на которой сборка упала, — в лог, остальные дальше."""
+	письма = []
+	for запись in записи:
+		try:
+			if письмо := построить(запись):
+				письма.append(письмо)
+		except Exception:
+			frappe.log_error(title="Письмо домашки не собрано", reference_doctype=ЖУРНАЛ)
+	return письма
 
 
 # --- кому можно писать ---
@@ -67,6 +89,7 @@ class _Получатели:
 
 	def __init__(self):
 		self._курсы: dict[str, set[str]] = {}
+		self._членства: dict[tuple[str, str], bool] = {}
 		self._адреса: dict[str, dict[str, str]] = {}
 
 	def ученику_можно(self, сдача, курс: str | None) -> bool:
@@ -77,12 +100,17 @@ class _Получатели:
 			self._курсы[сдача.member] = {к["course"] for к in курсы_ученика(сдача.member)}
 		if курс not in self._курсы[сдача.member]:
 			return False
-		return not сдача.organization or bool(
-			frappe.db.exists(
-				"Organization Membership",
-				{"user": сдача.member, "organization": сдача.organization, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
+		if not сдача.organization:
+			return True
+		пара = (сдача.member, сдача.organization)
+		if пара not in self._членства:
+			self._членства[пара] = bool(
+				frappe.db.exists(
+					"Organization Membership",
+					{"user": сдача.member, "organization": сдача.organization, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
+				)
 			)
-		)
+		return self._членства[пара]
 
 	def адрес(self, lesson: str, курс: str) -> str:
 		"""Ссылка на блок домашки урока. Порядок уроков — раз на курс."""
@@ -96,7 +124,17 @@ def _включён(user: str) -> bool:
 	return bool(frappe.get_cached_value("User", user, "enabled"))
 
 
+def _новые(записи: list, ключ) -> list:
+	"""Записи, писем по которым ещё не было, — до проверок адресата: те стоят запросов."""
+	записаны = _записанные([ключ(з) for з in записи])
+	return [з for з in записи if ключ(з) not in записаны]
+
+
 # --- напоминание ---
+
+
+def _ключ_напоминания(сдача) -> str:
+	return f"{сдача.name}:{НАПОМИНАНИЕ}:{сдача.due_at:%Y%m%d%H%M}"
 
 
 def _напоминания(сейчас, получатели: _Получатели) -> list[dict]:
@@ -109,13 +147,17 @@ def _напоминания(сейчас, получатели: _Получат�
 	дней = notices.дней_напоминания()
 	if not дней:
 		return []
+	порог = timedelta(days=дней)
+	# Why: срок дальше порога напоминания не ждёт ни при каком промежутке —
+	# выборка каждый час не тянет все будущие сроки платформы.
 	сдачи = frappe.get_all(
 		домашка.СДАЧА,
-		filters={
-			"status": ("in", [ДОМАШКА_ВЫДАНА, ДОМАШКА_ВОЗВРАЩЕНА]),
-			"member": ("is", "set"),
-			"due_at": (">", сейчас),
-		},
+		filters=[
+			["status", "in", [ДОМАШКА_ВЫДАНА, ДОМАШКА_ВОЗВРАЩЕНА]],
+			["member", "is", "set"],
+			["due_at", ">", сейчас],
+			["due_at", "<=", сейчас + порог],
+		],
 		fields=[
 			"name",
 			"homework",
@@ -128,43 +170,46 @@ def _напоминания(сейчас, получатели: _Получат�
 			"creation",
 		],
 	)
-	порог = timedelta(days=дней)
 	пора = []
 	for сдача in сдачи:
 		начало = сдача.assigned_at or сдача.submitted_at or сдача.creation
 		промежуток = сдача.due_at - начало
 		if сейчас >= сдача.due_at - (порог if промежуток >= порог else промежуток / 2):
 			пора.append(сдача)
+	пора = _новые(пора, _ключ_напоминания)
 	if not пора:
 		return []
 	уроки = домашка.уроки_с_курсом({с.lesson for с in пора})
-	задания = _названия(домашка.ЗАДАНИЕ, {с.homework for с in пора})
-	письма = []
-	for сдача in пора:
+	задания = домашка.названия(домашка.ЗАДАНИЕ, {с.homework for с in пора})
+
+	def построить(сдача) -> dict | None:
 		урок = уроки.get(сдача.lesson) or frappe._dict()
 		if not получатели.ученику_можно(сдача, урок.course):
-			continue
+			return None
 		задание = задания.get(сдача.homework) or ""
 		курс = _название_курса(урок.course)
-		письма.append(
-			{
-				"key": f"{сдача.name}:{НАПОМИНАНИЕ}:{сдача.due_at:%Y%m%d%H%M}",
-				"kind": НАПОМИНАНИЕ,
-				"recipient": сдача.member,
-				"submission": сдача.name,
-				"subject": f"Скоро срок домашнего задания «{задание}»",
-				"message": (
-					f"<p>Срок домашнего задания «{escape_html(задание)}» к уроку "
-					f"«{escape_html(урок.title or '')}» курса «{escape_html(курс)}» — "
-					f"{format_datetime(сдача.due_at, 'dd.MM.yyyy HH:mm')}.</p>"
-					f'<p><a href="{получатели.адрес(сдача.lesson, урок.course)}">Открыть задание</a></p>'
-				),
-			}
-		)
-	return письма
+		return {
+			"key": _ключ_напоминания(сдача),
+			"kind": НАПОМИНАНИЕ,
+			"recipient": сдача.member,
+			"submission": сдача.name,
+			"subject": f"Скоро срок домашнего задания «{задание}»",
+			"message": (
+				f"<p>Срок домашнего задания «{escape_html(задание)}» к уроку "
+				f"«{escape_html(урок.title or '')}» курса «{escape_html(курс)}» — "
+				f"{format_datetime(сдача.due_at, 'dd.MM.yyyy HH:mm')}.</p>"
+				f'<p><a href="{получатели.адрес(сдача.lesson, урок.course)}">Открыть задание</a></p>'
+			),
+		}
+
+	return _по_одному(пора, построить)
 
 
 # --- «вернули на доработку» ---
+
+
+def _ключ_возврата(строка) -> str:
+	return f"{строка.row}:{ВЕРНУЛИ}"
 
 
 def _возвраты(сейчас, получатели: _Получатели) -> list[dict]:
@@ -195,78 +240,97 @@ def _возвраты(сейчас, получатели: _Получатели)
 		.where(событие.event.isin(list(домашка.СОБЫТИЯ_С_КОММЕНТАРИЕМ)))
 		.where(событие.at >= сейчас - timedelta(days=ДНЕЙ_ВОЗВРАТА))
 		.where(сдача.status == ДОМАШКА_ВОЗВРАЩЕНА)
-		.where(сдача.member.isnotnull())
+		.where(сдача.member.isnotnull() & (сдача.member != ""))
 		.orderby(событие.idx, order=Order.asc)
 	).run(as_dict=True)
-	последние = {строка.name: строка for строка in строки}
+	последние = _новые(list({строка.name: строка for строка in строки}.values()), _ключ_возврата)
 	if not последние:
 		return []
-	уроки = домашка.уроки_с_курсом({с.lesson for с in последние.values()})
-	задания = _названия(домашка.ЗАДАНИЕ, {с.homework for с in последние.values()})
-	письма = []
-	for строка in последние.values():
+	уроки = домашка.уроки_с_курсом({с.lesson for с in последние})
+	задания = домашка.названия(домашка.ЗАДАНИЕ, {с.homework for с in последние})
+
+	def построить(строка) -> dict | None:
 		урок = уроки.get(строка.lesson) or frappe._dict()
 		if not получатели.ученику_можно(строка, урок.course):
-			continue
+			return None
 		задание = задания.get(строка.homework) or ""
 		что = "отменили приём домашнего задания" if строка.event == "reopened" else "вернули домашнее задание"
 		комментарий = escape_html(строка.comment or "").replace("\n", "<br>")
-		письма.append(
-			{
-				"key": f"{строка.row}:{ВЕРНУЛИ}",
-				"kind": ВЕРНУЛИ,
-				"recipient": строка.member,
-				"submission": строка.name,
-				"subject": f"Домашнее задание «{задание}» — на доработку",
-				"message": (
-					f"<p>Вам {что} «{escape_html(задание)}» к уроку «{escape_html(урок.title or '')}» "
-					f"курса «{escape_html(_название_курса(урок.course))}». Что доделать:</p>"
-					f"<blockquote>{комментарий}</blockquote>"
-					f'<p><a href="{получатели.адрес(строка.lesson, урок.course)}">Открыть задание</a></p>'
-				),
-			}
-		)
-	return письма
+		return {
+			"key": _ключ_возврата(строка),
+			"kind": ВЕРНУЛИ,
+			"recipient": строка.member,
+			"submission": строка.name,
+			"subject": f"Домашнее задание «{задание}» — на доработку",
+			"message": (
+				f"<p>Вам {что} «{escape_html(задание)}» к уроку «{escape_html(урок.title or '')}» "
+				f"курса «{escape_html(_название_курса(урок.course))}». Что доделать:</p>"
+				f"<blockquote>{комментарий}</blockquote>"
+				f'<p><a href="{получатели.адрес(строка.lesson, урок.course)}">Открыть задание</a></p>'
+			),
+		}
+
+	return _по_одному(последние, построить)
 
 
 # --- дайджест куратору ---
 
 
-def _дайджесты(сейчас) -> list[dict]:
-	"""«N домашек ждут проверки» — раз в день, первым запуском после часа дайджеста.
-
-	Руководителю — сдачи пространств его организаций, модератору — все,
-	методисту — курсов, где он инструктор: очередь чужих курсов ему ни к чему.
-	Свои сдачи куратору не считаются. Пустая очередь — письма нет.
-	"""
-	if сейчас.hour < ЧАС_ДАЙДЖЕСТА:
-		return []
-	ждут = frappe.get_all(
-		домашка.СДАЧА,
-		filters={"status": ДОМАШКА_СДАНА, "member": ("is", "set")},
-		fields=["name", "lesson", "member", "organization"],
-	)
-	if not ждут:
-		return []
-	курсы = {имя: урок.course for имя, урок in домашка.уроки_с_курсом({с.lesson for с in ждут}).items()}
+def _кураторы() -> dict[str, set[str]]:
+	"""Активные пользователи с ролью куратора и их кураторские роли."""
 	роли: dict[str, set[str]] = {}
 	for строка in frappe.get_all(
 		"Has Role",
-		filters={
-			"parenttype": "User",
-			"role": ("in", ["Organization Manager", *МЕТОДИСТЫ]),
-		},
+		filters={"parenttype": "User", "role": ("in", [РУКОВОДИТЕЛЬ, *МЕТОДИСТЫ])},
 		fields=["parent", "role"],
 	):
 		роли.setdefault(строка.parent, set()).add(строка.role)
 	if not роли:
+		return {}
+	включены = frappe.get_all("User", filters={"name": ("in", list(роли)), "enabled": 1}, pluck="name")
+	return {куратор: роли[куратор] for куратор in включены}
+
+
+def _ждут_проверки() -> list:
+	return frappe.get_all(
+		домашка.СДАЧА,
+		filters={"status": ДОМАШКА_СДАНА, "member": ("is", "set")},
+		fields=["name", "lesson", "member", "organization"],
+	)
+
+
+def _дайджесты(сейчас, _получатели=None) -> list[dict]:
+	"""«N домашек ждут проверки» — раз в день, первым запуском после часа
+	дайджеста, в котором у куратора есть ожидающие.
+
+	Кто что видит — то же правило, что у очереди (`api/review._отбор`):
+	руководителю — сдачи пространств его организаций, модератору — все.
+	Методисту — отличие от очереди: только курсы, где он инструктор, чтобы не
+	получать чужие. Свои сдачи куратору не считаются. Пустая очередь — письма
+	нет.
+	"""
+	if сейчас.hour < ЧАС_ДАЙДЖЕСТА:
 		return []
-	включены = set(frappe.get_all("User", filters={"name": ("in", list(роли)), "enabled": 1}, pluck="name"))
+	день = f"{сейчас:%Y%m%d}"
+
+	def ключ(куратор: str) -> str:
+		return f"{куратор}:{ДАЙДЖЕСТ}:{день}"
+
+	роли = _кураторы()
+	# Why: сначала — кому ещё не писали сегодня: после первого письма дня
+	# ожидающие всей платформы каждый час не выбираются.
+	кураторы = _новые(sorted(роли), ключ)
+	if not кураторы:
+		return []
+	ждут = _ждут_проверки()
+	if not ждут:
+		return []
+	курсы = {имя: урок.course for имя, урок in домашка.уроки_с_курсом({с.lesson for с in ждут}).items()}
 	руководит: dict[str, set[str]] = {}
 	for строка in frappe.get_all(
 		"Organization Membership",
 		filters={
-			"user": ("in", [у for у, р in роли.items() if "Organization Manager" in р] or [""]),
+			"user": ("in", [у for у in кураторы if РУКОВОДИТЕЛЬ in роли[у]] or [""]),
 			"role": ("in", РОЛИ_МЕНЕДЖЕРА),
 			"status": ЧЛЕНСТВО_ДЕЙСТВУЕТ,
 		},
@@ -278,15 +342,13 @@ def _дайджесты(сейчас) -> list[dict]:
 		"Course Instructor",
 		filters={
 			"parenttype": "LMS Course",
-			"instructor": ("in", [у for у, р in роли.items() if "Course Creator" in р] or [""]),
+			"instructor": ("in", [у for у in кураторы if "Course Creator" in роли[у]] or [""]),
 		},
 		fields=["instructor", "parent"],
 	):
 		ведёт.setdefault(строка.instructor, set()).add(строка.parent)
 
-	день = f"{сейчас:%Y%m%d}"
-	письма = []
-	for куратор in sorted(включены):
+	def построить(куратор: str) -> dict | None:
 		свои_роли = роли[куратор]
 		видит = [
 			с
@@ -299,22 +361,33 @@ def _дайджесты(сейчас) -> list[dict]:
 			)
 		]
 		if not видит:
-			continue
+			return None
 		число = len(видит)
-		письма.append(
-			{
-				"key": f"{куратор}:{ДАЙДЖЕСТ}:{день}",
-				"kind": ДАЙДЖЕСТ,
-				"recipient": куратор,
-				"submission": None,
-				"subject": f"{число} {_домашек(число)} {'ждёт' if _одна(число) else 'ждут'} проверки",
-				"message": (
-					f"<p>На проверке — {число} {_домашек(число)}: ученики сдали и ждут ответа.</p>"
-					f'<p><a href="{get_url(АДРЕС_ОЧЕРЕДИ)}">Открыть очередь</a></p>'
-				),
-			}
-		)
-	return письма
+		return {
+			"key": ключ(куратор),
+			"kind": ДАЙДЖЕСТ,
+			"recipient": куратор,
+			"submission": None,
+			"subject": f"{число} {_домашек(число)} {'ждёт' if _одна(число) else 'ждут'} проверки",
+			"message": (
+				f"<p>На проверке{_где(свои_роли, руководит.get(куратор), ведёт.get(куратор))} — "
+				f"{число} {_домашек(число)}: ученики сдали и ждут ответа.</p>"
+				f'<p><a href="{get_url(АДРЕС_ОЧЕРЕДИ)}">Открыть очередь</a></p>'
+			),
+		}
+
+	return _по_одному(кураторы, построить)
+
+
+def _где(роли: set[str], организации, курсы) -> str:
+	"""Чья очередь в письме: у одной роли — её область, у нескольких — без уточнения."""
+	if "Moderator" in роли or (организации and курсы):
+		return ""
+	if курсы:
+		return " в курсах, где вы автор"
+	if организации:
+		return " в ваших организациях"
+	return ""
 
 
 def _одна(число: int) -> bool:
@@ -344,11 +417,13 @@ def _записанные(ключи: list[str]) -> set[str]:
 
 
 def _отправить(письмо: dict) -> None:
-	"""Запись в журнал и письмо — вместе или никак.
+	"""Запись в журнал и письмо — вместе или никак, и сразу в базу.
 
 	Запись — до отправки, в той же транзакции: очередь писем Frappe отправляет
-	только закоммиченное. Сбой одного письма откатывает только его и не валит
-	запуск.
+	только закоммиченное. Коммит — после каждого письма: сбой следующего не
+	откатит уже отправленные. Взаимоблокировка или таймаут блокировки MariaDB
+	откатывают транзакцию целиком, и точки сохранения больше нет — тогда откат
+	всей транзакции: в ней ничего, кроме этого письма, уже нет.
 	"""
 	frappe.db.savepoint(ТОЧКА_ПИСЬМА)
 	try:
@@ -370,22 +445,21 @@ def _отправить(письмо: dict) -> None:
 		)
 	except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
 		# Параллельный запуск успел раньше: письмо уже в очереди.
-		frappe.db.rollback(save_point=ТОЧКА_ПИСЬМА)
+		_откатить_письмо()
 		frappe.clear_last_message()
 	except Exception:
-		frappe.db.rollback(save_point=ТОЧКА_ПИСЬМА)
+		_откатить_письмо()
 		frappe.log_error(title="Письмо домашки не отправлено", reference_doctype=ЖУРНАЛ)
 	else:
 		frappe.db.release_savepoint(ТОЧКА_ПИСЬМА)
+		frappe.db.commit()
 
 
-def _названия(doctype: str, имена) -> dict[str, str]:
-	имена = [и for и in имена if и]
-	if not имена:
-		return {}
-	return dict(
-		frappe.get_all(doctype, filters={"name": ("in", имена)}, fields=["name", "title"], as_list=True)
-	)
+def _откатить_письмо() -> None:
+	try:
+		frappe.db.rollback(save_point=ТОЧКА_ПИСЬМА)
+	except Exception:
+		frappe.db.rollback()
 
 
 def _название_курса(курс: str | None) -> str:

@@ -534,6 +534,14 @@ def _последние_события(сдачи: list[str], события: Se
 	return значения
 
 
+def названия(doctype: str, имена, поле: str = "title") -> dict[str, str]:
+	"""`поле` записей по имени — одной выборкой; пустые имена отбрасываются."""
+	имена = [и for и in имена if и]
+	if not имена:
+		return {}
+	return dict(frappe.get_all(doctype, filters={"name": ("in", имена)}, fields=["name", поле], as_list=True))
+
+
 def последние_комментарии(сдачи: list[str]) -> dict[str, str | None]:
 	"""Комментарий последнего возврата или отмены приёма каждой сдачи — одной выборкой.
 
