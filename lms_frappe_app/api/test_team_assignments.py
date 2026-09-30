@@ -57,7 +57,20 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		return ответ["data"]["id"]
 
 	def письма_о(self, вид: str) -> set[str]:
-		return set(frappe.get_all("Allocation Notice", filters={"kind": вид}, pluck="user"))
+		"""Письма по назначениям компании теста.
+
+		`Why:` напоминание о сроке ходит по всей платформе, и назначение стенда
+		со сроком в ближайшие дни попадало в проверку этого теста — тест
+		краснел от календаря, а не от кода.
+		"""
+		назначения = frappe.get_all("Course Allocation", filters={"organization": self.компания}, pluck="name")
+		return set(
+			frappe.get_all(
+				"Allocation Notice",
+				filters={"kind": вид, "allocation": ("in", назначения or [""])},
+				pluck="user",
+			)
+		)
 
 	def зачислен(self, кто: str) -> bool:
 		return bool(frappe.db.exists("LMS Enrollment", {"member": кто, "course": self.курс}))
@@ -123,7 +136,11 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		notices.напомнить_о_сроках()
 
 		# Руководитель — тоже участник: курс всей команде назначен и ему.
-		напоминания = frappe.get_all("Allocation Notice", filters={"kind": "deadline"}, pluck="user")
+		напоминания = frappe.get_all(
+			"Allocation Notice",
+			filters={"kind": "deadline", "user": ("in", [self.сотрудник, self.коллега, self.руководитель])},
+			pluck="user",
+		)
 		self.assertEqual(sorted(напоминания), sorted([self.сотрудник, self.руководитель]))
 
 	def test_ноль_дней_не_напоминает(self):
@@ -134,7 +151,7 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 0)
 
 		self.assertEqual(notices.напомнить_о_сроках(), 0)
-		self.assertFalse(self.письма_о("deadline") & {self.сотрудник, self.руководитель})
+		self.assertEqual(self.письма_о("deadline"), set())
 
 	def test_далёкий_и_прошедший_срок_без_напоминания(self):
 		self.назначить(deadline=add_days(nowdate(), 30))
