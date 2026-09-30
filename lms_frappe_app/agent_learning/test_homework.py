@@ -609,8 +609,9 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 		выдача не пересчитывает срок и не приписывает его автору."""
 		назначение = self.назначить({"due_mode": "absolute", "due_date": "2030-03-01"})
 		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
+		первая = документ.history[0]
 		self.assertEqual(
-			(str(документ.history[0].due_at), документ.history[0].due_source), ("2030-03-01 23:59:59", "allocation")
+			(str(первая.due_at), первая.due_source), ("2030-03-01 23:59:59", "allocation")
 		)
 		назначение.set("homework_due", [])
 		назначение.save(ignore_permissions=True)

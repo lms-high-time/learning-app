@@ -98,7 +98,11 @@ def _правила_назначений(задание, ученик: str, ор
 	курс = frappe.db.get_value("Course Lesson", задание.lesson, "course")
 	if not курс:
 		return []
-	назначения = [н.name for н in назначения_пользователя(ученик, course=курс) if н.organization == организация]
+	назначения = [
+		назначение.name
+		for назначение in назначения_пользователя(ученик, course=курс)
+		if назначение.organization == организация
+	]
 	if not назначения:
 		return []
 	return frappe.get_all(
