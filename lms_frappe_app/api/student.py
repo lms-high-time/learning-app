@@ -885,7 +885,9 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 	задания = {
 		з.name: з
 		for з in frappe.get_all(
-			домашка.ЗАДАНИЕ, filters={"name": ("in", list({с.homework for с in сдачи}))}, fields=домашка.ПОЛЯ_ЗАДАНИЯ
+			домашка.ЗАДАНИЕ,
+			filters={"name": ("in", list({с.homework for с in сдачи}))},
+			fields=домашка.ПОЛЯ_ЗАДАНИЯ,
 		)
 	}
 	комментарии = домашка.последние_комментарии([с.name for с in сдачи])

@@ -60,7 +60,9 @@ def задание_урока(lesson: str) -> frappe._dict | None:
 	return frappe.db.get_value(ЗАДАНИЕ, {"lesson": lesson}, ПОЛЯ_ЗАДАНИЯ, as_dict=True)
 
 
-def найти_сдачу(homework: str, ученик: str, организация: str | None, *, for_update: bool = False) -> str | None:
+def найти_сдачу(
+	homework: str, ученик: str, организация: str | None, *, for_update: bool = False
+) -> str | None:
 	return frappe.db.get_value(
 		СДАЧА,
 		{"homework": homework, "member": ученик, "organization": организация or ("is", "not set")},
@@ -276,7 +278,10 @@ def сохранить(
 		_откатить(вложенные)
 		# Why: предел Frappe (`max_file_size`) бывает меньше нашего.
 		raise Отказ(
-			ФАЙЛ_ВЕЛИК, "Файл больше допустимого", file=имя_файла, limit_mb=get_max_file_size() // (1024 * 1024)
+			ФАЙЛ_ВЕЛИК,
+			"Файл больше допустимого",
+			file=имя_файла,
+			limit_mb=get_max_file_size() // (1024 * 1024),
 		) from ошибка
 	except frappe.ValidationError as ошибка:
 		_откатить(вложенные)
