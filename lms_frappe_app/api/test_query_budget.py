@@ -39,7 +39,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_ученика,
 	сдать_отчёт,
 )
-from lms_frappe_app.api import manager, review, student
+from lms_frappe_app.api import manager, review, student, team
 from lms_frappe_app.testing import сколько_запросов
 
 #: Сколько обращений к базе делает метод на данных этого модуля. Меняется
@@ -78,6 +78,11 @@ from lms_frappe_app.testing import сколько_запросов
 	# организаций и заданий, имена учеников, проверенные версии — по одной
 	# выборке; адресов уроков в очереди нет — порядка глав не читает.
 	"review_queue": 10,
+	# Назначения руководителя (learning-services#452), два курса с заданиями:
+	# задания с названиями уроков — одной выборкой, порядок уроков — четырьмя
+	# на все курсы, сроки назначений — одной, названия неопубликованных курсов
+	# — одной, а не запросом на назначение.
+	"allocations": 13,
 }
 
 
@@ -178,6 +183,12 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		frappe.set_user(self.менеджер)
 		self.assertEqual(review.queue()["data"]["total"], 3)
 		self._ворота("review_queue", lambda: review.queue(), прогреть=False)
+
+	def test_бюджет_allocations(self):
+		"""Два назначенных курса с заданиями: у первого — в двух главах."""
+		self._домашки()
+		frappe.set_user(self.менеджер)
+		self._ворота("allocations", lambda: team.allocations(organization=self.организация))
 
 	def test_бюджет_student_detail(self):
 		frappe.set_user(self.менеджер)

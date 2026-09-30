@@ -34,7 +34,7 @@ from lms_frappe_app.agent_learning.doctype.agent_lesson_homework.agent_lesson_ho
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import СРОКИ_ДОМАШЕК
 from lms_frappe_app.agent_learning.errors import НЕТ_ПРАВА, Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
-from lms_frappe_app.agent_learning.structure import уроки_курса
+from lms_frappe_app.agent_learning.structure import уроки_курсов
 from lms_frappe_app.api import контракт, текущий_пользователь
 
 КОМАНДА_НЕДОСТУПНА = "team_not_available"
@@ -477,7 +477,10 @@ def allocations(organization: str) -> dict:
 	):
 		поимённые.setdefault(строка.parent, []).append(строка.user)
 	названия = {к.name: к.title for к in курсы}
-	задания = {курс: _задания_по_порядку(курс) for курс in {н.course for н in назначения}}
+	# Назначенный курс бывает снят с публикации или анонсирован — его название
+	# добирается одной выборкой на все такие курсы.
+	названия.update(homework.названия("LMS Course", {н.course for н in назначения} - set(названия)))
+	задания = _задания_по_порядку(list({н.course for н in назначения}))
 	правила: dict[str, dict] = {}
 	for строка in frappe.get_all(
 		СРОКИ_ДОМАШЕК,
@@ -490,8 +493,7 @@ def allocations(organization: str) -> dict:
 			{
 				"id": н.name,
 				"course": н.course,
-				"title": названия.get(н.course)
-				or frappe.db.get_value("LMS Course", н.course, "title"),
+				"title": названия.get(н.course),
 				"whole_team": н.audience == ВСЕ,
 				"members": поимённые.get(н.name, []),
 				"deadline": str(н.deadline) if н.deadline else None,
@@ -499,7 +501,7 @@ def allocations(organization: str) -> dict:
 				"chosen_by_member": bool(н.chosen_by_member),
 				"homework": [
 					{**задание, "due": правила.get(н.name, {}).get(задание["homework"])}
-					for задание in задания[н.course]
+					for задание in задания.get(н.course, [])
 				],
 			}
 			for н in назначения
@@ -586,27 +588,51 @@ def _срок(правило) -> dict:
 	}
 
 
-def _задания_по_порядку(курс: str) -> list[dict]:
-	"""Задания уроков курса в порядке уроков, со сроком автора."""
-	задания = homework.задания_курса(курс)
-	if not задания:
-		return []
-	названия = dict(
-		frappe.get_all(
-			"Course Lesson", filters={"name": ("in", list(задания))}, fields=["name", "title"], as_list=True
+def _задания_по_порядку(курсы: list[str]) -> dict[str, list[dict]]:
+	"""Задания уроков каждого курса в порядке уроков, со сроком автора.
+
+	`Why:` одна выборка заданий с названиями уроков на все курсы и порядок
+	уроков пакетом (`structure.уроки_курсов`) — а не запросы на каждую главу
+	каждого назначенного курса (lms-platform#196).
+	"""
+	if not курсы:
+		return {}
+	задание = frappe.qb.DocType(homework.ЗАДАНИЕ)
+	урок = frappe.qb.DocType("Course Lesson")
+	строки = (
+		frappe.qb.from_(задание)
+		.join(урок)
+		.on(урок.name == задание.lesson)
+		.select(
+			задание.name,
+			задание.lesson,
+			задание.title,
+			задание.due_mode,
+			задание.due_days,
+			задание.due_date,
+			урок.title.as_("lesson_title"),
+			урок.course,
 		)
-	)
-	return [
-		{
-			"homework": задания[урок].name,
-			"lesson": урок,
-			"lesson_title": названия.get(урок),
-			"title": задания[урок].title,
-			"author_due": _срок(задания[урок]),
-		}
-		for урок in уроки_курса(курс)
-		if урок in задания
-	]
+		.where(урок.course.isin(курсы))
+	).run(as_dict=True)
+	if not строки:
+		return {}
+	по_уроку = {строка.lesson: строка for строка in строки}
+	порядок = уроки_курсов(list({строка.course for строка in строки}))
+	return {
+		курс: [
+			{
+				"homework": по_уроку[урок_курса].name,
+				"lesson": урок_курса,
+				"lesson_title": по_уроку[урок_курса].lesson_title,
+				"title": по_уроку[урок_курса].title,
+				"author_due": _срок(по_уроку[урок_курса]),
+			}
+			for урок_курса in уроки
+			if урок_курса in по_уроку
+		]
+		for курс, уроки in порядок.items()
+	}
 
 
 def _сроки_домашек(значение) -> list[dict] | None:
