@@ -26,6 +26,21 @@ def занятие(ученик, урок):
 	return frappe.get_doc("Agent Learning Session", создать_занятие(ученик, урок))
 
 
+def не_найти_с_первого_раза():
+	"""Первый поиск сдачи отвечает «нет», хотя она есть, — как у вызова,
+	который проиграл гонку параллельному (learning-services#439)."""
+	from unittest.mock import patch
+
+	настоящий = домашка.найти_сдачу
+	вызовы = []
+
+	def найти(*args, **kwargs):
+		вызовы.append(args)
+		return None if len(вызовы) == 1 else настоящий(*args, **kwargs)
+
+	return patch.object(домашка, "найти_сдачу", side_effect=найти)
+
+
 class IntegrationTestHomeworkIssue(IntegrationTestCase):
 	"""Выдача домашки при закрытии урока (learning-services#439)."""
 
@@ -94,6 +109,17 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		домашка.выдать(frappe.get_doc("Agent Learning Session", имя))
 		self.assertEqual({с.organization for с in self.сдачи()}, {None, организация})
 
+	def test_выдача_в_гонке_берёт_уже_вставленную_сдачу(self):
+		"""Закрытие урока не падает, если сдачу уже вставил параллельный вызов."""
+		создать_домашку(self.урок, due_mode="relative", due_days=3)
+		домашка.сохранить(self.ученик, self.урок, None, answer="раньше закрытия")
+		with не_найти_с_первого_раза():
+			домашка.выдать(занятие(self.ученик, self.урок))
+		[сдача] = self.сдачи()
+		self.assertEqual(сдача.status, "Submitted")
+		self.assertIsNotNone(сдача.assigned_at)
+		self.assertIsNotNone(сдача.due_at)
+
 	def test_complete_lesson_выдаёт_домашку(self):
 		from lms_frappe_app.api import student
 		from lms_frappe_app.tests.sample_data import сдать_отчёт
@@ -149,6 +175,24 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		self.assertEqual(документ.version, 2)
 		self.assertEqual([в.answer for в in документ.versions], ["первая", "вторая"])
 		self.assertEqual([с.event for с in документ.history], ["submitted", "submitted"])
+
+	def test_сохранение_в_гонке_пишет_в_уже_вставленную_сдачу(self):
+		создать_домашку(self.урок)
+		первая = домашка.сохранить(self.ученик, self.урок, None, answer="первая", новые=[("a.txt", b"one")])
+		with не_найти_с_первого_раза():
+			вторая = домашка.сохранить(self.ученик, self.урок, None, answer="вторая")
+		self.assertEqual(вторая.name, первая.name)
+		self.assertEqual((вторая.version, вторая.answer), (2, "вторая"))
+		self.assertEqual([с.file for с in вторая.files], [с.file for с in первая.files], "файлы прежней сдачи на месте")
+		self.assertEqual(frappe.db.count("Agent Homework Submission", {"member": self.ученик}), 1)
+
+	def test_сохранение_в_гонке_не_правит_принятую(self):
+		создать_домашку(self.урок)
+		первая = домашка.сохранить(self.ученик, self.урок, None, answer="первая")
+		frappe.db.set_value("Agent Homework Submission", первая.name, "status", "Accepted")
+		with не_найти_с_первого_раза(), self.assertRaises(домашка.Отказ) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, answer="вторая")
+		self.assertEqual(отказ.exception.код, "accepted_locked")
 
 	def test_без_задания_отказ(self):
 		with self.assertRaises(домашка.Отказ) as отказ:
