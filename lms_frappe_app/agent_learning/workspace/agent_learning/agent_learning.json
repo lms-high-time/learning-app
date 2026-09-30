@@ -17,7 +17,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Курс",
-   "link_count": 8,
+   "link_count": 9,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -74,6 +74,16 @@
   {
    "hidden": 0,
    "is_query_report": 0,
+   "label": "Домашние задания",
+   "link_count": 0,
+   "link_to": "Agent Lesson Homework",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
    "label": "Репорты о курсе",
    "link_count": 0,
    "link_to": "Agent Course Report",
@@ -105,7 +115,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Ученики",
-   "link_count": 8,
+   "link_count": 9,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -165,6 +175,16 @@
    "label": "Документы учеников",
    "link_count": 0,
    "link_to": "Agent Student Artifact",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Сдачи домашек",
+   "link_count": 0,
+   "link_to": "Agent Homework Submission",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -248,7 +268,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-30 12:00:00.000000",
+ "modified": "2026-09-30 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",
