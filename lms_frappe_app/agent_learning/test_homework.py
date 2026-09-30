@@ -81,6 +81,19 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		self.assertEqual(было, стало)
 		self.assertEqual(len(frappe.get_doc("Agent Homework Submission", стало.name).history), 1)
 
+	def test_правка_правила_не_пересчитывает_выставленный_срок(self):
+		"""Ученик не получает просрочку задним числом за правку правила."""
+		правило = задание(self.урок, due_mode="relative", due_days=5)
+		запись = занятие(self.ученик, self.урок)
+		домашка.выдать(запись)
+		[было] = self.сдачи()
+		правило.update({"due_mode": "absolute", "due_date": "2020-01-01"})
+		правило.save(ignore_permissions=True)
+		домашка.выдать(запись)
+		домашка.сохранить(self.ученик, self.урок, None, answer="сделал")
+		[стало] = self.сдачи()
+		self.assertEqual(стало.due_at, было.due_at)
+
 	def test_закрытие_в_другом_пространстве_даёт_свою_сдачу(self):
 		задание(self.урок)
 		домашка.выдать(занятие(self.ученик, self.урок))
@@ -207,14 +220,13 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 
 	def test_отклонённый_файл_не_оставляет_новой_сдачи(self):
 		задание(self.урок)
+		файлов = frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"})
 		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ) as отказ:
 			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one"), ("b.exe", b"two")])
 		self.assertEqual(отказ.exception.код, "file_rejected")
 		self.assertEqual(отказ.exception.подробности["file"], "b.exe")
 		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
-		self.assertFalse(
-			frappe.db.exists("File", {"attached_to_doctype": "Agent Homework Submission", "file_name": "a.txt"})
-		)
+		self.assertEqual(frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"}), файлов)
 
 	def test_отклонённый_файл_не_меняет_существующую_сдачу(self):
 		задание(self.урок)
