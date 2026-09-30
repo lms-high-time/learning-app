@@ -225,24 +225,58 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 		)
 		self.assertEqual((self.код(ответ), ответ["error"]["status"]), ("wrong_status", "Submitted"))
 
-	def test_гонка_даёт_busy(self):
-		with (
-			patch.object(домашка, "проверить", side_effect=frappe.QueryDeadlockError("1020")),
-			patch.object(frappe.db, "rollback"),
-		):
+	def гонка(self, *исходы):
+		"""`проверить` по очереди: исключение — бросить, `None` — настоящий вызов.
+
+		`Why:` взаимоблокировку MariaDB стенда в тесте не вызвать — одна
+		транзакция; заглушка отдаёт её так, как база отдала бы при гонке.
+		Откат подменён: настоящий снял бы данные теста.
+		"""
+		настоящий = домашка.проверить
+		очередь = list(исходы)
+
+		def проверить(*args, **kwargs):
+			исход = очередь.pop(0)
+			if callable(исход):
+				исход = исход()
+			if исход is None:
+				return настоящий(*args, **kwargs)
+			raise исход
+
+		return patch.object(домашка, "проверить", side_effect=проверить), patch.object(frappe.db, "rollback")
+
+	def test_гонка_повторяется_один_раз(self):
+		подмена, откат = self.гонка(frappe.QueryDeadlockError("1213"), None)
+		with подмена, откат:
 			ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
-		self.assertEqual(self.код(ответ), "busy")
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(ответ["data"]["submission"]["status"], "Accepted")
+
+	def test_гонка_дважды_даёт_busy(self):
+		for ошибка in (frappe.QueryDeadlockError("1213"), frappe.QueryTimeoutError("1205")):
+			подмена, откат = self.гонка(ошибка, ошибка)
+			with подмена, откат:
+				ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
+			self.assertEqual(self.код(ответ), "busy", ошибка)
 
 	def test_гонка_с_новой_версией_даёт_stale_version(self):
-		"""Ученик сохранил, пока куратор ждал блокировку: снимок куратора старше."""
+		"""Ученик сохранил, пока куратор ждал блокировку: повтор видит новую версию."""
 
-		def сохранил_и_заблокировал(*args, **kwargs):
+		def сохранил_и_заблокировал():
 			frappe.db.set_value(домашка.СДАЧА, self.рабочая.name, "version", 2)
-			raise frappe.QueryDeadlockError("1020")
+			return frappe.QueryDeadlockError("1213")
 
-		with (
-			patch.object(домашка, "проверить", side_effect=сохранил_и_заблокировал),
-			patch.object(frappe.db, "rollback"),
-		):
+		подмена, откат = self.гонка(сохранил_и_заблокировал, None)
+		with подмена, откат:
 			ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
 		self.assertEqual((self.код(ответ), ответ["error"]["version"]), ("stale_version", 2))
+		self.assertEqual(
+			self.код(
+				self.вызвать(self.менеджер, "send_back", submission=self.рабочая.name, version=2, comment=" ")
+			),
+			"comment_required",
+		)
+		ответ = self.вызвать(
+			self.менеджер, "reopen", submission=self.рабочая.name, version=2, comment="Не то"
+		)
+		self.assertEqual((self.код(ответ), ответ["error"]["status"]), ("wrong_status", "Submitted"))

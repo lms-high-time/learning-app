@@ -44,6 +44,9 @@ def _отбор(куратор: str) -> list | None:
 
 	Не архивные (`member` задан) и не свои. Методист и модератор — без
 	ограничения по пространству, руководитель — пространства своих организаций.
+	Правило то же, что у `permissions.может_проверять`; дайджест куратору
+	(`homework_notices._дайджесты`) повторяет его отбором в памяти и сужает
+	методисту до курсов, где он инструктор, — правя одно, правьте и другое.
 	"""
 	фильтры = [["member", "is", "set"], ["member", "!=", куратор]]
 	if видит_всё(куратор) or методист(куратор):
@@ -55,30 +58,13 @@ def _отбор(куратор: str) -> list | None:
 
 
 def _названия_организаций(организации) -> dict[str | None, str]:
-	имена = [о for о in организации if о]
-	названия = dict(
-		frappe.get_all(
-			"Learning Organization",
-			filters={"name": ("in", имена)},
-			fields=["name", "organization_name"],
-			as_list=True,
-		)
-		if имена
-		else []
-	)
-	return {**названия, None: ЛИЧНОЕ}
+	return {**домашка.названия("Learning Organization", организации, "organization_name"), None: ЛИЧНОЕ}
 
 
 def _имена_учеников(ученики) -> dict[str, str]:
 	"""Полное имя, без имени — почта. `Why:` почту ученика куратору иначе не отдаём."""
-	if not ученики:
-		return {}
-	return {
-		строка.name: строка.full_name or строка.name
-		for строка in frappe.get_all(
-			"User", filters={"name": ("in", list(ученики))}, fields=["name", "full_name"]
-		)
-	}
+	имена = домашка.названия("User", ученики, "full_name")
+	return {ученик: имена.get(ученик) or ученик for ученик in ученики if ученик}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -140,25 +126,10 @@ def queue(
 
 	уроки = домашка.уроки_с_курсом({с.lesson for с in [*сдачи, *значения]})
 	курсы_фильтра = {уроки[з.lesson].course for з in значения if з.lesson in уроки} - {None}
-	курсы = курсы_фильтра | {уроки[с.lesson].course for с in сдачи if с.lesson in уроки} - {None}
-	названия_курсов = dict(
-		frappe.get_all(
-			"LMS Course", filters={"name": ("in", list(курсы))}, fields=["name", "title"], as_list=True
-		)
-		if курсы
-		else []
-	)
+	курсы = курсы_фильтра | ({уроки[с.lesson].course for с in сдачи if с.lesson in уроки} - {None})
+	названия_курсов = домашка.названия("LMS Course", курсы)
 	организации = _названия_организаций({з.organization for з in значения})
-	задания = dict(
-		frappe.get_all(
-			домашка.ЗАДАНИЕ,
-			filters={"name": ("in", list({с.homework for с in сдачи}))},
-			fields=["name", "title"],
-			as_list=True,
-		)
-		if сдачи
-		else []
-	)
+	задания = домашка.названия(домашка.ЗАДАНИЕ, {с.homework for с in сдачи})
 	имена = _имена_учеников({с.member for с in сдачи})
 	проверенные = домашка.проверенные_версии([с.name for с in сдачи])
 
@@ -217,7 +188,7 @@ def карточка(документ, читатель: str) -> dict:
 		"lesson_title": урок.title,
 		"lesson_url": домашка.адрес_урока(документ.lesson, урок.course) if урок.course else None,
 		"organization": пространства.наружу(организация),
-		"organization_title": _названия_организаций({организация})[организация],
+		"organization_title": _названия_организаций({организация}).get(организация) or организация,
 		"reviewed_version": домашка.проверенная_версия(документ),
 		"actions": ДЕЙСТВИЯ.get(документ.status, []) if может_проверять(документ, читатель) else [],
 	}
@@ -245,23 +216,21 @@ def _проверить(submission: str, действие: str, version, comment
 	документ = _сдача(submission)
 	if not может_проверять(документ, куратор):
 		raise Отказ(НЕТ_ПРАВА, "Эту сдачу вы не проверяете", submission=submission)
-	try:
-		документ = домашка.проверить(куратор, submission, действие, cint(version), comment)
-	except frappe.QueryDeadlockError:
-		# Why: снимок куратора открыт до блокировки, и коммит ученика между ними
-		# MariaDB стенда (снимочная изоляция) отдаёт взаимоблокировкой. Откат —
-		# и версия новым запросом: ученик сохранил — `stale_version`, иначе
-		# гонка с другим куратором — «повторите».
-		frappe.db.rollback()
-		текущая = frappe.db.get_value(домашка.СДАЧА, submission, "version")
-		if текущая is not None and текущая != cint(version):
-			raise Отказ(
-				домашка.ВЕРСИЯ_УСТАРЕЛА,
-				"Ученик сохранил новую версию — посмотрите её",
-				submission=submission,
-				version=текущая,
-			)
-		raise Отказ(домашка.ЗАНЯТО, "Сдачу сейчас меняет другой запрос — повторите", submission=submission)
+	# Why: снимок куратора открыт до блокировки, и коммит ученика между ними
+	# MariaDB стенда (снимочная изоляция) отдаёт взаимоблокировкой, а занятая
+	# строка — таймаутом. Откат и один повтор на новом снимке: ученик сохранил
+	# — повтор сам ответит `stale_version`, сдачу уже проверили —
+	# `wrong_status`. Не вышло и со второго раза — «повторите».
+	for попытка in range(2):
+		try:
+			документ = домашка.проверить(куратор, submission, действие, cint(version), comment)
+			break
+		except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+			frappe.db.rollback()
+			if попытка:
+				raise Отказ(
+					домашка.ЗАНЯТО, "Сдачу сейчас меняет другой запрос — повторите", submission=submission
+				)
 	return карточка(документ, куратор)
 
 
