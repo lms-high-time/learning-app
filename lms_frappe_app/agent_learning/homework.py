@@ -45,6 +45,8 @@ from lms_frappe_app.agent_learning.structure import уроки_курса, ур�
 ФАЙЛ_ОТКЛОНЁН = "file_rejected"
 УЖЕ_ПРИНЯТА = "accepted_locked"
 
+ТОЧКА_СОХРАНЕНИЯ = "agent_homework_save"
+
 ПОЛЯ_ЗАДАНИЯ = ["name", "lesson", "title", "description", "answer_mode", "due_mode", "due_days", "due_date"]
 
 
@@ -186,6 +188,11 @@ def сохранить(
 	if not текст and not файлы and not новые:
 		raise Отказ(ПУСТОЙ_ОТВЕТ, "Ответ пустой: нужен текст или файл")
 
+	# Все отказы, кроме `file_rejected`, — выше, до первой записи. Отклонённый
+	# файл откатывает сохранение целиком. `Why:` `@контракт` отдаёт отказ
+	# успешным ответом, и транзакция запроса коммитится — без точки сохранения
+	# осталась бы новая сдача без версии и файлы, принятые до отклонённого.
+	frappe.db.savepoint(ТОЧКА_СОХРАНЕНИЯ)
 	# Why: файл привязывается к записи по имени — вставленный раньше неё остаётся
 	# без привязки (#343). Не `is_new()`: у записи из `frappe.get_doc({...})`
 	# нет `__islocal`, и проверка отвечает «не новая».
@@ -193,17 +200,9 @@ def сохранить(
 		документ.insert(ignore_permissions=True)
 	for имя_файла, данные in новые:
 		try:
-			файл = frappe.get_doc(
-				{
-					"doctype": "File",
-					"file_name": имя_файла or "file",
-					"content": данные,
-					"is_private": 1,
-					"attached_to_doctype": СДАЧА,
-					"attached_to_name": документ.name,
-				}
-			).insert(ignore_permissions=True)
+			файл = _вложить_файл(документ, имя_файла, данные)
 		except frappe.ValidationError as ошибка:
+			frappe.db.rollback(save_point=ТОЧКА_СОХРАНЕНИЯ)
 			# Why: запрещённый тип Frappe отдаёт 417 без кода — агенту нужен код контракта.
 			raise Отказ(ФАЙЛ_ОТКЛОНЁН, "Такой файл сдать нельзя", file=имя_файла) from ошибка
 		файлы.append(файл.name)
@@ -220,6 +219,20 @@ def сохранить(
 	документ.append("history", {"event": "submitted", "by_user": ученик, "at": сейчас, "version": документ.version})
 	документ.save(ignore_permissions=True)
 	return документ
+
+
+def _вложить_файл(документ, имя: str, данные: bytes):
+	"""Приватный `File`, привязанный к сдаче: права на него Frappe берёт у сдачи."""
+	return frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": имя or "file",
+			"content": данные,
+			"is_private": 1,
+			"attached_to_doctype": СДАЧА,
+			"attached_to_name": документ.name,
+		}
+	).insert(ignore_permissions=True)
 
 
 # --- представление ---

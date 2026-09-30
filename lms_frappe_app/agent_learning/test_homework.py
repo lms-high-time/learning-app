@@ -189,6 +189,44 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 			("Agent Homework Submission", 1),
 		)
 
+	def _отклонить_второй_файл(self):
+		"""Вставка файла, которая принимает первый файл и отклоняет второй — как
+		Frappe отклоняет запрещённый тип."""
+		from unittest.mock import patch
+
+		настоящая = домашка._вложить_файл
+		вызовы = []
+
+		def вложить(документ, имя, данные):
+			вызовы.append(имя)
+			if len(вызовы) > 1:
+				raise frappe.ValidationError("Тип файла не разрешён")
+			return настоящая(документ, имя, данные)
+
+		return patch.object(домашка, "_вложить_файл", side_effect=вложить)
+
+	def test_отклонённый_файл_не_оставляет_новой_сдачи(self):
+		задание(self.урок)
+		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one"), ("b.exe", b"two")])
+		self.assertEqual(отказ.exception.код, "file_rejected")
+		self.assertEqual(отказ.exception.подробности["file"], "b.exe")
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
+		self.assertFalse(
+			frappe.db.exists("File", {"attached_to_doctype": "Agent Homework Submission", "file_name": "a.txt"})
+		)
+
+	def test_отклонённый_файл_не_меняет_существующую_сдачу(self):
+		задание(self.урок)
+		было = домашка.сохранить(self.ученик, self.урок, None, answer="первая", новые=[("a.txt", b"one")])
+		файлы_было = set(frappe.get_all("File", filters={"attached_to_name": было.name}, pluck="name"))
+		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ):
+			домашка.сохранить(self.ученик, self.урок, None, answer="вторая", новые=[("b.txt", b"two"), ("c.exe", b"x")])
+		стало = frappe.get_doc("Agent Homework Submission", было.name)
+		self.assertEqual((стало.version, стало.answer, len(стало.versions)), (1, "первая", 1))
+		self.assertEqual([с.file for с in стало.files], [с.file for с in было.files])
+		self.assertEqual(set(frappe.get_all("File", filters={"attached_to_name": было.name}, pluck="name")), файлы_было)
+
 	def test_предел_числа_файлов(self):
 		задание(self.урок)
 		with self.assertRaises(домашка.Отказ) as отказ:
