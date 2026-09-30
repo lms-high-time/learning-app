@@ -76,6 +76,22 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 			ответ = student.submit_homework(lesson=self.урок, answer="сделал", **параметры)
 			self.assertEqual(ответ.get("error", {}).get("code"), "invalid_files", параметры)
 
+	def test_взаимоблокировка_при_сохранении_отказ_busy(self):
+		"""Гонку с параллельным сохранением MariaDB отдаёт взаимоблокировкой:
+		ответ агенту — повторить, а не 500."""
+		from unittest.mock import patch
+
+		from lms_frappe_app.agent_learning import homework as домашка
+
+		with (
+			patch.object(домашка, "сохранить", side_effect=frappe.QueryDeadlockError("1020")),
+			patch.object(frappe.db, "rollback") as откат,
+		):
+			ответ = student.submit_homework(lesson=self.урок, answer="сделал")
+		self.assertEqual(ответ["error"]["code"], "busy")
+		self.assertEqual(ответ["error"]["lesson"], self.урок)
+		откат.assert_called_once_with()
+
 	def test_задание_и_сдача_урока(self):
 		ответ = student.homework(lesson=self.урок)["data"]
 		self.assertEqual(ответ["homework"]["title"], "Встреча со спонсором")

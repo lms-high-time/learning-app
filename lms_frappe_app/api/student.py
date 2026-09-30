@@ -937,9 +937,17 @@ def submit_homework(
 	новые = [(ф.get("name") or "file", из_base64(ф.get("data"))) for ф in _список_домашки(files, dict)]
 	if frappe.request and frappe.request.files:
 		новые += [(ф.filename or "file", ф.stream.read()) for ф in frappe.request.files.getlist("file")]
-	документ = домашка.сохранить(
-		ученик, lesson, пространство, answer=answer, новые=новые, убрать=_список_домашки(remove_files, str)
-	)
+	try:
+		документ = домашка.сохранить(
+			ученик, lesson, пространство, answer=answer, новые=новые, убрать=_список_домашки(remove_files, str)
+		)
+	except frappe.QueryDeadlockError:
+		# Why: гонку с параллельным сохранением той же сдачи MariaDB стенда
+		# отдаёт взаимоблокировкой (снимочная изоляция), и транзакция уже
+		# испорчена — откат и отказ «повторите», а не 500. Откат убирает и
+		# байты файлов этого вызова (`File.on_rollback`).
+		frappe.db.rollback()
+		raise Отказ(домашка.ЗАНЯТО, "Сдачу сейчас сохраняет другой запрос — повторите", lesson=lesson)
 	return {
 		"space": пространства.наружу(пространство),
 		"submission": домашка.описание_сдачи(документ, с_версиями=True),
