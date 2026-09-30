@@ -321,6 +321,9 @@ def remove_lesson(lesson: str) -> dict:
 		frappe.delete_doc("LMS Quiz", квиз, ignore_permissions=True)
 	for директива in frappe.get_all("Agent Lesson Directive", filters={"lesson": lesson}, pluck="name"):
 		frappe.delete_doc("Agent Lesson Directive", директива, ignore_permissions=True)
+	# Сдач по уроку нет — проверено следами выше, задание уходит вместе с уроком.
+	if задание := _имя_задания(lesson):
+		frappe.delete_doc("Agent Lesson Homework", задание, ignore_permissions=True)
 	frappe.delete_doc("Course Lesson", lesson)
 	return {"removed": lesson, "chapter": глава, "lessons": structure.уроки_главы(глава)}
 
@@ -735,6 +738,115 @@ def remove_question(lesson: str, question: str) -> dict:
 		документ.append("questions", {"question": строка.question, "type": строка.type, "marks": строка.marks})
 	документ.save()
 	return {"quiz": квиз, "questions_total": len(документ.questions)}
+
+
+# --- домашнее задание (learning-services#439) ---
+
+ЗАДАНИЕ_УЖЕ_ЕСТЬ = "homework_exists"
+ЗАДАНИЯ_НЕТ = "homework_missing"
+ЗАДАНИЕ_СДАЮТ = "homework_in_use"
+ПОЛЯ_ЗАДАНИЯ_АВТОРА = ("title", "description", "answer_mode", "due_mode", "due_days", "due_date")
+
+
+def _задание_автора(документ) -> dict:
+	return {"id": документ.name, "lesson": документ.lesson, **{п: документ.get(п) for п in ПОЛЯ_ЗАДАНИЯ_АВТОРА}}
+
+
+def _имя_задания(lesson: str) -> str | None:
+	return frappe.db.get_value("Agent Lesson Homework", {"lesson": lesson})
+
+
+def _задание_урока(lesson: str):
+	if имя := _имя_задания(lesson):
+		return frappe.get_doc("Agent Lesson Homework", имя)
+	raise Отказ(ЗАДАНИЯ_НЕТ, "У урока нет домашнего задания", lesson=lesson)
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def add_homework(
+	lesson: str,
+	title: str,
+	description: str,
+	answer_mode: str = "text_and_files",
+	due_mode: str = "none",
+	due_days: int | None = None,
+	due_date: str | None = None,
+) -> dict:
+	"""Домашнее задание урока: одно на урок, как квиз.
+
+	Задание одинаковое у всех учеников, выдаётся закрытием урока. Необязательное:
+	`publish_course` его не проверяет.
+	"""
+	_автор()
+	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	if имя := _имя_задания(lesson):
+		raise Отказ(ЗАДАНИЕ_УЖЕ_ЕСТЬ, "У урока уже есть домашнее задание: правьте его", lesson=lesson, homework=имя)
+	документ = frappe.get_doc(
+		{
+			"doctype": "Agent Lesson Homework",
+			"lesson": lesson,
+			"title": title,
+			"description": description,
+			"answer_mode": answer_mode,
+			"due_mode": due_mode,
+			"due_days": due_days,
+			"due_date": due_date,
+		}
+	).insert()
+	return _задание_автора(документ)
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def update_homework(
+	lesson: str,
+	title: str | None = None,
+	description: str | None = None,
+	answer_mode: str | None = None,
+	due_mode: str | None = None,
+	due_days: int | None = None,
+	due_date: str | None = None,
+) -> dict:
+	"""Правка задания. Пустое не затирает.
+
+	Сроки, уже выставленные сдачам, не пересчитываются: ученик не получает
+	просрочку задним числом за правку правила.
+	"""
+	_автор()
+	документ = _задание_урока(lesson)
+	for поле, значение in (
+		("title", title),
+		("description", description),
+		("answer_mode", answer_mode),
+		("due_mode", due_mode),
+		("due_days", due_days),
+		("due_date", due_date),
+	):
+		if значение not in (None, ""):
+			документ.set(поле, значение)
+	документ.save()
+	return _задание_автора(документ)
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def remove_homework(lesson: str) -> dict:
+	"""Удаляет задание, по которому ещё никто не сдавал.
+
+	Сдачи в счёт — и архивные после сброса прогресса: они ссылаются на задание.
+	"""
+	_автор()
+	документ = _задание_урока(lesson)
+	if сдач := frappe.db.count("Agent Homework Submission", {"homework": документ.name}):
+		raise Отказ(
+			ЗАДАНИЕ_СДАЮТ, "По заданию уже есть сдачи: его можно только переписать", lesson=lesson, submissions=сдач
+		)
+	frappe.delete_doc("Agent Lesson Homework", документ.name)
+	# Why: удаление записи не двигает ничьего `modified`, и `ревизия` не заметила
+	# бы, что задания больше нет, — зеркало автора осталось бы старым.
+	frappe.get_doc("Course Lesson", lesson).save()
+	return {"lesson": lesson, "removed": True}
 
 
 # --- карта декомпозиции ---
@@ -1232,6 +1344,7 @@ def ревизия(course: str) -> str:
 		источники.append(("LMS Question", {"name": ["in", вопросы]}))
 	if уроки:
 		источники.append(("Agent Lesson Directive", {"lesson": ["in", уроки]}))
+		источники.append(("Agent Lesson Homework", {"lesson": ["in", уроки]}))
 	отметки = [
 		отметка
 		for doctype, фильтры in источники
@@ -1269,6 +1382,9 @@ def get_lesson(lesson: str) -> dict:
 		"directive": _действующая_директива(lesson),
 		"course_directive": _действующая_директива_курса(сведения.course),
 		"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
+		"homework": _задание_автора(frappe.get_doc("Agent Lesson Homework", задание))
+		if (задание := _имя_задания(lesson))
+		else None,
 	}
 
 
@@ -1391,6 +1507,19 @@ def _уроки_главы(глава: str, предел: int) -> list[dict]:
 	from lms_frappe_app.agent_learning import quiz
 
 	уроки = structure.уроки_главы(глава)
+	# Домашние задания главы — одним запросом, а не по уроку (learning-services#439).
+	задания = (
+		{
+			запись.lesson: {"title": запись.title, "answer_mode": запись.answer_mode, "due_mode": запись.due_mode}
+			for запись in frappe.get_all(
+				"Agent Lesson Homework",
+				filters={"lesson": ("in", уроки)},
+				fields=["lesson", "title", "answer_mode", "due_mode"],
+			)
+		}
+		if уроки
+		else {}
+	)
 	собранное = []
 	for урок in уроки:
 		сведения = frappe.db.get_value(
@@ -1412,6 +1541,7 @@ def _уроки_главы(глава: str, предел: int) -> list[dict]:
 				"directive_version": директива.version if директива else None,
 				"objectives": len(directives.строки(директива.objectives)) if директива else 0,
 				"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
+				"homework": задания.get(урок),
 			}
 		)
 	return собранное
@@ -1482,6 +1612,7 @@ def _следы_учеников(lesson: str) -> dict:
 		"progress": frappe.db.count("LMS Course Progress", {"lesson": lesson}),
 		"sessions": frappe.db.count("Agent Learning Session", {"lesson": lesson}),
 		"attempts": frappe.db.count("Agent Quiz Attempt", {"lesson": lesson}),
+		"homework_submissions": frappe.db.count("Agent Homework Submission", {"lesson": lesson}),
 	}
 	return {ключ: значение for ключ, значение in следы.items() if значение}
 

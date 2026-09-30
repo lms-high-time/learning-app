@@ -453,14 +453,21 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			authoring.remove_question(lesson=с_квизом, question=лишний_вопрос),
 		)
 
-		frappe.get_doc(
-			{
-				"doctype": "Agent Lesson Homework",
-				"lesson": с_квизом,
-				"title": "Цикл из жизни",
-				"description": "Найдите у себя на работе повторяющееся действие и опишите его циклом.",
-			}
-		).insert(ignore_permissions=True)
+		self.сверить(
+			"authoring.add_homework",
+			authoring.add_homework(
+				lesson=с_квизом,
+				title="Цикл из жизни",
+				description="Найдите у себя на работе повторяющееся действие и опишите его циклом.",
+			),
+		)
+		self.сверить(
+			"authoring.update_homework",
+			authoring.update_homework(lesson=с_квизом, due_mode="relative", due_days=3),
+		)
+		# Задание второго урока ставится и снимается, пока по нему никто не сдавал.
+		authoring.add_homework(lesson=без_квиза, title="Лишнее", description="Лишнее задание")
+		self.сверить("authoring.remove_homework", authoring.remove_homework(lesson=без_квиза))
 		self.сверить("authoring.get_lesson", authoring.get_lesson(lesson=с_квизом))
 		self.сверить("authoring.course_draft", authoring.course_draft(course=курс))
 		self.сверить("authoring.course_revision", authoring.course_revision(course=курс))
