@@ -1212,8 +1212,16 @@ def request_quiz(session: str) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def submit_answer(attempt: str, question: str, answer: str) -> dict:
-	"""Принимает ответ, возвращает вердикт и следующий вопрос."""
+def submit_answer(
+	attempt: str, question: str, answer: str, student_words: str | None = None
+) -> dict:
+	"""Принимает ответ, возвращает вердикт и следующий вопрос.
+
+	`student_words` обязателен — что ученик написал в ответ, дословно; идёт в
+	журнал проверки и не проверяется (`quiz.принять_ответ`). По умолчанию
+	`None`, а не обязательный аргумент: без него вызов падал бы ошибкой
+	Frappe мимо контракта, а агенту нужен код `student_words_required`.
+	"""
 	попытка = frappe.get_doc("Agent Quiz Attempt", attempt)
 	if попытка.student != текущий_пользователь():
 		# Права на чтение мало: занятия и попытки своих людей читает ещё и
@@ -1224,7 +1232,7 @@ def submit_answer(attempt: str, question: str, answer: str) -> dict:
 	# приостановка организации или снятое зачисление посреди квиза иначе не
 	# мешали довести попытку до зачёта по курсу, которого у ученика уже нет.
 	_требовать_доступ_к_курсу(попытка.student, попытка.course)
-	return quiz.принять_ответ(attempt, question, answer)
+	return quiz.принять_ответ(attempt, question, answer, student_words)
 
 
 @frappe.whitelist()

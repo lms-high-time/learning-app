@@ -136,7 +136,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.assertIn(НЕВЕРНЫЙ_ВАРИАНТ, выдано)
 
 		попытка = квиз["data"]["attempt"]
-		ответ = student.submit_answer(попытка, self.вопрос, "2")
+		ответ = student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
 		self.проверить("submit_answer", ответ)
 		# Неверный ответ не должен подсказывать верный: проверку текста
 		# пояснения делает `проверить`.
@@ -188,7 +188,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		занятие = student.start_lesson()["data"]["session"]
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 
-		ответ = student.submit_answer(попытка, self.вопрос, "1")
+		ответ = student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
 
 		self.assertTrue(ответ["data"]["verdict"]["correct"])
 		self.assertIn(ТЕКСТ_ПОЯСНЕНИЯ, ответ["data"]["verdict"]["explanation"])
@@ -200,7 +200,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		занятие = student.start_lesson()["data"]["session"]
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 
-		ответ = student.submit_answer(попытка, self.вопрос, "2")
+		ответ = student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
 
 		self.проверить("submit_answer", ответ)
 		вердикт = ответ["data"]["verdict"]
@@ -211,7 +211,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		занятие = student.start_lesson()["data"]["session"]
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
-		student.submit_answer(попытка, self.вопрос, "1")
+		student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
 
 		frappe.set_user(self.менеджер)
 
@@ -238,7 +238,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 			),
 		)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
-		student.submit_answer(попытка, self.вопрос, "2")
+		student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
 
 		frappe.set_user(self.менеджер)
 		# Реплика ученика из журнала — то, что отчёт не имеет права раскрывать.

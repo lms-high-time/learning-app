@@ -59,7 +59,9 @@ from lms_frappe_app.testing import сколько_запросов
 	# одна выборка на трудные цели и брошенные попытки — и остаток уроков к
 	# сроку курса, у которого срок есть.
 	"start_lesson": 33,
-	"submit_answer": 15,
+	# +2 за журнал проверки (learning-services#437): запись об ответе и о
+	# выданном следом вопросе.
+	"submit_answer": 17,
 	"student_detail": 12,
 }
 
@@ -134,10 +136,10 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
-		student.submit_answer(попытка, self.вопросы[0], "1")
+		student.submit_answer(попытка, self.вопросы[0], "1", "слова ученика")
 		self._ворота(
 			"submit_answer",
-			lambda: student.submit_answer(попытка, self.вопросы[1], "1"),
+			lambda: student.submit_answer(попытка, self.вопросы[1], "1", "слова ученика"),
 			прогреть=False,
 		)
 

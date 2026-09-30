@@ -1,0 +1,150 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-09-30 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "kind",
+  "occurred_at",
+  "student",
+  "course",
+  "lesson",
+  "attempt",
+  "session",
+  "question",
+  "sb_answer",
+  "answer",
+  "student_words",
+  "is_correct"
+ ],
+ "fields": [
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Событие",
+   "options": "Question Issued\nAnswer Submitted",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Когда",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ученик",
+   "options": "User",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Курс",
+   "options": "LMS Course",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Урок",
+   "options": "Course Lesson",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempt",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Попытка",
+   "options": "Agent Quiz Attempt",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "session",
+   "fieldtype": "Link",
+   "label": "Занятие",
+   "options": "Agent Learning Session",
+   "read_only": 1
+  },
+  {
+   "fieldname": "question",
+   "fieldtype": "Link",
+   "label": "Вопрос",
+   "options": "LMS Question",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.kind == \"Answer Submitted\"",
+   "fieldname": "sb_answer",
+   "fieldtype": "Section Break",
+   "label": "Ответ"
+  },
+  {
+   "description": "Ответ так, как его прислал агент: номера вариантов или введённый текст.",
+   "fieldname": "answer",
+   "fieldtype": "Small Text",
+   "label": "Ответ агента",
+   "read_only": 1
+  },
+  {
+   "description": "Что ученик написал в ответ, дословно со слов агента. Не проверяется и на вердикт не влияет — для разбора.",
+   "fieldname": "student_words",
+   "fieldtype": "Small Text",
+   "label": "Слова ученика",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_correct",
+   "fieldtype": "Check",
+   "label": "Верно",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-09-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Quiz Event",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "occurred_at",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "kind"
+}

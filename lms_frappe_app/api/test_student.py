@@ -329,7 +329,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		занятие = student.start_lesson()["data"]["session"]
 		сдать_отчёт(занятие)
 		начало = student.request_quiz(занятие)["data"]
-		итог = student.submit_answer(начало["attempt"], вопрос, "1")["data"]
+		итог = student.submit_answer(начало["attempt"], вопрос, "1", "слова ученика")["data"]
 
 		self.assertTrue(итог["verdict"]["correct"])
 		self.assertTrue(итог["result"]["passed"])
@@ -351,7 +351,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		начало = student.request_quiz(занятие)["data"]
 		frappe.db.set_value("Learning Organization", self.организация, "status", "Suspended")
 
-		ответ = student.submit_answer(начало["attempt"], вопрос, "1")
+		ответ = student.submit_answer(начало["attempt"], вопрос, "1", "слова ученика")
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА)
@@ -1087,7 +1087,7 @@ class IntegrationTestCompleteLesson(IntegrationTestCase):
 
 		практика = student.start_lesson()["data"]
 		квиз = student.request_quiz(практика["session"])["data"]
-		student.submit_answer(квиз["attempt"], квиз["question"]["id"], "1")
+		student.submit_answer(квиз["attempt"], квиз["question"]["id"], "1", "слова ученика")
 
 		курс = next(
 			к for к in student.list_my_courses()["data"]["courses"] if к["id"] == self.курс

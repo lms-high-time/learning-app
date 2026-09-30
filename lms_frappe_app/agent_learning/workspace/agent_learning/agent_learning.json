@@ -105,7 +105,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Ученики",
-   "link_count": 7,
+   "link_count": 8,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -145,6 +145,16 @@
    "label": "Ответы квизов",
    "link_count": 0,
    "link_to": "Agent Quiz Answer",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Журнал проверки",
+   "link_count": 0,
+   "link_to": "Agent Quiz Event",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -238,7 +248,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-29 16:00:00.000000",
+ "modified": "2026-09-30 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",
