@@ -30,6 +30,7 @@ from lms_frappe_app.tests.sample_data import (
 	привязать_урок,
 	политика_по_умолчанию,
 	создать_вопрос,
+	создать_домашку,
 	создать_занятие,
 	создать_квиз,
 	создать_менеджера,
@@ -58,11 +59,20 @@ from lms_frappe_app.testing import сколько_запросов
 	# +2 за сигналы агенту (learning-services#416): история занятий по уроку —
 	# одна выборка на трудные цели и брошенные попытки — и остаток уроков к
 	# сроку курса, у которого срок есть.
-	"start_lesson": 33,
+	# +1 за домашку (learning-services#439): есть ли у курса задания — одна
+	# выборка, пока их нет.
+	"start_lesson": 34,
 	# +2 за журнал проверки (learning-services#437): запись об ответе и о
 	# выданном следом вопросе.
 	"submit_answer": 17,
 	"student_detail": 12,
+	# Домашки ученика (learning-services#439), три сдачи в двух курсах: сдачи,
+	# уроки, задания и комментарии — по одной выборке, курсы ученика — раз,
+	# порядок уроков ради адресов — раз на курс, а не на сдачу.
+	"my_homework": 23,
+	# `start_lesson` на курсе с заданиями: задания курса — одной выборкой со
+	# всеми полями, сдача прошлого урока — поиск и документ целиком.
+	"start_lesson_homework": 52,
 }
 
 
@@ -143,6 +153,20 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 			прогреть=False,
 		)
 
+	def test_бюджет_my_homework(self):
+		"""Три сдачи: два урока разных глав одного курса и урок второго курса."""
+		self._домашки()
+		self._ворота("my_homework", lambda: student.my_homework())
+
+	def test_бюджет_start_lesson_с_домашкой(self):
+		"""Курс с заданиями: задание текущего урока и сдача прошлого."""
+		self._домашки()
+		прогрев = student.start_lesson(lesson=self.уроки[1])["data"]["session"]
+		frappe.db.set_value("Agent Learning Session", прогрев, "status", "Abandoned")
+		self._ворота(
+			"start_lesson_homework", lambda: student.start_lesson(lesson=self.уроки[1]), прогреть=False
+		)
+
 	def test_бюджет_student_detail(self):
 		frappe.set_user(self.менеджер)
 		self._ворота("student_detail", lambda: manager.student_detail(self.ученик))
@@ -210,6 +234,24 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 				}
 			).insert(ignore_permissions=True)
 			student.update_artifact(self.курс, f"doc{номер}", f"b{номер}1", "текст")
+
+	def _домашки(self) -> None:
+		"""Задания у первого и второго урока, у первого урока другой главы и у
+		урока второго курса; сдачи — по всем, кроме второго, одна возвращена."""
+		from lms_frappe_app.agent_learning.homework import СДАЧА
+
+		frappe.set_user("Administrator")
+		урок_второго_курса = frappe.get_all("Course Lesson", filters={"course": self.второй_курс}, pluck="name")[0]
+		for урок in (self.уроки[0], self.уроки[1], self.уроки[3], урок_второго_курса):
+			создать_домашку(урок)
+		frappe.set_user(self.ученик)
+		сдачи = [
+			student.submit_homework(lesson=урок, answer="Сделал")["data"]["submission"]["id"]
+			for урок in (self.уроки[0], self.уроки[3], урок_второго_курса)
+		]
+		возвращённая = frappe.get_doc(СДАЧА, сдачи[0])
+		возвращённая.append("history", {"event": "returned", "by_user": "Administrator", "comment": "Доделай"})
+		возвращённая.save(ignore_permissions=True)
 
 	def _попытка(self) -> str:
 		занятие = student.start_lesson(lesson=self.уроки[0])["data"]["session"]

@@ -1,0 +1,74 @@
+{
+ "actions": [],
+ "creation": "2026-09-30 18:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "event",
+  "by_user",
+  "at",
+  "version",
+  "comment",
+  "due_at",
+  "due_source"
+ ],
+ "fields": [
+  {
+   "fieldname": "event",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Событие",
+   "options": "assigned\nsubmitted\nreturned\naccepted\nreopened",
+   "reqd": 1
+  },
+  {
+   "fieldname": "by_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Кто",
+   "options": "User"
+  },
+  {
+   "fieldname": "at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Когда"
+  },
+  {
+   "description": "У сохранения — сохранённая версия, у действия куратора — версия, которую он видел",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Версия"
+  },
+  {
+   "fieldname": "comment",
+   "fieldtype": "Small Text",
+   "label": "Комментарий куратора"
+  },
+  {
+   "fieldname": "due_at",
+   "fieldtype": "Datetime",
+   "label": "Срок"
+  },
+  {
+   "fieldname": "due_source",
+   "fieldtype": "Select",
+   "label": "Чьё правило срока",
+   "options": "\nauthor\nallocation"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-30 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Homework Event",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -347,6 +347,45 @@ def доступен_артефакт(doc, ptype: str = "read", user: str | None
 	return bool(doc.organization) and doc.organization in организации_с_документами(user)
 
 
+#: Методисты видят все сдачи домашек, включая личные (learning-services#439):
+#: решение владельца. `Why:` у занятий и документов личное им закрыто — здесь
+#: нет: домашку проверяет и методист курса, а не только руководитель.
+МЕТОДИСТЫ = frozenset({"Course Creator", "Moderator"})
+
+
+def _методист(user: str) -> bool:
+	return bool(МЕТОДИСТЫ & set(frappe.get_roles(user)))
+
+
+def условие_сдачи(user: str | None = None) -> str:
+	"""`Agent Homework Submission`: свои, руководителю — пространство его организаций, методисту — все."""
+	user = user or frappe.session.user
+	if видит_всё(user) or _методист(user):
+		return ""
+	таблица = "`tabAgent Homework Submission`"
+	свои = f"{таблица}.`member` = {frappe.db.escape(user)}"
+	организации = организации_менеджера(user)
+	if not организации:
+		return свои
+	return f"({свои} or {таблица}.`organization` in ({_список(организации)}))"
+
+
+def доступна_сдача(doc, ptype: str = "read", user: str | None = None) -> bool:
+	"""Только чтение: все изменения — через методы, которые пишут журнал и версии.
+
+	`Why:` `_только_чтение` пропустил бы запись методистам
+	(`АДМИНИСТРАТИВНЫЕ_РОЛИ`) — и статус меняли бы мимо журнала.
+	"""
+	user = user or frappe.session.user
+	if видит_всё(user):
+		return True
+	if ptype not in ЧИТАЮЩИЕ_ПРАВА:
+		return False
+	if _методист(user) or doc.member == user:
+		return True
+	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+
+
 def доступен_desk(user: str | None = None) -> bool:
 	"""Показывать ли приложение на стартовом экране desk.
 

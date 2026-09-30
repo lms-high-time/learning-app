@@ -1,0 +1,218 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "autoname": "hash",
+ "creation": "2026-09-30 18:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "homework",
+  "lesson",
+  "member",
+  "organization",
+  "status",
+  "cb_dates",
+  "assigned_at",
+  "due_at",
+  "submitted_at",
+  "version",
+  "sb_answer",
+  "answer",
+  "files",
+  "sb_history",
+  "versions",
+  "history",
+  "sb_archive",
+  "archived_student",
+  "archived_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "homework",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Задание",
+   "options": "Agent Lesson Homework",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Урок",
+   "options": "Course Lesson",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "member",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ученик",
+   "options": "User",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Пусто — личное пространство ученика.",
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Пространство",
+   "options": "Learning Organization",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Статус",
+   "options": "Assigned\nSubmitted\nReturned\nAccepted",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_dates",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Когда урок закрылся и задание выдано. Пусто — сдано без выдачи.",
+   "fieldname": "assigned_at",
+   "fieldtype": "Datetime",
+   "label": "Выдано",
+   "read_only": 1
+  },
+  {
+   "description": "Пусто — без срока.",
+   "fieldname": "due_at",
+   "fieldtype": "Datetime",
+   "label": "Срок",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Последнее сохранение",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Версия ответа",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_answer",
+   "fieldtype": "Section Break",
+   "label": "Ответ"
+  },
+  {
+   "fieldname": "answer",
+   "fieldtype": "Long Text",
+   "label": "Текст ответа",
+   "read_only": 1
+  },
+  {
+   "fieldname": "files",
+   "fieldtype": "Table",
+   "label": "Файлы ответа",
+   "options": "Agent Homework File",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sb_history",
+   "fieldtype": "Section Break",
+   "label": "Версии и журнал"
+  },
+  {
+   "fieldname": "versions",
+   "fieldtype": "Table",
+   "label": "Версии",
+   "options": "Agent Homework Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "history",
+   "fieldtype": "Table",
+   "label": "Журнал",
+   "options": "Agent Homework Event",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sb_archive",
+   "fieldtype": "Section Break",
+   "label": "Архив"
+  },
+  {
+   "description": "Запись заархивирована сбросом прогресса: ученик перенесён сюда, поле «Ученик» пусто.",
+   "fieldname": "archived_student",
+   "fieldtype": "Link",
+   "label": "Ученик до сброса",
+   "options": "User",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "archived_at",
+   "fieldtype": "Datetime",
+   "label": "Сброшено",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-30 22:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Homework Submission",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "LMS Student"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Organization Manager"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "lesson",
+ "track_changes": 0
+}

@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "creation": "2026-09-30 18:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "version",
+  "saved_at",
+  "answer",
+  "files"
+ ],
+ "fields": [
+  {
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Версия",
+   "reqd": 1
+  },
+  {
+   "fieldname": "saved_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Сохранено"
+  },
+  {
+   "fieldname": "answer",
+   "fieldtype": "Long Text",
+   "label": "Текст"
+  },
+  {
+   "description": "Имена записей File этой версии",
+   "fieldname": "files",
+   "fieldtype": "JSON",
+   "label": "Файлы"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-30 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Homework Version",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -16,6 +16,7 @@ from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import announcements, directives, quiz
+from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import signals as сигналы
 from lms_frappe_app.agent_learning.access import (
 	НЕ_ЗАЧИСЛЕН,
@@ -27,6 +28,8 @@ from lms_frappe_app.agent_learning.access import (
 	политика_квиза_для_курса,
 )
 from lms_frappe_app.agent_learning.artifacts import files
+# Отдельным именем: параметр `files` в `submit_homework` затеняет модуль.
+from lms_frappe_app.agent_learning.artifacts.files import из_base64
 from lms_frappe_app.agent_learning.artifacts.document import (
 	_артефакт_целиком,
 	_блоки_урока,
@@ -435,6 +438,10 @@ def start_lesson(
 				"closed_reports": len(итоги),
 			},
 			"signals": _сигналы_старта(ученик, курс, lesson, занятие, директива, сведения),
+			# Задание урока — целиком. По прошлому уроку — статус и комментарий
+			# куратора, ответ ученика — `my_homework(lesson=…)`
+			# (learning-services#439).
+			**домашка.для_старта(ученик, lesson, курс, пространство, полное=False),
 		}
 		if channel == "web":
 			ответ["lesson"].update(_место_урока(lesson, курс))
@@ -489,6 +496,9 @@ def start_lesson(
 		# Выводы сервера из истории ученика — коды, фразы складывает сервис
 		# (learning-services#416).
 		"signals": _сигналы_старта(ученик, курс, lesson, занятие, директива, сведения),
+		# Домашка прошлого урока — с ответом и журналом, задание текущего —
+		# целиком (learning-services#439).
+		**домашка.для_старта(ученик, lesson, курс, пространство, полное=True),
 	}
 	if channel == "web":
 		# Шапке веб-чата — место урока в курсе и остаток пробы
@@ -807,6 +817,178 @@ def upload_artifact_file(
 	пространство = пространства.пространство_курса(ученик, course, space)
 	_требовать_доступ_к_курсу(ученик, course)
 	return _положить_файл(ученик, course, пространство, artifact, key, имя, данные)
+
+
+# --- домашние задания (learning-services#439) ---
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def homework(lesson: str, space: str | None = None) -> dict:
+	"""Задание урока и сдача ученика в пространстве — для страницы урока и окна файлов.
+
+	У урока без задания — `homework: null`, а не отказ: страница урока зовёт
+	метод всегда.
+	"""
+	ученик = текущий_пользователь()
+	курс = _курс_урока(lesson)
+	_требовать_доступ_к_курсу(ученик, курс)
+	пространство = пространства.пространство_курса(ученик, курс, space)
+	задание = домашка.задание_урока(lesson)
+	сдача = None
+	if задание and (имя := домашка.найти_сдачу(задание.name, ученик, пространство)):
+		сдача = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, имя), с_версиями=True, читатель=ученик)
+	return {
+		"space": пространства.наружу(пространство),
+		"lesson_url": домашка.адрес_урока(lesson, курс),
+		"homework": домашка.описание_задания(задание) if задание else None,
+		"submission": сдача,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def my_homework(course: str | None = None, lesson: str | None = None, space: str | None = None) -> dict:
+	"""Домашки ученика в пространстве. С `lesson` — одна, с заданием, ответом и журналом."""
+	ученик = текущий_пользователь()
+	курс_фильтра = _курс_урока(lesson) if lesson else course
+	if курс_фильтра:
+		_требовать_доступ_к_курсу(ученик, курс_фильтра)
+		пространство = пространства.пространство_курса(ученик, курс_фильтра, space)
+	else:
+		пространство = _названное_или_текущее(ученик, space)
+	фильтры = {"member": ученик, "organization": пространство or ("is", "not set")}
+	if lesson:
+		фильтры["lesson"] = lesson
+	elif course:
+		уроки_фильтра = frappe.get_all("Course Lesson", filters={"course": course}, pluck="name")
+		if not уроки_фильтра:
+			return {"space": пространства.наружу(пространство), "items": []}
+		фильтры["lesson"] = ("in", уроки_фильтра)
+	# Why: перечень — одна выборка на вид данных, а не на сдачу (lms-platform#196):
+	# сдачи, уроки с курсом, задания, комментарии и адреса — по одному запросу,
+	# порядок уроков — раз на курс. Сдача целиком читается только для `lesson`.
+	сдачи = frappe.get_all(
+		домашка.СДАЧА,
+		filters=фильтры,
+		fields=["name", "homework", "lesson", "status", "due_at", "version"],
+		order_by="modified desc",
+	)
+	уроки = домашка.уроки_с_курсом({с.lesson for с in сдачи})
+	# Курс урока — через главу; у урока без главы — курс фильтра, если он есть.
+	курсы = {имя: урок.course or курс_фильтра for имя, урок in уроки.items()}
+	if курс_фильтра:
+		доступные = {курс_фильтра}
+	else:
+		# Why: без записи на курс задания не видно нигде — и в общем списке
+		# тоже, хотя сдача по курсу осталась.
+		доступные = {к["course"] for к in курсы_ученика(ученик)} if сдачи else set()
+	сдачи = [с for с in сдачи if курсы.get(с.lesson) in доступные]
+	if not сдачи:
+		return {"space": пространства.наружу(пространство), "items": []}
+	задания = {
+		з.name: з
+		for з in frappe.get_all(
+			домашка.ЗАДАНИЕ,
+			filters={"name": ("in", list({с.homework for с in сдачи}))},
+			fields=домашка.ПОЛЯ_ЗАДАНИЯ,
+		)
+	}
+	комментарии = домашка.последние_комментарии([с.name for с in сдачи])
+	адреса = {курс: домашка.адреса_уроков(курс) for курс in {курсы[с.lesson] for с in сдачи}}
+	строки = []
+	for сдача in сдачи:
+		курс = курсы[сдача.lesson]
+		задание = задания[сдача.homework]
+		строка = {
+			"course": курс,
+			"course_title": frappe.get_cached_value("LMS Course", курс, "title"),
+			"lesson": сдача.lesson,
+			"lesson_title": уроки[сдача.lesson].title,
+			"lesson_url": адреса[курс].get(сдача.lesson),
+			"title": задание.title,
+			**домашка.описание_сдачи(сдача, полное=False, читатель=ученик),
+			"last_comment": комментарии.get(сдача.name),
+		}
+		if lesson:
+			строка["homework"] = домашка.описание_задания(задание)
+			строка["submission"] = домашка.описание_сдачи(
+				frappe.get_doc(домашка.СДАЧА, сдача.name), читатель=ученик
+			)
+		строки.append(строка)
+	return {"space": пространства.наружу(пространство), "items": строки}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def submit_homework(
+	lesson: str,
+	answer: str | None = None,
+	space: str | None = None,
+	remove_files=None,
+	files=None,
+) -> dict:
+	"""Сохраняет ответ на домашку: одна версия на вызов.
+
+	`answer` не передан — текст остаётся прежним: окно файлов агента текст не
+	трогает. Новые файлы — полями `file` формы (страница урока) или списком
+	`files` из `{name, data}` в base64 (окно загрузки MCP); `remove_files` —
+	`id` файлов, которые убрать из ответа. Убранные файлы не удаляются: на них
+	ссылаются прежние версии.
+	"""
+	ученик = текущий_пользователь()
+	курс = _курс_урока(lesson)
+	_требовать_доступ_к_курсу(ученик, курс)
+	пространство = пространства.пространство_курса(ученик, курс, space)
+	новые = [(ф.get("name") or "file", из_base64(ф.get("data"))) for ф in _список_домашки(files, dict)]
+	if frappe.request and frappe.request.files:
+		новые += [(ф.filename or "file", ф.stream.read()) for ф in frappe.request.files.getlist("file")]
+	try:
+		документ = домашка.сохранить(
+			ученик, lesson, пространство, answer=answer, новые=новые, убрать=_список_домашки(remove_files, str)
+		)
+	except frappe.QueryDeadlockError:
+		# Why: гонку с параллельным сохранением той же сдачи MariaDB стенда
+		# отдаёт взаимоблокировкой (снимочная изоляция), и транзакция уже
+		# испорчена — откат и отказ «повторите», а не 500. Откат убирает и
+		# байты файлов этого вызова (`File.on_rollback`).
+		frappe.db.rollback()
+		raise Отказ(домашка.ЗАНЯТО, "Сдачу сейчас сохраняет другой запрос — повторите", lesson=lesson)
+	return {
+		"space": пространства.наружу(пространство),
+		"submission": домашка.описание_сдачи(документ, с_версиями=True, читатель=ученик),
+	}
+
+
+def _список_домашки(значение, тип: type) -> list:
+	"""`files` или `remove_files` списком нужного вида — или отказ контракта.
+
+	`Why:` список приезжает и строкой JSON (форма), и от агента бывает чем
+	угодно: не-JSON и элемент не того вида роняли вызов 500 мимо контракта.
+	`data` не строкой — пустой файл: дальше откажет `file_missing`; `name` не
+	строкой — тоже отказ контракта: из него строится имя файла.
+	"""
+	if isinstance(значение, str):
+		if not значение.strip():
+			return []
+		try:
+			значение = json.loads(значение)
+		except ValueError:
+			значение = None
+	elif значение is None:
+		return []
+	if (
+		not isinstance(значение, list | tuple)
+		or not all(isinstance(э, тип) for э in значение)
+		or (тип is dict and not all(isinstance(э.get("name"), str | None) for э in значение))
+	):
+		raise Отказ(
+			домашка.НЕВЕРНЫЕ_ФАЙЛЫ,
+			"files — список объектов { name, data }, remove_files — список id файлов",
+		)
+	if тип is dict:
+		return [{**э, "data": э.get("data") if isinstance(э.get("data"), str) else None} for э in значение]
+	return list(значение)
 
 
 @frappe.whitelist(methods=["POST"])

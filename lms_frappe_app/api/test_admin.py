@@ -9,6 +9,7 @@ from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
 	создать_вопрос,
+	создать_домашку,
 	создать_квиз,
 	создать_куратора,
 	создать_организацию,
@@ -80,6 +81,28 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 			frappe.db.exists("Agent Student Note", {"student": self.ученик, "note_key": "role"}),
 			"факт без курса — не прогресс по курсу",
 		)
+
+	def test_сдачи_домашки_уходят_в_архив(self):
+		"""Повторное прохождение начинается с чистого листа (learning-services#439)."""
+		создать_домашку(self.урок)
+		frappe.set_user(self.ученик)
+		сдача = student.submit_homework(lesson=self.урок, answer="Сделал")["data"]["submission"]["id"]
+		итог = self.сбросить()["data"]
+
+		self.assertEqual(итог["homework_archived"], 1)
+		запись = frappe.db.get_value(
+			"Agent Homework Submission", сдача, ["member", "archived_student", "archived_at"], as_dict=True
+		)
+		self.assertIsNone(запись.member)
+		self.assertEqual(запись.archived_student, self.ученик)
+		self.assertIsNotNone(запись.archived_at)
+
+		зачислить(self.ученик, self.урок)
+		frappe.set_user(self.ученик)
+		self.assertIsNone(student.homework(lesson=self.урок)["data"]["submission"])
+		заново = student.submit_homework(lesson=self.урок, answer="Сделал заново")["data"]["submission"]
+		self.assertNotEqual(заново["id"], сдача)
+		self.assertEqual(заново["version"], 1)
 
 	def test_запись_на_курс_снимается(self):
 		self.сбросить()
