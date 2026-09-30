@@ -42,7 +42,7 @@ class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
 		return frappe.get_doc("Agent Quiz Answer", {"attempt": self.попытка, "question": self.вопрос})
 
 	def test_верный_ответ_приносит_вес_вопроса(self):
-		принять_ответ(self.попытка, self.вопрос, "1")
+		принять_ответ(self.попытка, self.вопрос, "1", "слова ученика")
 
 		запись = self.запись()
 		self.assertTrue(запись.is_correct)
@@ -52,7 +52,7 @@ class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
 	def test_неверный_ответ_обнуляет_баллы_но_не_вес(self):
 		"""`Why:` доля считается как «набрано из скольких», и потерянный вес
 		вопроса поднял бы итог: ошибка стала бы выгоднее пропуска."""
-		принять_ответ(self.попытка, self.вопрос, "2")
+		принять_ответ(self.попытка, self.вопрос, "2", "слова ученика")
 
 		запись = self.запись()
 		self.assertFalse(запись.is_correct)
@@ -61,7 +61,7 @@ class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
 
 	def test_ответ_хранится_обрезанным_до_предела_поля(self):
 		"""Агент волен прислать в ответ хоть всё занятие; запись — про вердикт."""
-		принять_ответ(self.попытка, self.вопрос, "я" * 900)
+		принять_ответ(self.попытка, self.вопрос, "я" * 900, "слова ученика")
 
 		self.assertEqual(len(self.запись().answer), 500)
 

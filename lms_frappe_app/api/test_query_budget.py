@@ -134,10 +134,10 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
-		student.submit_answer(попытка, self.вопросы[0], "1")
+		student.submit_answer(попытка, self.вопросы[0], "1", "слова ученика")
 		self._ворота(
 			"submit_answer",
-			lambda: student.submit_answer(попытка, self.вопросы[1], "1"),
+			lambda: student.submit_answer(попытка, self.вопросы[1], "1", "слова ученика"),
 			прогреть=False,
 		)
 

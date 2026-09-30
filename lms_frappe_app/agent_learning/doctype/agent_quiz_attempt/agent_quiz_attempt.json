@@ -153,8 +153,14 @@
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-09-25 17:36:56.050456",
+ "links": [
+  {
+   "group": "Журнал",
+   "link_doctype": "Agent Quiz Event",
+   "link_fieldname": "attempt"
+  }
+ ],
+ "modified": "2026-09-30 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",

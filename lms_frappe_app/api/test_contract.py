@@ -582,7 +582,10 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			ответ = self.сверить(
 				"student.submit_answer",
 				student.submit_answer(
-					attempt=попытка["attempt"], question=вопрос["id"], answer="1"
+					attempt=попытка["attempt"],
+					question=вопрос["id"],
+					answer="1",
+					student_words="Первый вариант",
 				),
 			)
 			вопрос = ответ["next_question"]

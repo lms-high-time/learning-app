@@ -114,7 +114,7 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 		frappe.set_user(ученик)
 		try:
 			попытка = начать_попытку(занятие)["attempt"]
-			принять_ответ(попытка, self.вопрос, "1")
+			принять_ответ(попытка, self.вопрос, "1", "слова ученика")
 		finally:
 			frappe.set_user("Administrator")
 

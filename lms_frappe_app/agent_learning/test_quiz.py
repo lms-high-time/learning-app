@@ -72,8 +72,8 @@ class IntegrationTestQuiz(IntegrationTestCase):
 	def пройти_целиком(self, верно_выбор=True, верно_ввод=True):
 		начало = self.начать()
 		попытка = начало["attempt"]
-		принять_ответ(попытка, self.вопрос_выбор, "2" if верно_выбор else "1")
-		итог = принять_ответ(попытка, self.вопрос_ввод, "цикл" if верно_ввод else "мимо")
+		принять_ответ(попытка, self.вопрос_выбор, "2" if верно_выбор else "1", "слова ученика")
+		итог = принять_ответ(попытка, self.вопрос_ввод, "цикл" if верно_ввод else "мимо", "слова ученика")
 		return попытка, итог
 
 	# --- главное: эталоны не покидают сервер ---
@@ -100,7 +100,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		начало = self.начать()
 		self.assertNotIn("explanation", json.dumps(начало["question"], ensure_ascii=False))
 
-		ответ = принять_ответ(начало["attempt"], self.вопрос_выбор, "2")
+		ответ = принять_ответ(начало["attempt"], self.вопрос_выбор, "2", "слова ученика")
 
 		# После верного ответа — приходит, и это разные состояния одного
 		# вопроса, а не ссылка на соседний тест.
@@ -113,7 +113,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		"""Пояснение верного варианта ошибившемуся — готовый ответ до пересдачи."""
 		попытка = self.начать()["attempt"]
 
-		вердикт = принять_ответ(попытка, self.вопрос_выбор, "1")["verdict"]
+		вердикт = принять_ответ(попытка, self.вопрос_выбор, "1", "слова ученика")["verdict"]
 
 		self.assertFalse(вердикт["correct"])
 		self.assertEqual(вердикт["why_wrong"], ПОЯСНЕНИЕ_НЕВЕРНОГО)
@@ -123,7 +123,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 	def test_неверный_вариант_без_пояснения_не_даёт_why_wrong(self):
 		попытка = self.начать()["attempt"]
 
-		вердикт = принять_ответ(попытка, self.вопрос_выбор, "3")["verdict"]
+		вердикт = принять_ответ(попытка, self.вопрос_выбор, "3", "слова ученика")["verdict"]
 
 		self.assertEqual(вердикт, {"correct": False})
 
@@ -144,7 +144,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		зачислить(self.ученик, урок)
 		попытка = начать_попытку(создать_занятие(self.ученик, урок))["attempt"]
 
-		вердикт = принять_ответ(попытка, вопрос, "1,2")["verdict"]
+		вердикт = принять_ответ(попытка, вопрос, "1,2", "слова ученика")["verdict"]
 
 		self.assertFalse(вердикт["correct"])
 		self.assertEqual(вердикт["why_wrong"], "Три нечётное")
@@ -154,12 +154,12 @@ class IntegrationTestQuiz(IntegrationTestCase):
 
 	def test_неверный_выбор_не_засчитывается(self):
 		попытка = self.начать()["attempt"]
-		self.assertFalse(принять_ответ(попытка, self.вопрос_выбор, "1")["verdict"]["correct"])
+		self.assertFalse(принять_ответ(попытка, self.вопрос_выбор, "1", "слова ученика")["verdict"]["correct"])
 
 	def test_свободный_ввод_сверяется_без_учёта_регистра_и_пробелов(self):
 		попытка = self.начать()["attempt"]
-		принять_ответ(попытка, self.вопрос_выбор, "2")
-		ответ = принять_ответ(попытка, self.вопрос_ввод, "  ЦИКЛ ")
+		принять_ответ(попытка, self.вопрос_выбор, "2", "слова ученика")
+		ответ = принять_ответ(попытка, self.вопрос_ввод, "  ЦИКЛ ", "слова ученика")
 		self.assertTrue(ответ["verdict"]["correct"])
 
 	def test_множественный_выбор_требует_полного_совпадения(self):
@@ -175,10 +175,10 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		зачислить(self.ученик, урок)
 		попытка = начать_попытку(создать_занятие(self.ученик, урок))["attempt"]
 
-		частично = принять_ответ(попытка, вопросы[0], "1")
+		частично = принять_ответ(попытка, вопросы[0], "1", "слова ученика")
 		self.assertFalse(частично["verdict"]["correct"])
 
-		все_варианты = принять_ответ(попытка, вопросы[1], "1,2,3")
+		все_варианты = принять_ответ(попытка, вопросы[1], "1,2,3", "слова ученика")
 		self.assertFalse(все_варианты["verdict"]["correct"])
 
 	def test_ответ_принимается_и_строкой_и_списком(self):
@@ -195,7 +195,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 			зачислить(self.ученик, урок)
 			попытка = начать_попытку(создать_занятие(self.ученик, урок))["attempt"]
 
-			self.assertTrue(принять_ответ(попытка, вопрос, ответ)["verdict"]["correct"])
+			self.assertTrue(принять_ответ(попытка, вопрос, ответ, "слова ученика")["verdict"]["correct"])
 
 	# --- ответ текстом варианта (lms-platform#148) ---
 	# Модели передают в квиз текст выбранного варианта вместо его номера.
@@ -203,22 +203,22 @@ class IntegrationTestQuiz(IntegrationTestCase):
 
 	def test_текст_верного_варианта_засчитывается(self):
 		попытка = self.начать()["attempt"]
-		ответ = принять_ответ(попытка, self.вопрос_выбор, "  Два ")
+		ответ = принять_ответ(попытка, self.вопрос_выбор, "  Два ", "слова ученика")
 		self.assertTrue(ответ["verdict"]["correct"])
 
 	def test_текст_неверного_варианта_не_засчитывается(self):
 		попытка = self.начать()["attempt"]
-		self.assertFalse(принять_ответ(попытка, self.вопрос_выбор, "раз")["verdict"]["correct"])
+		self.assertFalse(принять_ответ(попытка, self.вопрос_выбор, "раз", "слова ученика")["verdict"]["correct"])
 
 	def test_все_варианты_текстом_не_засчитываются(self):
 		# Строгое равенство множеств держится и для текстов.
 		попытка = self.начать()["attempt"]
-		ответ = принять_ответ(попытка, self.вопрос_выбор, "раз, два, три")
+		ответ = принять_ответ(попытка, self.вопрос_выбор, "раз, два, три", "слова ученика")
 		self.assertFalse(ответ["verdict"]["correct"])
 
 	def test_неизвестный_текст_неверен_а_не_ошибка(self):
 		попытка = self.начать()["attempt"]
-		self.assertFalse(принять_ответ(попытка, self.вопрос_выбор, "четыре")["verdict"]["correct"])
+		self.assertFalse(принять_ответ(попытка, self.вопрос_выбор, "четыре", "слова ученика")["verdict"]["correct"])
 
 	def test_текст_варианта_с_запятой_засчитывается_целиком(self):
 		вопрос = создать_вопрос(
@@ -229,7 +229,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		зачислить(self.ученик, урок)
 		попытка = начать_попытку(создать_занятие(self.ученик, урок))["attempt"]
 
-		self.assertTrue(принять_ответ(попытка, вопрос, "москва, россия")["verdict"]["correct"])
+		self.assertTrue(принять_ответ(попытка, вопрос, "москва, россия", "слова ученика")["verdict"]["correct"])
 
 	def test_номера_важнее_текстов_похожих_на_номер(self):
 		# У варианта №2 текст «3»: ответ «1,3» — это номера, а не текст.
@@ -239,7 +239,7 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		зачислить(self.ученик, урок)
 		попытка = начать_попытку(создать_занятие(self.ученик, урок))["attempt"]
 
-		self.assertTrue(принять_ответ(попытка, вопрос, "1,3")["verdict"]["correct"])
+		self.assertTrue(принять_ответ(попытка, вопрос, "1,3", "слова ученика")["verdict"]["correct"])
 
 	# --- итог ---
 
@@ -288,10 +288,10 @@ class IntegrationTestQuiz(IntegrationTestCase):
 
 	def test_повторный_ответ_на_вопрос_отклоняется(self):
 		попытка = self.начать()["attempt"]
-		принять_ответ(попытка, self.вопрос_выбор, "2")
+		принять_ответ(попытка, self.вопрос_выбор, "2", "слова ученика")
 
 		with self.assertRaises(Отказ) as отказ:
-			принять_ответ(попытка, self.вопрос_выбор, "1")
+			принять_ответ(попытка, self.вопрос_выбор, "1", "слова ученика")
 		self.assertEqual(отказ.exception.код, ЧУЖОЙ_ВОПРОС)
 
 	def test_чужой_вопрос_отклоняется(self):
@@ -300,14 +300,14 @@ class IntegrationTestQuiz(IntegrationTestCase):
 		попытка = self.начать()["attempt"]
 
 		with self.assertRaises(Отказ) as отказ:
-			принять_ответ(попытка, чужой, "1")
+			принять_ответ(попытка, чужой, "1", "слова ученика")
 		self.assertEqual(отказ.exception.код, ЧУЖОЙ_ВОПРОС)
 
 	def test_ответ_в_завершённую_попытку_отклоняется(self):
 		попытка, _ = self.пройти_целиком()
 
 		with self.assertRaises(Отказ) as отказ:
-			принять_ответ(попытка, self.вопрос_выбор, "2")
+			принять_ответ(попытка, self.вопрос_выбор, "2", "слова ученика")
 		self.assertEqual(отказ.exception.код, ПОПЫТКА_ЗАВЕРШЕНА)
 
 	def test_урок_без_квиза_даёт_внятный_код(self):
@@ -431,7 +431,7 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 		self.организация_с_политикой(max_attempts=1, retry_delay_minutes=60)
 
 		первая = начать_попытку(self.занятие())["attempt"]
-		принять_ответ(первая, self.вопрос, "2")  # неверно, попытка остаётся открытой
+		принять_ответ(первая, self.вопрос, "2", "слова ученика")  # неверно, попытка остаётся открытой
 
 		with self.assertRaises(Отказ) as отказ:
 			начать_попытку(self.занятие())
@@ -455,7 +455,7 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 		занятие = создать_занятие(self.ученик, урок)
 
 		попытка = начать_попытку(занятие)["attempt"]
-		принять_ответ(попытка, self.вопрос, "1")
+		принять_ответ(попытка, self.вопрос, "1", "слова ученика")
 
 		повтор = начать_попытку(занятие)
 
@@ -490,7 +490,7 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 		попытка = начать_попытку(занятие)["attempt"]
 		frappe.db.set_value("Agent Learning Session", занятие, "status", "Abandoned")
 
-		итог = принять_ответ(попытка, self.вопрос, "1")
+		итог = принять_ответ(попытка, self.вопрос, "1", "слова ученика")
 
 		self.assertTrue(итог["result"]["passed"])
 		self.assertTrue(frappe.db.get_value("Agent Quiz Attempt", попытка, "submission"))
@@ -501,7 +501,7 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 		# Иначе в нашей записи «зачтено», а в браузерной — ниже проходного.
 		self.организация_с_политикой(pass_threshold=0.5)
 		попытка = начать_попытку(self.занятие())["attempt"]
-		принять_ответ(попытка, self.вопрос, "1")
+		принять_ответ(попытка, self.вопрос, "1", "слова ученика")
 
 		submission = frappe.db.get_value("Agent Quiz Attempt", попытка, "submission")
 		self.assertEqual(
@@ -533,5 +533,5 @@ class IntegrationTestQuizIntegrity(IntegrationTestCase):
 		self.assertEqual(начало["question"]["id"], годный)
 		self.assertEqual(начало["question"]["total"], 1)
 
-		итог = принять_ответ(начало["attempt"], годный, "1")
+		итог = принять_ответ(начало["attempt"], годный, "1", "слова ученика")
 		self.assertTrue(итог["attempt_finished"], "квиз должен завершаться без кривого вопроса")
