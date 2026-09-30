@@ -70,6 +70,7 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 			{"files": ["a.txt"]},
 			{"files": "{не json"},
 			{"files": {"name": "a.txt", "data": "aGk="}},
+			{"files": [{"name": 5, "data": "aGk="}]},
 			{"remove_files": "не json"},
 			{"remove_files": [{"id": "x"}]},
 		):
@@ -190,6 +191,16 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		[строка] = student.my_homework()["data"]["items"]
 		self.assertEqual(строка["last_comment"], "Второй")
+
+	def test_урок_без_главы_не_роняет_перечень_курса(self):
+		student.submit_homework(lesson=self.урок, answer="сделал")
+		frappe.set_user("Administrator")
+		frappe.db.set_value("Course Lesson", self.урок, "chapter", None)
+		frappe.set_user(self.ученик)
+		ответ = student.my_homework(course=self.курс)
+		self.assertTrue(ответ["ok"], ответ)
+		[строка] = ответ["data"]["items"]
+		self.assertEqual(строка["course"], self.курс)
 
 	def test_моя_домашка_по_уроку_целиком(self):
 		student.submit_homework(lesson=self.урок, answer="сделал")

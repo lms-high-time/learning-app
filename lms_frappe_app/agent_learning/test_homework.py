@@ -391,6 +391,13 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		self.assertEqual([с.file for с in стало.files], [с.file for с in было.files])
 		self.assertEqual(set(frappe.get_all("File", filters={"attached_to_name": было.name}, pluck="name")), файлы_было)
 
+	def test_почта_в_журнале_только_у_событий_читателя(self):
+		создать_домашку(self.урок)
+		документ = домашка.сохранить(self.ученик, self.урок, None, answer="сделал")
+		[своё] = домашка.описание_сдачи(документ, читатель=self.ученик)["history"]
+		[чужое] = домашка.описание_сдачи(документ, читатель="Administrator")["history"]
+		self.assertEqual((своё["by"], чужое["by"]), (self.ученик, None))
+
 	def test_версии_читают_файлы_одним_запросом(self):
 		from unittest.mock import patch
 

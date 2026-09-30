@@ -437,8 +437,8 @@ def _файлы(имена: list[str], сведения: dict[str, dict]) -> lis
 КУРАТОР = "Куратор"
 
 
-def _автор_события(user: str | None) -> dict:
-	"""`by` и `by_name` строки журнала для того, кто его читает.
+def _автор_события(user: str | None, читатель: str) -> dict:
+	"""`by` и `by_name` строки журнала для `читатель`.
 
 	`Why:` журнал читает ученик — на странице урока и через агента, и почта
 	куратора ему ни к чему (learning-services#439). Почта остаётся только у
@@ -447,7 +447,7 @@ def _автор_события(user: str | None) -> dict:
 	if not user:
 		return {"by": None, "by_name": None}
 	имя = frappe.get_cached_value("User", user, "full_name")
-	if user == frappe.session.user:
+	if user == читатель:
 		return {"by": user, "by_name": имя or user}
 	return {"by": None, "by_name": имя or КУРАТОР}
 
@@ -466,8 +466,14 @@ def просрочена(документ) -> bool:
 	)
 
 
-def описание_сдачи(документ, *, полное: bool = True, с_версиями: bool = False) -> dict:
-	"""Сдача для ответа. Коротко — для лёгкого старта и списка."""
+def описание_сдачи(
+	документ, *, полное: bool = True, с_версиями: bool = False, читатель: str | None = None
+) -> dict:
+	"""Сдача для ответа. Коротко — для лёгкого старта и списка.
+
+	`читатель` — кому отдаётся журнал (по умолчанию пользователь сессии): от
+	него зависит, чья почта в `history` видна (`_автор_события`).
+	"""
 	короткое = {
 		"id": документ.name,
 		"status": документ.status,
@@ -490,7 +496,7 @@ def описание_сдачи(документ, *, полное: bool = True, 
 		"history": [
 			{
 				"event": с.event,
-				**_автор_события(с.by_user),
+				**_автор_события(с.by_user, читатель or frappe.session.user),
 				"at": _время(с.at),
 				"version": с.version or None,
 				"comment": с.comment or None,
@@ -556,7 +562,7 @@ def для_старта(ученик: str, lesson: str, курс: str, орга�
 		прошлое = {
 			"lesson": задание.lesson,
 			"title": задание.title,
-			"submission": описание_сдачи(сдача, полное=полное) if сдача else None,
+			"submission": описание_сдачи(сдача, полное=полное, читатель=ученик) if сдача else None,
 			"last_comment": последний_комментарий(сдача) if сдача else None,
 			**({"homework": описание_задания(задание)} if полное else {}),
 		}

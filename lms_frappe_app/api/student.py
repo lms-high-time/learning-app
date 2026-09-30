@@ -837,7 +837,7 @@ def homework(lesson: str, space: str | None = None) -> dict:
 	задание = домашка.задание_урока(lesson)
 	сдача = None
 	if задание and (имя := домашка.найти_сдачу(задание.name, ученик, пространство)):
-		сдача = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, имя), с_версиями=True)
+		сдача = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, имя), с_версиями=True, читатель=ученик)
 	return {
 		"space": пространства.наружу(пространство),
 		"lesson_url": домашка.адрес_урока(lesson, курс),
@@ -875,11 +875,15 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 		order_by="modified desc",
 	)
 	уроки = домашка.уроки_с_курсом({с.lesson for с in сдачи})
-	if not курс_фильтра and сдачи:
+	# Курс урока — через главу; у урока без главы — курс фильтра, если он есть.
+	курсы = {имя: урок.course or курс_фильтра for имя, урок in уроки.items()}
+	if курс_фильтра:
+		доступные = {курс_фильтра}
+	else:
 		# Why: без записи на курс задания не видно нигде — и в общем списке
 		# тоже, хотя сдача по курсу осталась.
-		доступные = {к["course"] for к in курсы_ученика(ученик)}
-		сдачи = [с for с in сдачи if с.lesson in уроки and уроки[с.lesson].course in доступные]
+		доступные = {к["course"] for к in курсы_ученика(ученик)} if сдачи else set()
+	сдачи = [с for с in сдачи if курсы.get(с.lesson) in доступные]
 	if not сдачи:
 		return {"space": пространства.наружу(пространство), "items": []}
 	задания = {
@@ -891,24 +895,26 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 		)
 	}
 	комментарии = домашка.последние_комментарии([с.name for с in сдачи])
-	адреса = {курс: домашка.адреса_уроков(курс) for курс in {уроки[с.lesson].course for с in сдачи}}
+	адреса = {курс: домашка.адреса_уроков(курс) for курс in {курсы[с.lesson] for с in сдачи}}
 	строки = []
 	for сдача in сдачи:
-		урок = уроки[сдача.lesson]
+		курс = курсы[сдача.lesson]
 		задание = задания[сдача.homework]
 		строка = {
-			"course": урок.course,
-			"course_title": frappe.get_cached_value("LMS Course", урок.course, "title"),
+			"course": курс,
+			"course_title": frappe.get_cached_value("LMS Course", курс, "title"),
 			"lesson": сдача.lesson,
-			"lesson_title": урок.title,
-			"lesson_url": адреса[урок.course].get(сдача.lesson),
+			"lesson_title": уроки[сдача.lesson].title,
+			"lesson_url": адреса[курс].get(сдача.lesson),
 			"title": задание.title,
-			**домашка.описание_сдачи(сдача, полное=False),
+			**домашка.описание_сдачи(сдача, полное=False, читатель=ученик),
 			"last_comment": комментарии.get(сдача.name),
 		}
 		if lesson:
 			строка["homework"] = домашка.описание_задания(задание)
-			строка["submission"] = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, сдача.name))
+			строка["submission"] = домашка.описание_сдачи(
+				frappe.get_doc(домашка.СДАЧА, сдача.name), читатель=ученик
+			)
 		строки.append(строка)
 	return {"space": пространства.наружу(пространство), "items": строки}
 
@@ -950,7 +956,7 @@ def submit_homework(
 		raise Отказ(домашка.ЗАНЯТО, "Сдачу сейчас сохраняет другой запрос — повторите", lesson=lesson)
 	return {
 		"space": пространства.наружу(пространство),
-		"submission": домашка.описание_сдачи(документ, с_версиями=True),
+		"submission": домашка.описание_сдачи(документ, с_версиями=True, читатель=ученик),
 	}
 
 
@@ -959,7 +965,8 @@ def _список_домашки(значение, тип: type) -> list:
 
 	`Why:` список приезжает и строкой JSON (форма), и от агента бывает чем
 	угодно: не-JSON и элемент не того вида роняли вызов 500 мимо контракта.
-	`data` не строкой — пустой файл: дальше откажет `file_missing`.
+	`data` не строкой — пустой файл: дальше откажет `file_missing`; `name` не
+	строкой — тоже отказ контракта: из него строится имя файла.
 	"""
 	if isinstance(значение, str):
 		if not значение.strip():
@@ -970,7 +977,11 @@ def _список_домашки(значение, тип: type) -> list:
 			значение = None
 	elif значение is None:
 		return []
-	if not isinstance(значение, list | tuple) or not all(isinstance(э, тип) for э in значение):
+	if (
+		not isinstance(значение, list | tuple)
+		or not all(isinstance(э, тип) for э in значение)
+		or (тип is dict and not all(isinstance(э.get("name"), str | None) for э in значение))
+	):
 		raise Отказ(
 			домашка.НЕВЕРНЫЕ_ФАЙЛЫ,
 			"files — список объектов { name, data }, remove_files — список id файлов",
