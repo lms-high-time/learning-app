@@ -6,9 +6,15 @@ from frappe.model.document import Document
 from frappe.utils import cint, getdate
 
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
+from lms_frappe_app.agent_learning.doctype.agent_lesson_homework.agent_lesson_homework import (
+	НЕВЕРНЫЙ_СРОК,
+	проверить_срок,
+)
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
 	LearningOrganization,
 )
+from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
 
 ВСЕ_РОЛИ_УЧАСТНИКОВ = ("Member", "Manager", "Org Admin")
 
@@ -46,7 +52,8 @@ class CourseAllocation(Document):
 			# Список адресатов при назначении на всю организацию только
 			# вводит в заблуждение: состав считается на момент выдачи.
 			self.members = []
-		self.проверить_сроки_домашек()
+		if not self.flags.сроки_домашек_проверены:
+			self.проверить_сроки_домашек()
 
 	def on_update(self):
 		self.выдать_зачисления()
@@ -95,23 +102,15 @@ class CourseAllocation(Document):
 
 		Зовётся и методом `team.update_allocation` до сохранения: у задания,
 		которого нет вовсе, Frappe иначе отказал бы проверкой ссылки раньше
-		`validate` — без кода контракта.
+		`validate` — без кода контракта. Проверенное помечается флагом, и
+		`validate` второй раз не проверяет.
 		"""
-		from lms_frappe_app.agent_learning.doctype.agent_lesson_homework.agent_lesson_homework import (
-			НЕВЕРНЫЙ_СРОК,
-			проверить_срок,
-		)
-		from lms_frappe_app.agent_learning.errors import Отказ
-		from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
-
+		self.flags.сроки_домашек_проверены = True
 		if not self.homework_due:
 			return
+		уроки_курса = frappe.get_all("Course Lesson", filters={"course": self.course}, pluck="name")
 		задания_курса = set(
-			frappe.get_all(
-				ЗАДАНИЕ,
-				filters={"lesson": ("in", frappe.get_all("Course Lesson", filters={"course": self.course}, pluck="name") or [""])},
-				pluck="name",
-			)
+			frappe.get_all(ЗАДАНИЕ, filters={"lesson": ("in", уроки_курса or [""])}, pluck="name")
 		)
 		прежние = (
 			set()

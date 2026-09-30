@@ -255,10 +255,24 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 		self.assertIsNotNone(self.сроки()[0]["due"])
 
 		# Список заменяет таблицу целиком; пустой снимает все правила.
-		self.assertTrue(self.задать(json.dumps([{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1}]))["ok"])
+		правило_3 = [{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1}]
+		self.assertTrue(self.задать(json.dumps(правило_3))["ok"])
 		self.assertEqual([с["due"] is None for с in self.сроки()], [True, False])
 		self.assertTrue(self.задать([])["ok"])
 		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
+
+	def test_сроки_проверяются_один_раз(self):
+		"""Метод проверяет сроки до сохранения — `validate` второй раз не зовёт."""
+		from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
+			CourseAllocation,
+		)
+
+		настоящая = CourseAllocation.проверить_сроки_домашек
+		with patch.object(
+			CourseAllocation, "проверить_сроки_домашек", autospec=True, side_effect=настоящая
+		) as проверка:
+			self.задать([{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1}])
+		self.assertEqual(проверка.call_count, 1)
 
 	def test_неверные_сроки(self):
 		for неверное in (
