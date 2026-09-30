@@ -5,8 +5,8 @@
 
 Решения владельца (learning-services#313):
 
-- **Архив, а не удаление.** Занятия, попытки квиза, документ курса и заметки по
-  курсу остаются в базе. Ученик переносится в `archived_student`, а поле
+- **Архив, а не удаление.** Занятия, попытки квиза, документ курса, заметки по
+  курсу и сдачи домашки остаются в базе. Ученик переносится в `archived_student`, а поле
   «Ученик» очищается. Все запросы учебного потока ищут по ученику и архив не
   видят сами: первое занятие, перенос незакрытых целей, повтор урока, лимит
   попыток, прогресс, отчёт руководителя. `Why:` отметка «сброшено» потребовала
@@ -84,6 +84,23 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 	for имя in заметки:
 		frappe.db.set_value("Agent Student Note", имя, архив, update_modified=False)
 
+	# Сдачи домашки — как занятия: повторное прохождение начинается с новой
+	# сдачи, а задание со сдачами автор не удалит (learning-services#439).
+	сдачи = (
+		frappe.get_all(
+			"Agent Homework Submission", filters={"member": ученик, "lesson": ("in", уроки)}, pluck="name"
+		)
+		if уроки
+		else []
+	)
+	for имя in сдачи:
+		frappe.db.set_value(
+			"Agent Homework Submission",
+			имя,
+			{"member": None, "archived_student": ученик, "archived_at": момент},
+			update_modified=False,
+		)
+
 	пройдено = frappe.get_all(
 		"LMS Course Progress", filters={"member": ученик, "course": курс}, pluck="name"
 	)
@@ -107,6 +124,7 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 		"attempts_archived": len(попытки),
 		"artifacts_archived": len(документы),
 		"notes_archived": len(заметки),
+		"homework_archived": len(сдачи),
 		"progress_deleted": len(пройдено),
 		"enrolled_again": по_назначению,
 	}
