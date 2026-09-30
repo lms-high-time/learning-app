@@ -64,7 +64,7 @@ def разослать() -> None:
 		try:
 			письма = сборщик(сейчас, получатели)
 		except Exception:
-			frappe.log_error(title="Письма домашки не собраны", reference_doctype=ЖУРНАЛ)
+			_в_лог("Письма домашки не собраны")
 			continue
 		for письмо in письма:
 			_отправить(письмо)
@@ -78,7 +78,7 @@ def _по_одному(записи, построить) -> list[dict]:
 			if письмо := построить(запись):
 				письма.append(письмо)
 		except Exception:
-			frappe.log_error(title="Письмо домашки не собрано", reference_doctype=ЖУРНАЛ)
+			_в_лог("Письмо домашки не собрано")
 	return письма
 
 
@@ -119,6 +119,17 @@ class _Получатели:
 			self._адреса[курс] = домашка.адреса_уроков(курс)
 		путь = self._адреса[курс].get(lesson) or f"/lms/courses/{курс}"
 		return get_url(f"{путь}#homework")
+
+
+def _в_лог(заголовок: str) -> None:
+	"""Сбой — в лог и сразу в базу.
+
+	`Why:` лог пишется в транзакции рассылки, и полный откат после сбоя
+	следующего письма (`_откатить_письмо`) снял бы и его — сбой пропал бы
+	без следа.
+	"""
+	frappe.log_error(title=заголовок, reference_doctype=ЖУРНАЛ)
+	frappe.db.commit()
 
 
 def _включён(user: str) -> bool:
@@ -450,7 +461,7 @@ def _отправить(письмо: dict) -> None:
 		frappe.clear_last_message()
 	except Exception:
 		_откатить_письмо()
-		frappe.log_error(title="Письмо домашки не отправлено", reference_doctype=ЖУРНАЛ)
+		_в_лог("Письмо домашки не отправлено")
 	else:
 		frappe.db.release_savepoint(ТОЧКА_ПИСЬМА)
 		frappe.db.commit()

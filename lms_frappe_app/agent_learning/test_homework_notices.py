@@ -403,3 +403,14 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 				"agent_homework_submission_status_due",
 			)
 		)
+
+	def test_запись_о_сбое_коммитится(self):
+		"""Запись лога — сразу в базу: полный откат следующего письма её не снимет."""
+		with (
+			patch.object(письма, "_напоминания", return_value=[]),
+			patch.object(письма, "_возвраты", side_effect=RuntimeError("сломался")),
+			patch.object(письма, "_дайджесты", return_value=[]),
+			patch.object(frappe, "log_error"),
+		):
+			письма.разослать()
+		self.коммит.assert_called_once()
