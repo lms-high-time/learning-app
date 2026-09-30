@@ -6,8 +6,9 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning.programs import ПОРЯДОК_ПРОГРАММЫ
+from lms_frappe_app.agent_learning.programs import ПОРЯДОК_ПРОГРАММЫ, программы_курсов
 from lms_frappe_app.api import public, student
+from lms_frappe_app.testing import сколько_запросов
 from lms_frappe_app.tests.sample_data import создать_ученика, создать_урок
 
 
@@ -76,9 +77,9 @@ class IntegrationTestPrograms(IntegrationTestCase):
 
 	def test_занятие_тоже_проверяет_порядок(self):
 		# Запись могла появиться до вступления в программу.
-		frappe.get_doc(
-			{"doctype": "LMS Enrollment", "member": self.ученик, "course": self.второй}
-		).insert(ignore_permissions=True)
+		frappe.get_doc({"doctype": "LMS Enrollment", "member": self.ученик, "course": self.второй}).insert(
+			ignore_permissions=True
+		)
 
 		ответ = self.от_имени(self.ученик, student.start_lesson, lesson=self.урок_второго)
 
@@ -119,3 +120,57 @@ class IntegrationTestPrograms(IntegrationTestCase):
 		self.assertIsNone(
 			self.от_имени(self.ученик, public.lesson_entry, lesson=self.урок_первого)["data"]["program_lock"]
 		)
+
+	def test_каталог_агенту_показывает_цепочку_и_замок(self):
+		участнику = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
+		постороннему = self.от_имени(self.посторонний, student.list_catalog)["data"]["courses"]
+
+		[первый] = [курс["programs"] for курс in участнику if курс["id"] == self.первый]
+		[второй] = [курс["programs"] for курс in участнику if курс["id"] == self.второй]
+		self.assertEqual((первый[0]["number"], первый[0]["next"]["id"]), (1, self.второй))
+		self.assertIsNone(первый[0]["locked_by"])
+		self.assertEqual(второй[0]["locked_by"]["id"], self.первый)
+		[чужой] = [курс["programs"] for курс in постороннему if курс["id"] == self.второй]
+		self.assertIsNone(чужой[0]["locked_by"])
+		# Курс вне программ — пустой список, а не отсутствие ключа.
+		self.assertTrue(all("programs" in курс for курс in участнику))
+
+	def test_мои_курсы_и_программа_курса_знают_место(self):
+		self.от_имени(self.ученик, student.enroll, course=self.первый)
+
+		[мой] = [
+			курс
+			for курс in self.от_имени(self.ученик, student.list_my_courses)["data"]["courses"]
+			if курс["id"] == self.первый
+		]
+		структура = self.от_имени(self.ученик, student.course_outline, course=self.первый)["data"]
+
+		self.assertEqual(мой["programs"][0]["program"], self.программа.name)
+		self.assertEqual(
+			мой["programs"][0]["next"]["title"], frappe.db.get_value("LMS Course", self.второй, "title")
+		)
+		self.assertEqual(структура["programs"], мой["programs"])
+
+	def test_пройденный_предыдущий_снимает_замок_в_каталоге(self):
+		self.от_имени(self.ученик, student.enroll, course=self.первый)
+		self._пройти(self.первый)
+
+		[второй] = [
+			курс
+			for курс in self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
+			if курс["id"] == self.второй
+		]
+		self.assertIsNone(второй["programs"][0]["locked_by"])
+
+	def test_выборок_не_больше_от_числа_курсов(self):
+		# Каталог и список курсов строятся одним вызовом: запрос на курс
+		# сделал бы их N+1.
+		frappe.set_user(self.ученик)
+		self.addCleanup(frappe.set_user, "Administrator")
+		программы_курсов([self.второй], self.ученик)
+		# Второй курс заперт: и у одного, и у двух нужны все выборки — с
+		# прогрессом предыдущего и названиями соседей.
+		на_один, _ = сколько_запросов(lambda: программы_курсов([self.второй], self.ученик))
+		на_два, _ = сколько_запросов(lambda: программы_курсов([self.первый, self.второй], self.ученик))
+
+		self.assertEqual(на_один, на_два)

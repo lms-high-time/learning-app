@@ -214,8 +214,9 @@ Frappe заворачивает результат whitelisted-метода в �
 
 В какие программы Learning входит курс и заперт ли он программой
 (learning-services#405). Зовёт страница курса: «курс 2 из 3 программы …», а у
-запертого курса — «сначала пройдите …» вместо записи. В MCP не выставляется.
-Доступен и гостю.
+запертого курса — «сначала пройдите …» вместо записи. В MCP не выставляется:
+агенту те же сведения приходят полем `programs` у курса в `list_catalog`,
+`list_my_courses` и `course_outline`. Доступен и гостю.
 
 **Параметры:** `course`. Только `GET`.
 
@@ -226,11 +227,13 @@ Frappe заворачивает результат whitelisted-метода в �
     "program": "Работа между отделами", "title": "Работа между отделами",
     "number": 2, "total": 3, "enforce_order": true, "member": true,
     "previous": { "id": "course-handoffs", "title": "Где теряется работа между отделами" },
+    "next": { "id": "course-risk-matrix", "title": "Матрица рисков и контролей" },
     "locked_by": { "id": "course-handoffs", "title": "Где теряется работа между отделами" } } ] } }
 ```
 
 Видны опубликованные программы и те, где вызывающий участник. `previous` —
-курс перед этим в программе, у первого — `null`. `locked_by` — курс, который
+курс перед этим в программе, у первого — `null`; `next` — курс после, у
+последнего — `null`. `locked_by` — курс, который
 пройти раньше: только участнику программы с обязательным порядком
 (`enforce_order`), пока предыдущий курс не пройден целиком; прочим — `null`.
 Порядок действует только для участников: второй курс напрямую из каталога
@@ -393,8 +396,14 @@ Frappe заворачивает результат whitelisted-метода в �
   { "id": "course-basics", "title": "Основы", "organization": "org-1",
     "mandatory": true, "deadline": "2026-09-15", "overdue": false,
     "progress": { "lessons_total": 12, "lessons_completed": 5 },
-    "next_lesson": { "id": "lesson-6", "title": "Циклы" } } ] } }
+    "next_lesson": { "id": "lesson-6", "title": "Циклы" },
+    "programs": [] } ] } }
 ```
+
+`programs` — программы курса в том же виде, что у `course_programs`: место
+курса в цепочке, предыдущий и следующий курс и `locked_by`, если курс для
+ученика заперт порядком (learning-services#405). Курс вне программ —
+пустой список.
 
 ## `lms_frappe_app.api.student.list_catalog`
 
@@ -406,16 +415,28 @@ Frappe заворачивает результат whitelisted-метода в �
 ```json
 { "ok": true, "data": { "space": "personal", "courses": [
   { "id": "course-python", "title": "Питон с нуля",
-    "summary": "Для тех, кто не программировал", "upcoming": false },
+    "summary": "Для тех, кто не программировал", "upcoming": false, "programs": [] },
   { "id": "ops-junctions", "title": "Где теряется работа между отделами",
     "summary": "Стыки между отделами и риски на них", "upcoming": true,
-    "objectives": [ "Описать процесс в пять колонок" ], "notify": false } ] } }
+    "objectives": [ "Описать процесс в пять колонок" ], "notify": false,
+    "programs": [ {
+      "program": "ops-chain", "title": "Операционное управление",
+      "number": 1, "total": 3, "enforce_order": true, "member": false,
+      "previous": null,
+      "next": { "id": "ops-early-signals", "title": "Как заметить проблему заранее" },
+      "locked_by": null } ] } ] } }
 ```
 
 У анонса (`upcoming: true`) записи нет: `enroll` отказывает `course_upcoming`.
 Вместо неё — `notify_when_released`. `objectives` — цели курса из его
 директивы, `notify` — подписан ли ученик на письмо о выходе; оба ключа
 приходят только у анонса.
+
+`programs` — программы курса в том же виде, что у `course_programs`: место
+курса в цепочке, предыдущий и следующий курс и `locked_by`, если курс для
+ученика заперт порядком (learning-services#405). Курс вне программ —
+пустой список. Курс с `locked_by` в каталоге остаётся: `enroll` на нём
+откажет `program_order`, а агент назовёт курс, который пройти раньше.
 
 В личном пространстве — весь опубликованный каталог без курсов, на которые
 ученик уже записан. В пространстве организации — открытые ею курсы (пустой
@@ -479,11 +500,17 @@ learning-services#405).
 { "ok": true, "data": { "course": "course-basics", "chapters": [
   { "title": "Основы", "lessons": [
     { "id": "lesson-1", "title": "Переменные", "completed": true, "current": false },
-    { "id": "lesson-2", "title": "Циклы", "completed": false, "current": true } ] } ] } }
+    { "id": "lesson-2", "title": "Циклы", "completed": false, "current": true } ] } ],
+  "programs": [] } }
 ```
 
 Порядок глав и уроков — тот же, что показывает браузер: Frappe Learning
 хранит его в строках-ссылках, а не в самих записях, где `idx` всегда ноль.
+
+`programs` — программы курса в том же виде, что у `course_programs`: место
+курса в цепочке, предыдущий и следующий курс и `locked_by`, если курс для
+ученика заперт порядком (learning-services#405). Курс вне программ —
+пустой список.
 
 **Отказы:** `not_enrolled`, `organization_suspended`.
 
