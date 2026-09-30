@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import frappe
 from frappe.utils import add_to_date, get_system_timezone, now_datetime
 
+from lms_frappe_app.agent_learning import homework
 from lms_frappe_app.agent_learning.access import доступен_курс, политика_квиза_для_курса
 from lms_frappe_app.agent_learning.constants import (
 	ВЫБОР,
@@ -627,6 +628,9 @@ def отметить_урок_пройденным(запись) -> None:
 	Принимает и попытку квиза, и занятие: у обеих есть ученик, урок и курс, а
 	прогресс от способа закрытия урока не зависит.
 	"""
+	# Домашка выдаётся на каждое закрытие: повторное ничего не меняет, а закрытие
+	# в другом пространстве даёт свою сдачу (learning-services#439).
+	homework.выдать(запись)
 	уже = frappe.db.exists(
 		"LMS Course Progress", {"member": запись.student, "lesson": запись.lesson}
 	)

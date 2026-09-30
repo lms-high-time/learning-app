@@ -91,6 +91,32 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		домашка.выдать(frappe.get_doc("Agent Learning Session", имя))
 		self.assertEqual({с.organization for с in self.сдачи()}, {None, организация})
 
+	def test_complete_lesson_выдаёт_домашку(self):
+		from lms_frappe_app.api import student
+		from lms_frappe_app.tests.sample_data import сдать_отчёт
+
+		задание(self.урок, due_mode="relative", due_days=2)
+		frappe.set_user(self.ученик)
+		старт = student.start_lesson(lesson=self.урок)["data"]
+		сдать_отчёт(старт["session"])
+		ответ = student.complete_lesson(старт["session"])
+		self.assertTrue(ответ["ok"], ответ)
+		frappe.set_user("Administrator")
+		[сдача] = self.сдачи()
+		self.assertEqual(сдача.status, "Assigned")
+
+	def test_попытка_квиза_выдаёт_в_пространстве_своего_занятия(self):
+		задание(self.урок)
+		организация = создать_организацию(f"Орг {frappe.generate_hash(length=4)}")
+		добавить_в_организацию(self.ученик, организация)
+		имя = создать_занятие(self.ученик, self.урок)
+		frappe.db.set_value("Agent Learning Session", имя, "organization", организация)
+		попытка = frappe._dict(
+			doctype="Agent Quiz Attempt", session=имя, lesson=self.урок, student=self.ученик, course=self.курс
+		)
+		домашка.выдать(попытка)
+		self.assertEqual([с.organization for с in self.сдачи()], [организация])
+
 	def test_задание_проверяет_правило_срока(self):
 		from lms_frappe_app.agent_learning.errors import Отказ
 

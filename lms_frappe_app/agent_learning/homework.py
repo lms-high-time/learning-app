@@ -15,15 +15,17 @@ import json
 from datetime import datetime, time, timedelta
 
 import frappe
-from frappe.utils import getdate, now_datetime
+from frappe.utils import get_datetime, getdate, now_datetime
 
 from lms_frappe_app.agent_learning.artifacts import files as файлы_платформы
 from lms_frappe_app.agent_learning.constants import (
+	ДОМАШКА_ВОЗВРАЩЕНА,
 	ДОМАШКА_ВЫДАНА,
 	ДОМАШКА_ПРИНЯТА,
 	ДОМАШКА_СДАНА,
 )
 from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 
 ЗАДАНИЕ = "Agent Lesson Homework"
 СДАЧА = "Agent Homework Submission"
@@ -218,3 +220,142 @@ def сохранить(
 	документ.append("history", {"event": "submitted", "by_user": ученик, "at": сейчас, "version": документ.version})
 	документ.save(ignore_permissions=True)
 	return документ
+
+
+# --- представление ---
+
+
+def адрес_урока(lesson: str, курс: str) -> str | None:
+	"""Адрес урока в SPA: `/lms/courses/<курс>/learn/<глава>-<урок>`."""
+	for номер_главы, глава in enumerate(уроки_по_главам(курс), 1):
+		if lesson in глава["lessons"]:
+			return f"/lms/courses/{курс}/learn/{номер_главы}-{глава['lessons'].index(lesson) + 1}"
+	return None
+
+
+def описание_задания(задание) -> dict:
+	return {
+		"lesson": задание.lesson,
+		"title": задание.title,
+		"description": задание.description,
+		"answer_mode": задание.answer_mode,
+		"due": {
+			"mode": задание.due_mode,
+			"days": задание.due_days or None,
+			"date": str(задание.due_date) if задание.due_date else None,
+		},
+	}
+
+
+def _файлы(имена: list[str]) -> list[dict]:
+	"""Файлы ответа по порядку: `id` — имя `File` (для `remove_files`), `name` — имя файла."""
+	сведения = файлы_платформы.сведения_о_файлах(имена)
+	return [{"id": имя, **сведения[имя]} for имя in имена if имя in сведения]
+
+
+def _время(значение) -> str | None:
+	return str(значение) if значение else None
+
+
+def просрочена(документ) -> bool:
+	"""Просрочка — признак, а не статус: срок прошёл, а от ученика ждут действия."""
+	return (
+		bool(документ.due_at)
+		and документ.status in (ДОМАШКА_ВЫДАНА, ДОМАШКА_ВОЗВРАЩЕНА)
+		and get_datetime(документ.due_at) < now_datetime()
+	)
+
+
+def описание_сдачи(документ, *, полное: bool = True, с_версиями: bool = False) -> dict:
+	"""Сдача для ответа. Коротко — для лёгкого старта и списка."""
+	короткое = {
+		"id": документ.name,
+		"status": документ.status,
+		"due_at": _время(документ.due_at),
+		"overdue": просрочена(документ),
+		"version": документ.version,
+	}
+	if not полное:
+		return короткое
+	ответ = {
+		**короткое,
+		"assigned_at": _время(документ.assigned_at),
+		"submitted_at": _время(документ.submitted_at),
+		"answer": документ.answer or "",
+		"files": _файлы([с.file for с in документ.files]),
+		"history": [
+			{
+				"event": с.event,
+				"by": с.by_user,
+				"at": _время(с.at),
+				"version": с.version or None,
+				"comment": с.comment or None,
+				"due_at": _время(с.due_at),
+			}
+			for с in документ.history
+		],
+	}
+	if с_версиями:
+		ответ["versions"] = [
+			{
+				"version": в.version,
+				"saved_at": _время(в.saved_at),
+				"answer": в.answer or "",
+				"files": _файлы(json.loads(в.files or "[]")),
+			}
+			for в in документ.versions
+		]
+	return ответ
+
+
+def последний_комментарий(документ) -> str | None:
+	"""Комментарий последнего возврата на доработку."""
+	for строка in reversed(документ.history):
+		if строка.event == "returned":
+			return строка.comment
+	return None
+
+
+def _уроки_с_заданием(курс: str) -> list[str]:
+	"""Уроки курса, у которых есть задание, — одним запросом."""
+	задание = frappe.qb.DocType(ЗАДАНИЕ)
+	урок = frappe.qb.DocType("Course Lesson")
+	return (
+		frappe.qb.from_(задание)
+		.join(урок)
+		.on(урок.name == задание.lesson)
+		.select(задание.lesson)
+		.where(урок.course == курс)
+	).run(pluck=True)
+
+
+def для_старта(ученик: str, lesson: str, курс: str, организация: str | None, *, полное: bool) -> dict:
+	"""`homework` и `previous_homework` для `start_lesson`.
+
+	Прошлый урок — предыдущий по порядку курса, независимо от того, есть ли
+	задание у текущего. Сдача — в пространстве занятия.
+	"""
+	# Why: порядок уроков стоит запросов на каждую главу, а на каждом старте его
+	# не платим (student.py, `_место_урока`). У курса без заданий старт платит
+	# один запрос — узнать, что их нет.
+	с_заданием = _уроки_с_заданием(курс)
+	if not с_заданием:
+		return {"homework": None, "previous_homework": None}
+	текущее = задание_урока(lesson) if lesson in с_заданием else None
+	прошлое = None
+	уроки = уроки_курса(курс)
+	номер = уроки.index(lesson) if lesson in уроки else -1
+	if номер > 0 and уроки[номер - 1] in с_заданием and (задание := задание_урока(уроки[номер - 1])):
+		имя = найти_сдачу(задание.name, ученик, организация)
+		сдача = frappe.get_doc(СДАЧА, имя) if имя else None
+		прошлое = {
+			"lesson": задание.lesson,
+			"title": задание.title,
+			"submission": описание_сдачи(сдача, полное=полное) if сдача else None,
+			"last_comment": последний_комментарий(сдача) if сдача else None,
+			**({"homework": описание_задания(задание)} if полное else {}),
+		}
+	# Why: задание текущего урока агент озвучивает в конце занятия, и в лёгком
+	# старте тоже — описание короткое, отдаём целиком. Ответ ученика по прошлому
+	# уроку в лёгком старте не отдаём: агент берёт его `my_homework(lesson=…)`.
+	return {"homework": описание_задания(текущее) if текущее else None, "previous_homework": прошлое}
