@@ -20,6 +20,7 @@ import frappe
 #: на одну и ту же беду. Код, который знает один модуль, живёт в этом модуле.
 УРОК_НЕ_НАЙДЕН = "lesson_not_found"
 НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА = "unknown_report_kind"
+НЕТ_ПРАВА = "not_allowed"
 
 
 class Отказ(frappe.ValidationError):

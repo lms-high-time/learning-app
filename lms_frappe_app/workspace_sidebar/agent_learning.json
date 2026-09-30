@@ -238,6 +238,18 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
+   "label": "Письма по домашкам",
+   "link_to": "Homework Notice",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Заметки об учениках",
    "link_to": "Agent Student Note",
    "link_type": "DocType",
@@ -351,7 +363,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-30 18:00:00.000000",
+ "modified": "2026-09-30 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",

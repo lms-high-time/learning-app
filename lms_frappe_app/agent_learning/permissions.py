@@ -353,14 +353,14 @@ def доступен_артефакт(doc, ptype: str = "read", user: str | None
 МЕТОДИСТЫ = frozenset({"Course Creator", "Moderator"})
 
 
-def _методист(user: str) -> bool:
+def методист(user: str) -> bool:
 	return bool(МЕТОДИСТЫ & set(frappe.get_roles(user)))
 
 
 def условие_сдачи(user: str | None = None) -> str:
 	"""`Agent Homework Submission`: свои, руководителю — пространство его организаций, методисту — все."""
 	user = user or frappe.session.user
-	if видит_всё(user) or _методист(user):
+	if видит_всё(user) or методист(user):
 		return ""
 	таблица = "`tabAgent Homework Submission`"
 	свои = f"{таблица}.`member` = {frappe.db.escape(user)}"
@@ -381,7 +381,21 @@ def доступна_сдача(doc, ptype: str = "read", user: str | None = Non
 		return True
 	if ptype not in ЧИТАЮЩИЕ_ПРАВА:
 		return False
-	if _методист(user) or doc.member == user:
+	if методист(user) or doc.member == user:
+		return True
+	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+
+
+def может_проверять(doc, user: str) -> bool:
+	"""Может ли пользователь принять или вернуть сдачу (learning-services#452).
+
+	Методист и модератор — любую, руководитель — сдачи пространств своих
+	организаций. Свою не проверяет никто, даже с ролью куратора, архивную — тоже:
+	её ученик начал курс заново.
+	"""
+	if not doc.member or doc.member == user:
+		return False
+	if видит_всё(user) or методист(user):
 		return True
 	return bool(doc.organization) and doc.organization in организации_менеджера(user)
 

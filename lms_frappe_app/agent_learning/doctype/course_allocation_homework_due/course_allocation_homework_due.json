@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-09-30 20:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "homework",
+  "due_mode",
+  "due_days",
+  "due_date"
+ ],
+ "fields": [
+  {
+   "fieldname": "homework",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Домашнее задание",
+   "options": "Agent Lesson Homework",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "relative — дней после закрытия урока, absolute — до конца дня по времени платформы",
+   "fieldname": "due_mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Срок",
+   "options": "relative\nabsolute",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.due_mode=='relative'",
+   "fieldname": "due_days",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Дней после закрытия урока"
+  },
+  {
+   "depends_on": "eval:doc.due_mode=='absolute'",
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Сдать до"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-30 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Course Allocation Homework Due",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

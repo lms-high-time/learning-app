@@ -15,6 +15,7 @@
   "sb_terms",
   "deadline",
   "mandatory",
+  "homework_due",
   "chosen_by_member"
  ],
  "fields": [
@@ -70,6 +71,13 @@
    "label": "Обязательный"
   },
   {
+   "description": "Срок домашки урока для этой группы — вместо срока автора. Нет строки — действует срок автора.",
+   "fieldname": "homework_due",
+   "fieldtype": "Table",
+   "label": "Сроки домашек",
+   "options": "Course Allocation Homework Due"
+  },
+  {
    "default": "0",
    "description": "Сотрудник сам взял курс из каталога организации — не поручение руководителя.",
    "fieldname": "chosen_by_member",
@@ -81,7 +89,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-28 20:00:00.000000",
+ "modified": "2026-09-30 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Course Allocation",
