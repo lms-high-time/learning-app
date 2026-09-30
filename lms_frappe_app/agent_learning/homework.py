@@ -356,12 +356,23 @@ def _файлы(имена: list[str]) -> list[dict]:
 	return [{"id": имя, **сведения[имя]} for имя in имена if имя in сведения]
 
 
-def _имя(user: str | None) -> str | None:
-	"""Кто сделал запись журнала — по имени. `Why:` журнал читает и ученик на
-	странице урока, и почта куратора ему ни к чему (learning-services#439)."""
+#: Как назвать в журнале куратора без имени в профиле.
+КУРАТОР = "Куратор"
+
+
+def _автор_события(user: str | None) -> dict:
+	"""`by` и `by_name` строки журнала для того, кто его читает.
+
+	`Why:` журнал читает ученик — на странице урока и через агента, и почта
+	куратора ему ни к чему (learning-services#439). Почта остаётся только у
+	своих событий: по ней SPA пишет «Вы». Остальным — имя, без имени — «Куратор».
+	"""
 	if not user:
-		return None
-	return frappe.get_cached_value("User", user, "full_name") or user
+		return {"by": None, "by_name": None}
+	имя = frappe.get_cached_value("User", user, "full_name")
+	if user == frappe.session.user:
+		return {"by": user, "by_name": имя or user}
+	return {"by": None, "by_name": имя or КУРАТОР}
 
 
 def _время(значение) -> str | None:
@@ -398,8 +409,7 @@ def описание_сдачи(документ, *, полное: bool = True, 
 		"history": [
 			{
 				"event": с.event,
-				"by": с.by_user,
-				"by_name": _имя(с.by_user),
+				**_автор_события(с.by_user),
 				"at": _время(с.at),
 				"version": с.version or None,
 				"comment": с.comment or None,

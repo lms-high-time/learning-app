@@ -5,11 +5,13 @@ import base64
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import now_datetime
 
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	создать_домашку,
+	создать_куратора,
 	привязать_урок,
 	создать_организацию,
 	создать_ученика,
@@ -102,6 +104,29 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		frappe.clear_document_cache("User", self.ученик)
 		[событие] = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["history"]
 		self.assertEqual(событие["by_name"], self.ученик)
+
+	def test_журнал_не_отдаёт_ученику_почту_куратора(self):
+		"""Почта куратора ученику ни к чему: `by` — только у своих событий."""
+		сдача = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["id"]
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=4)
+		куратор = создать_куратора(f"hwcur-{суффикс}@example.com")
+		frappe.db.set_value("User", куратор, "full_name", "Ирина Смирнова")
+		безымянный = создать_куратора(f"hwcur0-{суффикс}@example.com")
+		frappe.db.set_value("User", безымянный, {"first_name": "", "full_name": ""})
+		for user in (куратор, безымянный):
+			frappe.clear_document_cache("User", user)
+		документ = frappe.get_doc("Agent Homework Submission", сдача)
+		документ.append("history", {"event": "returned", "by_user": куратор, "at": now_datetime(), "comment": "Доделай"})
+		документ.append("history", {"event": "accepted", "by_user": безымянный, "at": now_datetime()})
+		документ.save(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		for история in (
+			student.homework(lesson=self.урок)["data"]["submission"]["history"],
+			student.my_homework(lesson=self.урок)["data"]["items"][0]["submission"]["history"],
+		):
+			self.assertEqual([с["by"] for с in история], [self.ученик, None, None])
+			self.assertEqual([с["by_name"] for с in история][1:], ["Ирина Смирнова", "Куратор"])
 
 	def test_урок_без_задания_не_отказ(self):
 		frappe.set_user("Administrator")
