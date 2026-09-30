@@ -2,6 +2,7 @@
 # See license.txt
 
 import json
+import os
 from datetime import timedelta
 
 import frappe
@@ -191,21 +192,82 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 			("Agent Homework Submission", 1),
 		)
 
-	def _отклонить_второй_файл(self):
+	def _отклонить_второй_файл(self, ошибка: Exception | None = None):
 		"""Вставка файла, которая принимает первый файл и отклоняет второй — как
-		Frappe отклоняет запрещённый тип."""
+		Frappe отклоняет запрещённый тип. Принятые файлы — в `self.принятые`."""
 		from unittest.mock import patch
 
 		настоящая = домашка._вложить_файл
-		вызовы = []
+		self.принятые = []
 
-		def вложить(документ, имя, данные):
-			вызовы.append(имя)
-			if len(вызовы) > 1:
-				raise frappe.ValidationError("Тип файла не разрешён")
-			return настоящая(документ, имя, данные)
+		def вложить(*args):
+			if self.принятые:
+				raise ошибка or frappe.ValidationError("Тип файла не разрешён")
+			файл = настоящая(*args)
+			self.принятые.append(файл)
+			return файл
 
 		return patch.object(домашка, "_вложить_файл", side_effect=вложить)
+
+	@staticmethod
+	def _на_диске(файл) -> bool:
+		return os.path.exists(frappe.get_site_path("private", "files", файл.file_url.rsplit("/", 1)[-1]))
+
+	def test_отклонённый_файл_убирает_с_диска_байты_принятых(self):
+		"""Откат к точке сохранения не зовёт `after_rollback`: байты, записанные
+		`File.before_insert`, остались бы на диске без записи о них."""
+		создать_домашку(self.урок)
+		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ):
+			домашка.сохранить(
+				self.ученик, self.урок, None, новые=[("a.txt", frappe.generate_hash().encode()), ("b.exe", b"two")]
+			)
+		[принятый] = self.принятые
+		self.assertFalse(self._на_диске(принятый))
+
+	def test_откат_не_удаляет_общий_файл_другой_записи(self):
+		"""Frappe хранит одинаковое содержимое одним файлом на диске: откат своей
+		записи не должен удалять байты, на которые ссылается чужая."""
+		создать_домашку(self.урок)
+		содержимое = frappe.generate_hash().encode()
+		первая = домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", содержимое)])
+		прежний = frappe.get_doc("File", первая.files[0].file)
+		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ):
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("copy.txt", содержимое), ("b.exe", b"two")])
+		self.assertTrue(self._на_диске(прежний))
+
+	def test_наш_отказ_при_вложении_не_становится_file_rejected(self):
+		создать_домашку(self.урок)
+		with self._отклонить_второй_файл(домашка.Отказ("свой_код", "Свой отказ")), self.assertRaises(
+			домашка.Отказ
+		) as отказ:
+			домашка.сохранить(
+				self.ученик, self.урок, None, новые=[("a.txt", frappe.generate_hash().encode()), ("b.txt", b"two")]
+			)
+		self.assertEqual(отказ.exception.код, "свой_код")
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
+		self.assertFalse(self._на_диске(self.принятые[0]))
+
+	def test_предел_размера_frappe_даёт_file_too_large(self):
+		"""Предел Frappe (`max_file_size`) бывает меньше нашего — отказ тем же кодом."""
+		from unittest.mock import patch
+
+		создать_домашку(self.урок)
+		with patch("frappe.core.api.file.get_max_file_size", return_value=3), self.assertRaises(
+			домашка.Отказ
+		) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"hello")])
+		self.assertEqual(отказ.exception.код, "file_too_large")
+		self.assertEqual(отказ.exception.подробности["file"], "a.txt")
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
+
+	def test_пустой_файл_отказ_до_записи(self):
+		"""Пустой файл не пропадает молча из ответа: ученик думал бы, что сдал его."""
+		создать_домашку(self.урок)
+		with self.assertRaises(домашка.Отказ) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, answer="текст", новые=[("a.txt", b"")])
+		self.assertEqual(отказ.exception.код, "file_missing")
+		self.assertEqual(отказ.exception.подробности["file"], "a.txt")
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
 
 	def test_отклонённый_файл_не_оставляет_новой_сдачи(self):
 		создать_домашку(self.урок)

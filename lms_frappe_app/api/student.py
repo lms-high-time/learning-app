@@ -918,16 +918,42 @@ def submit_homework(
 	курс = _курс_урока(lesson)
 	_требовать_доступ_к_курсу(ученик, курс)
 	пространство = пространства.пространство_курса(ученик, курс, space)
-	новые = [(ф.get("name") or "file", из_base64(ф.get("data"))) for ф in список(files)]
+	новые = [(ф.get("name") or "file", из_base64(ф.get("data"))) for ф in _список_домашки(files, dict)]
 	if frappe.request and frappe.request.files:
 		новые += [(ф.filename or "file", ф.stream.read()) for ф in frappe.request.files.getlist("file")]
 	документ = домашка.сохранить(
-		ученик, lesson, пространство, answer=answer, новые=новые, убрать=список(remove_files)
+		ученик, lesson, пространство, answer=answer, новые=новые, убрать=_список_домашки(remove_files, str)
 	)
 	return {
 		"space": пространства.наружу(пространство),
 		"submission": домашка.описание_сдачи(документ, с_версиями=True),
 	}
+
+
+def _список_домашки(значение, тип: type) -> list:
+	"""`files` или `remove_files` списком нужного вида — или отказ контракта.
+
+	`Why:` список приезжает и строкой JSON (форма), и от агента бывает чем
+	угодно: не-JSON и элемент не того вида роняли вызов 500 мимо контракта.
+	`data` не строкой — пустой файл: дальше откажет `file_missing`.
+	"""
+	if isinstance(значение, str):
+		if not значение.strip():
+			return []
+		try:
+			значение = json.loads(значение)
+		except ValueError:
+			значение = None
+	elif значение is None:
+		return []
+	if not isinstance(значение, list | tuple) or not all(isinstance(э, тип) for э in значение):
+		raise Отказ(
+			домашка.НЕВЕРНЫЕ_ФАЙЛЫ,
+			"files — список объектов { name, data }, remove_files — список id файлов",
+		)
+	if тип is dict:
+		return [{**э, "data": э.get("data") if isinstance(э.get("data"), str) else None} for э in значение]
+	return list(значение)
 
 
 @frappe.whitelist(methods=["POST"])

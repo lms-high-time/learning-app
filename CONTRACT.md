@@ -1653,9 +1653,13 @@ Frappe.
 `space_not_available`, `course_not_in_space`; `no_homework` — у урока нет
 задания; `empty_answer` — нет ни текста, ни файлов; `answer_mode` (с
 `answer_mode`) — в ответе поле, которого у задания нет; `too_many_files` (с
-`limit`); `file_too_large` (с `file` и `limit_mb`); `answer_too_large` (с
-`limit_mb`) — новых файлов больше предела сохранения; `file_rejected` (с
-`file`) — Frappe не принял файл; `accepted_locked` — домашку уже приняли.
+`limit`); `file_missing` (с `file`) — файл не передан или пуст (в том числе
+битый base64); `invalid_files` — `files` не список объектов `{ name, data }` или
+`remove_files` не список `id`; `file_too_large` (с `file` и `limit_mb`) — больше
+нашего предела или предела Frappe; `answer_too_large` (с `limit_mb`) — новых
+файлов больше предела сохранения; `file_rejected` (с `file`) — Frappe не
+принял файл; `accepted_locked` — домашку уже приняли. Отказ по файлу ничего не
+сохраняет: ни ответа, ни других файлов этого вызова.
 
 ## `lms_frappe_app.api.student.remember`
 

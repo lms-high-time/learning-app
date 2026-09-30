@@ -15,6 +15,8 @@ import json
 from datetime import datetime, time, timedelta
 
 import frappe
+from frappe.core.api.file import get_max_file_size
+from frappe.core.doctype.file.exceptions import MaxFileSizeReachedError
 from frappe.utils import get_datetime, getdate, now_datetime
 
 from lms_frappe_app.agent_learning.artifacts import files as файлы_платформы
@@ -43,6 +45,8 @@ from lms_frappe_app.agent_learning.structure import уроки_курса, ур�
 ФАЙЛ_ВЕЛИК = "file_too_large"
 ОТВЕТ_ВЕЛИК = "answer_too_large"
 ФАЙЛ_ОТКЛОНЁН = "file_rejected"
+ФАЙЛ_ПУСТ = "file_missing"
+НЕВЕРНЫЕ_ФАЙЛЫ = "invalid_files"
 УЖЕ_ПРИНЯТА = "accepted_locked"
 
 ТОЧКА_СОХРАНЕНИЯ = "agent_homework_save"
@@ -172,7 +176,11 @@ def сохранить(
 	текст = (документ.answer or "") if answer is None else answer.strip()
 	убрать = set(убрать or ())
 	файлы = [строка.file for строка in документ.files if строка.file not in убрать]
-	новые = [(имя_файла, данные) for имя_файла, данные in новые if данные]
+	for имя_файла, данные in новые:
+		# Why: пустой или битый base64 приходит пустыми байтами — выброшенный
+		# молча, файл пропал бы из ответа, а ученик считал бы его сданным.
+		if not данные:
+			raise Отказ(ФАЙЛ_ПУСТ, "Файл не передан или пуст", file=имя_файла)
 	if len(файлы) + len(новые) > ПРЕДЕЛ_ФАЙЛОВ:
 		raise Отказ(СЛИШКОМ_МНОГО_ФАЙЛОВ, f"В ответе не больше {ПРЕДЕЛ_ФАЙЛОВ} файлов", limit=ПРЕДЕЛ_ФАЙЛОВ)
 	предел = файлы_платформы.предел_байт()
@@ -188,8 +196,9 @@ def сохранить(
 	if not текст and not файлы and not новые:
 		raise Отказ(ПУСТОЙ_ОТВЕТ, "Ответ пустой: нужен текст или файл")
 
-	# Все отказы, кроме `file_rejected`, — выше, до первой записи. Отклонённый
-	# файл откатывает сохранение целиком. `Why:` `@контракт` отдаёт отказ
+	# Все отказы, кроме отказов Frappe на файл (`file_rejected`, `file_too_large`
+	# по его пределу), — выше, до первой записи. Отклонённый файл откатывает
+	# сохранение целиком. `Why:` `@контракт` отдаёт отказ
 	# успешным ответом, и транзакция запроса коммитится — без точки сохранения
 	# осталась бы новая сдача без версии и файлы, принятые до отклонённого.
 	frappe.db.savepoint(ТОЧКА_СОХРАНЕНИЯ)
@@ -198,14 +207,25 @@ def сохранить(
 	# нет `__islocal`, и проверка отвечает «не новая».
 	if not документ.name:
 		документ.insert(ignore_permissions=True)
-	for имя_файла, данные in новые:
-		try:
-			файл = _вложить_файл(документ, имя_файла, данные)
-		except frappe.ValidationError as ошибка:
-			frappe.db.rollback(save_point=ТОЧКА_СОХРАНЕНИЯ)
-			# Why: запрещённый тип Frappe отдаёт 417 без кода — агенту нужен код контракта.
-			raise Отказ(ФАЙЛ_ОТКЛОНЁН, "Такой файл сдать нельзя", file=имя_файла) from ошибка
-		файлы.append(файл.name)
+	вложенные = []
+	имя_файла = None
+	try:
+		for имя_файла, данные in новые:
+			файлы.append(_вложить_файл(документ, имя_файла, данные, вложенные).name)
+	except Отказ:
+		_откатить(вложенные)
+		raise
+	except MaxFileSizeReachedError as ошибка:
+		_откатить(вложенные)
+		# Why: предел Frappe (`max_file_size`) бывает меньше нашего.
+		raise Отказ(
+			ФАЙЛ_ВЕЛИК, "Файл больше допустимого", file=имя_файла, limit_mb=get_max_file_size() // (1024 * 1024)
+		) from ошибка
+	except frappe.ValidationError as ошибка:
+		_откатить(вложенные)
+		# Why: запрещённый тип Frappe отдаёт 417 без кода — агенту нужен код контракта.
+		raise Отказ(ФАЙЛ_ОТКЛОНЁН, "Такой файл сдать нельзя", file=имя_файла) from ошибка
+	frappe.db.release_savepoint(ТОЧКА_СОХРАНЕНИЯ)
 
 	документ.answer = текст
 	документ.set("files", [{"file": ф} for ф in файлы])
@@ -221,18 +241,31 @@ def сохранить(
 	return документ
 
 
-def _вложить_файл(документ, имя: str, данные: bytes):
-	"""Приватный `File`, привязанный к сдаче: права на него Frappe берёт у сдачи."""
-	return frappe.get_doc(
-		{
-			"doctype": "File",
-			"file_name": имя or "file",
-			"content": данные,
-			"is_private": 1,
-			"attached_to_doctype": СДАЧА,
-			"attached_to_name": документ.name,
-		}
-	).insert(ignore_permissions=True)
+def _вложить_файл(документ, имя: str, данные: bytes, вложенные: list):
+	"""Приватный `File`, привязанный к сдаче: права на него Frappe берёт у сдачи.
+
+	Файл попадает в `вложенные` до вставки: `File.before_insert` пишет байты на
+	диск раньше, чем вставка может упасть.
+	"""
+	файл = файлы_платформы.новый_файл(документ, имя or "file", данные)
+	вложенные.append(файл)
+	return файл.insert(ignore_permissions=True)
+
+
+def _откатить(вложенные: list) -> None:
+	"""Откат сохранения к точке и байты его файлов — с диска.
+
+	`Why:` откат к точке сохранения не зовёт `frappe.db.after_rollback`, а
+	`File.before_insert` уже записал байты: без уборки они остались бы на диске
+	без записи о них. `on_rollback` удаляет файл, только если на то же
+	содержимое не ссылается другой `File` (`File._delete_file_on_disk`), — общий
+	файл прежней версии цел. Зовётся после отката: откаченные записи о файлах
+	уже не считаются ссылками.
+	"""
+	frappe.db.rollback(save_point=ТОЧКА_СОХРАНЕНИЯ)
+	for файл in вложенные:
+		if файл.flags.new_file:
+			файл.on_rollback()
 
 
 # --- представление ---

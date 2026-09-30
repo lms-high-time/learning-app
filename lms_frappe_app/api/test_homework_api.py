@@ -55,6 +55,25 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		ответ = student.submit_homework(lesson=self.урок, files=json.dumps([файл("b.txt", b"x")]))
 		self.assertEqual(ответ["data"]["submission"]["files"][0]["name"], "b.txt")
 
+	def test_битый_или_пустой_файл_отказ(self):
+		for битый in ({"name": "a.txt", "data": "%%%"}, {"name": "a.txt", "data": ""}, {"name": "a.txt"}):
+			ответ = student.submit_homework(lesson=self.урок, answer="сделал", files=[битый])
+			self.assertEqual(ответ["error"]["code"], "file_missing", битый)
+			self.assertEqual(ответ["error"]["file"], "a.txt")
+		self.assertIsNone(student.homework(lesson=self.урок)["data"]["submission"])
+
+	def test_неверные_списки_отказ_контракта(self):
+		"""Не список объектов в `files` и не JSON в `remove_files` — отказ, а не 500."""
+		for параметры in (
+			{"files": ["a.txt"]},
+			{"files": "{не json"},
+			{"files": {"name": "a.txt", "data": "aGk="}},
+			{"remove_files": "не json"},
+			{"remove_files": [{"id": "x"}]},
+		):
+			ответ = student.submit_homework(lesson=self.урок, answer="сделал", **параметры)
+			self.assertEqual(ответ.get("error", {}).get("code"), "invalid_files", параметры)
+
 	def test_задание_и_сдача_урока(self):
 		ответ = student.homework(lesson=self.урок)["data"]
 		self.assertEqual(ответ["homework"]["title"], "Встреча со спонсором")

@@ -274,18 +274,26 @@ def собрать_таблицу(строки: list[list], тип: str) -> byte
 	return поток.getvalue()
 
 
-def сохранить_файл(документ_ученика, имя: str, данные: bytes):
-	"""Приватный `File`, привязанный к документу ученика."""
+def новый_файл(документ, имя: str, данные: bytes):
+	"""Приватный `File`, привязанный к записи ученика, — ещё не вставленный.
+
+	Права на файл Frappe берёт у записи: документа курса или сдачи домашки.
+	"""
 	return frappe.get_doc(
 		{
 			"doctype": "File",
 			"file_name": имя,
 			"content": данные,
 			"is_private": 1,
-			"attached_to_doctype": "Agent Student Artifact",
-			"attached_to_name": документ_ученика.name,
+			"attached_to_doctype": документ.doctype,
+			"attached_to_name": документ.name,
 		}
-	).insert(ignore_permissions=True)
+	)
+
+
+def сохранить_файл(документ, имя: str, данные: bytes):
+	"""`новый_файл`, вставленный в базу."""
+	return новый_файл(документ, имя, данные).insert(ignore_permissions=True)
 
 
 def удалить_файл(имя_файла: str | None) -> None:
