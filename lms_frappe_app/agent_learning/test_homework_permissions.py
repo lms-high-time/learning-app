@@ -31,6 +31,7 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 		добавить_в_организацию(self.ученик, self.организация)
 		чужая = создать_организацию(f"Чужая {с}")
 		добавить_в_организацию(self.ученик, чужая)
+		self.чужая_организация = чужая
 		self.менеджер = создать_менеджера(f"hwm-{с}@example.com", self.организация)
 		self.методист = создать_куратора(f"hwc-{с}@example.com", роль="Course Creator")
 		self.модератор = создать_куратора(f"hwmod-{с}@example.com", роль="Moderator")
@@ -71,3 +72,26 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 			self.assertFalse(
 				frappe.has_permission("Agent Homework Submission", "write", doc=self.рабочая), user
 			)
+
+	def test_файл_сдачи_видят_те_же_кто_сдачу(self):
+		"""Права на `File` Frappe берёт у сдачи: файл открывают те, кто видит сдачу.
+
+		Файл вставлен от администратора — доступ ученика идёт через сдачу, а не
+		через владельца `File`.
+		"""
+		рабочая = домашка.сохранить(
+			self.ученик, self.урок, self.организация, новые=[("отчёт.txt", frappe.generate_hash().encode())]
+		)
+		файл = frappe.get_doc("File", рабочая.files[0].file)
+		руководитель_чужой = создать_менеджера(
+			f"hwm2-{frappe.generate_hash(length=6)}@example.com", self.чужая_организация
+		)
+		for user, видит in (
+			(self.сосед, False),
+			(руководитель_чужой, False),
+			(self.методист, True),
+			(self.менеджер, True),
+			(self.ученик, True),
+		):
+			frappe.set_user(user)
+			self.assertEqual(bool(frappe.has_permission("File", "read", doc=файл)), видит, user)

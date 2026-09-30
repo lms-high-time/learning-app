@@ -182,6 +182,41 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.assertEqual(строка["homework"]["answer_mode"], "text_and_files")
 		self.assertNotIn("versions", строка["submission"])
 
+	def test_чужой_файл_не_убрать(self):
+		"""`remove_files` с чужим `id` не трогает ни чужую сдачу, ни файлы своей."""
+		frappe.set_user("Administrator")
+		сосед = создать_ученика(f"hwan-{frappe.generate_hash(length=6)}@example.com")
+		зачислить(сосед, self.урок)
+		frappe.set_user(сосед)
+		чужая = student.submit_homework(lesson=self.урок, files=[файл("чужой.txt", b"his")])["data"]["submission"]
+		чужой_файл = чужая["files"][0]["id"]
+		frappe.set_user(self.ученик)
+		своя = student.submit_homework(lesson=self.урок, answer="моё", files=[файл("мой.txt", b"mine")])
+		своя = своя["data"]["submission"]
+		ответ = student.submit_homework(lesson=self.урок, remove_files=[чужой_файл])
+		self.assertTrue(ответ["ok"], ответ)
+		стала = ответ["data"]["submission"]
+		self.assertEqual((стала["answer"], стала["files"]), (своя["answer"], своя["files"]))
+		frappe.set_user("Administrator")
+		документ = frappe.get_doc("Agent Homework Submission", чужая["id"])
+		self.assertEqual((документ.version, [с.file for с in документ.files]), (1, [чужой_файл]))
+		self.assertEqual(frappe.db.get_value("File", чужой_файл, "attached_to_name"), чужая["id"])
+
+	def test_мои_домашки_скрывают_курс_без_доступа(self):
+		"""Без фильтра перечень не показывает сдачу курса, куда ученик больше не записан."""
+		student.submit_homework(lesson=self.урок, answer="сделал")
+		frappe.set_user("Administrator")
+		другой = создать_урок(f"Другой {frappe.generate_hash(length=4)}")
+		зачислить(self.ученик, другой)
+		создать_домашку(другой)
+		frappe.set_user(self.ученик)
+		student.submit_homework(lesson=другой, answer="и тут")
+		self.assertEqual(len(student.my_homework()["data"]["items"]), 2)
+		frappe.set_user("Administrator")
+		frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+		frappe.set_user(self.ученик)
+		self.assertEqual([с["lesson"] for с in student.my_homework()["data"]["items"]], [другой])
+
 	def test_чужое_пространство_отказ(self):
 		frappe.set_user("Administrator")
 		организация = создать_организацию(f"Чужая {frappe.generate_hash(length=4)}")
