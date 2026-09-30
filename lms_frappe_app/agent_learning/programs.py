@@ -29,38 +29,28 @@ from lms_frappe_app.agent_learning.errors import Отказ
 ПРОЙДЕН_ЦЕЛИКОМ = 100
 
 
-def _курсы_программы(программа: str) -> list[str]:
-	return frappe.get_all(
-		"LMS Program Course",
-		filters={"parent": программа, "parenttype": "LMS Program"},
-		pluck="course",
-		order_by="idx asc",
-	)
-
-
-def _пройден(ученик: str, курс: str) -> bool:
-	прогресс = frappe.db.get_value("LMS Enrollment", {"member": ученик, "course": курс}, "progress")
-	return (прогресс or 0) >= ПРОЙДЕН_ЦЕЛИКОМ
-
-
-def _название_курса(курс: str) -> str | None:
-	return frappe.db.get_value("LMS Course", курс, "title")
-
-
-def программы_курса(курс: str, ученик: str | None) -> list[dict]:
-	"""Программы, в которые входит курс, — опубликованные и те, где ученик участник.
+def программы_курсов(курсы: list[str], ученик: str | None) -> dict[str, list[dict]]:
+	"""Программы каждого курса — опубликованные и те, где ученик участник.
 
 	По каждой: место курса, число курсов, обязателен ли порядок, участник ли
-	ученик и — если курс для него заперт — какой курс пройти раньше.
+	ученик, предыдущий и следующий курс и — если курс для него заперт — какой
+	курс пройти раньше. Курса без программ в ответе нет.
+
+	Выборок постоянное число, сколько бы курсов ни пришло: каталог и список
+	курсов агенту строятся одним вызовом, и запрос на курс сделал бы их N+1.
+	Курс вне программ стоит одной выборки.
 	"""
+	запрошены = set(курсы)
+	if not запрошены:
+		return {}
 	программы = frappe.get_all(
 		"LMS Program Course",
-		filters={"course": курс, "parenttype": "LMS Program"},
+		filters={"course": ("in", list(запрошены)), "parenttype": "LMS Program"},
 		pluck="parent",
 		distinct=True,
 	)
 	if not программы:
-		return []
+		return {}
 	участник_в = (
 		set(
 			frappe.get_all(
@@ -72,38 +62,114 @@ def программы_курса(курс: str, ученик: str | None) -> li
 		if ученик and ученик != "Guest"
 		else set()
 	)
-	итог = []
-	for запись in frappe.get_all(
-		"LMS Program",
-		filters={"name": ("in", программы)},
-		fields=["name", "title", "published", "enforce_course_order"],
-		order_by="title asc",
+	видимые = [
+		запись
+		for запись in frappe.get_all(
+			"LMS Program",
+			filters={"name": ("in", программы)},
+			fields=["name", "title", "published", "enforce_course_order"],
+			order_by="title asc",
+		)
+		if запись.published or запись.name in участник_в
+	]
+	if not видимые:
+		return {}
+	состав: dict[str, list[str]] = {}
+	for строка in frappe.get_all(
+		"LMS Program Course",
+		filters={"parent": ("in", [запись.name for запись in видимые]), "parenttype": "LMS Program"},
+		fields=["parent", "course"],
+		order_by="parent asc, idx asc",
 	):
+		состав.setdefault(строка.parent, []).append(строка.course)
+
+	# Место каждого запрошенного курса в каждой видимой программе.
+	места = []
+	for запись in видимые:
+		курсы_программы = состав.get(запись.name, [])
+		места += [
+			(запись, курсы_программы, место)
+			for место, курс in enumerate(курсы_программы)
+			if курс in запрошены
+		]
+	соседи = {
+		курсы_программы[сдвиг]
+		for _, курсы_программы, место in места
+		for сдвиг in (место - 1, место + 1)
+		if 0 <= сдвиг < len(курсы_программы)
+	}
+	названия = dict(
+		frappe.get_all(
+			"LMS Course", filters={"name": ("in", list(соседи))}, fields=["name", "title"], as_list=True
+		)
+		if соседи
+		else []
+	)
+	проверить = {
+		курсы_программы[место - 1]
+		for запись, курсы_программы, место in места
+		if место > 0 and запись.enforce_course_order and запись.name in участник_в
+	}
+	пройдены = (
+		set(
+			frappe.get_all(
+				"LMS Enrollment",
+				filters={
+					"member": ученик,
+					"course": ("in", list(проверить)),
+					"progress": (">=", ПРОЙДЕН_ЦЕЛИКОМ),
+				},
+				pluck="course",
+			)
+		)
+		if проверить
+		else set()
+	)
+
+	def курс_наружу(курс: str) -> dict:
+		return {"id": курс, "title": названия.get(курс)}
+
+	итог: dict[str, list[dict]] = {}
+	for запись, курсы_программы, место in места:
+		предыдущий = курсы_программы[место - 1] if место > 0 else None
+		следующий = курсы_программы[место + 1] if место + 1 < len(курсы_программы) else None
 		участник = запись.name in участник_в
-		if not (запись.published or участник):
-			continue
-		курсы = _курсы_программы(запись.name)
-		место = курсы.index(курс)
-		замок = None
-		if участник and запись.enforce_course_order and место > 0:
-			предыдущий = курсы[место - 1]
-			if not _пройден(ученик, предыдущий):
-				замок = {"id": предыдущий, "title": _название_курса(предыдущий)}
-		итог.append(
+		заперт = bool(участник and запись.enforce_course_order and предыдущий and предыдущий not in пройдены)
+		итог.setdefault(курсы_программы[место], []).append(
 			{
 				"program": запись.name,
 				"title": запись.title or запись.name,
 				"number": место + 1,
-				"total": len(курсы),
+				"total": len(курсы_программы),
 				"enforce_order": bool(запись.enforce_course_order),
 				"member": участник,
-				"previous": {"id": курсы[место - 1], "title": _название_курса(курсы[место - 1])}
-				if место > 0
-				else None,
-				"locked_by": замок,
+				"previous": курс_наружу(предыдущий) if предыдущий else None,
+				"next": курс_наружу(следующий) if следующий else None,
+				"locked_by": курс_наружу(предыдущий) if заперт else None,
 			}
 		)
 	return итог
+
+
+def программы_курса(курс: str, ученик: str | None) -> list[dict]:
+	"""Программы одного курса — как у `программы_курсов`."""
+	return программы_курсов([курс], ученик).get(курс, [])
+
+
+def _замок_из(программы: list[dict]) -> dict | None:
+	for программа in программы:
+		if программа["locked_by"]:
+			return {
+				"program": программа["program"],
+				"program_title": программа["title"],
+				"previous": программа["locked_by"],
+			}
+	return None
+
+
+def запертые(ученик: str, курсы: list[str]) -> set[str]:
+	"""Какие из курсов ученику закрыты программой — одним пакетом выборок."""
+	return {курс for курс, программы in программы_курсов(курсы, ученик).items() if _замок_из(программы)}
 
 
 def замок(ученик: str, курс: str) -> dict | None:
@@ -112,14 +178,7 @@ def замок(ученик: str, курс: str) -> dict | None:
 	`None` — пускает: ученик не участник программы с обязательным порядком,
 	курс в ней первый или предыдущий пройден.
 	"""
-	for программа in программы_курса(курс, ученик):
-		if программа["locked_by"]:
-			return {
-				"program": программа["program"],
-				"program_title": программа["title"],
-				"previous": программа["locked_by"],
-			}
-	return None
+	return _замок_из(программы_курса(курс, ученик))
 
 
 def требовать_порядок(ученик: str, курс: str) -> None:
