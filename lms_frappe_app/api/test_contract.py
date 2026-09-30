@@ -28,7 +28,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 import lms_frappe_app.api
-from lms_frappe_app.api import authoring, manager, public, student
+from lms_frappe_app.api import authoring, manager, public, review, student
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	политика_по_умолчанию,
@@ -285,9 +285,10 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def test_ключи_ответов_совпадают_с_примерами_контракта(self):
 		курс, уроки = self._собрать_курс()
-		репорт = self._пройти_курс(курс, уроки)
+		репорт, сдача = self._пройти_курс(курс, уроки)
 		self._разобрать_репорт(курс, репорт)
 		self._посмотреть_отчёты()
+		self._проверить_домашку(сдача, уроки[0])
 
 	# --- сборка курса ---
 
@@ -530,7 +531,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	# --- учебный поток ---
 
-	def _пройти_курс(self, курс: str, уроки: list[str]) -> None:
+	def _пройти_курс(self, курс: str, уроки: list[str]) -> tuple[str, str]:
 		с_квизом, без_квиза = уроки
 		frappe.set_user(self.ученик)
 
@@ -607,17 +608,17 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.assertTrue(ответ["result"]["passed"], "квиз не зачтён — дальше сверять нечего")
 		# Сданный квиз выдал домашку урока (learning-services#439).
 		self.сверить("student.homework", student.homework(lesson=с_квизом))
-		self.сверить(
+		сдача = self.сверить(
 			"student.submit_homework",
 			student.submit_homework(lesson=с_квизом, answer="Сверка отчётов — цикл по отделам"),
-		)
+		)["submission"]["id"]
 		self.сверить("student.my_homework", student.my_homework())
 		self.сверить("student.my_homework", student.my_homework(lesson=с_квизом))
 
 		второе = student.start_lesson(lesson=без_квиза)["data"]["session"]
 		self.сверить("student.complete_lesson", student.complete_lesson(session=второе))
 		self.сверить("student.get_my_progress", student.get_my_progress())
-		return репорт
+		return репорт, сдача
 
 	# --- репорт: разбор и итог ---
 
@@ -637,3 +638,23 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		frappe.set_user(self.менеджер)
 		self.сверить("manager.org_report", manager.org_report())
 		self.сверить("manager.student_detail", manager.student_detail(user=self.ученик))
+
+	# --- проверка домашки куратором (learning-services#452) ---
+
+	def _проверить_домашку(self, сдача: str, урок: str) -> None:
+		"""Руководитель проверяет сдачу ученика в пространстве своей организации."""
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value("Agent Homework Submission", сдача, "organization"), self.организация)
+		frappe.set_user(self.менеджер)
+		self.сверить("review.pending_count", review.pending_count())
+		очередь = self.сверить("review.queue", review.queue())
+		self.assertIn(сдача, [с["id"] for с in очередь["items"]])
+		self.сверить("review.submission", review.submission(submission=сдача))
+		self.сверить(
+			"review.send_back", review.send_back(submission=сдача, version=1, comment="Добавьте пример")
+		)
+		frappe.set_user(self.ученик)
+		student.submit_homework(lesson=урок, answer="Сверка отчётов — цикл по отделам, пример")
+		frappe.set_user(self.менеджер)
+		self.сверить("review.accept", review.accept(submission=сдача, version=2))
+		self.сверить("review.reopen", review.reopen(submission=сдача, version=2, comment="Принял рано"))

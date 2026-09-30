@@ -21,13 +21,14 @@ from lms_frappe_app.agent_learning.leak_guards import проверить_отв�
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_вопрос,
+	создать_домашку,
 	создать_квиз,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
 )
-from lms_frappe_app.api import manager, student
+from lms_frappe_app.api import manager, review, student
 
 ПРАВИЛЬНЫЙ_ВАРИАНТ = "Москва"
 НЕВЕРНЫЙ_ВАРИАНТ = "Тула"
@@ -250,3 +251,16 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 			"student_detail",
 			запрещённые_тексты=("перепутал столицу",),
 		)
+
+	def test_методы_куратора_не_отдают_эталон(self):
+		"""Очередь и карточка домашки (learning-services#452): сдача, задание и
+		журнал — без эталонов и структур Frappe."""
+		создать_домашку(self.урок)
+		frappe.set_user(self.ученик)
+		сдача = student.submit_homework(lesson=self.урок, answer="Сделал")["data"]["submission"]["id"]
+
+		frappe.set_user(self.менеджер)
+		self.проверить("review.queue", review.queue())
+		self.проверить("review.pending_count", review.pending_count())
+		self.проверить("review.submission", review.submission(submission=сдача))
+		self.проверить("review.send_back", review.send_back(submission=сдача, version=1, comment="Доделай"))

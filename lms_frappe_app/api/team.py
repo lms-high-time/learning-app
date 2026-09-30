@@ -27,7 +27,7 @@ from lms_frappe_app.agent_learning.artifacts.document import (
 	_файлы,
 )
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
-from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.errors import НЕТ_ПРАВА, Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
 from lms_frappe_app.api import контракт, текущий_пользователь
 
@@ -199,7 +199,6 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 # --- сотрудники: приглашение ссылкой, роли, уход (learning-services#363) ---
 
 ПРИГЛАШЕНИЕ_НЕ_НАЙДЕНО = "invite_not_found"
-НЕТ_ПРАВА = "not_allowed"
 ПОСЛЕДНИЙ_АДМИН = "last_org_admin"
 НЕ_УЧАСТНИК = "not_a_member"
 АДМИН = "Org Admin"

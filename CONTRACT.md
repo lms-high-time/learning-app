@@ -623,7 +623,8 @@ learning-services#405).
 **предыдущего по порядку курса урока** и сдача ученика в пространстве занятия:
 статус, срок, ответ, файлы и журнал с комментариями куратора
 (learning-services#439); `submission: null` — ученик по нему ничего не
-сохранял, `last_comment` — комментарий последнего возврата на доработку. У
+сохранял, `last_comment` — комментарий последнего возврата на доработку или
+отмены приёма. У
 урока без задания — `null` в обоих ключах, независимо друг от друга.
 
 С `channel: web` — для шапки веб-чата (learning-services#404) — в `lesson`
@@ -1612,7 +1613,8 @@ ISO 8601 со смещением часового пояса сайта; при 
     "version": 2, "last_comment": "Не хватает решения по бюджету" } ] } }
 ```
 
-Свежие сверху. С `lesson` строка одна и несёт ещё `homework` — задание, как у
+Свежие сверху. `last_comment` — комментарий последнего возврата на доработку
+или отмены приёма. С `lesson` строка одна и несёт ещё `homework` — задание, как у
 `homework`, — и `submission` — сдачу целиком, без `versions`. Домашки курсов,
 на которые ученик больше не записан, в перечень не попадают.
 
@@ -2203,6 +2205,178 @@ Settings`, по умолчанию 3) тем, кто не прошёл курс,
 
 **Отказы:** `organization_name_invalid`, `organization_name_taken`,
 `organization_limit`.
+
+---
+
+# Методы куратора
+
+Проверка домашек в вебе — очередь «Ждут проверки» и карточка сдачи
+(learning-services#452). Все методы — только `POST`.
+
+**Кто проверяет.** Руководитель (роль `Organization Manager`) — сдачи
+пространств своих организаций; методист (`Course Creator`) и модератор
+(`Moderator`) — все сдачи всех курсов, включая личные пространства. Свою сдачу
+не проверяет никто, даже с ролью куратора; архивную (прогресс сброшен) — тоже.
+Остальным очередь пуста, а действия отвечают `not_allowed`.
+
+**Ученик** назван полным именем, без имени — почтой: почту ученика куратору
+иначе не отдаём. В журнале сдачи (`history`) события самого читателя несут
+`by` — его почту, остальные — `by: null` и `by_name`: имя ученика или
+«Ученик», имя куратора или «Куратор».
+
+**Проверенная версия** (`reviewed_version`) — `version` последней строки
+журнала `returned`, `accepted` или `reopened`; `null` — сдачу ещё не
+проверяли. С ней страница сравнивает текущую версию ответа.
+
+## `lms_frappe_app.api.review.queue`
+
+Сдачи, которые куратор вправе проверять, — старые сверху.
+
+**Параметры:** `status` (по умолчанию `Submitted`), `course`
+(необязательный), `organization` (необязательный; `personal` — личные
+пространства), `limit` (по умолчанию и не больше 50).
+
+```json
+{ "ok": true, "data": {
+  "items": [ { "id": "a1b2c3d4e5", "status": "Submitted", "student": { "name": "Анна Петрова" },
+               "course": "course-p3", "course_title": "Управление проектами",
+               "lesson": "lesson-6", "lesson_title": "Спонсор проекта",
+               "title": "Встреча со спонсором",
+               "organization": "org-1", "organization_title": "Кофейни Юга",
+               "submitted_at": "2026-10-02T09:15:40", "version": 2, "reviewed_version": 1,
+               "due_at": "2026-10-06T14:02:11", "overdue": false } ],
+  "total": 1,
+  "courses": [ { "id": "course-p3", "title": "Управление проектами" } ],
+  "organizations": [ { "id": "org-1", "title": "Кофейни Юга" },
+                     { "id": "personal", "title": "Личное" } ] } }
+```
+
+`total` — сколько сдач под фильтром, `items` — не больше `limit`.
+`organization` — имя организации или `personal`, `organization_title` у
+личного — «Личное». `courses` и `organizations` — значения для фильтров из всех
+видимых куратору сдач, без учёта выбранных фильтров; `personal` в них есть,
+только если куратору видны личные. Руководителю фильтр `personal` отдаёт
+пустую очередь. `overdue` — как у `my_homework`.
+
+**Отказов нет.**
+
+## `lms_frappe_app.api.review.submission`
+
+Карточка сдачи: задание, ответ с версиями, журнал и действия, доступные сейчас.
+
+**Параметры:** `submission`.
+
+```json
+{ "ok": true, "data": {
+  "submission": { "id": "a1b2c3d4e5", "status": "Submitted", "due_at": null, "overdue": false,
+    "version": 2, "assigned_at": "2026-10-01T14:02:11", "submitted_at": "2026-10-02T09:15:40",
+    "answer": "Встретился, договорились о бюджете…", "files": [],
+    "history": [ { "event": "returned", "by": null, "by_name": "Ирина Смирнова",
+                   "at": "2026-10-01T21:10:00", "version": 1,
+                   "comment": "Не хватает решения по бюджету", "due_at": null } ],
+    "versions": [ { "version": 1, "saved_at": "2026-10-01T20:00:00",
+                    "answer": "Черновик…", "files": [] } ] },
+  "homework": { "lesson": "lesson-6", "title": "Встреча со спонсором",
+    "description": "Проведите встречу и опишите итог…", "answer_mode": "text_and_files",
+    "due": { "mode": "relative", "days": 5, "date": null } },
+  "student": { "name": "Анна Петрова" },
+  "course": "course-p3", "course_title": "Управление проектами",
+  "lesson": "lesson-6", "lesson_title": "Спонсор проекта",
+  "lesson_url": "/lms/courses/course-p3/learn/2-1",
+  "organization": "org-1", "organization_title": "Кофейни Юга",
+  "reviewed_version": 1,
+  "actions": [ "accept", "send_back" ] } }
+```
+
+`submission` и `homework` — те же формы, что у `student.homework`. `actions`
+— что куратор может сделать сейчас: `accept` и `send_back` у сдачи в статусе
+`Submitted`, `reopen` — у `Accepted`; пустой список — карточка только для
+чтения. Открыть карточку может всякий, кому видна сдача, — и сам ученик;
+своя и архивная сдача приходят без действий.
+
+**Отказы:** `submission_not_found`; `not_allowed` — сдача вам не видна.
+
+## `lms_frappe_app.api.review.accept`
+
+Принимает сдачу. Принятую ученик больше не правит.
+
+**Параметры:** `submission`, `version` — версия, которую куратор видел.
+
+```json
+{ "ok": true, "data": { "submission": { "id": "a1b2c3d4e5", "status": "Accepted" },
+  "homework": { }, "student": { "name": "Анна Петрова" },
+  "course": "course-p3", "course_title": "Управление проектами",
+  "lesson": "lesson-6", "lesson_title": "Спонсор проекта",
+  "lesson_url": "/lms/courses/course-p3/learn/2-1",
+  "organization": "org-1", "organization_title": "Кофейни Юга",
+  "reviewed_version": 2, "actions": [ "reopen" ] } }
+```
+
+Ответ — карточка, как у `submission`, после действия. В журнал пишется строка
+`accepted` с версией.
+
+**Отказы:** `submission_not_found`; `not_allowed` — эту сдачу вы не
+проверяете или она ваша; `stale_version` (с `version` — текущей) — ученик
+сохранил новую версию, посмотрите её; `wrong_status` (со `status`) — сдача не
+в `Submitted` или уже неактивна; `busy` — сдачу в этот момент меняет другой
+запрос, ничего не сохранено: повторите.
+
+## `lms_frappe_app.api.review.send_back`
+
+Возвращает сдачу на доработку с комментарием: что доделать. Письмо с
+комментарием ученику уходит ближайшей ежечасной рассылкой.
+
+**Параметры:** `submission`, `version`, `comment`.
+
+```json
+{ "ok": true, "data": { "submission": { "id": "a1b2c3d4e5", "status": "Returned" },
+  "homework": { }, "student": { "name": "Анна Петрова" },
+  "course": "course-p3", "course_title": "Управление проектами",
+  "lesson": "lesson-6", "lesson_title": "Спонсор проекта",
+  "lesson_url": "/lms/courses/course-p3/learn/2-1",
+  "organization": "org-1", "organization_title": "Кофейни Юга",
+  "reviewed_version": 2, "actions": [ ] } }
+```
+
+Возвращённую ученик правит, сохранение снова ставит `Submitted` новой
+версией. Комментарий — последний комментарий куратора в `my_homework` и
+`start_lesson`.
+
+**Отказы:** как у `accept`, и `comment_required` — комментарий пустой.
+
+## `lms_frappe_app.api.review.reopen`
+
+Отменяет ошибочный приём: принятая сдача снова на доработке, с комментарием.
+
+**Параметры:** `submission`, `version`, `comment`.
+
+```json
+{ "ok": true, "data": { "submission": { "id": "a1b2c3d4e5", "status": "Returned" },
+  "homework": { }, "student": { "name": "Анна Петрова" },
+  "course": "course-p3", "course_title": "Управление проектами",
+  "lesson": "lesson-6", "lesson_title": "Спонсор проекта",
+  "lesson_url": "/lms/courses/course-p3/learn/2-1",
+  "organization": "org-1", "organization_title": "Кофейни Юга",
+  "reviewed_version": 2, "actions": [ ] } }
+```
+
+В журнал пишется строка `reopened`; её комментарий, как у `returned`, —
+последний комментарий куратора.
+
+**Отказы:** как у `send_back`; `wrong_status` — сдача не в `Accepted`.
+
+## `lms_frappe_app.api.review.pending_count`
+
+Сколько сдач ждут проверки (`Submitted`) у вызывающего — для счётчика у
+пункта меню. Отбор тот же, что у `queue`.
+
+**Параметры:** нет.
+
+```json
+{ "ok": true, "data": { "count": 3 } }
+```
+
+**Отказов нет.**
 
 ---
 
