@@ -606,10 +606,10 @@ learning-services#405).
       "due_at": "2026-09-04T13:05:00", "overdue": false, "version": 1,
       "assigned_at": "2026-09-01T13:05:00", "submitted_at": "2026-09-02T19:40:00",
       "answer": "Критический путь: смета → закупка → монтаж…", "files": [],
-      "history": [ { "event": "assigned", "by": "pupil@example.com",
+      "history": [ { "event": "assigned", "by": "pupil@example.com", "by_name": "Анна Петрова",
                      "at": "2026-09-01T13:05:00", "version": null, "comment": null,
                      "due_at": "2026-09-04T13:05:00" },
-                   { "event": "submitted", "by": "pupil@example.com",
+                   { "event": "submitted", "by": "pupil@example.com", "by_name": "Анна Петрова",
                      "at": "2026-09-02T19:40:00", "version": 1, "comment": null,
                      "due_at": null } ] },
     "last_comment": null,
@@ -1553,9 +1553,11 @@ ISO 8601 со смещением часового пояса сайта; при 
     "files": [ { "id": "f1a2b3c4d5", "name": "protocol.pdf", "type": "pdf", "size": 48213,
                  "uploaded_at": "2026-10-02T09:15:40", "url": "/private/files/protocol.pdf" } ],
     "history": [
-      { "event": "assigned", "by": "pupil@example.com", "at": "2026-10-01T14:02:11",
+      { "event": "assigned", "by": "pupil@example.com", "by_name": "Анна Петрова",
+        "at": "2026-10-01T14:02:11",
         "version": null, "comment": null, "due_at": "2026-10-06T14:02:11" },
-      { "event": "submitted", "by": "pupil@example.com", "at": "2026-10-02T09:15:40",
+      { "event": "submitted", "by": "pupil@example.com", "by_name": "Анна Петрова",
+        "at": "2026-10-02T09:15:40",
         "version": 2, "comment": null, "due_at": null } ],
     "versions": [ { "version": 1, "saved_at": "2026-10-01T20:00:00",
                     "answer": "Черновик…", "files": [] },
@@ -1578,8 +1580,9 @@ ISO 8601 со смещением часового пояса сайта; при 
 доработке, `Accepted` — принята. `due_at` — выставленный срок; относительный
 считается при выдаче и потом не пересчитывается. `overdue` — признак, а не
 статус: срок прошёл, а статус `Assigned` или `Returned`. `history` — журнал
-событий `assigned`, `submitted`, `returned`, `accepted`, `reopened`; `comment`
-— у действий куратора. `versions` — снимок ответа на каждое сохранение, файлы
+событий `assigned`, `submitted`, `returned`, `accepted`, `reopened`: `by` —
+кто, `by_name` — его имя (без имени — та же почта), `comment` — у действий
+куратора. `versions` — снимок ответа на каждое сохранение, файлы
 старых версий остаются доступными. `id` файла передаётся в `remove_files`
 метода `submit_homework`.
 
@@ -1632,7 +1635,8 @@ MCP-сервис из окна загрузки в чате). Убранный �
     "overdue": false, "version": 1, "assigned_at": null,
     "submitted_at": "2026-10-02T09:15:40", "answer": "Встретился…",
     "files": [],
-    "history": [ { "event": "submitted", "by": "pupil@example.com", "at": "2026-10-02T09:15:40",
+    "history": [ { "event": "submitted", "by": "pupil@example.com", "by_name": "Анна Петрова",
+                   "at": "2026-10-02T09:15:40",
                    "version": 1, "comment": null, "due_at": null } ],
     "versions": [ { "version": 1, "saved_at": "2026-10-02T09:15:40",
                     "answer": "Встретился…", "files": [] } ] } } }

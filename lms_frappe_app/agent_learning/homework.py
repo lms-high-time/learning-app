@@ -253,6 +253,14 @@ def _файлы(имена: list[str]) -> list[dict]:
 	return [{"id": имя, **сведения[имя]} for имя in имена if имя in сведения]
 
 
+def _имя(user: str | None) -> str | None:
+	"""Кто сделал запись журнала — по имени. `Why:` журнал читает и ученик на
+	странице урока, и почта куратора ему ни к чему (learning-services#439)."""
+	if not user:
+		return None
+	return frappe.get_cached_value("User", user, "full_name") or user
+
+
 def _время(значение) -> str | None:
 	"""Метка времени, как во всём контракте: ISO, без зоны, в поясе сайта."""
 	return get_datetime(значение).isoformat() if значение else None
@@ -288,6 +296,7 @@ def описание_сдачи(документ, *, полное: bool = True, 
 			{
 				"event": с.event,
 				"by": с.by_user,
+				"by_name": _имя(с.by_user),
 				"at": _время(с.at),
 				"version": с.version or None,
 				"comment": с.comment or None,

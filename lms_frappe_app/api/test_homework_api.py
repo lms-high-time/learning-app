@@ -67,6 +67,23 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.assertEqual([с["event"] for с in сдача["history"]], ["submitted"])
 		self.assertEqual(len(сдача["versions"]), 1)
 
+	def test_журнал_называет_автора_события_по_имени(self):
+		"""Ученику на странице урока журнал показывает имя, а не почту."""
+		frappe.db.set_value(
+			"User", self.ученик, {"first_name": "Анна", "last_name": "Петрова", "full_name": "Анна Петрова"}
+		)
+		frappe.clear_document_cache("User", self.ученик)
+		сдача = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]
+		[событие] = сдача["history"]
+		self.assertEqual(событие["by"], self.ученик)
+		self.assertEqual(событие["by_name"], "Анна Петрова")
+
+	def test_без_имени_журнал_называет_почту(self):
+		frappe.db.set_value("User", self.ученик, {"first_name": "", "last_name": "", "full_name": ""})
+		frappe.clear_document_cache("User", self.ученик)
+		[событие] = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["history"]
+		self.assertEqual(событие["by_name"], self.ученик)
+
 	def test_урок_без_задания_не_отказ(self):
 		frappe.set_user("Administrator")
 		другой = создать_урок(f"Без задания {frappe.generate_hash(length=4)}")
