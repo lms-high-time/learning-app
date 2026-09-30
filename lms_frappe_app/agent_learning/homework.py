@@ -169,6 +169,30 @@ def выдать(запись) -> None:
 	документ.save(ignore_permissions=True)
 
 
+#: Сколько раз фоновая выдача повторяет себя после гонки за сдачу.
+ПОВТОРОВ_ВЫДАЧИ = 2
+
+
+def выдать_по_записи(doctype: str, name: str) -> None:
+	"""Фоновая выдача по занятию или попытке квиза — после коммита их закрытия.
+
+	Гонка за сдачу (параллельное сохранение, второе закрытие) даёт дубль на
+	вставке или взаимоблокировку — MariaDB со снимочной изоляцией отдаёт так и
+	блокирующее чтение строки, появившейся после снимка. Обе откатывают
+	транзакцию: повтор идёт с нового снимка, где чужая сдача уже видна. Не
+	вышло и после повторов — в лог: урок закрыт, а сдачу ученик заведёт
+	сохранением сам.
+	"""
+	for попытка in range(ПОВТОРОВ_ВЫДАЧИ + 1):
+		try:
+			выдать(frappe.get_doc(doctype, name))
+			return
+		except (frappe.QueryDeadlockError, frappe.UniqueValidationError, frappe.DuplicateEntryError):
+			frappe.db.rollback()
+			if попытка == ПОВТОРОВ_ВЫДАЧИ:
+				frappe.log_error(title="Домашка не выдана", reference_doctype=doctype, reference_name=name)
+
+
 def _новая_сдача(задание, ученик: str, организация: str | None, сейчас: datetime):
 	return frappe.get_doc(
 		{

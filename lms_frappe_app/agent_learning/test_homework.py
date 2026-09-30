@@ -13,8 +13,10 @@ from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
+	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
+	создать_квиз,
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
@@ -133,6 +135,61 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		[сдача] = self.сдачи()
 		self.assertEqual(сдача.status, "Assigned")
+
+	def test_сданный_квиз_выдаёт_домашку(self):
+		from lms_frappe_app.agent_learning.quiz import начать_попытку, принять_ответ
+
+		создать_домашку(self.урок, due_mode="relative", due_days=2)
+		вопрос = создать_вопрос(f"Вопрос {frappe.generate_hash(length=6)}", [("да", True), ("нет", False)])
+		создать_квиз(self.урок, [вопрос])
+		имя = создать_занятие(self.ученик, self.урок)
+		frappe.set_user(self.ученик)
+		попытка = начать_попытку(имя)["attempt"]
+		принять_ответ(попытка, вопрос, "1", "слова ученика")
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value("Agent Quiz Attempt", попытка, "passed"), 1)
+		[сдача] = self.сдачи()
+		self.assertEqual(сдача.status, "Assigned")
+
+	def test_закрытие_урока_ставит_выдачу_в_очередь_после_коммита(self):
+		"""Выдача — не в транзакции закрытия: её сбой не срывает зачёт."""
+		from unittest.mock import patch
+
+		from lms_frappe_app.agent_learning import quiz
+
+		запись = занятие(self.ученик, self.урок)
+		with patch.object(frappe, "enqueue") as очередь:
+			quiz.отметить_урок_пройденным(запись)
+		очередь.assert_called_once()
+		self.assertEqual(очередь.call_args.args, ("lms_frappe_app.agent_learning.homework.выдать_по_записи",))
+		self.assertEqual(
+			{к: очередь.call_args.kwargs[к] for к in ("enqueue_after_commit", "doctype", "name")},
+			{"enqueue_after_commit": True, "doctype": "Agent Learning Session", "name": запись.name},
+		)
+
+	def test_фоновая_выдача_повторяет_после_взаимоблокировки(self):
+		from unittest.mock import patch
+
+		имя = создать_занятие(self.ученик, self.урок)
+		with (
+			patch.object(домашка, "выдать", side_effect=[frappe.QueryDeadlockError("1020"), None]) as выдать,
+			patch.object(frappe.db, "rollback") as откат,
+		):
+			домашка.выдать_по_записи("Agent Learning Session", имя)
+		self.assertEqual((выдать.call_count, откат.call_count), (2, 1))
+
+	def test_фоновая_выдача_без_успеха_пишет_в_лог(self):
+		from unittest.mock import patch
+
+		имя = создать_занятие(self.ученик, self.урок)
+		with (
+			patch.object(домашка, "выдать", side_effect=frappe.QueryDeadlockError("1020")) as выдать,
+			patch.object(frappe.db, "rollback"),
+			patch.object(frappe, "log_error") as лог,
+		):
+			домашка.выдать_по_записи("Agent Learning Session", имя)
+		self.assertEqual(выдать.call_count, 3)
+		лог.assert_called_once()
 
 	def test_попытка_квиза_выдаёт_в_пространстве_своего_занятия(self):
 		создать_домашку(self.урок)
