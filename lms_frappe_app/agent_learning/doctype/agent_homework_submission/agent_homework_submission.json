@@ -44,7 +44,8 @@
    "label": "Урок",
    "options": "Course Lesson",
    "read_only": 1,
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "member",
@@ -71,6 +72,7 @@
    "in_standard_filter": 1,
    "label": "Статус",
    "options": "Assigned\nSubmitted\nReturned\nAccepted",
+   "read_only": 1,
    "reqd": 1
   },
   {
@@ -167,7 +169,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-30 18:00:00.000000",
+ "modified": "2026-09-30 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Homework Submission",
