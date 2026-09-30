@@ -17,17 +17,10 @@
 from __future__ import annotations
 
 import frappe
-from frappe.utils import add_days, get_url, getdate, nowdate
-
-from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
-	настройка,
-)
+from frappe.utils import add_days, cint, get_url, getdate, nowdate
 
 НАЗНАЧЕН = "assigned"
 СРОК = "deadline"
-
-#: Напомнить о сроке за столько дней, если настройка пуста.
-ДНЕЙ_ДО_СРОКА = 3
 
 
 def уведомить_о_назначении(назначение, адресаты: list[str]) -> int:
@@ -50,7 +43,7 @@ def напомнить_о_сроках() -> int:
 		адресаты_назначений,
 	)
 
-	дней = настройка("deadline_reminder_days", ДНЕЙ_ДО_СРОКА)
+	дней = дней_напоминания()
 	if not дней:
 		return 0
 	сегодня = getdate(nowdate())
@@ -78,6 +71,16 @@ def напомнить_о_сроках() -> int:
 			if адресат not in прошли:
 				отправлено += _отправить(назначение, адресат, СРОК)
 	return отправлено
+
+
+def дней_напоминания() -> int:
+	"""За сколько дней до срока напоминать — о курсе и о домашке; `0` — не напоминать.
+
+	`Why:` не `настройка()`: та превращает пустое и `0` в запасное, и «0 — не
+	напоминать» из описания поля не работало (learning-services#452). Пустым
+	поле не бывает: у него значение по умолчанию.
+	"""
+	return cint(frappe.db.get_single_value("Agent Learning Settings", "deadline_reminder_days", cache=False))
 
 
 def уведомить_о_выходе(course: str) -> int:

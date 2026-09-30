@@ -125,6 +125,16 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		напоминания = frappe.get_all("Allocation Notice", filters={"kind": "deadline"}, pluck="user")
 		self.assertEqual(sorted(напоминания), sorted([self.сотрудник, self.руководитель]))
 
+	def test_ноль_дней_не_напоминает(self):
+		"""`deadline_reminder_days = 0` — «не напоминать», как обещает описание
+		поля, а не запасные три дня (learning-services#452)."""
+		self.addCleanup(frappe.db.set_single_value, "Agent Learning Settings", "deadline_reminder_days", 3)
+		self.назначить(deadline=add_days(nowdate(), 2))
+		frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 0)
+
+		self.assertEqual(notices.напомнить_о_сроках(), 0)
+		self.assertFalse(self.письма_о("deadline") & {self.сотрудник, self.руководитель})
+
 	def test_далёкий_и_прошедший_срок_без_напоминания(self):
 		self.назначить(deadline=add_days(nowdate(), 30))
 		self.назначить(deadline=add_days(nowdate(), -1))

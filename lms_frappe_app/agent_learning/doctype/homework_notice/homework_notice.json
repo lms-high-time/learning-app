@@ -1,0 +1,88 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-09-30 21:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "key",
+  "kind",
+  "recipient",
+  "submission"
+ ],
+ "fields": [
+  {
+   "fieldname": "key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ключ",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Письмо",
+   "options": "reminder\nreturned\ndigest",
+   "reqd": 1
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Кому",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "submission",
+   "fieldtype": "Link",
+   "label": "Сдача",
+   "options": "Agent Homework Submission",
+   "search_index": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-09-30 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Homework Notice",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "key",
+ "track_changes": 0
+}

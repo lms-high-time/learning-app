@@ -190,7 +190,11 @@ fixtures = [
 _назначение = "lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation"
 
 scheduler_events = {
-	"hourly": [f"{_сессия}.закрыть_брошенные_занятия"],
+	"hourly": [
+		f"{_сессия}.закрыть_брошенные_занятия",
+		# Письма домашки: напоминание, «вернули», дайджест куратору (learning-services#452).
+		"lms_frappe_app.agent_learning.homework_notices.разослать",
+	],
 	# Страховка к хуку на вступление: членство может появиться в обход него —
 	# импортом, миграцией или правкой в базе.
 	"daily": [
