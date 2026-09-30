@@ -236,6 +236,10 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		with self.assertRaises(Отказ) as отказ:
 			создать_домашку(self.урок, due_mode="relative")
 		self.assertEqual(отказ.exception.код, "invalid_due")
+		for дата in ("завтра", "2030-02-30", "15.01.2030"):
+			with self.assertRaises(Отказ) as отказ:
+				создать_домашку(self.урок, due_mode="absolute", due_date=дата)
+			self.assertEqual(отказ.exception.код, "invalid_due", дата)
 		with self.assertRaises(Отказ) as отказ:
 			создать_домашку(self.урок, answer_mode="audio")
 		self.assertEqual(отказ.exception.код, "invalid_answer_mode")

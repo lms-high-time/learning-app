@@ -1,6 +1,8 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
+from datetime import date
+
 from frappe.model.document import Document
 from frappe.utils import cint
 
@@ -41,5 +43,19 @@ def проверить_срок(due_mode, due_days, due_date, *, режимы=В
 	# Why: лишнее поле другого режима читалось бы как действующий срок.
 	return (
 		cint(due_days) if due_mode == "relative" else None,
-		due_date if due_mode == "absolute" else None,
+		_дата(due_date) if due_mode == "absolute" else None,
 	)
+
+
+def _дата(значение) -> str:
+	"""Дата срока строго `ГГГГ-ММ-ДД`.
+
+	`Why:` без проверки «завтра» или 30 февраля доходили до базы, и MariaDB
+	отвечала ошибкой — 500 вместо отказа контракта (learning-services#452).
+	`getdate` не годится: он угадывает формат и принимает то, чего контракт не
+	обещает.
+	"""
+	try:
+		return date.fromisoformat(str(значение)).isoformat()
+	except (TypeError, ValueError):
+		raise Отказ(НЕВЕРНЫЙ_СРОК, "Дата — ГГГГ-ММ-ДД", due_date=str(значение))

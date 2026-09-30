@@ -573,6 +573,9 @@ def update_allocation(
 # --- сроки домашек в назначении (learning-services#452) ---
 
 ПОЛЯ_СРОКА = ("homework", "due_mode", "due_days", "due_date")
+#: Поля строки срока, которые приходят только строкой: список или объект в
+#: них ронял бы сохранение ошибкой базы, а не отказом.
+ПОЛЯ_СТРОКОЙ = ("homework", "due_mode", "due_date")
 
 
 def _срок(правило) -> dict:
@@ -619,7 +622,11 @@ def _сроки_домашек(значение) -> list[dict] | None:
 			raise Отказ(НЕВЕРНЫЙ_СРОК, "homework_due — список объектов { homework, due_mode, … }")
 	if значение is None:
 		return None
-	if not isinstance(значение, list | tuple) or not all(isinstance(строка, dict) for строка in значение):
+	if not isinstance(значение, list | tuple) or not all(
+		isinstance(строка, dict)
+		and all(isinstance(строка.get(поле), str | None) for поле in ПОЛЯ_СТРОКОЙ)
+		for строка in значение
+	):
 		raise Отказ(НЕВЕРНЫЙ_СРОК, "homework_due — список объектов { homework, due_mode, … }")
 	return [{поле: строка.get(поле) for поле in ПОЛЯ_СРОКА} for строка in значение]
 

@@ -273,6 +273,11 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 			"{не json",
 			[self.задание_1.name],
 			{"homework": self.задание_1.name},
+			[{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "завтра"}],
+			[{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "2030-02-30"}],
+			[{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": ["2030-02-01"]}],
+			[{"homework": [self.задание_1.name], "due_mode": "relative", "due_days": 1}],
+			[{"homework": self.задание_1.name, "due_mode": {"relative": 1}, "due_days": 1}],
 		):
 			self.assertEqual(self.код(self.задать(неверное)), "invalid_due", неверное)
 		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
