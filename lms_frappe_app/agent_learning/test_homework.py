@@ -599,3 +599,17 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 		self.assertIsNone(документ.due_at)
 		сдача = self.выдать(self.организация)
 		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=2))
+
+	def test_источник_срока_из_журнала_если_правило_сняли(self):
+		"""Срок выставлен сохранением по правилу назначения, правило потом сняли:
+		выдача не пересчитывает срок и не приписывает его автору."""
+		назначение = self.назначить({"due_mode": "absolute", "due_date": "2030-03-01"})
+		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
+		self.assertEqual(
+			(str(документ.history[0].due_at), документ.history[0].due_source), ("2030-03-01 23:59:59", "allocation")
+		)
+		назначение.set("homework_due", [])
+		назначение.save(ignore_permissions=True)
+		сдача = self.выдать(self.организация)
+		self.assertEqual(str(сдача.due_at), "2030-03-01 23:59:59")
+		self.assertEqual((сдача.history[-1].event, сдача.history[-1].due_source), ("assigned", "allocation"))
