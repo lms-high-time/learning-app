@@ -597,8 +597,34 @@ learning-services#405).
       "kind": "text", "accept": [], "content": "", "file": null, "url": null,
       "preview": null } ],
   "signals": [ { "code": "objective_struggling", "objective": 1,
-                 "text": "Понимать разницу между while и for", "sessions": 2 } ] } }
+                 "text": "Понимать разницу между while и for", "sessions": 2 } ],
+  "homework": { "lesson": "lesson-6", "title": "Цикл из жизни",
+    "description": "Найдите у себя на работе повторяющееся действие…",
+    "answer_mode": "text", "due": { "mode": "relative", "days": 3, "date": null } },
+  "previous_homework": { "lesson": "lesson-5", "title": "Критический путь своего проекта",
+    "submission": { "id": "a1b2c3d4e5", "status": "Submitted",
+      "due_at": "2026-09-04T13:05:00", "overdue": false, "version": 1,
+      "assigned_at": "2026-09-01T13:05:00", "submitted_at": "2026-09-02T19:40:00",
+      "answer": "Критический путь: смета → закупка → монтаж…", "files": [],
+      "history": [ { "event": "assigned", "by": "pupil@example.com",
+                     "at": "2026-09-01T13:05:00", "version": null, "comment": null,
+                     "due_at": "2026-09-04T13:05:00" },
+                   { "event": "submitted", "by": "pupil@example.com",
+                     "at": "2026-09-02T19:40:00", "version": 1, "comment": null,
+                     "due_at": null } ] },
+    "last_comment": null,
+    "homework": { "lesson": "lesson-5", "title": "Критический путь своего проекта",
+      "description": "…", "answer_mode": "text_and_files",
+      "due": { "mode": "relative", "days": 3, "date": null } } } } }
 ```
+
+`homework` — домашнее задание этого урока, как у `homework`; агент озвучивает
+его в конце занятия, выдаёт его закрытие урока. `previous_homework` — задание
+**предыдущего по порядку курса урока** и сдача ученика в пространстве занятия:
+статус, срок, ответ, файлы и журнал с комментариями куратора
+(learning-services#439); `submission: null` — ученик по нему ничего не
+сохранял, `last_comment` — комментарий последнего возврата на доработку. У
+урока без задания — `null` в обоих ключах, независимо друг от друга.
 
 С `channel: web` — для шапки веб-чата (learning-services#404) — в `lesson`
 ещё место урока в курсе и название курса (`"number": 6, "total": 12,
@@ -715,8 +741,19 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
   "course_objectives": [ "Вести проект по системе" ],
   "quiz": { "required": true, "pass_threshold": 1.0, "attempts_left": null },
   "context": { "notes": 2, "carried_over": 1, "recent_work": 0, "closed_reports": 0 },
-  "signals": [] } }
+  "signals": [],
+  "homework": { "lesson": "lesson-6", "title": "Цикл из жизни",
+    "description": "Найдите у себя на работе повторяющееся действие…",
+    "answer_mode": "text", "due": { "mode": "relative", "days": 3, "date": null } },
+  "previous_homework": { "lesson": "lesson-5", "title": "Критический путь своего проекта",
+    "submission": { "id": "a1b2c3d4e5", "status": "Returned",
+      "due_at": "2026-09-04T13:05:00", "overdue": true, "version": 1 },
+    "last_comment": "Не хватает сроков по закупке" } } }
 ```
+
+Домашка в лёгком старте: задание текущего урока — целиком, по прошлому — статус,
+срок, просрочка и последний комментарий куратора; ответ ученика и журнал —
+`my_homework(lesson=…)`.
 
 Без `brief` — прежний полный ответ. `Why:` подключения с кэшем инструментов не
 знают новых методов, и лёгкий ответ послал бы их к тому, чего у них нет.

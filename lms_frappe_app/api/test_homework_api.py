@@ -10,6 +10,7 @@ from lms_frappe_app.agent_learning.test_homework import задание
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
+	привязать_урок,
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
@@ -116,3 +117,52 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.assertEqual(ответ["error"]["code"], "space_not_available")
 		ответ = student.my_homework(space=организация)
 		self.assertEqual(ответ["error"]["code"], "space_not_available")
+
+
+class IntegrationTestHomeworkStart(IntegrationTestCase):
+	"""Домашка в `start_lesson`: задание текущего урока и сдача прошлого (learning-services#439)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.ученик = создать_ученика(f"hwst-{суффикс}@example.com")
+		self.первый = создать_урок(f"Урок 1 {суффикс}")
+		self.курс = зачислить(self.ученик, self.первый)
+		глава = frappe.db.get_value("Course Lesson", self.первый, "chapter")
+		self.второй = frappe.get_doc(
+			{"doctype": "Course Lesson", "title": f"Урок 2 {суффикс}", "chapter": глава}
+		).insert(ignore_permissions=True).name
+		привязать_урок(глава, self.второй)
+		задание(self.первый, due_mode="relative", due_days=3)
+		frappe.set_user(self.ученик)
+
+	def test_первый_урок_отдаёт_своё_задание(self):
+		данные = student.start_lesson(lesson=self.первый)["data"]
+		self.assertEqual(данные["homework"]["title"], "Встреча со спонсором")
+		self.assertEqual(данные["homework"]["due"]["days"], 3)
+		self.assertIsNone(данные["previous_homework"])
+
+	def test_следующий_урок_отдаёт_сдачу_прошлого(self):
+		student.submit_homework(lesson=self.первый, answer="Встретились, бюджет согласован")
+		данные = student.start_lesson(lesson=self.второй)["data"]
+		self.assertIsNone(данные["homework"])
+		прошлое = данные["previous_homework"]
+		self.assertEqual(прошлое["lesson"], self.первый)
+		self.assertEqual(прошлое["homework"]["title"], "Встреча со спонсором")
+		self.assertEqual(прошлое["submission"]["status"], "Submitted")
+		self.assertEqual(прошлое["submission"]["answer"], "Встретились, бюджет согласован")
+		self.assertEqual([с["event"] for с in прошлое["submission"]["history"]], ["submitted"])
+		self.assertIsNone(прошлое["last_comment"])
+
+	def test_лёгкий_старт_без_ответа_ученика(self):
+		student.submit_homework(lesson=self.первый, answer="Встретились")
+		прошлое = student.start_lesson(lesson=self.второй, brief=True)["data"]["previous_homework"]
+		self.assertEqual(прошлое["submission"]["status"], "Submitted")
+		self.assertNotIn("answer", прошлое["submission"])
+		self.assertNotIn("homework", прошлое)
+		self.assertIn("last_comment", прошлое)
+
+	def test_прошлое_задание_без_сдачи(self):
+		прошлое = student.start_lesson(lesson=self.второй)["data"]["previous_homework"]
+		self.assertEqual(прошлое["lesson"], self.первый)
+		self.assertIsNone(прошлое["submission"])
