@@ -334,6 +334,22 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		self.assertEqual([с.file for с in стало.files], [с.file for с in было.files])
 		self.assertEqual(set(frappe.get_all("File", filters={"attached_to_name": было.name}, pluck="name")), файлы_было)
 
+	def test_версии_читают_файлы_одним_запросом(self):
+		from unittest.mock import patch
+
+		создать_домашку(self.урок)
+		for номер in range(3):
+			документ = домашка.сохранить(self.ученик, self.урок, None, новые=[(f"{номер}.txt", f"v{номер}".encode())])
+		with patch.object(
+			домашка.файлы_платформы, "сведения_о_файлах", wraps=домашка.файлы_платформы.сведения_о_файлах
+		) as сведения:
+			описание = домашка.описание_сдачи(документ, с_версиями=True)
+		self.assertEqual(сведения.call_count, 1)
+		self.assertEqual([[ф["name"] for ф in в["files"]] for в in описание["versions"]], [
+			["0.txt"], ["0.txt", "1.txt"], ["0.txt", "1.txt", "2.txt"]
+		])
+		self.assertEqual([ф["name"] for ф in описание["files"]], ["0.txt", "1.txt", "2.txt"])
+
 	def test_предел_числа_файлов(self):
 		создать_домашку(self.урок)
 		with self.assertRaises(домашка.Отказ) as отказ:

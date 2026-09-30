@@ -861,38 +861,52 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 	if lesson:
 		фильтры["lesson"] = lesson
 	elif course:
-		уроки = frappe.get_all("Course Lesson", filters={"course": course}, pluck="name")
-		if not уроки:
+		уроки_фильтра = frappe.get_all("Course Lesson", filters={"course": course}, pluck="name")
+		if not уроки_фильтра:
 			return {"space": пространства.наружу(пространство), "items": []}
-		фильтры["lesson"] = ("in", уроки)
+		фильтры["lesson"] = ("in", уроки_фильтра)
+	# Why: перечень — одна выборка на вид данных, а не на сдачу (lms-platform#196):
+	# сдачи, уроки с курсом, задания, комментарии и адреса — по одному запросу,
+	# порядок уроков — раз на курс. Сдача целиком читается только для `lesson`.
+	сдачи = frappe.get_all(
+		домашка.СДАЧА,
+		filters=фильтры,
+		fields=["name", "homework", "lesson", "status", "due_at", "version"],
+		order_by="modified desc",
+	)
+	уроки = домашка.уроки_с_курсом({с.lesson for с in сдачи})
+	if not курс_фильтра and сдачи:
+		# Why: без записи на курс задания не видно нигде — и в общем списке
+		# тоже, хотя сдача по курсу осталась.
+		доступные = {к["course"] for к in курсы_ученика(ученик)}
+		сдачи = [с for с in сдачи if с.lesson in уроки and уроки[с.lesson].course in доступные]
+	if not сдачи:
+		return {"space": пространства.наружу(пространство), "items": []}
+	задания = {
+		з.name: з
+		for з in frappe.get_all(
+			домашка.ЗАДАНИЕ, filters={"name": ("in", list({с.homework for с in сдачи}))}, fields=домашка.ПОЛЯ_ЗАДАНИЯ
+		)
+	}
+	комментарии = домашка.последние_комментарии([с.name for с in сдачи])
+	адреса = {курс: домашка.адреса_уроков(курс) for курс in {уроки[с.lesson].course for с in сдачи}}
 	строки = []
-	адреса: dict[str, str | None] = {}
-	доступ: dict[str, bool] = {}
-	for имя in frappe.get_all(домашка.СДАЧА, filters=фильтры, pluck="name", order_by="modified desc"):
-		сдача = frappe.get_doc(домашка.СДАЧА, имя)
-		курс = курс_урока(сдача.lesson)
-		# Why: без записи на курс задания не видно нигде — и в общем списке тоже,
-		# хотя сдача по курсу осталась.
-		if курс not in доступ:
-			доступ[курс] = доступен_курс(ученик, курс)[0]
-		if not доступ[курс]:
-			continue
-		if сдача.lesson not in адреса:
-			адреса[сдача.lesson] = домашка.адрес_урока(сдача.lesson, курс)
-		задание = frappe.get_doc(домашка.ЗАДАНИЕ, сдача.homework)
+	for сдача in сдачи:
+		урок = уроки[сдача.lesson]
+		задание = задания[сдача.homework]
 		строка = {
-			"course": курс,
-			"course_title": frappe.get_cached_value("LMS Course", курс, "title"),
+			"course": урок.course,
+			"course_title": frappe.get_cached_value("LMS Course", урок.course, "title"),
 			"lesson": сдача.lesson,
-			"lesson_title": frappe.get_cached_value("Course Lesson", сдача.lesson, "title"),
-			"lesson_url": адреса[сдача.lesson],
+			"lesson_title": урок.title,
+			"lesson_url": адреса[урок.course].get(сдача.lesson),
 			"title": задание.title,
 			**домашка.описание_сдачи(сдача, полное=False),
-			"last_comment": домашка.последний_комментарий(сдача),
+			"last_comment": комментарии.get(сдача.name),
 		}
 		if lesson:
 			строка["homework"] = домашка.описание_задания(задание)
-			строка["submission"] = домашка.описание_сдачи(сдача)
+			строка["submission"] = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, сдача.name))
 		строки.append(строка)
 	return {"space": пространства.наружу(пространство), "items": строки}
 

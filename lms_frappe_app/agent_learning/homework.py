@@ -328,12 +328,56 @@ def _откатить(вложенные: list) -> None:
 # --- представление ---
 
 
-def адрес_урока(lesson: str, курс: str) -> str | None:
-	"""Адрес урока в SPA: `/lms/courses/<курс>/learn/<глава>-<урок>`."""
+def адреса_уроков(курс: str) -> dict[str, str]:
+	"""Адреса уроков курса в SPA: `/lms/courses/<курс>/learn/<глава>-<урок>`.
+
+	`Why:` порядок глав и уроков стоит запросов на каждую главу — перечень
+	домашек платит его раз на курс, а не на сдачу.
+	"""
+	адреса: dict[str, str] = {}
 	for номер_главы, глава in enumerate(уроки_по_главам(курс), 1):
-		if lesson in глава["lessons"]:
-			return f"/lms/courses/{курс}/learn/{номер_главы}-{глава['lessons'].index(lesson) + 1}"
-	return None
+		for номер_урока, урок in enumerate(глава["lessons"], 1):
+			адреса.setdefault(урок, f"/lms/courses/{курс}/learn/{номер_главы}-{номер_урока}")
+	return адреса
+
+
+def адрес_урока(lesson: str, курс: str) -> str | None:
+	return адреса_уроков(курс).get(lesson)
+
+
+def уроки_с_курсом(уроки) -> dict[str, frappe._dict]:
+	"""Название и курс каждого урока — одним запросом. Курс — через главу, как
+	у `курс_урока`."""
+	if not уроки:
+		return {}
+	урок = frappe.qb.DocType("Course Lesson")
+	глава = frappe.qb.DocType("Course Chapter")
+	строки = (
+		frappe.qb.from_(урок)
+		.left_join(глава)
+		.on(глава.name == урок.chapter)
+		.select(урок.name, урок.title, глава.course)
+		.where(урок.name.isin(list(уроки)))
+	).run(as_dict=True)
+	return {строка.name: строка for строка in строки}
+
+
+def последние_комментарии(сдачи: list[str]) -> dict[str, str | None]:
+	"""Комментарий последнего возврата каждой сдачи — одной выборкой из журнала.
+
+	То же, что `последний_комментарий`, но без чтения сдач целиком.
+	"""
+	if not сдачи:
+		return {}
+	комментарии: dict[str, str | None] = {}
+	for строка in frappe.get_all(
+		"Agent Homework Event",
+		filters={"parenttype": СДАЧА, "parentfield": "history", "parent": ("in", сдачи), "event": "returned"},
+		fields=["parent", "comment"],
+		order_by="idx asc",
+	):
+		комментарии[строка.parent] = строка.comment
+	return комментарии
 
 
 def описание_задания(задание) -> dict:
@@ -350,9 +394,8 @@ def описание_задания(задание) -> dict:
 	}
 
 
-def _файлы(имена: list[str]) -> list[dict]:
+def _файлы(имена: list[str], сведения: dict[str, dict]) -> list[dict]:
 	"""Файлы ответа по порядку: `id` — имя `File` (для `remove_files`), `name` — имя файла."""
-	сведения = файлы_платформы.сведения_о_файлах(имена)
 	return [{"id": имя, **сведения[имя]} for имя in имена if имя in сведения]
 
 
@@ -400,12 +443,16 @@ def описание_сдачи(документ, *, полное: bool = True, 
 	}
 	if not полное:
 		return короткое
+	имена = [с.file for с in документ.files]
+	версии = [(в, json.loads(в.files or "[]")) for в in документ.versions] if с_версиями else []
+	# Файлы ответа и всех версий — одним запросом, а не запросом на версию.
+	сведения = файлы_платформы.сведения_о_файлах(list({*имена, *(и for _, файлы in версии for и in файлы)}))
 	ответ = {
 		**короткое,
 		"assigned_at": _время(документ.assigned_at),
 		"submitted_at": _время(документ.submitted_at),
 		"answer": документ.answer or "",
-		"files": _файлы([с.file for с in документ.files]),
+		"files": _файлы(имена, сведения),
 		"history": [
 			{
 				"event": с.event,
@@ -424,9 +471,9 @@ def описание_сдачи(документ, *, полное: bool = True, 
 				"version": в.version,
 				"saved_at": _время(в.saved_at),
 				"answer": в.answer or "",
-				"files": _файлы(json.loads(в.files or "[]")),
+				"files": _файлы(файлы, сведения),
 			}
-			for в in документ.versions
+			for в, файлы in версии
 		]
 	return ответ
 
@@ -439,17 +486,18 @@ def последний_комментарий(документ) -> str | None:
 	return None
 
 
-def _уроки_с_заданием(курс: str) -> list[str]:
-	"""Уроки курса, у которых есть задание, — одним запросом."""
+def _задания_курса(курс: str) -> dict[str, frappe._dict]:
+	"""Задания уроков курса по уроку — одним запросом, сразу всеми полями."""
 	задание = frappe.qb.DocType(ЗАДАНИЕ)
 	урок = frappe.qb.DocType("Course Lesson")
-	return (
+	строки = (
 		frappe.qb.from_(задание)
 		.join(урок)
 		.on(урок.name == задание.lesson)
-		.select(задание.lesson)
+		.select(*(задание[поле] for поле in ПОЛЯ_ЗАДАНИЯ))
 		.where(урок.course == курс)
-	).run(pluck=True)
+	).run(as_dict=True)
+	return {строка.lesson: строка for строка in строки}
 
 
 def для_старта(ученик: str, lesson: str, курс: str, организация: str | None, *, полное: bool) -> dict:
@@ -461,14 +509,14 @@ def для_старта(ученик: str, lesson: str, курс: str, орга�
 	# Why: порядок уроков стоит запросов на каждую главу, а на каждом старте его
 	# не платим (student.py, `_место_урока`). У курса без заданий старт платит
 	# один запрос — узнать, что их нет.
-	с_заданием = _уроки_с_заданием(курс)
-	if not с_заданием:
+	задания = _задания_курса(курс)
+	if not задания:
 		return {"homework": None, "previous_homework": None}
-	текущее = задание_урока(lesson) if lesson in с_заданием else None
+	текущее = задания.get(lesson)
 	прошлое = None
 	уроки = уроки_курса(курс)
 	номер = уроки.index(lesson) if lesson in уроки else -1
-	if номер > 0 and уроки[номер - 1] in с_заданием and (задание := задание_урока(уроки[номер - 1])):
+	if номер > 0 and (задание := задания.get(уроки[номер - 1])):
 		имя = найти_сдачу(задание.name, ученик, организация)
 		сдача = frappe.get_doc(СДАЧА, имя) if имя else None
 		прошлое = {

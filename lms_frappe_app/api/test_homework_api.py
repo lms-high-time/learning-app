@@ -163,6 +163,18 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		[строка] = student.my_homework(course=self.курс)["data"]["items"]
 		self.assertEqual(строка["lesson"], self.урок)
 
+	def test_мои_домашки_несут_комментарий_последнего_возврата(self):
+		сдача = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["id"]
+		frappe.set_user("Administrator")
+		документ = frappe.get_doc("Agent Homework Submission", сдача)
+		for комментарий in ("Первый", "Второй"):
+			документ.append("history", {"event": "returned", "by_user": "Administrator", "comment": комментарий})
+		документ.append("history", {"event": "submitted", "by_user": self.ученик})
+		документ.save(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		[строка] = student.my_homework()["data"]["items"]
+		self.assertEqual(строка["last_comment"], "Второй")
+
 	def test_моя_домашка_по_уроку_целиком(self):
 		student.submit_homework(lesson=self.урок, answer="сделал")
 		[строка] = student.my_homework(lesson=self.урок)["data"]["items"]
