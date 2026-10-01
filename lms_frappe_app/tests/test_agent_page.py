@@ -93,6 +93,7 @@ class IntegrationTestAgentPage(IntegrationTestCase):
 
 		frappe.set_user("Administrator")
 		обеспечить_пункты_сайдбара()
+		# Любой пункт платформы: путь переименования у всех один.
 		пункт = ПУНКТЫ_САЙДБАРА[0]
 		заглушка = frappe.db.get_value("Web Page", {"route": пункт["route"]})
 		# Сайт, установленный с прежним именем: подпись заглушки и её копия в
@@ -116,6 +117,14 @@ class IntegrationTestAgentPage(IntegrationTestCase):
 				"LMS Sidebar Item", {"parenttype": "LMS Settings", "web_page": заглушка}, "title"
 			),
 			пункт["title"],
+		)
+
+		# Повторная миграция ничего не переписывает.
+		строки = {"parenttype": "LMS Settings", "parentfield": "sidebar_items"}
+		было = frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx")
+		обеспечить_пункты_сайдбара()
+		self.assertEqual(
+			frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx"), было
 		)
 
 	def test_маршруты_пунктов_ведут_на_страницы(self):
