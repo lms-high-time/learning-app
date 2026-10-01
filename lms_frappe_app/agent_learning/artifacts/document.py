@@ -11,10 +11,25 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import frappe
+from frappe.utils import get_system_timezone
 
 from lms_frappe_app.agent_learning.artifacts import canvas, data, export, files, fill, schema
 from lms_frappe_app.agent_learning.artifacts.course import _действующая_схема, _схемы_курса
+
+
+def _с_поясом(момент: datetime) -> str:
+	"""ISO 8601 со смещением пояса сайта — как время у квиза.
+
+	`Why:` Frappe хранит время наивным, в поясе сайта; браузер прочёл бы
+	строку без смещения в своём поясе, и «Мои документы» сдвигали время
+	изменения на разницу поясов, а около полуночи — и день
+	(learning-services#462).
+	"""
+	return момент.replace(tzinfo=ZoneInfo(get_system_timezone())).isoformat()
 
 
 def _экземпляр(ученик: str, course: str, artifact: str, пространство: str | None):
@@ -198,7 +213,7 @@ def _перечень_артефактов(ученик: str, course: str, пр�
 				"title": схема.title,
 				"purpose": схема.purpose or None,
 				"layout": схема.layout,
-				"modified": изменён[схема.slug].isoformat() if схема.slug in изменён else None,
+				"modified": _с_поясом(изменён[схема.slug]) if схема.slug in изменён else None,
 				**_заполненность(
 					схема,
 					по_документам.get(схема.slug, {}),
@@ -231,7 +246,7 @@ def _артефакт_целиком(ученик: str, course: str, прост�
 		# Когда документ менялся и сколько раз сохранялся — по журналу `Version`,
 		# который Frappe ведёт у документа ученика (`track_changes`). История
 		# наружу не выходит, только её длина (learning-services#342).
-		"modified": экземпляр.modified.isoformat() if экземпляр else None,
+		"modified": _с_поясом(экземпляр.modified) if экземпляр else None,
 		"version": frappe.db.count(
 			"Version", {"ref_doctype": "Agent Student Artifact", "docname": экземпляр.name}
 		)

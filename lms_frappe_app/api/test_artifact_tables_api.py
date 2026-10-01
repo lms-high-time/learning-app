@@ -9,6 +9,7 @@
 """
 
 import json
+from datetime import datetime
 from io import BytesIO
 
 import frappe
@@ -120,6 +121,11 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 
 		перечень = student.artifact(self.курс)["data"]["artifacts"]
 		self.assertIsNotNone(перечень[0]["modified"])
+		# Со смещением пояса сайта: браузер читает строку без него в своём поясе.
+		self.assertIsNotNone(datetime.fromisoformat(перечень[0]["modified"]).tzinfo)
+		self.assertEqual(
+			student.artifact(self.курс, "risk_register")["data"]["modified"], перечень[0]["modified"]
+		)
 		документы = student.get_my_progress()["data"]["courses"]
 		self.assertEqual(
 			next(к for к in документы if к["id"] == self.курс)["documents"][0]["modified"],
