@@ -398,28 +398,6 @@ class IntegrationTestAuthoringReadBack(IntegrationTestCase):
 		for директива in (урок["directive"], урок["course_directive"]):
 			self.assertIsInstance(datetime.fromisoformat(директива["created_at"]), datetime)
 
-	def test_директива_принимает_иконку_карты(self):
-		authoring.set_directive(
-			lesson=self.урок,
-			teaching_directive="Начать с примера",
-			objectives="Назвать спонсора",
-			map_icon="rocket",
-		)
-
-		from lms_frappe_app.api import public
-
-		курс = frappe.db.get_value(
-			"Course Chapter", frappe.db.get_value("Course Lesson", self.урок, "chapter"), "course"
-		)
-		# Карта — витрина: черновик она посторонним не показывает, а куратор
-		# смотрит свою работу через course_draft. Проверяем путь до читателя,
-		# ради которого иконка и задаётся.
-		frappe.db.set_value("LMS Course", курс, "published", 1)
-		карта = public.course_map(course=курс)["data"]
-		уроки = [урок for глава in карта["chapters"] for урок in глава["lessons"]]
-
-		self.assertEqual([у["icon"] for у in уроки if у["id"] == self.урок], ["rocket"])
-
 	def test_урок_без_директивы_не_ломает_чтение(self):
 		урок = authoring.get_lesson(lesson=self.урок)["data"]
 

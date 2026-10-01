@@ -389,12 +389,10 @@ def set_directive(
 	probing_questions: str | None = None,
 	common_misconceptions: str | None = None,
 	success_criteria: str | None = None,
-	map_icon: str | None = None,
 ) -> dict:
 	"""Задаёт директиву преподавателя новой версией.
 
-	`map_icon` — имя иконки lucide для ячейки урока на карте курса. Единственное
-	поле директивы, кроме целей, которое видно снаружи, в том числе гостю.
+	Цели — единственное поле директивы, которое видно снаружи, в том числе гостю.
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
@@ -407,7 +405,6 @@ def set_directive(
 			"probing_questions": probing_questions,
 			"common_misconceptions": common_misconceptions,
 			"success_criteria": success_criteria,
-			"map_icon": map_icon,
 		},
 	)
 

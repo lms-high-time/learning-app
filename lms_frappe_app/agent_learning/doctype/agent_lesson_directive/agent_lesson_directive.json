@@ -13,7 +13,6 @@
   "is_active",
   "sb_content",
   "objectives",
-  "map_icon",
   "teaching_directive",
   "probing_questions",
   "common_misconceptions",
@@ -56,12 +55,6 @@
    "label": "Цели урока"
   },
   {
-   "description": "Имя иконки lucide для ячейки карты курса, например rocket. Пусто — ячейка покажет номер урока",
-   "fieldname": "map_icon",
-   "fieldtype": "Data",
-   "label": "Иконка на карте"
-  },
-  {
    "description": "Инструкция преподавателю: порядок, тон, на чём задержаться. Ученику не показывается",
    "fieldname": "teaching_directive",
    "fieldtype": "Markdown Editor",
@@ -89,7 +82,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-01 21:53:15.771139",
+ "modified": "2026-10-01 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Lesson Directive",
