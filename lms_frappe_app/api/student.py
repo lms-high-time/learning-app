@@ -76,6 +76,7 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 )
 from lms_frappe_app.agent_learning.normalizer import нормализовать_урок
+from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 from lms_frappe_app.api import контракт, список, текущий_пользователь
 
@@ -551,10 +552,16 @@ def remember(kind: str, key: str, text: str, session: str | None = None) -> dict
 	существующая = frappe.db.exists(
 		"Agent Student Note", {"student": ученик, "course": курс, "note_key": ключ}
 	)
-	if not существующая:
-		сколько = frappe.db.count(
-			"Agent Student Note", {"student": ученик, "course": курс, "kind": вид}
-		)
+	# Ключи профиля в предел не входят ни сами, ни в счёте прочих. `Why:`
+	# ученик с полным набором прочих фактов иначе не смог бы заполнить профиль
+	# (learning-services#463). Набор фиксирован, так что предел остаётся
+	# конечным: прочие плюс ключи профиля.
+	профильный = вид == ЗАМЕТКА_ФАКТ and ключ in КЛЮЧИ_ПРОФИЛЯ
+	if not существующая and not профильный:
+		отбор = {"student": ученик, "course": курс, "kind": вид}
+		if вид == ЗАМЕТКА_ФАКТ:
+			отбор["note_key"] = ("not in", tuple(КЛЮЧИ_ПРОФИЛЯ))
+		сколько = frappe.db.count("Agent Student Note", отбор)
 		предел = лимит_заметок()
 		if сколько >= предел:
 			raise Отказ(

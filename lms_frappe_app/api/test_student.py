@@ -8,6 +8,7 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.artifacts import codes
+from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ
 from lms_frappe_app.tests.sample_data import (
 	настроить_квиз,
 	привязать_урок,
@@ -767,18 +768,42 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], student.ПЕРЕПОЛНЕНО)
 
-	def test_предел_заметок_читается_из_настроек(self):
+	def _предел_заметок(self, предел: int) -> None:
 		from lms_frappe_app.tests.sample_data import политика_по_умолчанию
 
 		self.addCleanup(политика_по_умолчанию)
-		frappe.db.set_single_value("Agent Learning Settings", "student_notes_limit", 1)
+		frappe.db.set_single_value("Agent Learning Settings", "student_notes_limit", предел)
 		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
-		student.remember(kind="fact", key="role", text="Директор")
+
+	def test_предел_заметок_читается_из_настроек(self):
+		self._предел_заметок(1)
+		student.remember(kind="fact", key="language", text="Python")
 
 		ответ = student.remember(kind="fact", key="ещё один", text="да")
 
 		self.assertEqual(ответ["error"]["code"], student.ПЕРЕПОЛНЕНО)
 		self.assertEqual(ответ["error"]["limit"], 1)
+
+	def test_ключ_профиля_пишется_и_при_заполненном_пределе(self):
+		"""learning-services#463: ученик с полным набором прочих фактов иначе
+		не смог бы заполнить профиль."""
+		self._предел_заметок(2)
+		student.remember(kind="fact", key="language", text="Python")
+		student.remember(kind="fact", key="city", text="Казань")
+
+		self.assertTrue(student.remember(kind="fact", key="role", text="Директор")["ok"])
+		ответ = student.remember(kind="fact", key="ещё один", text="да")
+		self.assertEqual(ответ["error"]["code"], student.ПЕРЕПОЛНЕНО)
+
+	def test_ключи_профиля_не_занимают_предел(self):
+		self._предел_заметок(2)
+		for ключ in КЛЮЧИ_ПРОФИЛЯ:
+			student.remember(kind="fact", key=ключ, text="да")
+		student.remember(kind="fact", key="language", text="Python")
+
+		ответ = student.remember(kind="fact", key="city", text="Казань")
+
+		self.assertTrue(ответ["ok"], ответ)
 
 	def test_замена_по_ключу_проходит_и_на_пределе(self):
 		"""Иначе упор в лимит становится тупиком: заменить тоже нельзя."""
