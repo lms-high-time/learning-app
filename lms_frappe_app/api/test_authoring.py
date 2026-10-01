@@ -519,6 +519,28 @@ class IntegrationTestCourseArtifact(IntegrationTestCase):
 		)
 		self.assertEqual(frappe.db.count("Agent Course Artifact", {"course": self.курс, "slug": "summary"}), 2)
 
+	def test_зачем_документ_переживает_новые_версии(self):
+		"""Не названный `purpose` остаётся у прежней версии, пустой — убирается (#462)."""
+		зачем = "Проект на одной странице — чтобы все договорились об одном и том же."
+		authoring.set_course_artifact(
+			course=self.курс, artifact="summary", title="Резюме", blocks=self.блоки, purpose=f"  {зачем} "
+		)
+		authoring.set_course_artifact(course=self.курс, artifact="summary", title="Резюме", blocks=self.блоки)
+
+		def действующий():
+			return frappe.db.get_value(
+				"Agent Course Artifact", {"course": self.курс, "slug": "summary", "is_active": 1}, "purpose"
+			)
+
+		self.assertEqual(действующий(), зачем, "вторая версия без purpose сохранила прежний")
+		артефакты = authoring.course_draft(course=self.курс)["data"]["artifacts"]
+		self.assertEqual(артефакты[0]["purpose"], зачем, "автор видит его в черновике")
+
+		authoring.set_course_artifact(
+			course=self.курс, artifact="summary", title="Резюме", blocks=self.блоки, purpose=""
+		)
+		self.assertIsNone(действующий())
+
 	def test_черновик_показывает_документы_с_блоками(self):
 		authoring.set_course_artifact(
 			course=self.курс, artifact="summary", title="Резюме", blocks=self.блоки, layout="canvas"
