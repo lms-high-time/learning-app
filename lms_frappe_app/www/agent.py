@@ -1,6 +1,6 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""Страница «Подключить агента»: адреса MCP и шаги подключения под роль.
+"""Страница «Подключить ассистента»: адреса MCP и шаги подключения под роль.
 
 Здесь только механика платформы — куда подключаться и как войти. Чему учить
 и как вести занятие, страница не знает: это закрытая часть.
@@ -93,6 +93,6 @@ def _первый_шаг_куратора() -> str:
 def get_context(context):
 	context.no_breadcrumbs = True
 	шапка_платформы(context)
-	context.title = "Подключить агента"
+	context.title = "Подключить ассистента"
 	context.update(сведения(frappe.session.user))
 	return context
