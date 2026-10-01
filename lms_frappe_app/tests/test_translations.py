@@ -66,3 +66,31 @@ class IntegrationTestTranslations(IntegrationTestCase):
 		оригинал, перевод = _строки()[0][0], _строки()[0][1]
 
 		self.assertEqual(словарь.get(оригинал), перевод)
+
+	def test_письма_о_пароле_переведены_целиком(self):
+		"""Приглашение после регистрации и сброс пароля — шаблоны Frappe.
+
+		`Why:` у Frappe переведена половина их строк, и письмо приходило
+		вперемешку русским и английским (learning-services#460). Строки — из
+		`frappe/templates/emails/new_user.html` и `password_reset.html`.
+		"""
+		словарь = get_all_translations("ru")
+		строки = (
+			"Reset your password",
+			"Dear",
+			"We received a request to reset the password for your account. "
+			"Click the button below to set a new password.",
+			"Reset Password",
+			"If you did not request a password reset, please ignore this email. "
+			"Your password will remain unchanged.",
+			"Complete your registration",
+			"Hello",
+			"Your login ID is:",
+			"Click the button below to complete your registration and set a new password.",
+			"Complete Registration",
+			"Or copy and paste this link:",
+		)
+
+		self.assertEqual([с for с in строки if not словарь.get(с)], [])
+		# Перевод Frappe «Уважаемый» угадывает пол адресата.
+		self.assertEqual(словарь["Dear"], "Здравствуйте,")
