@@ -101,6 +101,9 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 		from frappe.auth import CookieManager, LoginManager
 		from frappe.utils import set_request
 
+		self.прежнее = {
+			имя: getattr(frappe.local, имя, None) for имя in ("request", "cookie_manager", "login_manager")
+		}
 		# `update_password` Frappe входит под пользователем — нужен запрос.
 		set_request(method="POST", path="/")
 		frappe.local.cookie_manager = CookieManager()
@@ -112,6 +115,8 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 		patch.stopall()
 		frappe.local.response.pop("http_status_code", None)
 		frappe.set_user("Administrator")
+		for имя, значение in self.прежнее.items():
+			setattr(frappe.local, имя, значение)
 
 	def test_смена_пароля_по_ссылке_присылает_письмо(self):
 		пользователь = ученик()

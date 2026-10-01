@@ -27,7 +27,7 @@ from lms_frappe_app.agent_learning.notices import почта_есть
 ПРОВЕРЬТЕ_ПОЧТУ = "Проверьте почту: мы отправили письмо со ссылкой."
 
 
-def _запись_ключа(key: str | None):
+def запись_ключа(key: str | None):
 	if not key:
 		return None
 	return frappe.db.get_value(
@@ -44,7 +44,7 @@ def состояние_ключа(key: str | None) -> str:
 	Использованный ключ и опечатка неразличимы: после смены пароля Frappe
 	очищает ключ, и искать нечего в обоих случаях.
 	"""
-	запись = _запись_ключа(key)
+	запись = запись_ключа(key)
 	if not запись:
 		return КЛЮЧ_НЕ_НАЙДЕН
 	срок = cint(frappe.get_system_settings("reset_password_link_expiry_duration"))
@@ -77,7 +77,7 @@ def update_password(
 	двух случаях: пароль, заданный в desk, даты не ставит, а включение
 	`force_user_to_reset_password` проставляет её всем пустым.
 	"""
-	запись = _запись_ключа(key)
+	запись = запись_ключа(key)
 	пользователь = запись.name if запись else (None if key else frappe.session.user)
 	впервые = not пользователь or not frappe.db.get_value("User", пользователь, "last_password_reset_date")
 	ответ = frappe_user.update_password(

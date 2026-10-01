@@ -89,6 +89,11 @@ class IntegrationTestTranslations(IntegrationTestCase):
 			"Click the button below to complete your registration and set a new password.",
 			"Complete Registration",
 			"Or copy and paste this link:",
+			"A new account has been created for you at {0}.",
+			"Welcome to {0}",
+			"Password Reset",
+			"Thank you",
+			"Thanks",
 		)
 
 		self.assertEqual([с for с in строки if not словарь.get(с)], [])
