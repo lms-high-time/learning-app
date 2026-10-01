@@ -11,6 +11,7 @@
 from datetime import timedelta
 
 import frappe
+from frappe import _
 from frappe.core.doctype.user import user as frappe_user
 from frappe.rate_limiter import rate_limit
 from frappe.utils import cint, escape_html, get_url, now_datetime
@@ -47,7 +48,9 @@ def состояние_ключа(key: str | None) -> str:
 	if not запись:
 		return КЛЮЧ_НЕ_НАЙДЕН
 	срок = cint(frappe.get_system_settings("reset_password_link_expiry_duration"))
-	if срок and now_datetime() > запись.last_reset_password_key_generated_on + timedelta(seconds=срок):
+	выдан = запись.last_reset_password_key_generated_on
+	# Без даты выдачи срок не проверить — такой ключ считаем устаревшим.
+	if срок and (not выдан or now_datetime() > выдан + timedelta(seconds=срок)):
 		return КЛЮЧ_УСТАРЕЛ
 	return КЛЮЧ_ДЕЙСТВУЕТ
 
@@ -70,7 +73,9 @@ def update_password(
 	узнает, если пароль сменил кто-то другой. Первое задание пароля — после
 	регистрации по почте или входа через Google — письма не получает: человек
 	ничего не менял, а тревога на ровном месте пугает. Признак первого раза —
-	пустой `last_password_reset_date`.
+	пустой `last_password_reset_date`, как и у самого Frappe. Он ошибается в
+	двух случаях: пароль, заданный в desk, даты не ставит, а включение
+	`force_user_to_reset_password` проставляет её всем пустым.
 	"""
 	запись = _запись_ключа(key)
 	пользователь = запись.name if запись else (None if key else frappe.session.user)
@@ -97,23 +102,45 @@ def _письмо_пароль_изменён(пользователь: str) -> 
 	)
 
 
-@frappe.whitelist(allow_guest=True)
-@rate_limit(key="email", limit=5, seconds=60 * 60)
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 def sign_up(email: str, full_name: str, redirect_to: str | None = None) -> tuple[int, str]:
 	"""Регистрация формы Frappe на `/login`."""
-	return _зарегистрировать(email, lambda: frappe_user.sign_up(email, full_name, redirect_to))
+	адрес = _адрес(email)
+	return _зарегистрировать(адрес, lambda: frappe_user.sign_up(адрес, full_name, redirect_to))
 
 
-@frappe.whitelist(allow_guest=True)
-@rate_limit(key="email", limit=5, seconds=60 * 60)
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 def sign_up_learning(email: str, full_name: str, verify_terms: bool, user_category: str) -> tuple[int, str]:
 	"""Регистрация формы Learning: её показывают, если в `LMS Settings` есть свои поля."""
 	from lms.lms.user import sign_up as learning_sign_up
 
-	return _зарегистрировать(email, lambda: learning_sign_up(email, full_name, verify_terms, user_category))
+	адрес = _адрес(email)
+	return _зарегистрировать(адрес, lambda: learning_sign_up(адрес, full_name, verify_terms, user_category))
 
 
-def _зарегистрировать(email: str, создать) -> tuple[int, str]:
+def _адрес(email: str | None) -> str:
+	"""Адрес так, как его хранит `User`: Frappe приводит имя к `strip().lower()`.
+
+	`Why:` поиск по сырому вводу проходил мимо занятого адреса с пробелом или
+	в другом регистре, и вставка падала ошибкой «уже существует» — ответ формы
+	снова выдавал, зарегистрирован ли адрес.
+	"""
+	return (email or "").strip().lower()
+
+
+def _зарегистрировать(адрес: str, создать) -> tuple[int, str]:
+	if is_signup_disabled():
+		frappe.throw(_("Sign Up is disabled"), title=_("Not Allowed"))
+	# Лимит берёт адрес из `form_dict`: кладём туда приведённый, иначе каждое
+	# написание адреса считалось бы отдельно.
+	frappe.form_dict.email = адрес
+	return _зарегистрировать_в_лимите(адрес, создать)
+
+
+# По адресу, а не по IP: за двумя nginx Frappe видит у всех клиентов один IP,
+# и лимит по нему закрыл бы регистрацию всему сайту.
+@rate_limit(key="email", limit=5, seconds=60 * 60, ip_based=False)
+def _зарегистрировать_в_лимите(адрес: str, создать) -> tuple[int, str]:
 	"""Один ответ на новый, занятый и отключённый адрес.
 
 	`Why:` ответ «Already Registered» — тупик для того, кто входил через Google
@@ -122,29 +149,34 @@ def _зарегистрировать(email: str, создать) -> tuple[int, 
 	на платформе чужой адрес. Лимит частоты — против рассылки писем на чужой
 	ящик через форму.
 	"""
-	if is_signup_disabled():
-		frappe.throw("Регистрация закрыта", title="Нельзя")
-	занятый = frappe.db.get_value("User", {"email": email}, ["name", "enabled"], as_dict=True)
+	занятый = frappe.db.get_value("User", {"email": адрес}, ["name", "enabled"], as_dict=True)
 	if занятый:
-		if занятый.enabled:
+		if not почта_есть():
+			# Так Frappe отвечает новому адресу, когда письмо не ушло.
+			return 2, _("Please ask your administrator to verify your sign-up")
+		# Служебным пользователям ссылку не выдаёт и `reset_password` Frappe.
+		if занятый.enabled and занятый.name not in frappe.STANDARD_USERS:
 			_письмо_аккаунт_есть(занятый.name)
 		return 1, ПРОВЕРЬТЕ_ПОЧТУ
 	код, текст = создать()
 	if код != 1:
 		# Письмо-приглашение не ушло (почта не настроена) — честный ответ Frappe.
 		return код, текст
-	пользователь = frappe.db.get_value("User", {"email": email})
+	пользователь = frappe.db.get_value("User", {"email": адрес})
 	# Адрес возврата Frappe держит в кэше Redis, а его может вытеснить, пока
 	# человек идёт к письму. Поле `update_password` прочтёт и тогда.
-	if адрес := frappe.cache.hget("redirect_after_login", пользователь):
-		frappe.db.set_value("User", пользователь, "redirect_url", адрес)
+	if возврат := frappe.cache.hget("redirect_after_login", пользователь):
+		frappe.db.set_value("User", пользователь, "redirect_url", возврат)
 	return 1, ПРОВЕРЬТЕ_ПОЧТУ
 
 
 def _письмо_аккаунт_есть(пользователь: str) -> None:
 	if not почта_есть():
 		return
-	ссылка = frappe.get_doc("User", пользователь)._reset_password()
+	документ = frappe.get_doc("User", пользователь)
+	# Хук приложений, которым `reset_password` Frappe может запретить сброс.
+	документ.validate_reset_password()
+	ссылка = документ._reset_password()
 	frappe.sendmail(
 		recipients=[frappe.db.get_value("User", пользователь, "email")],
 		subject=f"У вас уже есть аккаунт на {_название()}",
