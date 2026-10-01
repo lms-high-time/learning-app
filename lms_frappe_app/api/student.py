@@ -1665,16 +1665,31 @@ def _ключ_сценария(key) -> str:
 
 
 def _запись_сценария(ключ: str) -> str:
-	"""Запись сценария текущего ученика; нет — заводится пустой."""
+	"""Запись сценария текущего ученика; нет — заводится пустой.
+
+	Два первых хода разом оба не находят записи, и второй упирается в
+	уникальный индекс. `Why:` это не сбой, а проигранная гонка: запись уже
+	есть, и ход досчитывается по ней, а не уходит сервису ошибкой базы.
+	Перечитывается она блокирующим чтением — обычное видит снимок транзакции
+	до вставки соседа и записи не находит. Сообщение «must be unique», которое
+	Frappe кладёт в журнал перед исключением, убирается: в ответ оно попало
+	бы при успехе.
+	"""
 	ученик = текущий_пользователь()
-	имя = frappe.db.get_value("Agent Scenario State", {"student": ученик, "scenario_key": ключ})
+	отбор = {"student": ученик, "scenario_key": ключ}
+	имя = frappe.db.get_value("Agent Scenario State", отбор)
 	if имя:
 		return имя
-	return (
-		frappe.get_doc({"doctype": "Agent Scenario State", "student": ученик, "scenario_key": ключ})
-		.insert(ignore_permissions=True)
-		.name
-	)
+	сообщений = len(frappe.local.message_log)
+	try:
+		return (
+			frappe.get_doc({"doctype": "Agent Scenario State", **отбор})
+			.insert(ignore_permissions=True)
+			.name
+		)
+	except frappe.UniqueValidationError:
+		frappe.local.message_log = frappe.local.message_log[:сообщений]
+		return frappe.db.get_value("Agent Scenario State", отбор, for_update=True)
 
 
 @frappe.whitelist()

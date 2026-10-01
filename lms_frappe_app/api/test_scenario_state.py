@@ -11,6 +11,7 @@ MCP-сервис, формат его внутренний. Приложение
 
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -124,6 +125,42 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 1)
 		self.assertGreater(self.запись().turns_since, now_datetime() - timedelta(minutes=1))
 		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 2)
+
+	def test_первый_ход_двух_запросов_разом_не_роняет_метод(self):
+		"""Два первых хода разом: оба не нашли записи, второй упирается в
+		уникальный индекс. Он должен досчитать ход по записи первого, а не
+		отдать сервису ошибку базы и сообщение «must be unique»."""
+		frappe.get_doc(
+			{
+				"doctype": "Agent Scenario State",
+				"student": self.ученик,
+				"scenario_key": КЛЮЧ,
+				"turns": 4,
+				"turns_since": now_datetime(),
+			}
+		).insert(ignore_permissions=True)
+		настоящий = frappe.db.get_value
+		обмануто = []
+
+		def запись_ещё_не_видна(doctype, filters=None, *args, **kwargs):
+			# Первую проверку существования метод проигрывает: запись соседа
+			# появилась сразу после неё.
+			if doctype == "Agent Scenario State" and isinstance(filters, dict) and not обмануто:
+				обмануто.append(filters)
+				return None
+			return настоящий(doctype, filters, *args, **kwargs)
+
+		сообщений = len(frappe.local.message_log)
+		with patch.object(frappe.db, "get_value", side_effect=запись_ещё_не_видна):
+			ответ = student.count_scenario_turn(КЛЮЧ)
+
+		self.assertTrue(обмануто, "проверка существования не подменилась")
+		self.assertTrue(ответ["ok"], ответ.get("error"))
+		self.assertEqual(ответ["data"]["turns"], 5)
+		self.assertEqual(len(frappe.local.message_log), сообщений)
+		self.assertEqual(
+			frappe.db.count("Agent Scenario State", {"student": self.ученик, "scenario_key": КЛЮЧ}), 1
+		)
 
 	def test_неверный_ключ_отклоняется(self):
 		for ключ in ("", "Profile", "1profile", "lesson:1", "a" * 33, "profile\n", None):
