@@ -117,6 +117,8 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 			student.remember(kind="fact", key="role", text="Руководитель отдела"),
 		)
 		self.проверить("my_notes", student.my_notes())
+		self.проверить("my_profile", student.my_profile())
+		self.проверить("my_profile", student.my_profile(summary=1))
 		self.проверить("forget", student.forget(key="role"))
 		self.проверить(
 			"update_artifact",

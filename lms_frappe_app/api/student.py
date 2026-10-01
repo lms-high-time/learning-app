@@ -65,6 +65,8 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning
 	курс_урока,
 )
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
+	ПУТЬ_ЧАТА,
+	адрес_сервиса,
 	настройка,
 	пробные_уроки_ученика,
 	пробных_уроков,
@@ -76,7 +78,8 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 )
 from lms_frappe_app.agent_learning.normalizer import нормализовать_урок
-from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ
+from lms_frappe_app.agent_learning.permissions import видит_всё
+from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ, заполненность, профиль
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 from lms_frappe_app.api import контракт, список, текущий_пользователь
 
@@ -86,6 +89,8 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ЦЕЛИ_НЕ_СОВПАЛИ = "objectives_mismatch"
 НУЖЕН_КВИЗ = "quiz_required"
 ЧУЖОЕ_ЗАНЯТИЕ = "not_your_session"
+ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
+ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН = "user_not_found"
 ЗАНЯТИЕ_ЗАКРЫТО = "session_closed"
 НЕВЕРНОЕ_СОСТОЯНИЕ = "invalid_chat_state"
 ДЕМО_ИСЧЕРПАНО = "web_demo_exhausted"
@@ -696,6 +701,42 @@ def whoami() -> dict:
 def my_notes(course: str | None = None) -> dict:
 	"""Что агент запомнил об ученике. Ученик вправе это видеть."""
 	return _заметки(текущий_пользователь(), course)
+
+
+@frappe.whitelist()
+@контракт
+def my_profile(user: str | None = None, summary: int | str | None = None) -> dict:
+	"""Профиль ученика: факты агента по блокам и заполненность.
+
+	Чужой профиль — только ролям, которые видят заметки (`ВСЕВИДЯЩИЕ_РОЛИ`).
+	`Why:` руководитель организации и автор курса заметок не видят (дизайн
+	памяти, «Границы приватности»), и профиль эту границу не сдвигает.
+	"""
+	ученик = текущий_пользователь()
+	чей = user or ученик
+	if чей != ученик:
+		if not видит_всё(ученик):
+			# Несуществующий логин отклоняется так же: иначе отказ
+			# подтверждал бы, есть ли такой человек на платформе.
+			raise Отказ(ЧУЖОЙ_ПРОФИЛЬ, "Чужой профиль недоступен", user=user)
+		if not frappe.db.exists("User", чей):
+			raise Отказ(ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН, "Такого пользователя нет", user=user)
+
+	# Интервью ведётся только о себе: команда платформы смотрит чужой
+	# профиль, но не заполняет его за ученика.
+	сервис = адрес_сервиса()
+	интервью = f"{сервис}{ПУТЬ_ЧАТА}?mode=profile" if сервис and чей == ученик else None
+	if _флаг(summary):
+		return {**заполненность(чей), "interview_url": интервью}
+
+	человек = frappe.db.get_value("User", чей, ["full_name", "user_image"], as_dict=True)
+	return {
+		"user": чей,
+		"full_name": человек.full_name,
+		"user_image": человек.user_image or None,
+		**профиль(чей),
+		"interview_url": интервью,
+	}
 
 
 @frappe.whitelist()

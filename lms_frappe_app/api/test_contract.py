@@ -568,6 +568,8 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			student.remember(kind="fact", key="role", text="Руководитель отдела"),
 		)
 		self.сверить("student.my_notes", student.my_notes(course=курс))
+		self.сверить("student.my_profile", student.my_profile())
+		self.сверить("student.my_profile", student.my_profile(summary=1))
 		self.сверить("student.forget", student.forget(key="role"))
 		self.сверить(
 			"student.update_artifact",
