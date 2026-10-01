@@ -110,6 +110,22 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		реестр = student.artifact(self.курс, "risk_register")["data"]["tables"]["register"]
 		self.assertNotIn("probability", реестр["rows"][0])
 
+	def test_перечень_говорит_когда_документ_менялся(self):
+		"""`modified` в перечне — `null`, пока документ пуст, затем время записи (#462)."""
+		перечень = student.artifact(self.курс)["data"]["artifacts"]
+		self.assertIsNone(перечень[0]["modified"])
+		self.assertIsNone(перечень[0]["purpose"], "автор не написал — null, а не пустая строка")
+
+		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
+
+		перечень = student.artifact(self.курс)["data"]["artifacts"]
+		self.assertIsNotNone(перечень[0]["modified"])
+		документы = student.get_my_progress()["data"]["courses"]
+		self.assertEqual(
+			next(к for к in документы if к["id"] == self.курс)["documents"][0]["modified"],
+			перечень[0]["modified"],
+		)
+
 	def test_прежний_текст_засчитан_пока_таблица_пуста(self):
 		self.записать("risks", content="| ID | Событие |\n| --- | --- |\n| R1 | Подрядчик уйдёт |")
 		перечень = student.artifact(self.курс)["data"]["artifacts"]

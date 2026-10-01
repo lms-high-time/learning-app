@@ -176,13 +176,29 @@ def _файлы(вложения: dict) -> dict[str, dict]:
 
 def _перечень_артефактов(ученик: str, course: str, пространство: str | None) -> list[dict]:
 	по_документам, вложения, данные = _содержимое_курса(ученик, course, пространство)
+	# Когда документ менялся — тот же `modified`, что у документа целиком;
+	# «Мои документы» показывают его в строке (learning-services#462).
+	изменён = dict(
+		frappe.get_all(
+			"Agent Student Artifact",
+			filters={
+				"student": ученик,
+				"course": course,
+				"organization": пространство or ("is", "not set"),
+			},
+			fields=["artifact", "modified"],
+			as_list=True,
+		)
+	)
 	перечень = []
 	for схема in _схемы_курса(course):
 		перечень.append(
 			{
 				"artifact": схема.slug,
 				"title": схема.title,
+				"purpose": схема.purpose or None,
 				"layout": схема.layout,
+				"modified": изменён[схема.slug].isoformat() if схема.slug in изменён else None,
 				**_заполненность(
 					схема,
 					по_документам.get(схема.slug, {}),

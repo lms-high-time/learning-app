@@ -11,6 +11,7 @@
   "course",
   "slug",
   "title",
+  "purpose",
   "layout",
   "canvas",
   "version",
@@ -45,6 +46,12 @@
    "in_list_view": 1,
    "label": "Название",
    "reqd": 1
+  },
+  {
+   "fieldname": "purpose",
+   "fieldtype": "Small Text",
+   "label": "Зачем документ",
+   "description": "Одна-две фразы ученику: зачем этот документ. Видны в «Моих документах»."
   },
   {
    "default": "sections",
@@ -119,7 +126,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-29 12:00:00.000000",
+ "modified": "2026-10-01 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Artifact",

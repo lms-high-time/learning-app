@@ -447,7 +447,13 @@ def set_course_directive(
 @frappe.whitelist(methods=["POST"])
 @контракт
 def set_course_artifact(
-	course: str, artifact: str, title: str, blocks, layout: str = "sections", canvas=None
+	course: str,
+	artifact: str,
+	title: str,
+	blocks,
+	layout: str = "sections",
+	canvas=None,
+	purpose: str | None = None,
 ) -> dict:
 	"""Задаёт схему документа курса новой версией.
 
@@ -470,10 +476,14 @@ def set_course_artifact(
 
 	Схема целиком отвязывает документ от шаблона: новая версия не хранит ни
 	шаблона, ни правок (learning-services#370).
+
+	`purpose` — одна-две фразы ученику: зачем этот документ. Ученик видит их
+	в «Моих документах» под названием (learning-services#462). Не назван —
+	остаётся прежний; пустая строка убирает.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	версия = записать_схему(course, artifact, title, список(blocks), layout, canvas)
+	версия = записать_схему(course, artifact, title, список(blocks), layout, canvas, purpose=purpose)
 	# Наружу ключ документа зовётся `artifact`, как в методах ученика.
 	return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
 
@@ -560,7 +570,12 @@ def artifact_template(template: str, version: int | None = None) -> dict:
 @frappe.whitelist(methods=["POST"])
 @контракт
 def set_course_artifact_template(
-	course: str, artifact: str, template: str, version: int | None = None, overlay=None
+	course: str,
+	artifact: str,
+	template: str,
+	version: int | None = None,
+	overlay=None,
+	purpose: str | None = None,
 ) -> dict:
 	"""Документ курса из шаблона с правками курса — новой версией схемы.
 
@@ -569,10 +584,14 @@ def set_course_artifact_template(
 	блок, подписи холста; по ключам, а не по позициям. Собранная схема
 	проверяется целиком, как у `set_course_artifact`, и пишется тем же путём:
 	ученик видит обычную схему документа.
+
+	`purpose` — как у `set_course_artifact`: зачем документ ученику; не назван —
+	остаётся прежний. Он у курса, а не у шаблона: один и тот же реестр рисков
+	нужен в разных курсах для разного.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	return templates.привязать(course, artifact, template, version, overlay)
+	return templates.привязать(course, artifact, template, version, overlay, purpose)
 
 
 @frappe.whitelist(methods=["POST"])

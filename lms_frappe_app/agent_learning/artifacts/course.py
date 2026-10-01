@@ -42,7 +42,7 @@ def _схемы_курса(course: str) -> list:
 	действующие = frappe.get_all(
 		"Agent Course Artifact",
 		filters={"course": course, "is_active": 1},
-		fields=["name", "slug", "title", "layout"],
+		fields=["name", "slug", "title", "purpose", "layout"],
 	)
 	if not действующие:
 		return []
@@ -103,7 +103,17 @@ def _действующие_артефакты(course: str) -> list[dict]:
 	записи = frappe.get_all(
 		"Agent Course Artifact",
 		filters={"course": course, "is_active": 1},
-		fields=["name", "slug", "title", "layout", "version", "template", "template_version", "overlay"],
+		fields=[
+			"name",
+			"slug",
+			"title",
+			"purpose",
+			"layout",
+			"version",
+			"template",
+			"template_version",
+			"overlay",
+		],
 		order_by="creation asc",
 	)
 	последние = последние_версии_шаблонов({з.template for з in записи if з.template})
@@ -115,6 +125,7 @@ def _действующие_артефакты(course: str) -> list[dict]:
 				"version": запись.version,
 				"artifact": запись.slug,
 				"title": запись.title,
+				"purpose": запись.purpose or None,
 				"layout": запись.layout,
 				# Шаблон и закреплённая версия; `template_latest` — чтобы автор
 				# видел, что шаблон ушёл вперёд (learning-services#370).
@@ -254,6 +265,7 @@ def записать_схему(
 	layout: str,
 	canvas,
 	привязка: dict | None = None,
+	purpose: str | None = None,
 ) -> dict:
 	"""Схема документа курса новой версией; неверная — отказ до записи.
 
@@ -261,15 +273,25 @@ def записать_схему(
 	автор: словари или JSON-строки. `привязка` — шаблон, его версия и правки
 	курса, из которых схема собрана (`set_course_artifact_template`); схема от
 	автора целиком — без неё, и новая версия шаблона не наследует.
+
+	`purpose` не назван — остаётся у прежней версии: переход на новую версию
+	шаблона и перепривязка не должны молча стирать то, что автор написал
+	ученику (learning-services#462). Пустая строка его убирает.
 	"""
 	строки, холст = проверить_схему(блоки, canvas)
 	привязка = привязка or {}
 	правки = привязка.get("overlay")
+	ключ = нормализовать_ключ(artifact)
+	if purpose is None:
+		purpose = frappe.db.get_value(
+			"Agent Course Artifact", {"course": course, "slug": ключ, "is_active": 1}, "purpose"
+		)
 	return directives.записать(
 		"Agent Course Artifact",
-		{"course": course, "slug": нормализовать_ключ(artifact)},
+		{"course": course, "slug": ключ},
 		{
 			"title": title,
+			"purpose": (purpose or "").strip() or None,
 			"layout": layout,
 			"blocks": строки,
 			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,

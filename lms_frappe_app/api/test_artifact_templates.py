@@ -435,6 +435,25 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		)
 		self.assertEqual((ответ["data"]["template_version"], ответ["data"]["version"]), (1, 2))
 
+	def test_зачем_документ_у_курса_и_переживает_переход(self):
+		"""`purpose` пишется при привязке и не теряется при переходе на новую версию (#462)."""
+		self.шаблон()
+		self.шаблон(note="Вторая")
+		ответ = authoring.set_course_artifact_template(
+			course=self.курс, artifact="journal", template=self.ключ, version=1, purpose="Журнал объекта"
+		)
+		self.assertTrue(ответ["ok"], ответ)
+
+		ответ = authoring.upgrade_course_artifact(course=self.курс, artifact="journal", version=2)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Agent Course Artifact", {"course": self.курс, "slug": "journal", "is_active": 1}, "purpose"
+			),
+			"Журнал объекта",
+		)
+
 	def test_схема_целиком_отвязывает_от_шаблона(self):
 		self.шаблон()
 		authoring.set_course_artifact_template(

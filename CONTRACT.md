@@ -1270,8 +1270,14 @@ ISO 8601 со смещением часового пояса сайта; при 
 ```json
 { "ok": true, "data": { "course": "course-p3", "space": "org-1", "artifacts": [
   { "artifact": "project_summary", "title": "Резюме проекта",
-    "layout": "sections", "blocks_total": 6, "blocks_filled": 2 } ] } }
+    "purpose": "Проект на одной странице — чтобы все договорились об одном и том же.",
+    "layout": "sections", "modified": "2026-09-28T22:14:42.064609",
+    "blocks_total": 6, "blocks_filled": 2 } ] } }
 ```
+
+`purpose` — одна-две фразы автора курса: зачем ученику этот документ; `null`,
+если автор не написал. `modified` — когда документ ученика последний раз
+менялся; `null`, пока в нём ничего не записано (learning-services#462).
 
 С ключом — блоки в порядке схемы; заполненные с текстом, пустые с подсказкой
 автора:
@@ -1797,7 +1803,9 @@ Frappe.
   "courses": [ { "id": "course-basics", "title": "Основы", "deadline": "2026-09-15",
                  "overdue": false, "completion": 0.42,
                  "documents": [ { "artifact": "summary", "title": "Резюме проекта",
+                                  "purpose": "Проект на одной странице.",
                                   "layout": "sections",
+                                  "modified": "2026-09-28T22:14:42.064609",
                                   "blocks_total": 6, "blocks_filled": 4 } ] } ],
   "recent_sessions": [ { "lesson": "lesson-6", "status": "Completed",
                          "started_at": "2026-09-01T12:20:00" } ] } }
@@ -2816,7 +2824,10 @@ Settings`, по умолчанию 3; `0` — не напоминать) тем,
 
 **Параметры:** `course`, `artifact` — ключ документа (`project_summary`),
 `title`, `blocks`, `layout` — `sections` (столбцом, по умолчанию) или
-`canvas` (сеткой по `span`), `canvas` (необязательный) — холст документа.
+`canvas` (сеткой по `span`), `canvas` (необязательный) — холст документа,
+`purpose` (необязательный) — одна-две фразы ученику: зачем этот документ.
+Ученик видит их в «Моих документах» под названием. Не назван — остаётся у
+прежней версии; пустая строка убирает (learning-services#462).
 
 ```json
 { "blocks": [
@@ -3057,7 +3068,9 @@ MCP шлёт его всегда, и наследник шаблона-холс�
 
 **Параметры:** `course`, `artifact` — ключ документа в курсе, `template`,
 `version` (необязательно) — версия шаблона, без него последняя, `overlay`
-(необязательно) — правки курса.
+(необязательно) — правки курса, `purpose` (необязательно) — зачем документ
+ученику, как у `set_course_artifact`. Он у документа курса, а не у шаблона:
+не назван — остаётся прежний, в том числе при `upgrade_course_artifact`.
 
 ```json
 { "title": "Реестр рисков стройки",
@@ -3396,6 +3409,7 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
   "directive": null,
   "artifacts": [ { "id": "ACA-00001", "version": 1,
     "artifact": "project_summary", "title": "Резюме проекта",
+    "purpose": "Проект на одной странице — чтобы все договорились об одном и том же.",
     "layout": "sections", "template": "project-summary",
     "template_version": 2, "template_latest": 3,
     "overlay": { "blocks": { "goal_and_benefits": { "lesson": "lesson-1" } } },

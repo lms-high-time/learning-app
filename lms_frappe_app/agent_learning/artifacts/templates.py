@@ -322,7 +322,9 @@ def шаблоны() -> list[dict]:
 	]
 
 
-def привязать(course: str, artifact: str, template: str, version, правки) -> dict:
+def привязать(
+	course: str, artifact: str, template: str, version, правки, purpose: str | None = None
+) -> dict:
 	"""Схема документа курса из шаблона с правками — новой версией.
 
 	Контракт — у `api.authoring.set_course_artifact_template`. Пишется тем же
@@ -330,7 +332,7 @@ def привязать(course: str, artifact: str, template: str, version, пр�
 	хранится так же, и чтение ученика не пересобирает схему на каждый запрос.
 	"""
 	исходный, правки, собранное = _собрать_привязку(course, template, version, правки)
-	return _записать_привязку(course, artifact, исходный, правки, собранное)
+	return _записать_привязку(course, artifact, исходный, правки, собранное, purpose)
 
 
 def _собрать_привязку(course: str, template: str, version, правки) -> tuple[dict, dict, dict]:
@@ -352,7 +354,14 @@ def _собрать_привязку(course: str, template: str, version, пра
 	return исходный, правки, собранное
 
 
-def _записать_привязку(course: str, artifact: str, исходный: dict, правки: dict, собранное: dict) -> dict:
+def _записать_привязку(
+	course: str,
+	artifact: str,
+	исходный: dict,
+	правки: dict,
+	собранное: dict,
+	purpose: str | None = None,
+) -> dict:
 	версия = записать_схему(
 		course,
 		artifact,
@@ -365,6 +374,7 @@ def _записать_привязку(course: str, artifact: str, исходн�
 			"template_version": исходный["version"],
 			"overlay": правки,
 		},
+		purpose=purpose,
 	)
 	return {
 		"id": версия["id"],
