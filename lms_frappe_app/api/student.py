@@ -9,6 +9,7 @@
 """
 
 import json
+import re
 from datetime import timedelta
 
 import frappe
@@ -93,6 +94,7 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН = "user_not_found"
 ЗАНЯТИЕ_ЗАКРЫТО = "session_closed"
 НЕВЕРНОЕ_СОСТОЯНИЕ = "invalid_chat_state"
+НЕВЕРНЫЙ_КЛЮЧ_СЦЕНАРИЯ = "invalid_scenario_key"
 ДЕМО_ИСЧЕРПАНО = "web_demo_exhausted"
 КУРС_НЕ_АНОНС = "course_not_upcoming"
 НЕИЗВЕСТНЫЙ_КАНАЛ = "unknown_channel"
@@ -1559,6 +1561,120 @@ def save_chat_state(session: str, state: str, version: str) -> dict:
 			}
 		).insert(ignore_permissions=True)
 	return {"session": занятие.name, "version": version}
+
+
+#: Ключ сценария боковой панели: `profile`, позже `onboarding`. Короткое имя
+#: латиницей — им же сценарий называется в адресе панели.
+КЛЮЧ_СЦЕНАРИЯ = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+#: Окно счёта ходов сценария. `Why:` сутки, а не навсегда: лимит навсегда
+#: закрыл бы профиль ученику, который вернётся к нему через полгода.
+ОКНО_ХОДОВ = timedelta(days=1)
+
+
+@frappe.whitelist()
+@контракт
+def scenario_state(key: str) -> dict:
+	"""Сохранённый разговор сценария вне урока — свой.
+
+	Записи `Agent Scenario State` ролью ученика не читаются: формат
+	внутренний, и отдаётся он только этим методом, только владельцу.
+	"""
+	ключ = _ключ_сценария(key)
+	запись = frappe.db.get_value(
+		"Agent Scenario State",
+		{"student": текущий_пользователь(), "scenario_key": ключ},
+		["state", "state_version"],
+		as_dict=True,
+	)
+	return {
+		"key": ключ,
+		"state": запись.state if запись else None,
+		"version": запись.state_version if запись else None,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def save_scenario_state(key: str, state: str, version: str) -> dict:
+	"""Замещает разговор сценария. Счётчик ходов не трогает — он свой."""
+	ключ = _ключ_сценария(key)
+	try:
+		json.loads(state)
+	except (TypeError, ValueError) as сбой:
+		raise Отказ(
+			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", key=key
+		) from сбой
+
+	frappe.db.set_value(
+		"Agent Scenario State",
+		_запись_сценария(ключ),
+		{"state": state, "state_version": version},
+	)
+	return {"key": ключ, "version": version}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def reset_scenario_state(key: str) -> dict:
+	"""Начинает разговор сценария заново.
+
+	`Why:` счётчик ходов не сбрасывается — иначе лимит ходов обходился бы
+	кнопкой «начать заново».
+	"""
+	ключ = _ключ_сценария(key)
+	имя = frappe.db.get_value(
+		"Agent Scenario State", {"student": текущий_пользователь(), "scenario_key": ключ}
+	)
+	if имя:
+		frappe.db.set_value("Agent Scenario State", имя, {"state": None, "state_version": None})
+	return {"key": ключ}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def count_scenario_turn(key: str) -> dict:
+	"""Засчитывает ход сценария и отвечает, сколько их за текущие сутки.
+
+	Лимит сверяет сервис чата: сколько ходов позволено, знает он. Счёт ведёт
+	Frappe отдельным методом, а не вместе с разговором, — строка блокируется
+	на чтение, и два хода подряд не засчитаются за один. Счётчик живёт в базе,
+	поэтому рестарт сервиса его не обнуляет.
+	"""
+	ключ = _ключ_сценария(key)
+	имя = _запись_сценария(ключ)
+	запись = frappe.db.get_value(
+		"Agent Scenario State", имя, ["turns", "turns_since"], as_dict=True, for_update=True
+	)
+	сейчас = now_datetime()
+	if not запись.turns_since or запись.turns_since <= сейчас - ОКНО_ХОДОВ:
+		ходов, с = 1, сейчас
+	else:
+		ходов, с = (запись.turns or 0) + 1, запись.turns_since
+	frappe.db.set_value("Agent Scenario State", имя, {"turns": ходов, "turns_since": с})
+	return {"key": ключ, "turns": ходов}
+
+
+def _ключ_сценария(key) -> str:
+	if not isinstance(key, str) or not КЛЮЧ_СЦЕНАРИЯ.fullmatch(key):
+		raise Отказ(
+			НЕВЕРНЫЙ_КЛЮЧ_СЦЕНАРИЯ,
+			"Ключ сценария — латиница в нижнем регистре, цифры, «_» и «-», до 32 знаков",
+			key=key,
+		)
+	return key
+
+
+def _запись_сценария(ключ: str) -> str:
+	"""Запись сценария текущего ученика; нет — заводится пустой."""
+	ученик = текущий_пользователь()
+	имя = frappe.db.get_value("Agent Scenario State", {"student": ученик, "scenario_key": ключ})
+	if имя:
+		return имя
+	return (
+		frappe.get_doc({"doctype": "Agent Scenario State", "student": ученик, "scenario_key": ключ})
+		.insert(ignore_permissions=True)
+		.name
+	)
 
 
 @frappe.whitelist()
