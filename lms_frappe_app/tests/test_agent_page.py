@@ -7,7 +7,7 @@ from lms_frappe_app.tests.sample_data import создать_куратора, с
 
 # (route пункта, заголовок, куда уводит редирект)
 ПУНКТЫ = (
-	("agent-sidebar", "Подключить агента", "/agent"),
+	("agent-sidebar", "Подключить ассистента", "/agent"),
 	# Чат живёт в MCP-сервисе на том же домене, что и сайт, — как `/mcp`.
 	("study-in-browser", "Заниматься в браузере", "/chat"),
 	("artifacts-sidebar", "Мои документы", "/lms/documents"),
@@ -15,7 +15,7 @@ from lms_frappe_app.tests.sample_data import создать_куратора, с
 
 
 class IntegrationTestAgentPage(IntegrationTestCase):
-	"""Страница «Подключить агента»: кто и какие адреса на ней видит."""
+	"""Страница «Подключить ассистента»: кто и какие адреса на ней видит."""
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -84,6 +84,48 @@ class IntegrationTestAgentPage(IntegrationTestCase):
 				# Web Page у пункта обязателен, но это заглушка: сайдбар ведёт по её
 				# route, а на настоящую страницу уводит редирект. Публиковать нельзя.
 				self.assertFalse(frappe.db.get_value("Web Page", пункты[0].web_page, "published"))
+
+	def test_переименованный_пункт_доезжает_до_сайдбара(self):
+		# Подпись пункта — копия заголовка Web Page (fetch_from) в строке
+		# сайдбара: новое имя в ПУНКТЫ_САЙДБАРА должно дойти и до заглушки,
+		# и до строки, иначе на стенде останется прежняя подпись.
+		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА, обеспечить_пункты_сайдбара
+
+		frappe.set_user("Administrator")
+		обеспечить_пункты_сайдбара()
+		# Любой пункт платформы: путь переименования у всех один.
+		пункт = ПУНКТЫ_САЙДБАРА[0]
+		заглушка = frappe.db.get_value("Web Page", {"route": пункт["route"]})
+		# Сайт, установленный с прежним именем: подпись заглушки и её копия в
+		# строке сайдбара — та, что стояла до переименования.
+		прежняя = frappe.get_doc("Web Page", заглушка)
+		прежняя.title = "Прежняя подпись"
+		прежняя.save(ignore_permissions=True)
+		frappe.get_single("LMS Settings").save(ignore_permissions=True)
+		self.assertEqual(
+			frappe.db.get_value(
+				"LMS Sidebar Item", {"parenttype": "LMS Settings", "web_page": заглушка}, "title"
+			),
+			"Прежняя подпись",
+		)
+
+		обеспечить_пункты_сайдбара()
+
+		self.assertEqual(frappe.db.get_value("Web Page", заглушка, "title"), пункт["title"])
+		self.assertEqual(
+			frappe.db.get_value(
+				"LMS Sidebar Item", {"parenttype": "LMS Settings", "web_page": заглушка}, "title"
+			),
+			пункт["title"],
+		)
+
+		# Повторная миграция ничего не переписывает.
+		строки = {"parenttype": "LMS Settings", "parentfield": "sidebar_items"}
+		было = frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx")
+		обеспечить_пункты_сайдбара()
+		self.assertEqual(
+			frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx"), было
+		)
 
 	def test_маршруты_пунктов_ведут_на_страницы(self):
 		# `route` пункта — это route его Web Page (fetch_from); без редиректа

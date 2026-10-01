@@ -1,7 +1,7 @@
 {
  "app": "lms_frappe_app",
  "charts": [],
- "content": "[{\"id\": \"al_header\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Обучение через агента</b></span>\", \"col\": 12}}, {\"id\": \"courses-spa-link\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/lms/courses\\\">Курсы</a>\", \"col\": 3}}, {\"id\": \"al_p_agent\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/agent\\\">Подключить агента</a>\", \"col\": 3}}, {\"id\": \"al_p_artifacts\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/artifacts\\\">Мои документы</a>\", \"col\": 3}}, {\"id\": \"al_p_author\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/author\\\">Кабинет автора</a>\", \"col\": 3}}, {\"id\": \"al_p_settings\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/desk/agent-learning-settings\\\">Настройки обучения</a>\", \"col\": 3}}, {\"id\": \"al_spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"al_shortcut_reports\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Репорты о курсе\", \"col\": 4}}, {\"id\": \"al_spacer_cards\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"al_card_course\", \"type\": \"card\", \"data\": {\"card_name\": \"Курс\", \"col\": 4}}, {\"id\": \"al_card_students\", \"type\": \"card\", \"data\": {\"card_name\": \"Ученики\", \"col\": 4}}, {\"id\": \"al_card_orgs\", \"type\": \"card\", \"data\": {\"card_name\": \"Организации\", \"col\": 4}}]",
+ "content": "[{\"id\": \"al_header\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Обучение через агента</b></span>\", \"col\": 12}}, {\"id\": \"courses-spa-link\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/lms/courses\\\">Курсы</a>\", \"col\": 3}}, {\"id\": \"al_p_agent\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/agent\\\">Подключить ассистента</a>\", \"col\": 3}}, {\"id\": \"al_p_artifacts\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/artifacts\\\">Мои документы</a>\", \"col\": 3}}, {\"id\": \"al_p_author\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/author\\\">Кабинет автора</a>\", \"col\": 3}}, {\"id\": \"al_p_settings\", \"type\": \"paragraph\", \"data\": {\"text\": \"<a href=\\\"/desk/agent-learning-settings\\\">Настройки обучения</a>\", \"col\": 3}}, {\"id\": \"al_spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"al_shortcut_reports\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Репорты о курсе\", \"col\": 4}}, {\"id\": \"al_spacer_cards\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"al_card_course\", \"type\": \"card\", \"data\": {\"card_name\": \"Курс\", \"col\": 4}}, {\"id\": \"al_card_students\", \"type\": \"card\", \"data\": {\"card_name\": \"Ученики\", \"col\": 4}}, {\"id\": \"al_card_orgs\", \"type\": \"card\", \"data\": {\"card_name\": \"Организации\", \"col\": 4}}]",
  "creation": "2026-09-14 12:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -268,7 +268,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-30 18:00:00.000000",
+ "modified": "2026-10-01 17:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",
