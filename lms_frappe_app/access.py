@@ -11,8 +11,11 @@
 from datetime import timedelta
 
 import frappe
-from frappe.utils import cint, now_datetime
+from frappe.core.doctype.user import user as frappe_user
+from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
+
+from lms_frappe_app.agent_learning.notices import почта_есть
 
 КЛЮЧ_ДЕЙСТВУЕТ = "valid"
 КЛЮЧ_УСТАРЕЛ = "expired"
@@ -43,3 +46,48 @@ def состояние_ключа(key: str | None) -> str:
 	if срок and now_datetime() > запись.last_reset_password_key_generated_on + timedelta(seconds=срок):
 		return КЛЮЧ_УСТАРЕЛ
 	return КЛЮЧ_ДЕЙСТВУЕТ
+
+
+def _название() -> str:
+	return frappe.db.get_single_value("Website Settings", "app_name") or get_url()
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def update_password(
+	new_password: str,
+	logout_all_sessions: int = 0,
+	key: str | None = None,
+	old_password: str | None = None,
+):
+	"""`update_password` Frappe и письмо «Пароль изменён».
+
+	`Why:` Frappe шлёт такое письмо только при смене пароля в desk, а смену по
+	ссылке не подтверждает ничем: человек не знает, сработала ли она, и не
+	узнает, если пароль сменил кто-то другой. Первое задание пароля — после
+	регистрации по почте или входа через Google — письма не получает: человек
+	ничего не менял, а тревога на ровном месте пугает. Признак первого раза —
+	пустой `last_password_reset_date`.
+	"""
+	запись = _запись_ключа(key)
+	пользователь = запись.name if запись else (None if key else frappe.session.user)
+	впервые = not пользователь or not frappe.db.get_value("User", пользователь, "last_password_reset_date")
+	ответ = frappe_user.update_password(
+		new_password, logout_all_sessions=logout_all_sessions, key=key, old_password=old_password
+	)
+	if not впервые and пользователь != "Guest" and frappe.local.response.get("http_status_code") != 410:
+		_письмо_пароль_изменён(пользователь)
+	return ответ
+
+
+def _письмо_пароль_изменён(пользователь: str) -> None:
+	if not почта_есть():
+		return
+	frappe.sendmail(
+		recipients=[frappe.db.get_value("User", пользователь, "email")],
+		subject="Пароль изменён",
+		message=(
+			f"<p>Пароль от вашего аккаунта на {escape_html(_название())} изменён.</p>"
+			f'<p>Если это сделали не вы, <a href="{get_url("/login#forgot")}">задайте новый пароль</a>: '
+			"ссылка придёт на этот адрес.</p>"
+		),
+	)

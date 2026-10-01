@@ -327,6 +327,9 @@ override_whitelisted_methods = {
 	"lms.lms.doctype.course_lesson.course_lesson.save_progress": (
 		"lms_frappe_app.agent_learning.browser_progress.save_progress"
 	),
+	# Вход по почте (learning-services#460): смена пароля подтверждается
+	# письмом — обоснование в `access.py`.
+	"frappe.core.doctype.user.user.update_password": "lms_frappe_app.access.update_password",
 }
 #
 # each overriding function accepts a `data` argument;
