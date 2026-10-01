@@ -12,14 +12,18 @@ from datetime import timedelta
 
 import frappe
 from frappe.core.doctype.user import user as frappe_user
+from frappe.rate_limiter import rate_limit
 from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
+from frappe.website.utils import is_signup_disabled
 
 from lms_frappe_app.agent_learning.notices import почта_есть
 
 КЛЮЧ_ДЕЙСТВУЕТ = "valid"
 КЛЮЧ_УСТАРЕЛ = "expired"
 КЛЮЧ_НЕ_НАЙДЕН = "not_found"
+
+ПРОВЕРЬТЕ_ПОЧТУ = "Проверьте почту: мы отправили письмо со ссылкой."
 
 
 def _запись_ключа(key: str | None):
@@ -89,5 +93,66 @@ def _письмо_пароль_изменён(пользователь: str) -> 
 			f"<p>Пароль от вашего аккаунта на {escape_html(_название())} изменён.</p>"
 			f'<p>Если это сделали не вы, <a href="{get_url("/login#forgot")}">задайте новый пароль</a>: '
 			"ссылка придёт на этот адрес.</p>"
+		),
+	)
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(key="email", limit=5, seconds=60 * 60)
+def sign_up(email: str, full_name: str, redirect_to: str | None = None) -> tuple[int, str]:
+	"""Регистрация формы Frappe на `/login`."""
+	return _зарегистрировать(email, lambda: frappe_user.sign_up(email, full_name, redirect_to))
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(key="email", limit=5, seconds=60 * 60)
+def sign_up_learning(email: str, full_name: str, verify_terms: bool, user_category: str) -> tuple[int, str]:
+	"""Регистрация формы Learning: её показывают, если в `LMS Settings` есть свои поля."""
+	from lms.lms.user import sign_up as learning_sign_up
+
+	return _зарегистрировать(email, lambda: learning_sign_up(email, full_name, verify_terms, user_category))
+
+
+def _зарегистрировать(email: str, создать) -> tuple[int, str]:
+	"""Один ответ на новый, занятый и отключённый адрес.
+
+	`Why:` ответ «Already Registered» — тупик для того, кто входил через Google
+	и не знает, что аккаунт уже есть (learning-services#459). Занятому адресу
+	уходит письмо со ссылкой на пароль, а одинаковый ответ не выдаёт, есть ли
+	на платформе чужой адрес. Лимит частоты — против рассылки писем на чужой
+	ящик через форму.
+	"""
+	if is_signup_disabled():
+		frappe.throw("Регистрация закрыта", title="Нельзя")
+	занятый = frappe.db.get_value("User", {"email": email}, ["name", "enabled"], as_dict=True)
+	if занятый:
+		if занятый.enabled:
+			_письмо_аккаунт_есть(занятый.name)
+		return 1, ПРОВЕРЬТЕ_ПОЧТУ
+	код, текст = создать()
+	if код != 1:
+		# Письмо-приглашение не ушло (почта не настроена) — честный ответ Frappe.
+		return код, текст
+	пользователь = frappe.db.get_value("User", {"email": email})
+	# Адрес возврата Frappe держит в кэше Redis, а его может вытеснить, пока
+	# человек идёт к письму. Поле `update_password` прочтёт и тогда.
+	if адрес := frappe.cache.hget("redirect_after_login", пользователь):
+		frappe.db.set_value("User", пользователь, "redirect_url", адрес)
+	return 1, ПРОВЕРЬТЕ_ПОЧТУ
+
+
+def _письмо_аккаунт_есть(пользователь: str) -> None:
+	if not почта_есть():
+		return
+	ссылка = frappe.get_doc("User", пользователь)._reset_password()
+	frappe.sendmail(
+		recipients=[frappe.db.get_value("User", пользователь, "email")],
+		subject=f"У вас уже есть аккаунт на {_название()}",
+		message=(
+			"<p>На этот адрес пытались зарегистрироваться, но аккаунт с ним уже есть.</p>"
+			"<p>Если вы входили через Google — войдите так же. Или "
+			f'<a href="{ссылка}">задайте пароль</a> и входите по почте.</p>'
+			"<p>Если регистрировались не вы, ничего делать не нужно: без этой ссылки "
+			"пароль не поменять.</p>"
 		),
 	)
