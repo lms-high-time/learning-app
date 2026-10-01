@@ -5,7 +5,7 @@
 
 `Why:` страница урока в браузере показывает не материал, а куда идти
 заниматься (lms-platform#309). Позови она в веб-чат, когда пробные уроки
-кончились, — чат откажет; позови на `/agent`, когда пробный урок есть, —
+кончились, — чат откажет; позови подключать ассистента, когда пробный урок есть, —
 ученик без своего агента застрянет на самом тяжёлом шаге.
 """
 
@@ -69,7 +69,7 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 
 		вход = self.войти(self.уроки[2])
 
-		self.assertEqual(вход["study"], {"channel": "agent", "url": "/agent", "demo_left": 0})
+		self.assertEqual(вход["study"], {"channel": "agent", "url": "/lms/agent", "demo_left": 0})
 
 	def test_начатый_в_чате_урок_ведёт_в_чат_и_без_пробных(self):
 		"""Тем же правилом, что `start_lesson`: возврат в урок пробного не тратит."""
@@ -89,7 +89,7 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		вход = self.войти(self.уроки[0])
 
 		self.assertEqual(вход["study"]["channel"], "agent")
-		self.assertEqual(вход["study"]["url"], "/agent")
+		self.assertEqual(вход["study"]["url"], "/lms/agent")
 
 	def test_зачин_и_пройденность(self):
 		frappe.set_user("Administrator")

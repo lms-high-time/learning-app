@@ -33,7 +33,7 @@ from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН
 from lms_frappe_app.api.student import _пройденные, _следующий_урок
 
 #: Куда вести ученика, когда веб-чат недоступен: там шаги подключения агента.
-СТРАНИЦА_АГЕНТА = "/agent"
+СТРАНИЦА_АГЕНТА = "/lms/agent"
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
