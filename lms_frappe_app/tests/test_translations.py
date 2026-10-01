@@ -71,7 +71,9 @@ class IntegrationTestTranslations(IntegrationTestCase):
 		"""Приглашение после регистрации и сброс пароля — шаблоны Frappe.
 
 		`Why:` у Frappe переведена половина их строк, и письмо приходило
-		вперемешку русским и английским (learning-services#460). Строки — из
+		вперемешку русским и английским (learning-services#460). Все строки —
+		в нашем файле, а не в переводах Frappe: в CI Frappe свежее стенда, и
+		его перевод части строк там уже другой. Строки — из
 		`frappe/templates/emails/new_user.html` и `password_reset.html`.
 		"""
 		словарь = get_all_translations("ru")
@@ -96,6 +98,8 @@ class IntegrationTestTranslations(IntegrationTestCase):
 			"Thanks",
 		)
 
+		свои = {оригинал for оригинал, *_ in _строки()}
+		self.assertEqual([с for с in строки if с not in свои], [])
 		self.assertEqual([с for с in строки if not словарь.get(с)], [])
 		# Перевод Frappe «Уважаемый» угадывает пол адресата.
 		self.assertEqual(словарь["Dear"], "Здравствуйте,")

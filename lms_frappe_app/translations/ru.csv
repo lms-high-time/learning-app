@@ -1,3 +1,4 @@
+A new account has been created for you at {0}.,Для вас создан аккаунт на {0}.
 A new batch '{0}' has been published that might interest you. Check it out!,"Опубликован новый поток «{0}», который может вас заинтересовать. Загляните!"
 A new course '{0}' has been published that might interest you. Check it out!,"Опубликован новый курс «{0}», который может вас заинтересовать. Загляните!"
 A new course has been published on {0},Новый курс опубликован на {0}
@@ -64,6 +65,7 @@ Coaching or Training Institute,Курсы или учебный центр
 College or University,Колледж или университет
 Comma separated keywords,Ключевые слова через запятую
 Company or Workplace,Компания или рабочее место
+Complete Registration,Завершить регистрацию
 Complete your profile,Заполните профиль
 Complete your registration,Завершите регистрацию
 Completion Rate,Доля прохождения
@@ -251,6 +253,7 @@ Or copy and paste this link:,Или скопируйте ссылку в адр�
 "Oversee all users, content, and system settings","Контроль всех пользователей, контента и настроек системы"
 Paid certificate,Платный сертификат
 Paid course,Платный курс
+Password Reset,Сброс пароля
 Paste a YouTube link,Вставьте ссылку на YouTube
 "Paste a YouTube link, or upload a video file (MP4, WebM, or OGG) to show a preview on the course page.","Вставьте ссылку на YouTube или загрузите видеофайл (MP4, WebM или OGG), чтобы показать превью на странице курса."
 Payment gateways deleted successfully,Платёжные шлюзы успешно удалены
@@ -287,6 +290,8 @@ Randomize the order of questions for each attempt.,Перемешивать по
 Remove row,Удалить строку
 Remove the image to pick a color instead.,"Удалите изображение, чтобы выбрать цвет."
 Reply cannot be empty.,Ответ не может быть пустым.
+Reset Password,Сбросить пароль
+Reset your password,Задайте новый пароль
 Review and update the details of this payment.,Проверьте и обновите данные этого платежа.
 Rust,Rust
 Saved — this format can't be previewed here.,Сохранено — этот формат здесь не показывается.
@@ -326,6 +331,8 @@ TalentLMS,TalentLMS
 Taught by,Преподают
 Taught by a team of {0},Преподаёт команда из {0}
 Teachable,Teachable
+Thank you,Спасибо
+Thanks,Спасибо
 The Google Meet account does not have a Google Calendar configured. Please set up a Google Calendar first.,Для аккаунта Google Meet не настроен Google Календарь. Сначала настройте Google Календарь.
 The deadline to schedule evaluations has passed. Please contact the Instructor for assistance.,Срок записи на оценку истёк. Обратитесь за помощью к инструктору.
 The instructor has left a comment on your assignment {0},Инструктор оставил комментарий к вашему заданию {0}
@@ -371,6 +378,7 @@ Video failed to load — this lesson will still be marked complete after you spe
 View all reviews,Смотреть все отзывы
 Watch Time (mins),Время просмотра (мин)
 We received a request to reset the password for your account. Click the button below to set a new password.,"Мы получили запрос на смену пароля от вашего аккаунта. Нажмите кнопку ниже, чтобы задать новый пароль."
+Welcome to {0},Добро пожаловать в {0}
 What are you using today to manage learning?,Чем вы сейчас пользуетесь для организации обучения?
 What is this badge awarded for?,За что выдаётся этот бейдж?
 What's the first milestone you'd like to achieve?,Какой первой цели вы хотите достичь?
