@@ -9,6 +9,7 @@
 """
 
 import frappe
+from frappe import _
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ, ПОРОГ_ЗАПОЛНЕННОСТИ, ПРОФИЛЬ
@@ -102,6 +103,14 @@ class IntegrationTestProfile(IntegrationTestCase):
 
 		self.assertEqual(данные["blocks"][0]["title"], "Контекст работы")
 		self.assertEqual(данные["blocks"][0]["facts"][0]["label"], "Роль")
+		уровень = next(блок for блок in данные["blocks"] if блок["id"] == "level")
+		self.assertEqual(уровень["facts"][0]["label"], "Опыт в теме")
+
+	def test_перевод_подписей_не_трогает_ту_же_строку_вне_профиля(self):
+		"""`ru.csv` действует на всю платформу: без контекста «Experience»
+		переименовал бы любую строку upstream с тем же текстом."""
+		self.assertNotEqual(_("Experience", lang="ru"), "Опыт в теме")
+		self.assertNotEqual(_("Learning style", lang="ru"), "Подача")
 
 	# --- сводка ---
 
