@@ -102,7 +102,7 @@ get_website_user_home_page = "lms_frappe_app.www.home.домашняя_стра�
 # нужно. `/agent` — адрес, который уже разошёлся по ссылкам и закладкам.
 website_redirects = [
 	{"source": "/agent-sidebar", "target": "/lms/agent"},
-	{"source": "/agent", "target": "/lms/agent"},
+	{"source": "/agent", "target": "/lms/agent", "forward_query_parameters": True},
 	{"source": "/study-in-browser", "target": "/chat"},
 	{"source": "/artifacts-sidebar", "target": "/lms/documents"},
 ]

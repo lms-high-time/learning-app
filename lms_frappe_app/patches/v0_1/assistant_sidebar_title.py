@@ -16,14 +16,18 @@ import frappe
 
 
 def execute():
-	for заглушка in frappe.get_all("Web Page", filters={"route": МАРШРУТ, "title": ПРЕЖНЯЯ}, pluck="name"):
-		frappe.db.set_value("Web Page", заглушка, "title", НОВАЯ)
-	# Копия в строке — напрямую: `fetch_from` при сохранении настроек читает
-	# заголовок через кэш значений запроса и в той же транзакции вернул бы
-	# прежний.
-	for строка in frappe.get_all(
-		"LMS Sidebar Item",
-		filters={"parenttype": "LMS Settings", "route": МАРШРУТ, "title": ПРЕЖНЯЯ},
-		pluck="name",
-	):
-		frappe.db.set_value("LMS Sidebar Item", строка, "title", НОВАЯ)
+	for заглушка in frappe.get_all("Web Page", filters={"route": МАРШРУТ}, fields=["name", "title"]):
+		подпись = заглушка.title
+		if подпись == ПРЕЖНЯЯ:
+			подпись = НОВАЯ
+			frappe.db.set_value("Web Page", заглушка.name, "title", подпись)
+		# Копия в строке обновилась бы только при следующем сохранении настроек —
+		# пишем её сразу, из заголовка самой заглушки: так строка не разойдётся
+		# и с подписью, которую админ задал, но настроек после не сохранял.
+		for строка in frappe.get_all(
+			"LMS Sidebar Item",
+			filters={"parenttype": "LMS Settings", "web_page": заглушка.name},
+			fields=["name", "title"],
+		):
+			if строка.title != подпись:
+				frappe.db.set_value("LMS Sidebar Item", строка.name, "title", подпись)

@@ -23,7 +23,13 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 
 		frappe.set_user("Administrator")
 		обеспечить_пункты_сайдбара()
+		строки = {"parenttype": "LMS Settings", "parentfield": "sidebar_items"}
+		было = frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx")
 		обеспечить_пункты_сайдбара()
+		# Повторная миграция без расхождений ничего не сохраняет.
+		self.assertEqual(
+			frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx"), было
+		)
 		for route, заголовок, _ in ПУНКТЫ:
 			with self.subTest(route=route):
 				пункты = frappe.get_all(
@@ -45,10 +51,18 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 			with self.subTest(route=route):
 				self.assertEqual(редиректы.get(f"/{route}"), куда)
 
-	def test_прежний_адрес_страницы_ведёт_в_learning(self):
-		# `/agent` разошёлся по ссылкам и закладкам, пока страница жила на теме сайта.
-		редиректы = {п["source"]: п["target"] for п in frappe.get_hooks("website_redirects")}
-		self.assertEqual(редиректы.get("/agent"), "/lms/agent")
+	def test_адрес_agent_ведёт_в_learning(self):
+		# `/agent` — адрес из ссылок и закладок; правило якорное и соседние
+		# пути не задевает.
+		from frappe.website.path_resolver import resolve_redirect
+
+		frappe.cache.delete_value("website_redirects")
+		with self.assertRaises(frappe.Redirect):
+			resolve_redirect("agent", "x=1")
+		self.assertEqual(frappe.flags.redirect_location, "/lms/agent?x=1")
+		for путь in ("agent-learning", "agent/lessons"):
+			with self.subTest(путь=путь):
+				resolve_redirect(путь)  # без переадресации
 
 	# --- веб-чат (lms-platform#141) ---
 
@@ -201,6 +215,19 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 		execute()  # повторный запуск ничего не ломает
 
 		self.assertEqual(self._подписи(заглушка), (НОВАЯ, НОВАЯ))
+
+	def test_строка_берёт_подпись_своей_заглушки(self):
+		# Админ сменил заголовок заглушки, а настроек после не сохранял: копия
+		# в строке осталась прежней. Патч выравнивает её по заглушке.
+		from lms_frappe_app.patches.v0_1.assistant_sidebar_title import ПРЕЖНЯЯ, execute
+
+		заглушка = self._пункт_ассистента()
+		self._подписать(заглушка, ПРЕЖНЯЯ)
+		frappe.db.set_value("Web Page", заглушка, "title", "Свой ИИ")
+
+		execute()
+
+		self.assertEqual(self._подписи(заглушка), ("Свой ИИ", "Свой ИИ"))
 
 	def test_подпись_админа_переживает_патч_и_миграцию(self):
 		from lms_frappe_app.install import обеспечить_пункты_сайдбара

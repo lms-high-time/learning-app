@@ -54,9 +54,7 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 		from lms_frappe_app.www import author
 
 		frappe.set_user(self.ученик)
-		for страница in (author,):
-			with self.subTest(страница=страница.__name__):
-				context = frappe._dict()
-				страница.get_context(context)
-				self.assertEqual(context.home_page, "/lms")
-				self.assertTrue(context.top_bar_items)
+		context = frappe._dict()
+		author.get_context(context)
+		self.assertEqual(context.home_page, "/lms")
+		self.assertTrue(context.top_bar_items)

@@ -12,8 +12,8 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 #: Пункты сайдбара Frappe Learning — в том порядке, в каком их видит ученик:
 #: сначала способы заниматься, документы последними (lms-platform#311).
 #: Web Page — обязательное поле пункта, а `route` и `title` пункт берёт из неё
-#: (`fetch_from`). Заглушки не публикуются: сами страницы живут в коде, а с
-#: маршрута заглушки на них ведёт `website_redirects` в hooks.
+#: (`fetch_from`). Заглушки не публикуются: сами страницы живут в Learning и в
+#: MCP-сервисе, а с маршрута заглушки на них ведёт `website_redirects` в hooks.
 #:
 #: Иконка — имя компонента `lucide-vue-next` (PascalCase), как её сохраняет
 #: выбор иконки в самом Learning: по нему рисует сайдбар на десктопе, а
