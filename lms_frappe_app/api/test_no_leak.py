@@ -117,6 +117,8 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 			student.remember(kind="fact", key="role", text="Руководитель отдела"),
 		)
 		self.проверить("my_notes", student.my_notes())
+		self.проверить("my_profile", student.my_profile())
+		self.проверить("my_profile", student.my_profile(summary=1))
 		self.проверить("forget", student.forget(key="role"))
 		self.проверить(
 			"update_artifact",
@@ -129,6 +131,13 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 			student.save_chat_state(занятие, json.dumps({"messages": []}), "1"),
 		)
 		self.проверить("chat_state", student.chat_state(занятие))
+		self.проверить(
+			"save_scenario_state",
+			student.save_scenario_state("profile", json.dumps({"messages": []}), "1"),
+		)
+		self.проверить("scenario_state", student.scenario_state("profile"))
+		self.проверить("count_scenario_turn", student.count_scenario_turn("profile"))
+		self.проверить("reset_scenario_state", student.reset_scenario_state("profile"))
 
 		квиз = student.request_quiz(занятие)
 		выдано = self.проверить("request_quiz", квиз)

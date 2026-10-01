@@ -64,6 +64,7 @@ Close student view,Выйти из режима студента
 Coaching or Training Institute,Курсы или учебный центр
 College or University,Колледж или университет
 Comma separated keywords,Ключевые слова через запятую
+Company and team,Компания и команда,Learner profile
 Company or Workplace,Компания или рабочее место
 Complete Registration,Завершить регистрацию
 Complete your profile,Заполните профиль
@@ -101,6 +102,7 @@ Course unpublished,Курс снят с публикации
 Create a reusable email template for your notifications.,Создайте многоразовый шаблон письма для ваших уведомлений.
 Create and manage reusable email templates for your notifications.,Создавайте и ведите многоразовые шаблоны писем для ваших уведомлений.
 Create chapter,Создать главу
+Current task,Задача сейчас,Learner profile
 Curriculum,Программа обучения
 Customer Academy,Академия для клиентов
 Dear,"Здравствуйте,"
@@ -157,12 +159,14 @@ Evaluation Requests,Запросы на оценку
 Evaluation cancelled successfully,Оценка успешно отменена
 Evaluations,Оценки
 Exercise deleted successfully,Упражнение успешно удалено
+Experience,Опыт в теме,Learner profile
 Failed to assign badge,Не удалось назначить бейдж
 Failed to refresh session,Не удалось обновить сессию
 File type of {0} is not allowed in quiz answers.,Файлы типа {0} нельзя прикреплять к ответам на тест.
 File upload failed. Please try again.,Не удалось загрузить файл. Попробуйте ещё раз.
 Frappe Learning,Frappe Learning
 Get the Payments app,Установить приложение Payments
+Goal and task,Цель и задача,Learner profile
 Google Classroom,Google Classroom
 Google Meet,Google Meet
 Google Meet Account,Аккаунт Google Meet
@@ -174,6 +178,7 @@ Hello Learner,Здравствуйте
 Here are the details:,Вот подробности:
 Highlight on the homepage.,Показывать на главной странице.
 Highlight what makes you unique and show your skills.,"Расскажите, чем вы уникальны, и покажите свои навыки."
+How I learn best,Как удобно учиться,Learner profile
 How to edit a lesson,Как редактировать урок
 I am happy to announce that I earned the {0} badge on {1} at {2},"Рад сообщить, что {1} я получил бейдж {0} на платформе {2}"
 "If you did not request a password reset, please ignore this email. Your password will remain unchanged.","Если вы не просили сменить пароль, просто проигнорируйте письмо: пароль останется прежним."
@@ -181,6 +186,7 @@ Import via Data Import Tool,Импорт через Data Import Tool
 Import via ZIP,Импорт из ZIP
 In-app,В приложении
 Include in preview,Включить в предпросмотр
+Industry,Отрасль,Learner profile
 Instructor notes,Заметки инструктора
 Invalid ZIP file,Некорректный ZIP-файл
 Invalid chapter.,Некорректная глава.
@@ -196,6 +202,8 @@ Kajabi,Kajabi
 LMS Google Meet Settings,Настройки Google Meet для LMS
 Launch a paid course,Запустить платный курс
 Learning,Обучение
+Learning goal,Цель обучения,Learner profile
+Learning style,Подача,Learner profile
 Lesson Completion,Прохождение уроков
 Lesson Dwell Time (seconds),Время на уроке (секунды)
 Lesson Dwell Time must be at least 1 second.,Время на уроке должно быть не меньше 1 секунды.
@@ -293,6 +301,7 @@ Reply cannot be empty.,Ответ не может быть пустым.
 Reset Password,Сбросить пароль
 Reset your password,Задайте новый пароль
 Review and update the details of this payment.,Проверьте и обновите данные этого платежа.
+Role,Роль,Learner profile
 Rust,Rust
 Saved — this format can't be previewed here.,Сохранено — этот формат здесь не показывается.
 School,Школа
@@ -322,6 +331,7 @@ Skip for now,Пропустить
 Slots,Слоты
 Sort by,Сортировать по
 Spreadsheets,Таблицы
+Starting level,Стартовый уровень,Learner profile
 Status/Percentage,Статус/Процент
 Student View,Режим студента
 Student enrolled successfully,Студент успешно записан
@@ -349,7 +359,9 @@ This permanently deletes the user account and cannot be undone.,"Учётная 
 This quiz has no questions available yet.,В этом тесте пока нет вопросов.
 This user cannot be deleted.,Этого пользователя нельзя удалить.
 This video's codec can't be played in browsers (e.g. HEVC/H.265). Please upload an H.264 MP4 or a WebM.,"Кодек этого видео не воспроизводится в браузерах (например, HEVC/H.265). Загрузите MP4 с кодеком H.264 или WebM."
+Time per week,Время в неделю,Learner profile
 Title cannot be empty.,Заголовок не может быть пустым.
+Tools and methods,Инструменты и методики,Learner profile
 Total Questions,Всего вопросов
 Transaction created successfully,Транзакция успешно создана
 Transaction updated successfully,Транзакция успешно обновлена
@@ -386,6 +398,7 @@ What's the first milestone you'd like to achieve?,Какой первой цел
 "When you feel ready, you can schedule an evaluation to get certified.","Когда почувствуете, что готовы, запишитесь на оценку, чтобы получить сертификат."
 Where will you be using Frappe Learning?,Где вы будете использовать Frappe Learning?
 Work,Работа
+Work context,Контекст работы,Learner profile
 You are not authorized to view the assessments of this batch.,У вас нет прав на просмотр оценок этого потока.
 You are not authorized to view the chart data of this batch.,У вас нет прав на просмотр данных графиков этого потока.
 You are not authorized to view the details of this program.,У вас нет прав на просмотр сведений об этой программе.

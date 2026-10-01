@@ -9,6 +9,7 @@
 """
 
 import json
+import re
 from datetime import timedelta
 
 import frappe
@@ -65,6 +66,8 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning
 	курс_урока,
 )
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
+	ПУТЬ_ЧАТА,
+	адрес_сервиса,
 	настройка,
 	пробные_уроки_ученика,
 	пробных_уроков,
@@ -76,6 +79,8 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 )
 from lms_frappe_app.agent_learning.normalizer import нормализовать_урок
+from lms_frappe_app.agent_learning.permissions import видит_всё
+from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ, заполненность, профиль
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 from lms_frappe_app.api import контракт, список, текущий_пользователь
 
@@ -85,8 +90,11 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ЦЕЛИ_НЕ_СОВПАЛИ = "objectives_mismatch"
 НУЖЕН_КВИЗ = "quiz_required"
 ЧУЖОЕ_ЗАНЯТИЕ = "not_your_session"
+ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
+ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН = "user_not_found"
 ЗАНЯТИЕ_ЗАКРЫТО = "session_closed"
 НЕВЕРНОЕ_СОСТОЯНИЕ = "invalid_chat_state"
+НЕВЕРНЫЙ_КЛЮЧ_СЦЕНАРИЯ = "invalid_scenario_key"
 ДЕМО_ИСЧЕРПАНО = "web_demo_exhausted"
 КУРС_НЕ_АНОНС = "course_not_upcoming"
 НЕИЗВЕСТНЫЙ_КАНАЛ = "unknown_channel"
@@ -551,10 +559,16 @@ def remember(kind: str, key: str, text: str, session: str | None = None) -> dict
 	существующая = frappe.db.exists(
 		"Agent Student Note", {"student": ученик, "course": курс, "note_key": ключ}
 	)
-	if not существующая:
-		сколько = frappe.db.count(
-			"Agent Student Note", {"student": ученик, "course": курс, "kind": вид}
-		)
+	# Ключи профиля в предел не входят ни сами, ни в счёте прочих. `Why:`
+	# ученик с полным набором прочих фактов иначе не смог бы заполнить профиль
+	# (learning-services#463). Набор фиксирован, так что предел остаётся
+	# конечным: прочие плюс ключи профиля.
+	профильный = вид == ЗАМЕТКА_ФАКТ and ключ in КЛЮЧИ_ПРОФИЛЯ
+	if not существующая and not профильный:
+		отбор = {"student": ученик, "course": курс, "kind": вид}
+		if вид == ЗАМЕТКА_ФАКТ:
+			отбор["note_key"] = ("not in", tuple(КЛЮЧИ_ПРОФИЛЯ))
+		сколько = frappe.db.count("Agent Student Note", отбор)
 		предел = лимит_заметок()
 		if сколько >= предел:
 			raise Отказ(
@@ -689,6 +703,42 @@ def whoami() -> dict:
 def my_notes(course: str | None = None) -> dict:
 	"""Что агент запомнил об ученике. Ученик вправе это видеть."""
 	return _заметки(текущий_пользователь(), course)
+
+
+@frappe.whitelist()
+@контракт
+def my_profile(user: str | None = None, summary: int | str | None = None) -> dict:
+	"""Профиль ученика: факты агента по блокам и заполненность.
+
+	Чужой профиль — только ролям, которые видят заметки (`ВСЕВИДЯЩИЕ_РОЛИ`).
+	`Why:` руководитель организации и автор курса заметок не видят (дизайн
+	памяти, «Границы приватности»), и профиль эту границу не сдвигает.
+	"""
+	кто = текущий_пользователь()
+	чей = user or кто
+	if чей != кто:
+		if not видит_всё(кто):
+			# Несуществующий логин отклоняется так же: иначе отказ
+			# подтверждал бы, есть ли такой человек на платформе.
+			raise Отказ(ЧУЖОЙ_ПРОФИЛЬ, "Чужой профиль недоступен", user=user)
+		if not frappe.db.exists("User", чей):
+			raise Отказ(ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН, "Такого пользователя нет", user=user)
+
+	# Интервью ведётся только о себе: команда платформы смотрит чужой
+	# профиль, но не заполняет его за ученика.
+	сервис = адрес_сервиса()
+	интервью = f"{сервис}{ПУТЬ_ЧАТА}?mode=profile" if сервис and чей == кто else None
+	if _флаг(summary):
+		return {**заполненность(чей), "interview_url": интервью}
+
+	человек = frappe.db.get_value("User", чей, ["full_name", "user_image"], as_dict=True)
+	return {
+		"user": чей,
+		"full_name": человек.full_name,
+		"user_image": человек.user_image or None,
+		**профиль(чей),
+		"interview_url": интервью,
+	}
 
 
 @frappe.whitelist()
@@ -1511,6 +1561,155 @@ def save_chat_state(session: str, state: str, version: str) -> dict:
 			}
 		).insert(ignore_permissions=True)
 	return {"session": занятие.name, "version": version}
+
+
+#: Ключ сценария боковой панели: `profile`, позже `onboarding`. Короткое имя
+#: латиницей — им же сценарий называется в адресе панели.
+КЛЮЧ_СЦЕНАРИЯ = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+#: Окно счёта ходов сценария — 24 часа от первого хода окна. `Why:` окно, а не
+#: счёт навсегда: лимит навсегда закрыл бы профиль ученику, который вернётся к
+#: нему через полгода.
+ОКНО_ХОДОВ = timedelta(days=1)
+СЦЕНАРИЙ = "Agent Scenario State"
+
+
+@frappe.whitelist()
+@контракт
+def scenario_state(key: str) -> dict:
+	"""Сохранённый разговор сценария вне урока — свой.
+
+	Записи `Agent Scenario State` ролью ученика не читаются: формат
+	внутренний, и отдаётся он только этим методом, только владельцу.
+	"""
+	ключ = _ключ_сценария(key)
+	запись = frappe.db.get_value(
+		СЦЕНАРИЙ,
+		{"student": текущий_пользователь(), "scenario_key": ключ},
+		["state", "state_version"],
+		as_dict=True,
+	)
+	return {
+		"key": ключ,
+		"state": запись.state if запись else None,
+		"version": запись.state_version if запись else None,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def save_scenario_state(key: str, state: str, version: str) -> dict:
+	"""Замещает разговор сценария. Счётчик ходов не трогает — он свой."""
+	ключ = _ключ_сценария(key)
+	try:
+		json.loads(state)
+	except (TypeError, ValueError) as сбой:
+		raise Отказ(
+			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", key=key
+		) from сбой
+
+	_с_повтором_при_гонке(ключ, _сохранить_разговор, текущий_пользователь(), ключ, state, version)
+	return {"key": ключ, "version": version}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def reset_scenario_state(key: str) -> dict:
+	"""Начинает разговор сценария заново.
+
+	`Why:` счётчик ходов не сбрасывается — иначе лимит ходов обходился бы
+	кнопкой «начать заново».
+	"""
+	ключ = _ключ_сценария(key)
+	_с_повтором_при_гонке(ключ, _сбросить_разговор, текущий_пользователь(), ключ)
+	return {"key": ключ}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def count_scenario_turn(key: str) -> dict:
+	"""Засчитывает ход сценария и отвечает, сколько их в текущем окне.
+
+	Лимит сверяет сервис чата: сколько ходов позволено, знает он. Счёт ведёт
+	Frappe отдельным методом, а не перезаписью вместе с разговором: перезапись
+	затёрла бы ход, засчитанный параллельно. Счётчик живёт в базе, поэтому
+	рестарт сервиса его не обнуляет.
+	"""
+	ключ = _ключ_сценария(key)
+	ходов = _с_повтором_при_гонке(ключ, _засчитать_ход, текущий_пользователь(), ключ)
+	return {"key": ключ, "turns": ходов}
+
+
+def _ключ_сценария(key) -> str:
+	if not isinstance(key, str) or not КЛЮЧ_СЦЕНАРИЯ.fullmatch(key):
+		raise Отказ(
+			НЕВЕРНЫЙ_КЛЮЧ_СЦЕНАРИЯ,
+			"Ключ сценария — латиница в нижнем регистре, цифры, «_» и «-», до 32 знаков",
+			key=key,
+		)
+	return key
+
+
+def _с_повтором_при_гонке(ключ: str, действие, *args):
+	"""Запись разговора сценария — с одним повтором на новом снимке.
+
+	`Why:` MariaDB стенда работает со снимочной изоляцией
+	(`innodb_snapshot_isolation`): два хода разом отдают второму
+	взаимоблокировку на блокирующем чтении строки, которую первый изменил или
+	вставил после начала снимка, а занятая строка — таймаут. Первый ход двух
+	запросов разом упирается ещё и в уникальный индекс. Перечитать запись в
+	той же транзакции нельзя — снимок тот же, и чтение снова упадёт. Поэтому
+	откат и один повтор: на новом снимке чужая запись уже видна. Не вышло и со
+	второго раза — `busy`. Сообщение «must be unique», которое Frappe кладёт в
+	журнал перед исключением, убирается: при успехе повтора оно ушло бы в
+	ответ.
+	"""
+	for попытка in range(2):
+		сообщений = len(frappe.local.message_log)
+		try:
+			return действие(*args)
+		except (frappe.QueryDeadlockError, frappe.QueryTimeoutError, frappe.UniqueValidationError):
+			frappe.db.rollback()
+			frappe.local.message_log = frappe.local.message_log[:сообщений]
+			if попытка:
+				raise Отказ(
+					домашка.ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
+				)
+
+
+def _засчитать_ход(ученик: str, ключ: str) -> int:
+	отбор = {"student": ученик, "scenario_key": ключ}
+	запись = frappe.db.get_value(
+		СЦЕНАРИЙ, отбор, ["name", "turns", "turns_since"], as_dict=True, for_update=True
+	)
+	сейчас = now_datetime()
+	if not запись:
+		frappe.get_doc({"doctype": СЦЕНАРИЙ, **отбор, "turns": 1, "turns_since": сейчас}).insert(
+			ignore_permissions=True
+		)
+		return 1
+	if not запись.turns_since or запись.turns_since <= сейчас - ОКНО_ХОДОВ:
+		ходов, с = 1, сейчас
+	else:
+		ходов, с = (запись.turns or 0) + 1, запись.turns_since
+	frappe.db.set_value(СЦЕНАРИЙ, запись.name, {"turns": ходов, "turns_since": с})
+	return ходов
+
+
+def _сохранить_разговор(ученик: str, ключ: str, state: str, version: str) -> None:
+	отбор = {"student": ученик, "scenario_key": ключ}
+	имя = frappe.db.get_value(СЦЕНАРИЙ, отбор, for_update=True)
+	if имя:
+		frappe.db.set_value(СЦЕНАРИЙ, имя, {"state": state, "state_version": version})
+	else:
+		frappe.get_doc(
+			{"doctype": СЦЕНАРИЙ, **отбор, "state": state, "state_version": version}
+		).insert(ignore_permissions=True)
+
+
+def _сбросить_разговор(ученик: str, ключ: str) -> None:
+	имя = frappe.db.get_value(СЦЕНАРИЙ, {"student": ученик, "scenario_key": ключ}, for_update=True)
+	if имя:
+		frappe.db.set_value(СЦЕНАРИЙ, имя, {"state": None, "state_version": None})
 
 
 @frappe.whitelist()

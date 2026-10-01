@@ -1,0 +1,95 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-10-01 12:00:00.000000",
+ "description": "Разговор сценария боковой панели вне урока — например, интервью о профиле. Одна запись на ученика и сценарий. Формат внутренний для MCP-сервиса; ученик и руководитель записи не читают",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "scenario_key",
+  "state_version",
+  "state",
+  "turns",
+  "turns_since"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ученик",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Какой сценарий: profile — интервью о профиле",
+   "fieldname": "scenario_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Сценарий",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Версия формата состояния. Сменилась — сервис отбрасывает запись и начинает разговор заново",
+   "fieldname": "state_version",
+   "fieldtype": "Data",
+   "label": "Версия формата",
+   "read_only": 1
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Long Text",
+   "label": "Состояние",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Сколько ходов сделано с начала текущих суток счёта. Сброс разговора счётчик не трогает",
+   "fieldname": "turns",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Ходов за сутки",
+   "read_only": 1
+  },
+  {
+   "description": "Когда начались текущие сутки счёта ходов",
+   "fieldname": "turns_since",
+   "fieldtype": "Datetime",
+   "label": "Сутки счёта с",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-10-01 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Scenario State",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "scenario_key"
+}
