@@ -1,3 +1,4 @@
+A new account has been created for you at {0}.,Для вас создан аккаунт на {0}.
 A new batch '{0}' has been published that might interest you. Check it out!,"Опубликован новый поток «{0}», который может вас заинтересовать. Загляните!"
 A new course '{0}' has been published that might interest you. Check it out!,"Опубликован новый курс «{0}», который может вас заинтересовать. Загляните!"
 A new course has been published on {0},Новый курс опубликован на {0}
@@ -57,13 +58,16 @@ Charge learners to enroll in this course.,Брать плату за запис�
 Checkout the batch,Перейти к потоку
 Checkout the course,Перейти к курсу
 Choose a payment provider to configure its credentials.,"Выберите платёжного провайдера, чтобы настроить его доступы."
+Click the button below to complete your registration and set a new password.,"Нажмите кнопку ниже, чтобы завершить регистрацию и задать пароль."
 Click to upload an image.,"Нажмите, чтобы загрузить изображение."
 Close student view,Выйти из режима студента
 Coaching or Training Institute,Курсы или учебный центр
 College or University,Колледж или университет
 Comma separated keywords,Ключевые слова через запятую
 Company or Workplace,Компания или рабочее место
+Complete Registration,Завершить регистрацию
 Complete your profile,Заполните профиль
+Complete your registration,Завершите регистрацию
 Completion Rate,Доля прохождения
 Completion certificate,Сертификат об окончании
 Conferencing,Видеосвязь
@@ -99,6 +103,7 @@ Create and manage reusable email templates for your notifications.,Создав�
 Create chapter,Создать главу
 Curriculum,Программа обучения
 Customer Academy,Академия для клиентов
+Dear,"Здравствуйте,"
 Deduct marks for incorrect answers.,Снимать баллы за неверные ответы.
 Default Sending & Inbox,Отправка и входящие по умолчанию
 Define a badge and the criteria for awarding it to learners.,Опишите бейдж и условия его выдачи студентам.
@@ -164,12 +169,14 @@ Google Meet Account,Аккаунт Google Meet
 Google Meet Account created successfully,Аккаунт Google Meet успешно создан
 Google Meet Account deleted successfully,Аккаунт Google Meet успешно удалён
 Google Meet Account updated successfully,Аккаунт Google Meet успешно обновлён
+Hello,"Здравствуйте,"
 Hello Learner,Здравствуйте
 Here are the details:,Вот подробности:
 Highlight on the homepage.,Показывать на главной странице.
 Highlight what makes you unique and show your skills.,"Расскажите, чем вы уникальны, и покажите свои навыки."
 How to edit a lesson,Как редактировать урок
 I am happy to announce that I earned the {0} badge on {1} at {2},"Рад сообщить, что {1} я получил бейдж {0} на платформе {2}"
+"If you did not request a password reset, please ignore this email. Your password will remain unchanged.","Если вы не просили сменить пароль, просто проигнорируйте письмо: пароль останется прежним."
 Import via Data Import Tool,Импорт через Data Import Tool
 Import via ZIP,Импорт из ZIP
 In-app,В приложении
@@ -242,9 +249,11 @@ Only show batches that offer a certificate,Показывать только п�
 Only show courses that offer a certificate,Показывать только курсы с сертификатом
 Only {0} file is allowed.,Можно загружать только файлы {0}.
 Open to Work,Ищу работу
+Or copy and paste this link:,Или скопируйте ссылку в адресную строку:
 "Oversee all users, content, and system settings","Контроль всех пользователей, контента и настроек системы"
 Paid certificate,Платный сертификат
 Paid course,Платный курс
+Password Reset,Сброс пароля
 Paste a YouTube link,Вставьте ссылку на YouTube
 "Paste a YouTube link, or upload a video file (MP4, WebM, or OGG) to show a preview on the course page.","Вставьте ссылку на YouTube или загрузите видеофайл (MP4, WebM или OGG), чтобы показать превью на странице курса."
 Payment gateways deleted successfully,Платёжные шлюзы успешно удалены
@@ -281,6 +290,8 @@ Randomize the order of questions for each attempt.,Перемешивать по
 Remove row,Удалить строку
 Remove the image to pick a color instead.,"Удалите изображение, чтобы выбрать цвет."
 Reply cannot be empty.,Ответ не может быть пустым.
+Reset Password,Сбросить пароль
+Reset your password,Задайте новый пароль
 Review and update the details of this payment.,Проверьте и обновите данные этого платежа.
 Rust,Rust
 Saved — this format can't be previewed here.,Сохранено — этот формат здесь не показывается.
@@ -320,6 +331,8 @@ TalentLMS,TalentLMS
 Taught by,Преподают
 Taught by a team of {0},Преподаёт команда из {0}
 Teachable,Teachable
+Thank you,Спасибо
+Thanks,Спасибо
 The Google Meet account does not have a Google Calendar configured. Please set up a Google Calendar first.,Для аккаунта Google Meet не настроен Google Календарь. Сначала настройте Google Календарь.
 The deadline to schedule evaluations has passed. Please contact the Instructor for assistance.,Срок записи на оценку истёк. Обратитесь за помощью к инструктору.
 The instructor has left a comment on your assignment {0},Инструктор оставил комментарий к вашему заданию {0}
@@ -364,6 +377,8 @@ User does not have permission to access this user's profile details.,У поль
 Video failed to load — this lesson will still be marked complete after you spend some time on it.,"Видео не загрузилось — урок всё равно будет отмечен как пройденный, когда вы проведёте на нём немного времени."
 View all reviews,Смотреть все отзывы
 Watch Time (mins),Время просмотра (мин)
+We received a request to reset the password for your account. Click the button below to set a new password.,"Мы получили запрос на смену пароля от вашего аккаунта. Нажмите кнопку ниже, чтобы задать новый пароль."
+Welcome to {0},Добро пожаловать в {0}
 What are you using today to manage learning?,Чем вы сейчас пользуетесь для организации обучения?
 What is this badge awarded for?,За что выдаётся этот бейдж?
 What's the first milestone you'd like to achieve?,Какой первой цели вы хотите достичь?
@@ -409,6 +424,7 @@ You're enrolled in {0} – start whenever you're ready,"Вы записаны н
 YouTube link added — students see it embedded on the course page. Clear the field to upload a file instead.,"Ссылка на YouTube добавлена — студенты видят видео на странице курса. Очистите поле, чтобы вместо этого загрузить файл."
 Your browser does not support the video tag.,Ваш браузер не поддерживает тег video.
 Your evaluation for the course {0} has been scheduled on {1} at {2} ({3} time).,Ваша оценка по курсу {0} назначена на {1} в {2} (время {3}).
+Your login ID is:,Ваш логин:
 Zoom,Zoom
 Zoom account deleted successfully,Аккаунт Zoom успешно удалён
 course must be a string,course должен быть строкой
