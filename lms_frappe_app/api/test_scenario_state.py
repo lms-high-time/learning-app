@@ -126,41 +126,81 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 		self.assertGreater(self.запись().turns_since, now_datetime() - timedelta(minutes=1))
 		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 2)
 
-	def test_первый_ход_двух_запросов_разом_не_роняет_метод(self):
-		"""Два первых хода разом: оба не нашли записи, второй упирается в
-		уникальный индекс. Он должен досчитать ход по записи первого, а не
-		отдать сервису ошибку базы и сообщение «must be unique»."""
-		frappe.get_doc(
-			{
-				"doctype": "Agent Scenario State",
-				"student": self.ученик,
-				"scenario_key": КЛЮЧ,
-				"turns": 4,
-				"turns_since": now_datetime(),
-			}
-		).insert(ignore_permissions=True)
-		настоящий = frappe.db.get_value
-		обмануто = []
+	def гонка(self, функция: str, *исходы):
+		"""Запись разговора по очереди: исключение — бросить, `None` — настоящая.
 
-		def запись_ещё_не_видна(doctype, filters=None, *args, **kwargs):
-			# Первую проверку существования метод проигрывает: запись соседа
-			# появилась сразу после неё.
-			if doctype == "Agent Scenario State" and isinstance(filters, dict) and not обмануто:
-				обмануто.append(filters)
-				return None
-			return настоящий(doctype, filters, *args, **kwargs)
+		`Why:` гонку MariaDB стенда в тесте не вызвать — одна транзакция;
+		заглушка отдаёт её так, как база отдала бы второму из двух ходов разом.
+		Откат подменён: настоящий снял бы данные теста.
+		"""
+		настоящая = getattr(student, функция)
+		очередь = list(исходы)
+
+		def запись(*args, **kwargs):
+			исход = очередь.pop(0)
+			if callable(исход):
+				исход = исход()
+			if исход is None:
+				return настоящая(*args, **kwargs)
+			raise исход
+
+		return patch.object(student, функция, side_effect=запись), patch.object(frappe.db, "rollback")
+
+	def вызовы(self):
+		"""Метод и его запись: ход и сохранение разговора гонку переживают одинаково."""
+		return (
+			("_засчитать_ход", lambda: student.count_scenario_turn(КЛЮЧ)),
+			("_сохранить_разговор", lambda: student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")),
+			("_сбросить_разговор", lambda: student.reset_scenario_state(КЛЮЧ)),
+		)
+
+	def test_гонка_повторяется_один_раз(self):
+		for функция, вызов in self.вызовы():
+			for ошибка in (
+				frappe.QueryDeadlockError("1020"),
+				frappe.QueryTimeoutError("1205"),
+				frappe.UniqueValidationError("1062"),
+			):
+				подмена, откат = self.гонка(функция, ошибка, None)
+				with подмена, откат:
+					ответ = вызов()
+				self.assertTrue(ответ["ok"], (функция, ошибка, ответ))
+		self.assertEqual(self.запись().state, None, "сброс шёл последним")
+		self.assertEqual(self.запись().turns, 3)
+
+	def test_гонка_дважды_даёт_busy(self):
+		for функция, вызов in self.вызовы():
+			подмена, откат = self.гонка(
+				функция, frappe.QueryDeadlockError("1020"), frappe.QueryDeadlockError("1020")
+			)
+			with подмена, откат:
+				ответ = вызов()
+			self.assertFalse(ответ["ok"], функция)
+			self.assertEqual(
+				(ответ["error"]["code"], ответ["error"]["key"]), ("busy", КЛЮЧ), функция
+			)
+
+	def test_сообщение_о_дубле_не_уходит_в_ответ(self):
+		"""Frappe кладёт «must be unique» в журнал перед исключением; при
+		успешном повторе оно ушло бы в ответ ученику."""
+
+		def дубль():
+			frappe.msgprint("Student must be unique")
+			return frappe.UniqueValidationError("1062")
 
 		сообщений = len(frappe.local.message_log)
-		with patch.object(frappe.db, "get_value", side_effect=запись_ещё_не_видна):
+		подмена, откат = self.гонка("_засчитать_ход", дубль, None)
+		with подмена, откат:
 			ответ = student.count_scenario_turn(КЛЮЧ)
 
-		self.assertTrue(обмануто, "проверка существования не подменилась")
-		self.assertTrue(ответ["ok"], ответ.get("error"))
-		self.assertEqual(ответ["data"]["turns"], 5)
+		self.assertEqual(ответ["data"]["turns"], 1)
 		self.assertEqual(len(frappe.local.message_log), сообщений)
-		self.assertEqual(
-			frappe.db.count("Agent Scenario State", {"student": self.ученик, "scenario_key": КЛЮЧ}), 1
-		)
+
+	def test_первое_сохранение_заводит_запись_с_разговором(self):
+		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
+
+		запись = self.запись()
+		self.assertEqual((запись.state, запись.state_version, запись.turns), (СОСТОЯНИЕ, "1", 0))
 
 	def test_неверный_ключ_отклоняется(self):
 		for ключ in ("", "Profile", "1profile", "lesson:1", "a" * 33, "profile\n", None):

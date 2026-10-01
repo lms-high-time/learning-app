@@ -1566,9 +1566,11 @@ def save_chat_state(session: str, state: str, version: str) -> dict:
 #: Ключ сценария боковой панели: `profile`, позже `onboarding`. Короткое имя
 #: латиницей — им же сценарий называется в адресе панели.
 КЛЮЧ_СЦЕНАРИЯ = re.compile(r"[a-z][a-z0-9_-]{0,31}")
-#: Окно счёта ходов сценария. `Why:` сутки, а не навсегда: лимит навсегда
-#: закрыл бы профиль ученику, который вернётся к нему через полгода.
+#: Окно счёта ходов сценария — 24 часа от первого хода окна. `Why:` окно, а не
+#: счёт навсегда: лимит навсегда закрыл бы профиль ученику, который вернётся к
+#: нему через полгода.
 ОКНО_ХОДОВ = timedelta(days=1)
+СЦЕНАРИЙ = "Agent Scenario State"
 
 
 @frappe.whitelist()
@@ -1581,7 +1583,7 @@ def scenario_state(key: str) -> dict:
 	"""
 	ключ = _ключ_сценария(key)
 	запись = frappe.db.get_value(
-		"Agent Scenario State",
+		СЦЕНАРИЙ,
 		{"student": текущий_пользователь(), "scenario_key": ключ},
 		["state", "state_version"],
 		as_dict=True,
@@ -1605,11 +1607,7 @@ def save_scenario_state(key: str, state: str, version: str) -> dict:
 			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", key=key
 		) from сбой
 
-	frappe.db.set_value(
-		"Agent Scenario State",
-		_запись_сценария(ключ),
-		{"state": state, "state_version": version},
-	)
+	_с_повтором_при_гонке(ключ, _сохранить_разговор, текущий_пользователь(), ключ, state, version)
 	return {"key": ключ, "version": version}
 
 
@@ -1622,35 +1620,22 @@ def reset_scenario_state(key: str) -> dict:
 	кнопкой «начать заново».
 	"""
 	ключ = _ключ_сценария(key)
-	имя = frappe.db.get_value(
-		"Agent Scenario State", {"student": текущий_пользователь(), "scenario_key": ключ}
-	)
-	if имя:
-		frappe.db.set_value("Agent Scenario State", имя, {"state": None, "state_version": None})
+	_с_повтором_при_гонке(ключ, _сбросить_разговор, текущий_пользователь(), ключ)
 	return {"key": ключ}
 
 
 @frappe.whitelist(methods=["POST"])
 @контракт
 def count_scenario_turn(key: str) -> dict:
-	"""Засчитывает ход сценария и отвечает, сколько их за текущие сутки.
+	"""Засчитывает ход сценария и отвечает, сколько их в текущем окне.
 
 	Лимит сверяет сервис чата: сколько ходов позволено, знает он. Счёт ведёт
-	Frappe отдельным методом, а не перезаписью вместе с разговором: строка
-	блокируется на время счёта, и два хода подряд не засчитаются за один.
-	Счётчик живёт в базе, поэтому рестарт сервиса его не обнуляет.
+	Frappe отдельным методом, а не перезаписью вместе с разговором: перезапись
+	затёрла бы ход, засчитанный параллельно. Счётчик живёт в базе, поэтому
+	рестарт сервиса его не обнуляет.
 	"""
 	ключ = _ключ_сценария(key)
-	имя = _запись_сценария(ключ)
-	запись = frappe.db.get_value(
-		"Agent Scenario State", имя, ["turns", "turns_since"], as_dict=True, for_update=True
-	)
-	сейчас = now_datetime()
-	if not запись.turns_since or запись.turns_since <= сейчас - ОКНО_ХОДОВ:
-		ходов, с = 1, сейчас
-	else:
-		ходов, с = (запись.turns or 0) + 1, запись.turns_since
-	frappe.db.set_value("Agent Scenario State", имя, {"turns": ходов, "turns_since": с})
+	ходов = _с_повтором_при_гонке(ключ, _засчитать_ход, текущий_пользователь(), ключ)
 	return {"key": ключ, "turns": ходов}
 
 
@@ -1664,32 +1649,67 @@ def _ключ_сценария(key) -> str:
 	return key
 
 
-def _запись_сценария(ключ: str) -> str:
-	"""Запись сценария текущего ученика; нет — заводится пустой.
+def _с_повтором_при_гонке(ключ: str, действие, *args):
+	"""Запись разговора сценария — с одним повтором на новом снимке.
 
-	Два первых хода разом оба не находят записи, и второй упирается в
-	уникальный индекс. `Why:` это не сбой, а проигранная гонка: запись уже
-	есть, и ход досчитывается по ней, а не уходит сервису ошибкой базы.
-	Перечитывается она блокирующим чтением — обычное видит снимок транзакции
-	до вставки соседа и записи не находит. Сообщение «must be unique», которое
-	Frappe кладёт в журнал перед исключением, убирается: в ответ оно попало
-	бы при успехе.
+	`Why:` MariaDB стенда работает со снимочной изоляцией
+	(`innodb_snapshot_isolation`): два хода разом отдают второму
+	взаимоблокировку на блокирующем чтении строки, которую первый изменил или
+	вставил после начала снимка, а занятая строка — таймаут. Первый ход двух
+	запросов разом упирается ещё и в уникальный индекс. Перечитать запись в
+	той же транзакции нельзя — снимок тот же, и чтение снова упадёт. Поэтому
+	откат и один повтор: на новом снимке чужая запись уже видна. Не вышло и со
+	второго раза — `busy`. Сообщение «must be unique», которое Frappe кладёт в
+	журнал перед исключением, убирается: при успехе повтора оно ушло бы в
+	ответ.
 	"""
-	ученик = текущий_пользователь()
+	for попытка in range(2):
+		сообщений = len(frappe.local.message_log)
+		try:
+			return действие(*args)
+		except (frappe.QueryDeadlockError, frappe.QueryTimeoutError, frappe.UniqueValidationError):
+			frappe.db.rollback()
+			frappe.local.message_log = frappe.local.message_log[:сообщений]
+			if попытка:
+				raise Отказ(
+					домашка.ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
+				)
+
+
+def _засчитать_ход(ученик: str, ключ: str) -> int:
 	отбор = {"student": ученик, "scenario_key": ключ}
-	имя = frappe.db.get_value("Agent Scenario State", отбор)
-	if имя:
-		return имя
-	сообщений = len(frappe.local.message_log)
-	try:
-		return (
-			frappe.get_doc({"doctype": "Agent Scenario State", **отбор})
-			.insert(ignore_permissions=True)
-			.name
+	запись = frappe.db.get_value(
+		СЦЕНАРИЙ, отбор, ["name", "turns", "turns_since"], as_dict=True, for_update=True
+	)
+	сейчас = now_datetime()
+	if not запись:
+		frappe.get_doc({"doctype": СЦЕНАРИЙ, **отбор, "turns": 1, "turns_since": сейчас}).insert(
+			ignore_permissions=True
 		)
-	except frappe.UniqueValidationError:
-		frappe.local.message_log = frappe.local.message_log[:сообщений]
-		return frappe.db.get_value("Agent Scenario State", отбор, for_update=True)
+		return 1
+	if not запись.turns_since or запись.turns_since <= сейчас - ОКНО_ХОДОВ:
+		ходов, с = 1, сейчас
+	else:
+		ходов, с = (запись.turns or 0) + 1, запись.turns_since
+	frappe.db.set_value(СЦЕНАРИЙ, запись.name, {"turns": ходов, "turns_since": с})
+	return ходов
+
+
+def _сохранить_разговор(ученик: str, ключ: str, state: str, version: str) -> None:
+	отбор = {"student": ученик, "scenario_key": ключ}
+	имя = frappe.db.get_value(СЦЕНАРИЙ, отбор, for_update=True)
+	if имя:
+		frappe.db.set_value(СЦЕНАРИЙ, имя, {"state": state, "state_version": version})
+	else:
+		frappe.get_doc(
+			{"doctype": СЦЕНАРИЙ, **отбор, "state": state, "state_version": version}
+		).insert(ignore_permissions=True)
+
+
+def _сбросить_разговор(ученик: str, ключ: str) -> None:
+	имя = frappe.db.get_value(СЦЕНАРИЙ, {"student": ученик, "scenario_key": ключ}, for_update=True)
+	if имя:
+		frappe.db.set_value(СЦЕНАРИЙ, имя, {"state": None, "state_version": None})
 
 
 @frappe.whitelist()
