@@ -26,6 +26,10 @@ from lms_frappe_app.agent_learning.notices import почта_есть
 
 ПРОВЕРЬТЕ_ПОЧТУ = "Проверьте почту: мы отправили письмо со ссылкой."
 
+#: Общий ключ счётчика регистраций. Frappe ключует счётчик вызванным методом,
+#: и без общего ключа каждая форма и `/api/v2` считали бы попытки порознь.
+ЛИМИТ_РЕГИСТРАЦИИ = "lms_frappe_app.access.sign_up"
+
 
 def запись_ключа(key: str | None):
 	if not key:
@@ -131,14 +135,22 @@ def _адрес(email: str | None) -> str:
 def _зарегистрировать(адрес: str, создать) -> tuple[int, str]:
 	if is_signup_disabled():
 		frappe.throw(_("Sign Up is disabled"), title=_("Not Allowed"))
-	# Лимит берёт адрес из `form_dict`: кладём туда приведённый, иначе каждое
-	# написание адреса считалось бы отдельно.
-	frappe.form_dict.email = адрес
-	return _зарегистрировать_в_лимите(адрес, создать)
+	if not адрес:
+		frappe.throw(_("Please enter a valid email."))
+	# Лимит берёт адрес и метод из `form_dict`: кладём туда приведённый адрес
+	# и общий ключ, иначе каждое написание адреса и каждая форма считались бы
+	# отдельно.
+	прежний = frappe.form_dict.cmd
+	frappe.form_dict.update(email=адрес, cmd=ЛИМИТ_РЕГИСТРАЦИИ)
+	try:
+		return _зарегистрировать_в_лимите(адрес, создать)
+	finally:
+		frappe.form_dict.cmd = прежний
 
 
-# По адресу, а не по IP: за двумя nginx Frappe видит у всех клиентов один IP,
-# и лимит по нему закрыл бы регистрацию всему сайту.
+# По адресу, а не по IP: nginx образа `frontend` подставляет в
+# `X-Forwarded-For` адрес контейнера `site` (`@webserver` в `frappe.conf`), и
+# Frappe видит у всех клиентов один IP — лимит по нему был бы общим на сайт.
 @rate_limit(key="email", limit=5, seconds=60 * 60, ip_based=False)
 def _зарегистрировать_в_лимите(адрес: str, создать) -> tuple[int, str]:
 	"""Один ответ на новый, занятый и отключённый адрес.
@@ -148,6 +160,10 @@ def _зарегистрировать_в_лимите(адрес: str, созд�
 	уходит письмо со ссылкой на пароль, а одинаковый ответ не выдаёт, есть ли
 	на платформе чужой адрес. Лимит частоты — против рассылки писем на чужой
 	ящик через форму.
+
+	Когда почта не настроена, ответы расходятся: новому адресу Frappe ещё и
+	пишет в `message_log` «настройте исходящую почту». Это авария, а не режим
+	работы, и прятать её от формы незачем.
 	"""
 	занятый = frappe.db.get_value("User", {"email": адрес}, ["name", "enabled"], as_dict=True)
 	if занятый:
@@ -174,8 +190,14 @@ def _письмо_аккаунт_есть(пользователь: str) -> None
 	if not почта_есть():
 		return
 	документ = frappe.get_doc("User", пользователь)
-	# Хук приложений, которым `reset_password` Frappe может запретить сброс.
-	документ.validate_reset_password()
+	try:
+		# Хук приложений, которым `reset_password` Frappe может запретить
+		# сброс. Отказ, как и у Frappe, не меняет ответа формы — письма просто нет.
+		документ.validate_reset_password()
+	except Exception:
+		frappe.clear_messages()
+		frappe.log_error(title="Ссылка на пароль для занятого адреса не выдана")
+		return
 	ссылка = документ._reset_password()
 	frappe.sendmail(
 		recipients=[frappe.db.get_value("User", пользователь, "email")],

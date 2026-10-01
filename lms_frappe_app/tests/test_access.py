@@ -13,6 +13,7 @@ from lms_frappe_app.access import (
 	КЛЮЧ_ДЕЙСТВУЕТ,
 	КЛЮЧ_НЕ_НАЙДЕН,
 	КЛЮЧ_УСТАРЕЛ,
+	ЛИМИТ_РЕГИСТРАЦИИ,
 	ПРОВЕРЬТЕ_ПОЧТУ,
 	sign_up,
 	sign_up_learning,
@@ -198,8 +199,8 @@ class IntegrationTestSignUp(IntegrationTestCase):
 			setattr(frappe.local, имя, значение)
 
 	def сбросить_лимит(self):
-		# Только счётчики этих тестов: сайт общий с соседними прогонами.
-		frappe.cache.delete_keys(f"rl:{frappe.form_dict.cmd}:")
+		# Только счётчик регистрации: сайт общий с соседними прогонами.
+		frappe.cache.delete_keys(f"rl:{ЛИМИТ_РЕГИСТРАЦИИ}:")
 
 	def новый_адрес(self) -> str:
 		return f"signup-{frappe.generate_hash(length=8)}@example.com"
@@ -255,11 +256,31 @@ class IntegrationTestSignUp(IntegrationTestCase):
 		for попытка in range(5):
 			sign_up(пользователь if попытка % 2 else пользователь.upper(), "Кто-то", "")
 
-		# Лимит — по адресу, а не по IP: за двумя nginx Frappe видит у всех
-		# клиентов один IP, и лимит по нему закрыл бы регистрацию всему сайту.
+		# Лимит — по адресу, а не по IP (обоснование в `access.py`).
 		self.assertEqual(sign_up(ученик(), "Кто-то", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
 		with self.assertRaises(frappe.RateLimitExceededError):
 			sign_up(" " + пользователь, "Кто-то", "")
+
+	def test_лимит_общий_для_обеих_форм(self):
+		"""Счётчик Frappe ключуется вызванным методом: без общего ключа каждая
+		форма и `/api/v2` давали бы свои пять писем в час на один ящик."""
+		пользователь = ученик()
+		for попытка in range(5):
+			if попытка % 2:
+				frappe.form_dict.cmd = "lms.lms.user.sign_up"
+				sign_up_learning(пользователь, "Кто-то", 1, "")
+			else:
+				frappe.form_dict.cmd = "frappe.core.doctype.user.user.sign_up"
+				sign_up(пользователь, "Кто-то", "")
+
+		frappe.form_dict.cmd = None
+		with self.assertRaises(frappe.RateLimitExceededError):
+			sign_up(пользователь, "Кто-то", "")
+
+	def test_пустой_адрес_отклоняется_понятно(self):
+		with self.assertRaises(frappe.ValidationError) as отказ:
+			sign_up("  ", "Кто-то", "")
+		self.assertNotIn("Either key or IP", str(отказ.exception))
 
 	def test_отключённый_адрес_отвечает_так_же_и_без_письма(self):
 		пользователь = ученик()
