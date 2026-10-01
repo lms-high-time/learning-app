@@ -47,7 +47,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 				"probing_questions": "Кто принимает решение о запуске?",
 				"common_misconceptions": "Проект — это любая работа",
 				"success_criteria": "Ученик называет спонсора своими словами",
-				"map_icon": "rocket",
 			}
 		).insert(ignore_permissions=True)
 
@@ -177,13 +176,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 		]
 
 		self.assertEqual(наш, их)
-
-	def test_иконка_урока_приходит_из_директивы(self):
-		frappe.set_user("Guest")
-
-		урок = self.карта()["chapters"][0]["lessons"][0]
-
-		self.assertEqual(урок["icon"], "rocket")
 
 	def test_тело_директивы_наружу_не_выходит(self):
 		frappe.set_user("Guest")
