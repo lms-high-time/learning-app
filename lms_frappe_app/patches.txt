@@ -15,3 +15,4 @@ lms_frappe_app.patches.v0_1.quiz_full_score
 lms_frappe_app.patches.v0_1.artifact_templates
 lms_frappe_app.patches.v0_1.org_roles_without_desk
 lms_frappe_app.patches.v0_1.assistant_sidebar_title
+lms_frappe_app.patches.v0_1.drop_authoring_guide_tool

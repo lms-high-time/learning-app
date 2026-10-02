@@ -293,7 +293,6 @@ def политика_по_умолчанию() -> None:
 			"lesson_segment_limit": 6000,
 			"web_demo_lessons": 2,
 			"agent_service_url": get_url().rstrip("/"),
-			"authoring_guide_tool": "authoring_guide",
 		}
 	)
 	настройки.save(ignore_permissions=True)
