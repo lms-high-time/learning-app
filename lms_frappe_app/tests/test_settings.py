@@ -108,7 +108,10 @@ class IntegrationTestSettings(IntegrationTestCase):
 		frappe.db.set_single_value(НАСТРОЙКИ, "authoring_guide_tool", "authoring_guide", update_modified=False)
 		self.assertIn("authoring_guide_tool", frappe.db.get_singles_dict(НАСТРОЙКИ))
 
+		было = frappe.db.get_singles_dict(НАСТРОЙКИ)
 		execute()
 		execute()  # повторный запуск не падает
 
-		self.assertNotIn("authoring_guide_tool", frappe.db.get_singles_dict(НАСТРОЙКИ))
+		# Ушло ровно это значение: остальные настройки на месте.
+		было.pop("authoring_guide_tool")
+		self.assertEqual(frappe.db.get_singles_dict(НАСТРОЙКИ), было)
