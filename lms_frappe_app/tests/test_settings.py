@@ -101,3 +101,14 @@ class IntegrationTestSettings(IntegrationTestCase):
 		обеспечить_значения_настроек()
 
 		self.assertEqual(frappe.db.get_singles_dict(НАСТРОЙКИ)["carry_over_depth"], "")
+
+	def test_патч_стирает_значение_убранного_поля(self):
+		from lms_frappe_app.patches.v0_1.drop_authoring_guide_tool import execute
+
+		frappe.db.set_single_value(НАСТРОЙКИ, "authoring_guide_tool", "authoring_guide", update_modified=False)
+		self.assertIn("authoring_guide_tool", frappe.db.get_singles_dict(НАСТРОЙКИ))
+
+		execute()
+		execute()  # повторный запуск не падает
+
+		self.assertNotIn("authoring_guide_tool", frappe.db.get_singles_dict(НАСТРОЙКИ))
