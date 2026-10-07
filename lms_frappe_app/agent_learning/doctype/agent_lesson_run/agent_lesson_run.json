@@ -1,8 +1,7 @@
 {
  "actions": [],
- "allow_rename": 0,
  "autoname": "hash",
- "creation": "2026-10-08 12:00:00.000000",
+ "creation": "2026-10-08 12:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -28,32 +27,32 @@
   {
    "fieldname": "student",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Ученик",
    "options": "User",
+   "read_only": 1,
    "reqd": 1,
-   "in_list_view": 1,
-   "search_index": 1,
-   "read_only": 1
+   "search_index": 1
   },
   {
    "fieldname": "course",
    "fieldtype": "Link",
-   "label": "Курс",
-   "options": "LMS Course",
-   "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "search_index": 1,
-   "read_only": 1
+   "label": "Курс",
+   "options": "LMS Course",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
   },
   {
+   "description": "Опора прохождения: ключ стабилен между релизами",
    "fieldname": "lesson_key",
    "fieldtype": "Data",
-   "label": "Ключ урока",
-   "reqd": 1,
    "in_list_view": 1,
-   "description": "Опора прохождения: ключ стабилен между релизами",
-   "read_only": 1
+   "label": "Ключ урока",
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "fieldname": "lesson",
@@ -63,21 +62,21 @@
    "read_only": 1
   },
   {
+   "description": "Релиз, с которым сверены пункты и цели",
    "fieldname": "release",
    "fieldtype": "Link",
    "label": "Релиз",
    "options": "Agent Course Release",
-   "description": "Релиз, с которым сверены пункты и цели",
    "read_only": 1
   },
   {
    "default": "not_started",
    "fieldname": "status",
    "fieldtype": "Select",
-   "label": "Статус",
-   "options": "not_started\nin_progress\ncovered\npassed",
    "in_list_view": 1,
    "in_standard_filter": 1,
+   "label": "Статус",
+   "options": "not_started\nin_progress\ncovered\npassed",
    "read_only": 1
   },
   {
@@ -86,10 +85,10 @@
    "label": "Время"
   },
   {
+   "description": "Когда агент впервые получил список пунктов",
    "fieldname": "accepted_at",
    "fieldtype": "Datetime",
    "label": "Список принят",
-   "description": "Когда агент впервые получил список пунктов",
    "read_only": 1
   },
   {
@@ -105,10 +104,10 @@
    "read_only": 1
   },
   {
+   "description": "Заметка агента",
    "fieldname": "resume_from",
    "fieldtype": "Small Text",
    "label": "С чего продолжить",
-   "description": "Заметка агента",
    "read_only": 1
   },
   {
@@ -142,8 +141,8 @@
    "fieldtype": "Link",
    "label": "Ученик до сброса",
    "options": "User",
-   "search_index": 1,
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "fieldname": "archived_at",
@@ -154,7 +153,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-08 12:00:00.000000",
+ "modified": "2026-10-08 12:00:00",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Lesson Run",

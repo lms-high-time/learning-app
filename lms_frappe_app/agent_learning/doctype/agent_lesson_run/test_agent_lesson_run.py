@@ -17,7 +17,7 @@ DOCTYPE = "Agent Lesson Run"
 
 
 class IntegrationTestAgentLessonRun(IntegrationTestCase):
-	"""Прохождение урока: одно на ученика и урок, видят его только платформа (learning-services#504)."""
+	"""Прохождение урока: одно на ученика и урок, видит его только платформа (learning-services#504)."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")

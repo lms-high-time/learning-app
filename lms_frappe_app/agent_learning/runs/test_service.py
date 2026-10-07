@@ -257,13 +257,121 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.опубликовать(релиз_двух_целей(self.ключ))
 		второй = релиз_двух_целей(self.ключ)
 		пункт(второй, "term:T1")["title"] = "Термин «другой пример»"
+		# Вне тестов: в тестах сбой сверки — ошибка теста (см. следующий тест).
 		with (
+			patch.object(frappe, "in_test", False),
 			patch.object(frappe, "enqueue", side_effect=RuntimeError("очередь переполнена")),
 			patch.object(frappe, "log_error") as журнал,
 		):
 			ответ = self.опубликовать(второй)
 		журнал.assert_called_once()
 		self.assertEqual(ответ["version"], 2)
+
+	def test_в_тестах_ошибка_сверки_не_прячется(self):
+		self.опубликовать(релиз_двух_целей(self.ключ))
+		второй = релиз_двух_целей(self.ключ)
+		пункт(второй, "term:T1")["title"] = "Термин «другой пример»"
+		with (
+			patch.object(service, "сверить_курс", side_effect=RuntimeError("ошибка сверки")),
+			self.assertRaises(RuntimeError),
+		):
+			self.опубликовать(второй)
+
+	def новый_релиз(self, курс: str) -> str:
+		"""Второй релиз курса без фоновой сверки: её зовёт тест."""
+		второй = релиз_двух_целей(self.ключ)
+		пункт(второй, "term:T1")["title"] = "Термин «другой пример»"
+		with patch.object(frappe, "enqueue"):
+			return self.опубликовать(второй)["release"]
+
+	def ученики(self, курс: str, сколько: int) -> list:
+		return [
+			service.прохождение(
+				создать_ученика(f"run-svc-{номер}-{frappe.generate_hash(length=6)}@example.com"), курс, "l-1"
+			)
+			for номер in range(сколько)
+		]
+
+	def test_сверка_курса_пропускает_архивные(self):
+		ответ = self.опубликовать(релиз_двух_целей(self.ключ))
+		курс = ответ["course"]
+		живые = self.ученики(курс, 2)
+		[архивное] = self.ученики(курс, 1)
+		frappe.db.set_value(
+			ПРОХОЖДЕНИЕ,
+			архивное.name,
+			{"student": None, "archived_student": архивное.student, "archived_at": now_datetime()},
+		)
+		новый = self.новый_релиз(курс)
+
+		with patch.object(service.index, "урок", wraps=service.index.урок) as урок:
+			self.assertEqual(service.сверить_курс(курс), 2)
+
+		# Урок релиза прочитан один раз на ключ, а не на каждое прохождение.
+		self.assertEqual(урок.call_count, 1)
+		for run in живые:
+			self.assertEqual(self.перечитать(run).release, новый)
+		self.assertEqual(self.перечитать(архивное).release, ответ["release"])
+		self.assertEqual(service.сверить_курс(курс), 0)
+
+	def test_сбой_одного_прохождения_не_срывает_сверку_курса(self):
+		ответ = self.опубликовать(релиз_двух_целей(self.ключ))
+		курс = ответ["course"]
+		плохое, хорошее = self.ученики(курс, 2)
+		новый = self.новый_релиз(курс)
+		сверить = service._сверить
+
+		def сбой(run, *args):
+			if run.name == плохое.name:
+				raise RuntimeError("сбой сверки")
+			return сверить(run, *args)
+
+		with (
+			patch.object(service, "_сверить", side_effect=сбой),
+			patch.object(frappe, "log_error") as журнал,
+		):
+			self.assertEqual(service.сверить_курс(курс), 1)
+
+		журнал.assert_called_once()
+		self.assertEqual(self.перечитать(хорошее).release, новый)
+		self.assertEqual(self.перечитать(плохое).release, ответ["release"])
+
+	def test_взаимоблокировка_откатывает_и_сверка_идёт_дальше(self):
+		"""Взаимоблокировка откатывает транзакцию целиком: откат — полный, не к точке."""
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		гонка, хорошее = self.ученики(курс, 2)
+		новый = self.новый_релиз(курс)
+		сверить = service._сверить
+
+		def сбой(run, *args):
+			if run.name == гонка.name:
+				raise frappe.QueryDeadlockError("1213")
+			return сверить(run, *args)
+
+		# Полный откат в тесте снял бы и записи теста — он подменён.
+		with (
+			patch.object(service, "_сверить", side_effect=сбой),
+			patch.object(frappe.db, "rollback") as откат,
+			patch.object(frappe, "log_error") as журнал,
+		):
+			self.assertEqual(service.сверить_курс(курс), 1)
+
+		откат.assert_called_once_with()
+		журнал.assert_called_once()
+		self.assertEqual(self.перечитать(хорошее).release, новый)
+
+	def test_курс_с_прохождениями_не_удаляется(self):
+		ответ = self.опубликовать(релиз_двух_целей(self.ключ))
+		курс = ответ["course"]
+		service.прохождение(self.ученик, курс, "l-1")
+		frappe.set_user("Administrator")
+
+		with self.assertRaises(Отказ) as пойман:
+			релизы.удалить_курс(курс)
+
+		self.assertEqual(пойман.exception.код, "course_has_lesson_runs")
+		self.assertEqual(frappe.db.get_value("LMS Course", курс, "active_release"), ответ["release"])
+		self.assertTrue(frappe.db.exists("Agent Course Release", ответ["release"]))
 
 	def test_урок_исчез_из_релиза(self):
 		релиз = пример_релиза(self.ключ)
@@ -294,7 +402,11 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(пойман.exception.код, "lesson_not_in_release")
 
 	def test_гонка_создания_отдаёт_уже_созданное(self):
-		"""Параллельный вызов вставил прохождение между поиском и вставкой."""
+		"""Параллельный вызов вставил прохождение между поиском и вставкой.
+
+		Случай, когда чужая запись видна снимку этой транзакции. При настоящей
+		гонке перечитывание падает взаимоблокировкой — её отдаёт `busy` метод
+		контракта (`_вставить`)."""
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
 		первое = service.прохождение(self.ученик, курс, "l-1")
 		найти = service._найти

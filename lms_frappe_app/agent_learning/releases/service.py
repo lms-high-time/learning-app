@@ -37,6 +37,7 @@ from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗ�
 КЛЮЧ_НЕ_ТОТ = "course_key_mismatch"
 КЛЮЧ_ЗАНЯТ = "course_key_taken"
 У_КУРСА_ЕСТЬ_УРОКИ = "course_has_content"
+КУРС_С_ПРОХОЖДЕНИЯМИ = "course_has_lesson_runs"
 
 
 def опубликовать(релиз, course: str | None, автор: str) -> dict:
@@ -95,6 +96,9 @@ def _сверить_прохождения(курс: str) -> None:
 			курс=курс,
 		)
 	except Exception:
+		# В тестах сверка идёт сразу, и её ошибка — ошибка теста, а не сбой очереди.
+		if frappe.in_test:
+			raise
 		frappe.log_error(title="Сверка прохождений не поставлена в очередь (learning-services#504)")
 
 
@@ -332,11 +336,21 @@ def удалить_курс(курс: str) -> None:
 	Для курсов, по которым учиться больше не будут (решение владельца: старые
 	курсы удаляются вместе с историей). Релизы и схемы документа — проекции
 	релиза, их удаление здесь; остальное удаляет Learning (`delete_course`).
-	Записи учеников по курсу — записи на курс Learning и прохождения уроков
-	(`Agent Lesson Run`) — не трогает: курс с ними удаление остановит ссылками.
+	Записи учеников по курсу не трогает: курс с прохождениями уроков
+	(`Agent Lesson Run`) — отказ `course_has_lesson_runs` до первой записи,
+	с записями на курс Learning удаление остановит ссылками.
 	"""
 	from lms.lms.api import delete_course
 
+	# Why: прохождения ссылаются на релизы курса, и удаление встало бы на
+	# релизе — уже после того, как курс потерял действующий релиз.
+	if прохождений := frappe.db.count("Agent Lesson Run", {"course": курс}):
+		raise Отказ(
+			КУРС_С_ПРОХОЖДЕНИЯМИ,
+			"У курса есть прохождения уроков учеников: курс с ними не удаляется",
+			course=курс,
+			lesson_runs=прохождений,
+		)
 	frappe.db.set_value("LMS Course", курс, "active_release", None)
 	frappe.clear_document_cache("LMS Course", курс)
 	frappe.flags[УДАЛЯЕТСЯ_КУРС] = курс

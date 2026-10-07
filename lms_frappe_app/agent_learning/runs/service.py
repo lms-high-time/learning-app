@@ -21,6 +21,7 @@ from lms_frappe_app.agent_learning.releases import index
 ПРОХОЖДЕНИЕ = "Agent Lesson Run"
 УРОК_НЕ_В_РЕЛИЗЕ = "lesson_not_in_release"
 ТОЧКА_ВСТАВКИ = "lesson_run_insert"
+ТОЧКА_СВЕРКИ = "lesson_run_reconcile"
 
 ОТКРЫТ = "open"
 #: Статусы пункта, которые закрывают его для цели: разобран или отложен на потом.
@@ -52,7 +53,7 @@ def прохождение(ученик: str, курс: str, ключ_урока
 	run = frappe.get_doc(
 		{"doctype": ПРОХОЖДЕНИЕ, "student": ученик, "course": курс, "lesson_key": ключ_урока}
 	)
-	_привести(run, релиз, урок)
+	_привести(run, релиз, урок, index.цели_урока(релиз, ключ_урока))
 	return _вставить(run)
 
 
@@ -75,11 +76,7 @@ def сверить(run) -> bool:
 	if not релиз or релиз == run.release:
 		return False
 	урок = index.урок(релиз, run.lesson_key)
-	if not урок:
-		return False
-	_привести(run, релиз, урок)
-	run.save(ignore_permissions=True)
-	return True
+	return _сверить(run, релиз, урок, index.цели_урока(релиз, run.lesson_key) if урок else [])
 
 
 def статусы(run) -> None:
@@ -122,6 +119,14 @@ def сверить_курс(курс: str) -> int:
 	Ставится в фон публикацией релиза (`releases.service.опубликовать`).
 	Архивные прохождения (`student` пуст после сброса) не сверяются: это
 	история того, как ученик проходил урок, и новый релиз её не переписывает.
+	Урок релиза и его цели читаются один раз на ключ урока.
+
+	`Why:` каждое прохождение — своя транзакция. MariaDB стенда
+	(`innodb_snapshot_isolation`) отвечает взаимоблокировкой на блокирующее
+	чтение строки, которую после снимка задачи записал агент, и откатывает
+	транзакцию целиком: одна общая транзакция теряла бы всю сверку из-за
+	одного ученика и копила блокировки всех. Не сверенное здесь — гонка или
+	сбой — уходит в лог и сверится при обращении (`прохождение`).
 	"""
 	релиз = _действующий(курс)
 	if not релиз:
@@ -131,7 +136,39 @@ def сверить_курс(курс: str) -> int:
 		filters={"course": курс, "student": ("is", "set"), "release": ("!=", релиз)},
 		pluck="name",
 	)
-	return sum(сверить(frappe.get_doc(ПРОХОЖДЕНИЕ, имя, for_update=True)) for имя in имена)
+	уроки: dict[str, tuple] = {}
+	изменено = 0
+	for имя in имена:
+		frappe.db.savepoint(ТОЧКА_СВЕРКИ)
+		try:
+			run = frappe.get_doc(ПРОХОЖДЕНИЕ, имя, for_update=True)
+			if run.lesson_key not in уроки:
+				урок = index.урок(релиз, run.lesson_key)
+				уроки[run.lesson_key] = (урок, index.цели_урока(релиз, run.lesson_key) if урок else [])
+			if run.release != релиз:
+				изменено += _сверить(run, релиз, *уроки[run.lesson_key])
+		except frappe.QueryDeadlockError:
+			# Взаимоблокировка уже откатила транзакцию целиком — точки сохранения нет.
+			frappe.db.rollback()
+			frappe.log_error(
+				title="Прохождение не сверено: гонка с агентом (learning-services#504)",
+				reference_doctype=ПРОХОЖДЕНИЕ,
+				reference_name=имя,
+			)
+			continue
+		except Exception:
+			frappe.db.rollback(save_point=ТОЧКА_СВЕРКИ)
+			frappe.log_error(
+				title="Прохождение не сверено (learning-services#504)",
+				reference_doctype=ПРОХОЖДЕНИЕ,
+				reference_name=имя,
+			)
+			continue
+		frappe.db.release_savepoint(ТОЧКА_СВЕРКИ)
+		# В тестах — без коммита: тест откатывает свои записи сам.
+		if not frappe.in_test:
+			frappe.db.commit()
+	return изменено
 
 
 def _найти(ученик: str, курс: str, ключ_урока: str, *, for_update: bool = False) -> str | None:
@@ -153,6 +190,13 @@ def _вставить(run):
 	Дубль ловит уникальный индекс (`install.обеспечить_индекс_прохождений`);
 	откат к точке снимает только эту вставку, и прохождение перечитывается с
 	блокировкой — как `homework._вставить`.
+
+	`Why:` перечитывание помогает, только когда чужое прохождение видно снимку
+	этой транзакции — дубль в ней же или запись, зафиксированная до её
+	начала. При настоящей гонке MariaDB стенда (`innodb_snapshot_isolation`)
+	отвечает на блокирующее чтение новой строки взаимоблокировкой
+	(`frappe.QueryDeadlockError`), и она откатывает транзакцию целиком: метод
+	контракта, вызвавший `прохождение`, отдаёт её агенту как `busy`.
 	"""
 	frappe.db.savepoint(ТОЧКА_ВСТАВКИ)
 	try:
@@ -171,9 +215,17 @@ def _вставить(run):
 	return run
 
 
-def _привести(run, релиз: str, урок: dict) -> None:
+def _сверить(run, релиз: str, урок: dict | None, цели: list[dict]) -> bool:
+	"""Сверка с уроком релиза, уже прочитанным: `урок` пуст — урока в релизе нет."""
+	if not урок:
+		return False
+	_привести(run, релиз, урок, цели)
+	run.save(ignore_permissions=True)
+	return True
+
+
+def _привести(run, релиз: str, урок: dict, цели: list[dict]) -> None:
 	"""Строки прохождения — по уроку релиза, статусы пересчитаны; без сохранения."""
-	цели = index.цели_урока(релиз, run.lesson_key)
 	_сверить_пункты(run, цели)
 	_сверить_цели(run, цели)
 	run.release = релиз
