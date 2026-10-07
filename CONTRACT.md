@@ -1873,7 +1873,7 @@ Frappe.
 { "ok": true, "data": { "space": "personal",
   "courses_total": 3, "courses_overdue": 1,
   "courses": [ { "id": "course-basics", "title": "Основы", "deadline": "2026-09-15",
-                 "overdue": false, "completion": 0.42,
+                 "overdue": false, "archived": false, "completion": 0.42,
                  "documents": [ { "artifact": "summary", "title": "Резюме проекта",
                                   "purpose": "Проект на одной странице.",
                                   "layout": "sections",
@@ -1889,6 +1889,8 @@ Frappe.
 документ. У курса без документов — пустой список.
 `documents` — документы этого пространства. `recent_sessions` — последние
 занятия ученика в этом пространстве, свежие вперёд.
+Курс в архиве в списке есть — с `archived: true` и без просрочки: занятия
+по нему закрыты, а документы ученик читает и выгружает (learning-services#500).
 
 **Отказов нет.**
 

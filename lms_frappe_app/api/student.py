@@ -1723,7 +1723,10 @@ def get_my_progress(space: str | None = None) -> dict:
 	"""Сводка по себе в пространстве: курсы, их документы, последние занятия."""
 	ученик = текущий_пользователь()
 	организация = _названное_или_текущее(ученик, space)
-	курсы = пространства.курсы(ученик, организация)
+	# С архивом: «Мои документы» строятся отсюда, а документы по курсу в архиве
+	# ученик читает и выгружает — это его работа (learning-services#500).
+	курсы = пространства.курсы(ученик, организация, с_архивом=True)
+	архив = {курс["course"] for курс in курсы if в_архиве(курс["course"])}
 	занятия = frappe.get_all(
 		"Agent Learning Session",
 		filters={"student": ученик, "organization": организация or ("is", "not set")},
@@ -1734,13 +1737,15 @@ def get_my_progress(space: str | None = None) -> dict:
 	return {
 		"space": пространства.наружу(организация),
 		"courses_total": len(курсы),
-		"courses_overdue": sum(1 for к in курсы if к["overdue"]),
+		"courses_overdue": sum(1 for к in курсы if к["overdue"] and к["course"] not in архив),
 		"courses": [
 			{
 				"id": курс["course"],
 				"title": frappe.db.get_value("LMS Course", курс["course"], "title"),
 				"deadline": курс["deadline"],
-				"overdue": курс["overdue"],
+				"overdue": курс["overdue"] and курс["course"] not in архив,
+				# Курс снят и закрыт для занятий; документы по нему читаются.
+				"archived": курс["course"] in архив,
 				"completion": _доля_пройденного(ученик, курс["course"]),
 				# Документ — отдельно от доли уроков: урок засчитывает квиз, и
 				# пройденный курс с пустым документом иначе не отличить от

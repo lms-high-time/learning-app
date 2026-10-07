@@ -64,6 +64,23 @@ class IntegrationTestАрхивКурса(IntegrationTestCase):
 		ответ = student.update_artifact(self.курс, "notebook", "log", content="После архива")
 		self.assertEqual(ответ["error"]["code"], "course_archived")
 
+	def test_документ_выгружается(self):
+		from lms_frappe_app.www.artifacts import download
+
+		frappe.set_user(self.ученик)
+		download(self.курс, "notebook")
+		self.assertIn("Записано до архива", frappe.response["filecontent"])
+
+	def test_мои_документы_видят_курс_в_архиве(self):
+		"""«Мои документы» строятся по `get_my_progress`: курс в архиве — с признаком."""
+		frappe.set_user(self.ученик)
+		ответ = student.get_my_progress()
+		self.assertTrue(ответ["ok"], ответ)
+		курс = next(к for к in ответ["data"]["courses"] if к["id"] == self.курс)
+		self.assertTrue(курс["archived"])
+		self.assertFalse(курс["overdue"])
+		self.assertEqual([д["artifact"] for д in курс["documents"]], ["notebook"])
+
 	def test_автор_не_открывает_и_не_анонсирует(self):
 		frappe.set_user(self.куратор)
 		for метод in (authoring.publish_course, authoring.announce_course):
