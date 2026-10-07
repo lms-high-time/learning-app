@@ -156,31 +156,27 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Release",
  "owner": "Administrator",
  "permissions": [
   {
-   "role": "System Manager",
-   "create": 1,
-   "delete": 1,
    "export": 1,
    "read": 1,
-   "report": 1
+   "report": 1,
+   "role": "System Manager"
   },
   {
-   "role": "Course Creator",
-   "create": 1,
    "read": 1,
-   "report": 1
+   "report": 1,
+   "role": "Course Creator"
   },
   {
-   "role": "Moderator",
-   "create": 1,
    "read": 1,
-   "report": 1
+   "report": 1,
+   "role": "Moderator"
   }
  ],
  "row_format": "Dynamic",

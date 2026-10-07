@@ -289,6 +289,11 @@ doc_events = {
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
 	},
+	# Ключ курса и действующий релиз ставит только публикация релиза
+	# (learning-services#500).
+	"LMS Course": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
+	},
 }
 
 # Scheduled Tasks

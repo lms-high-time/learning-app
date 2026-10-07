@@ -6,7 +6,13 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_ученика
+from lms_frappe_app.tests.sample_data import (
+	создать_куратора,
+	создать_курс,
+	создать_менеджера,
+	создать_организацию,
+	создать_ученика,
+)
 
 
 class IntegrationTestПраваНаРелиз(IntegrationTestCase):
@@ -31,9 +37,19 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 				fields=["correct"],
 			)
 
-	def test_куратор_читает_и_создаёт_релиз(self):
-		for право in ("read", "create"):
-			self.assertTrue(frappe.has_permission("Agent Course Release", право, user=self.куратор), право)
+	def test_куратор_читает_но_не_создаёт_релиз(self):
+		"""Релиз создаёт только сервис публикации: права `create` нет ни у кого."""
+		модератор = создать_куратора(
+			f"rel-moder-{frappe.generate_hash(length=6)}@example.com", роль="Moderator"
+		)
+		for кто in (self.куратор, модератор):
+			self.assertTrue(frappe.has_permission("Agent Course Release", "read", user=кто), кто)
+			self.assertFalse(frappe.has_permission("Agent Course Release", "create", user=кто), кто)
+
+	def test_руководитель_не_читает_релиз(self):
+		организация = создать_организацию(f"Релиз {frappe.generate_hash(length=6)}")
+		руководитель = создать_менеджера(f"rel-mgr-{frappe.generate_hash(length=6)}@example.com", организация)
+		self.assertFalse(frappe.has_permission("Agent Course Release", "read", user=руководитель))
 
 	def test_релиз_не_правит_никто(self):
 		админ = создать_куратора(
@@ -41,6 +57,7 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 		)
 		for кто in (self.куратор, админ):
 			self.assertFalse(frappe.has_permission("Agent Course Release", "write", user=кто), кто)
+			self.assertFalse(frappe.has_permission("Agent Course Release", "delete", user=кто), кто)
 
 	def test_курсы_без_ключа_не_мешают_друг_другу(self):
 		"""`unique` у `course_key`: пустое значение — NULL, не дубль."""

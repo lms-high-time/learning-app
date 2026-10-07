@@ -24,6 +24,7 @@ from frappe.utils import now_datetime
 from lms_frappe_app.agent_learning import structure
 from lms_frappe_app.agent_learning.errors import КУРС_В_АРХИВЕ, КУРС_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import checks, document, index, projection, schema
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 РЕЛИЗ = index.РЕЛИЗ
 ТОЧКА = "publish_release"
@@ -158,27 +159,27 @@ def _дайджест(релиз: dict) -> str:
 
 
 def _завести_курс(данные: dict, автор: str) -> str:
-	return (
-		frappe.get_doc(
-			{
-				"doctype": "LMS Course",
-				"title": данные["title"],
-				"short_introduction": данные["summary"] or данные["title"],
-				"description": данные["description"] or данные["summary"] or данные["title"],
-				"published": 0,
-				"course_key": данные["key"],
-				"instructors": [{"instructor": автор}],
-			}
-		)
-		.insert()
-		.name
+	курс = frappe.get_doc(
+		{
+			"doctype": "LMS Course",
+			"title": данные["title"],
+			"short_introduction": данные["summary"] or данные["title"],
+			"description": данные["description"] or данные["summary"] or данные["title"],
+			"published": 0,
+			"course_key": данные["key"],
+			"instructors": [{"instructor": автор}],
+		}
 	)
+	курс.flags[ИЗ_РЕЛИЗА] = True
+	return курс.insert().name
 
 
 def _записать_релиз(курс: str, релиз: dict, дайджест: str, итог, автор: str):
 	последняя = frappe.db.sql("select max(version) from `tabAgent Course Release` where course=%s", курс)[0][
 		0
 	]
+	# Без проверки прав: метод закрыт авторскими ролями (`_автор`), а создавать
+	# релиз мимо сервиса не может никто — у доктайпа нет права `create`.
 	return frappe.get_doc(
 		{
 			"doctype": РЕЛИЗ,
@@ -193,7 +194,7 @@ def _записать_релиз(курс: str, релиз: dict, дайджес
 			"snapshot": json.dumps(релиз, ensure_ascii=False),
 			**index.строки(релиз, итог.главы, итог.уроки),
 		}
-	).insert()
+	).insert(ignore_permissions=True)
 
 
 def _карточка(курс: str, данные: dict, релиз: str) -> None:
@@ -217,6 +218,7 @@ def _карточка(курс: str, данные: dict, релиз: str) -> Non
 			"active_release": релиз,
 		}
 	)
+	документ.flags[ИЗ_РЕЛИЗА] = True
 	документ.save()
 
 

@@ -47,6 +47,12 @@ class IntegrationTestAgentCourseRelease(IntegrationTestCase):
 			релиз.save()
 		self.assertEqual(frappe.db.get_value(DOCTYPE, имя, "snapshot"), "{}")
 
+	def test_релиз_не_удаляется(self):
+		имя = вставить_релиз(self.курс)
+		with self.assertRaises(frappe.ValidationError):
+			frappe.delete_doc(DOCTYPE, имя)
+		self.assertTrue(frappe.db.exists(DOCTYPE, имя))
+
 	def test_версия_одна_на_курс(self):
 		вставить_релиз(self.курс)
 		with self.assertRaises(frappe.UniqueValidationError):
