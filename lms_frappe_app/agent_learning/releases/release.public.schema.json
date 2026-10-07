@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/lms-high-time/course-design/schema/release.public.schema.json",
+  "$id": "https://raw.githubusercontent.com/lms-high-time/learning-app/master/lms_frappe_app/agent_learning/releases/release.public.schema.json",
   "title": "Релиз курса: публичная и серверная часть",
   "description": "То, что разбирает открытое приложение: курс, главы, уроки с целями, квизом и домашним заданием, документ курса. Части agent и map — непрозрачные объекты: приложение хранит их как есть. Формат — docs/release-format.md.",
   "type": "object",
