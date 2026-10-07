@@ -29,6 +29,8 @@ class Итог:
 	создано: dict[str, list[str]] = field(default_factory=_виды)
 	обновлено: dict[str, list[str]] = field(default_factory=_виды)
 	снято: dict[str, list[str]] = field(default_factory=_виды)
+	#: Ключи, которых не было в действующем релизе, а запись по истории нашлась.
+	возвращено: dict[str, list[str]] = field(default_factory=_виды)
 
 
 def спроецировать(
@@ -71,9 +73,13 @@ def спроецировать(
 		[итог.главы[г["key"]] for г in релиз["chapters"]],
 		{итог.главы[г["key"]]: [итог.уроки[у] for у in г["lessons"]] for г in релиз["chapters"]},
 	)
-	есть = {"chapters": set(итог.главы), "lessons": set(итог.уроки)}
+	есть = {"chapters": list(итог.главы), "lessons": list(итог.уроки)}
 	for вид in ("chapters", "lessons"):
+		были = set(прежние.get(вид, []))
 		итог.снято[вид] = [ключ for ключ in прежние.get(вид, []) if ключ not in есть[вид]]
+		итог.возвращено[вид] = [
+			ключ for ключ in есть[вид] if ключ not in были and ключ not in итог.создано[вид]
+		]
 	return итог
 
 

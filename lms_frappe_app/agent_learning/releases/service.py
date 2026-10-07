@@ -55,7 +55,7 @@ def опубликовать(релиз, course: str | None, автор: str) ->
 	try:
 		создан = курс is None
 		if создан:
-			курс = _завести_курс(релиз["course"], автор)
+			курс = _завести_курс(релиз["course"], автор, ключ)
 		прежний = frappe.db.get_value("LMS Course", курс, "active_release")
 		прежний_документ = frappe.db.get_value(РЕЛИЗ, прежний, "document_key") if прежний else None
 		итог = projection.спроецировать(курс, релиз, index.известные(курс), index.ключи(прежний))
@@ -67,6 +67,7 @@ def опубликовать(релиз, course: str | None, автор: str) ->
 	except Отказ:
 		frappe.db.rollback(save_point=ТОЧКА)
 		raise
+	frappe.db.release_savepoint(ТОЧКА)
 	return _ответ(
 		курс, запись.name, итог, схема_документа, предупреждения, создан=создан, без_изменений=False
 	)
@@ -154,7 +155,13 @@ def _дайджест(релиз: dict) -> str:
 	return hashlib.sha256(канон.encode("utf-8")).hexdigest()
 
 
-def _завести_курс(данные: dict, автор: str) -> str:
+def _завести_курс(данные: dict, автор: str, ключ: str) -> str:
+	"""Новый курс-черновик под ключ релиза.
+
+	`Why:` две одновременные первые публикации одного ключа обе не находят
+	курса; вторая упирается в уникальный `course_key` — и получает код
+	контракта, а не ошибку сервера. Повтор вызова найдёт курс по ключу.
+	"""
 	курс = frappe.get_doc(
 		{
 			"doctype": "LMS Course",
@@ -167,7 +174,16 @@ def _завести_курс(данные: dict, автор: str) -> str:
 		}
 	)
 	курс.flags[ИЗ_РЕЛИЗА] = True
-	return курс.insert().name
+	try:
+		return курс.insert().name
+	except (frappe.UniqueValidationError, frappe.DuplicateEntryError) as причина:
+		frappe.clear_last_message()
+		raise Отказ(
+			КЛЮЧ_ЗАНЯТ,
+			"Курс с этим ключом заводит другая публикация: повторите вызов",
+			course=frappe.db.get_value("LMS Course", {"course_key": ключ}),
+			release_key=ключ,
+		) from причина
 
 
 def _записать_релиз(курс: str, релиз: dict, дайджест: str, итог, автор: str):
@@ -221,8 +237,13 @@ def _карточка(курс: str, данные: dict, релиз: str) -> Non
 def _ответ(курс, релиз, итог, схема_документа, предупреждения, *, создан: bool, без_изменений: bool) -> dict:
 	def изменения(вид: str) -> dict:
 		if not итог:
-			return {"created": [], "updated": [], "removed": []}
-		return {"created": итог.создано[вид], "updated": итог.обновлено[вид], "removed": итог.снято[вид]}
+			return {"created": [], "updated": [], "removed": [], "restored": []}
+		return {
+			"created": итог.создано[вид],
+			"updated": итог.обновлено[вид],
+			"removed": итог.снято[вид],
+			"restored": итог.возвращено[вид],
+		}
 
 	if без_изменений:
 		ключ_документа = frappe.db.get_value(РЕЛИЗ, релиз, "document_key")

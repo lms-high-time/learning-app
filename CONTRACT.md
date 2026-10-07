@@ -3863,14 +3863,15 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 { "ok": true, "data": { "course": "primer-kursa", "course_key": "sample-course",
   "release": "REL-00007", "version": 3, "unchanged": false, "course_created": false,
   "published": true,
-  "chapters": { "created": [], "updated": ["ch-1"], "removed": [] },
-  "lessons": { "created": ["l-4"], "updated": ["l-1"], "removed": ["l-3"] },
+  "chapters": { "created": [], "updated": ["ch-1"], "removed": [], "restored": [] },
+  "lessons": { "created": ["l-4"], "updated": ["l-1"], "removed": ["l-3"], "restored": ["l-2"] },
   "document": { "artifact": "notebook", "version": 4 },
   "warnings": [ { "code": "public_text_empty", "where": "chapters[ch-2].description" } ] } }
 ```
 
 `chapters` и `lessons` — ключи созданных, изменённых и снятых из программы
-узлов. `document` — ключ и версия действующей схемы документа курса; у
+узлов; `restored` — вернувшихся в программу: их не было в прежнем релизе, и
+они получили свою прежнюю запись (могут быть и в `updated`). `document` — ключ и версия действующей схемы документа курса; у
 релиза без документа — `null`. `warnings` — то, что публикации не мешает:
 `public_text_empty` (пустой текст ученику; на месте пустой карточки курса —
 его название), `explanation_missing`, `required_condition_ignored` (условие
@@ -3889,7 +3890,8 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 `duplicate_key`, `broken_ref`, `chapter_order`, `quiz_correct`,
 `document_key`, `text_too_long`; `total`), `course_not_found`,
 `course_key_mismatch` — у переданного курса другой ключ, `course_key_taken` —
-ключ релиза уже у другого курса, `course_has_content` — у переданного курса
+ключ релиза уже у другого курса или его курс сейчас заводит другая
+публикация (повтор вызова найдёт курс), `course_has_content` — у переданного курса
 без ключа есть уроки (`lessons`).
 
 ## `lms_frappe_app.api.authoring.publish_course`

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from lms.lms.utils import get_lessons
+from lms.lms.utils import get_chapters, get_lessons
 
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service
@@ -47,7 +47,9 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertTrue(ответ["course_created"])
 		self.assertEqual((ответ["version"], ответ["unchanged"], ответ["published"]), (1, False, False))
 		self.assertEqual(ответ["course_key"], self.ключ)
-		self.assertEqual(ответ["lessons"], {"created": ["l-1", "l-2", "l-3"], "updated": [], "removed": []})
+		self.assertEqual(
+			ответ["lessons"], {"created": ["l-1", "l-2", "l-3"], "updated": [], "removed": [], "restored": []}
+		)
 		self.assertEqual(ответ["chapters"]["created"], ["ch-1", "ch-2"])
 		self.assertEqual(ответ["document"], {"artifact": "notebook", "version": 1})
 		self.assertEqual(ответ["warnings"], [])
@@ -82,7 +84,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertFalse(ответ["course_created"])
 		self.assertEqual((ответ["version"], ответ["release"]), (1, первый["release"]))
 		self.assertEqual(ответ["document"], {"artifact": "notebook", "version": 1})
-		self.assertEqual(ответ["lessons"], {"created": [], "updated": [], "removed": []})
+		self.assertEqual(ответ["lessons"], {"created": [], "updated": [], "removed": [], "restored": []})
 		self.assertEqual(frappe.db.count(РЕЛИЗ, {"course": первый["course"]}), 1)
 
 	def test_тот_же_релиз_строкой_и_в_другом_порядке_ключей_без_новой_версии(self):
@@ -250,3 +252,56 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.опубликовать(релиз)
 
 		self.assertGreater(authoring.course_revision(course=первый["course"])["data"]["revision"], до)
+
+	def test_отказ_после_записи_релиза_оставляет_всё_как_было(self):
+		"""Отказ на последнем шаге: релиз, строки индекса, новая версия схемы,
+		карточка, действующий релиз и порядок глав — прежние."""
+		первый = self.опубликовать()
+		курс = первый["course"]
+		строк_индекса = frappe.db.count("Agent Release Goal")
+		главы_до = [г["name"] for г in get_chapters(курс)]
+		релиз = пример_релиза(self.ключ)
+		релиз["course"]["title"] = "Пример курса, второе издание"
+		релиз["document"]["sections"][0]["columns"][0]["title"] = "Тема встречи"
+		релиз["chapters"].reverse()
+		релиз["lessons"] = [релиз["lessons"][2], релиз["lessons"][0], релиз["lessons"][1]]
+		with patch(
+			"lms_frappe_app.agent_learning.releases.service._карточка", side_effect=Отказ("boom", "сбой")
+		):
+			self.отказ("boom", релиз)
+
+		self.assertEqual(frappe.db.count(РЕЛИЗ, {"course": курс}), 1)
+		self.assertEqual(frappe.db.count("Agent Release Goal"), строк_индекса)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Agent Course Artifact", {"course": курс, "slug": "notebook", "is_active": 1}, "version"
+			),
+			1,
+		)
+		self.assertEqual(frappe.db.count("Agent Course Artifact", {"course": курс}), 1)
+		self.assertEqual(
+			frappe.db.get_value("LMS Course", курс, ["title", "active_release"]),
+			("Пример курса", первый["release"]),
+		)
+		self.assertEqual([г["name"] for г in get_chapters(курс)], главы_до)
+
+	def test_гонка_первых_публикаций_одного_ключа(self):
+		"""Вторая из двух одновременных первых публикаций упирается в уникальный
+		ключ курса — отказ кодом контракта, а не ошибка сервера."""
+		self.опубликовать()
+		with patch("lms_frappe_app.agent_learning.releases.service._курс", return_value=None):
+			отказ = self.отказ(service.КЛЮЧ_ЗАНЯТ)
+		self.assertEqual(отказ.подробности["release_key"], self.ключ)
+		self.assertEqual(frappe.db.count("LMS Course", {"course_key": self.ключ}), 1)
+
+	def test_вернувшийся_ключ_в_ответе(self):
+		self.опубликовать()
+		без_третьего = пример_релиза(self.ключ)
+		без_третьего["chapters"] = без_третьего["chapters"][:1]
+		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		self.опубликовать(без_третьего)
+
+		ответ = self.опубликовать()
+
+		self.assertEqual(ответ["lessons"], {"created": [], "updated": [], "removed": [], "restored": ["l-3"]})
+		self.assertEqual(ответ["chapters"]["restored"], ["ch-2"])
