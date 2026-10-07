@@ -107,7 +107,7 @@ _РЕЛИЗ = {
 				"columns": [
 					{"key": "topic", "title": "Тема", "required": True},
 					{"key": "decision", "title": "Решение", "required": False},
-					{"key": "owner", "title": "Кто отвечает", "required": {"if_column": "decision"}},
+					{"key": "responsible", "title": "Кто отвечает", "required": {"if_column": "decision"}},
 				],
 			},
 			{

@@ -51,10 +51,10 @@ class IntegrationTestДокументИзРелиза(IntegrationTestCase):
 		self.assertEqual(журнал.description, "Что сюда записывают.")
 		спек = json.loads(журнал.spec)
 		self.assertEqual(спек["table"], "log")
-		self.assertEqual([к["key"] for к in спек["columns"]], ["topic", "decision", "owner"])
+		self.assertEqual([к["key"] for к in спек["columns"]], ["topic", "decision", "responsible"])
 		self.assertEqual(
 			{к["key"]: к.get("required") for к in спек["columns"]},
-			{"topic": True, "decision": None, "owner": "decision"},
+			{"topic": True, "decision": None, "responsible": "decision"},
 		)
 		self.assertEqual({к["type"] for к in спек["columns"]}, {"longtext"})
 		правила = блоки["rules"]
