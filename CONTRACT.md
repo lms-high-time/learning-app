@@ -3885,15 +3885,18 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 при публикации релиза. Всё или ничего: отказ на любом шаге оставляет курс
 как был.
 
-**Отказы:** `release_invalid` (`errors` — до 20 расхождений со схемой
-`{path, message}`, `total`), `release_format_unsupported` (`format`,
-`supported`), `release_inconsistent` (`problems` — до 20 `{code, where, …}`:
-`duplicate_key`, `broken_ref`, `chapter_order`, `quiz_correct`,
-`document_key`, `text_too_long`; `total`), `course_not_found`,
-`course_key_mismatch` — у переданного курса другой ключ, `course_key_taken` —
-ключ релиза уже у другого курса или его курс сейчас заводит другая
-публикация (повтор вызова найдёт курс), `course_has_content` — у переданного курса
-без ключа есть уроки (`lessons`).
+**Отказы:** `release_invalid` — релиз не JSON, не объект, несёт `NaN` или
+бесконечность в любой части (и в `agent`, `map`) или не проходит схему
+(`errors` — до 20 расхождений `{path, message}`, `total`);
+`release_format_unsupported` (`format`, `supported`); `release_inconsistent`
+(`problems` — до 20 `{code, where, …}`: `duplicate_key`, `broken_ref`,
+`chapter_order`, `quiz_correct`, `document_key`, `text_too_long`; `total`);
+`course_not_found` (`id`); `course_key_mismatch` — у переданного курса другой
+ключ (`course`, `course_key`, `release_key`); `course_key_taken` — ключ
+релиза уже у другого курса или его курс сейчас заводит другая публикация,
+повтор вызова найдёт курс (`release_key`; `course` — курс с этим ключом,
+`null`, если он ещё не виден); `course_has_content` — у переданного курса
+без ключа есть уроки (`course`, `lessons`).
 
 ## `lms_frappe_app.api.authoring.publish_course`
 
