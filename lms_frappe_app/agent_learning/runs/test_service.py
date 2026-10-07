@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service as релизы
@@ -65,10 +66,12 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		return {ц.objective_key: (ц.status, ц.removed) for ц in run.objectives}
 
 	def отметить(self, run, ключ: str, статус: str = "done", свидетельство: str = "Ученик объяснил сам"):
-		"""Отметка пункта напрямую — как её запишет `отметить` (шаг 3)."""
+		"""Отметка пункта напрямую — как её запишет `отметить` (шаг 3): первая начинает урок."""
 		run = frappe.get_doc(ПРОХОЖДЕНИЕ, run.name, for_update=True)
 		[строка] = [п for п in run.goals if п.goal_key == ключ]
 		строка.status, строка.evidence = статус, свидетельство
+		if статус != "open" and not run.started_at:
+			run.started_at = now_datetime()
 		service.статусы(run)
 		run.save(ignore_permissions=True)
 		return run
@@ -121,6 +124,9 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("in_progress", "touched"))
 		run = self.отметить(run, "exec:E1", "planned")
 		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("covered", "covered"))
+		# Пункт вернули в `open`: цель снова в работе, урок остаётся начатым.
+		run = self.отметить(run, "term:T1", "open", None)
+		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("in_progress", "touched"))
 
 	def test_пройденный_урок_не_снимается_пересчётом(self):
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
@@ -155,9 +161,9 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 			пункты["exec:E1"],
 			{"objective_key": "l-1-D1", "status": "planned", "evidence": "Сделает дома", "removed": 1},
 		)
-		# Снятый пункт на статусы не влияет: его отметка не начала урок заново.
+		# Снятый пункт на статус цели не влияет, но урок, начатый его отметкой, остаётся начатым.
 		self.assertEqual(self.цели(run)["l-1-D1"], ("not_started", 0))
-		self.assertEqual(run.status, "not_started")
+		self.assertEqual(run.status, "in_progress")
 		self.assertEqual(
 			[п.goal_key for п in run.goals if not п.removed], ["term:T1", "refute:M1", "trap:P1", "return:R1"]
 		)
