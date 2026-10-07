@@ -7,6 +7,10 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
+from lms_frappe_app.agent_learning import structure
+from lms_frappe_app.agent_learning.doctype.agent_course_release.test_agent_course_release import (
+	вставить_релиз,
+)
 from lms_frappe_app.agent_learning.releases import projection
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора
@@ -154,3 +158,28 @@ class IntegrationTestПроекция(IntegrationTestCase):
 
 		self.assertNotEqual(итог.уроки["l-1"], первый.уроки["l-1"])
 		self.assertEqual(итог.создано["lessons"], ["l-1", "l-2", "l-3"])
+
+	def test_снятый_урок_не_возвращается_в_программу(self):
+		"""Курс с действующим релизом: состав — только строки-ссылки, без запасного пути."""
+		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
+		frappe.db.set_value("LMS Course", self.курс, "active_release", вставить_релиз(self.курс))
+		релиз = пример_релиза()
+		релиз["chapters"] = релиз["chapters"][:1]
+		релиз["lessons"] = релиз["lessons"][:2]
+
+		projection.спроецировать(self.курс, релиз, известные(первый), прежние(первый))
+
+		self.assertEqual(structure.уроки_курса(self.курс), [первый.уроки["l-1"], первый.уроки["l-2"]])
+		self.assertEqual(structure.уроков_в_курсах([self.курс]), {self.курс: 2})
+		self.assertEqual([г["name"] for г in structure.главы_курса(self.курс)], [первый.главы["ch-1"]])
+		self.assertEqual(structure.уроки_главы(первый.главы["ch-2"]), [])
+
+	def test_курс_без_релиза_держит_запасной_путь(self):
+		"""Урок без строки-ссылки у курса без релиза по-прежнему в программе — в конце главы."""
+		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
+		frappe.db.delete("Lesson Reference", {"parent": первый.главы["ch-1"], "lesson": первый.уроки["l-1"]})
+
+		self.assertEqual(
+			structure.уроки_главы(первый.главы["ch-1"]), [первый.уроки["l-2"], первый.уроки["l-1"]]
+		)
+		self.assertEqual(structure.уроков_в_курсах([self.курс]), {self.курс: 3})
