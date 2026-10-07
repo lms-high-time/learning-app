@@ -109,6 +109,23 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 			self.assertEqual(ответ.get("error", {}).get("code"), "course_from_release", (метод, ответ))
 		self.assertEqual(frappe.db.get_value("Course Lesson", урок, "title"), "Урок первый")
 
+	def test_вопрос_квиза_на_уроке_из_релиза_не_правится(self):
+		"""Вопрос Learning, оказавшийся в квизе урока из релиза, — тоже правка курса."""
+		from lms_frappe_app.tests.sample_data import создать_вопрос, создать_квиз
+
+		frappe.set_user(self.куратор)
+		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		урок = frappe.db.get_value("Course Lesson", {"course": курс, "title": "Урок первый"})
+		frappe.set_user("Administrator")
+		вопрос = создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])
+		создать_квиз(урок, [вопрос])
+		frappe.set_user(self.куратор)
+
+		ответ = authoring.update_question(question=вопрос, text="Другой вопрос")
+
+		self.assertEqual(ответ["error"]["code"], "course_from_release", ответ)
+		self.assertEqual(frappe.db.get_value("LMS Question", вопрос, "question"), "Столица?")
+
 	def test_руководителю_нельзя(self):
 		организация = создать_организацию(f"Релиз {frappe.generate_hash(length=6)}")
 		руководитель = создать_менеджера(

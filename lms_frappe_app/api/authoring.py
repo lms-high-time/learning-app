@@ -730,6 +730,9 @@ def update_question(question: str, text: str | None = None, options=None, answer
 	"""
 	_автор()
 	_должен_существовать("LMS Question", question, ВОПРОС_НЕ_НАЙДЕН)
+	for квиз in frappe.get_all("LMS Quiz Question", filters={"question": question}, pluck="parent"):
+		if урок := frappe.db.get_value("LMS Quiz", квиз, "lesson"):
+			_не_из_релиза("Course Lesson", урок)
 	документ = frappe.get_doc("LMS Question", question)
 
 	if text is not None:
