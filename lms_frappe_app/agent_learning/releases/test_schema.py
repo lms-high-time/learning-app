@@ -6,6 +6,7 @@
 import unittest
 
 from lms_frappe_app.agent_learning.releases import schema
+from lms_frappe_app.tests.release_sample import пример_релиза
 
 
 def _слова(узел, найдено: set) -> set:
@@ -47,3 +48,34 @@ class TestСхемаРелиза(unittest.TestCase):
 	def test_путь_ошибки_указывает_место(self):
 		ошибки = schema.ошибки({"format": "lms-release/1"})
 		self.assertIn({"path": "$", "message": "нет поля «course»"}, ошибки)
+
+
+class TestСхемаНаПримере(unittest.TestCase):
+	def test_пример_проходит_схему(self):
+		self.assertEqual(schema.ошибки(пример_релиза()), [])
+
+	def test_agent_и_map_непрозрачны(self):
+		релиз = пример_релиза()
+		релиз["agent"] = {"что": ["угодно", 1, None]}
+		релиз["map"] = {}
+		self.assertEqual(schema.ошибки(релиз), [])
+
+	def test_лишнее_поле_урока(self):
+		релиз = пример_релиза()
+		релиз["lessons"][0]["body"] = "материал"
+		self.assertIn({"path": "$.lessons[0].body", "message": "лишнее поле"}, schema.ошибки(релиз))
+
+	def test_неверный_вид_пункта(self):
+		релиз = пример_релиза()
+		релиз["lessons"][0]["objectives"][0]["goals"][0]["kind"] = "icon"
+		self.assertEqual(
+			[о["path"] for о in schema.ошибки(релиз)],
+			["$.lessons[0].objectives[0].goals[0].kind"],
+		)
+
+	def test_документ_может_отсутствовать(self):
+		релиз = пример_релиза()
+		релиз["document"] = None
+		for урок in релиз["lessons"]:
+			урок["sections"] = []
+		self.assertEqual(schema.ошибки(релиз), [])
