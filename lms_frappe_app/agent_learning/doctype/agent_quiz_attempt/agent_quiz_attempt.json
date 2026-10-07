@@ -13,11 +13,15 @@
   "quiz",
   "lesson",
   "course",
+  "release",
+  "lesson_key",
+  "questions",
   "attempt_number",
   "sb_result",
   "status",
   "score",
   "passed",
+  "objective_results",
   "submission",
   "sb_time",
   "started_at",
@@ -48,12 +52,12 @@
    "search_index": 1
   },
   {
+   "description": "Квиз Frappe Learning; у попытки по уроку из релиза пусто.",
    "fieldname": "quiz",
    "fieldtype": "Link",
    "label": "Квиз",
    "options": "LMS Quiz",
    "read_only": 1,
-   "reqd": 1,
    "search_index": 1
   },
   {
@@ -68,6 +72,28 @@
    "fieldtype": "Link",
    "label": "Курс",
    "options": "LMS Course",
+   "read_only": 1
+  },
+  {
+   "description": "Релиз курса, по которому идёт попытка: из него вопросы и сверка ответов.",
+   "fieldname": "release",
+   "fieldtype": "Link",
+   "label": "Релиз",
+   "options": "Agent Course Release",
+   "read_only": 1
+  },
+  {
+   "description": "Ключ урока в релизе; попытки и пауза считаются по ученику, курсу и ключу урока.",
+   "fieldname": "lesson_key",
+   "fieldtype": "Data",
+   "label": "Ключ урока",
+   "read_only": 1
+  },
+  {
+   "description": "Снимок вопросов урока из релиза: ключ, цель, текст, варианты — без верного варианта и пояснения.",
+   "fieldname": "questions",
+   "fieldtype": "JSON",
+   "label": "Вопросы",
    "read_only": 1
   },
   {
@@ -102,6 +128,13 @@
    "fieldname": "passed",
    "fieldtype": "Check",
    "label": "Зачтено",
+   "read_only": 1
+  },
+  {
+   "description": "Итог по целям урока: {цель: {correct, total}}.",
+   "fieldname": "objective_results",
+   "fieldtype": "JSON",
+   "label": "Итог по целям",
    "read_only": 1
   },
   {
@@ -160,7 +193,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-09-30 12:00:00.000000",
+ "modified": "2026-10-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",

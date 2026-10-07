@@ -10,6 +10,8 @@
  "field_order": [
   "attempt",
   "question",
+  "question_key",
+  "objective_key",
   "answer",
   "is_correct",
   "marks",
@@ -28,14 +30,28 @@
    "search_index": 1
   },
   {
+   "description": "Вопрос Frappe Learning; у ответа по уроку из релиза пусто.",
    "fieldname": "question",
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Вопрос",
    "options": "LMS Question",
    "read_only": 1,
-   "reqd": 1,
    "search_index": 1
+  },
+  {
+   "description": "Ключ вопроса в релизе попытки.",
+   "fieldname": "question_key",
+   "fieldtype": "Data",
+   "label": "Ключ вопроса",
+   "read_only": 1
+  },
+  {
+   "description": "Ключ цели урока, которую проверяет вопрос.",
+   "fieldname": "objective_key",
+   "fieldtype": "Data",
+   "label": "Ключ цели",
+   "read_only": 1
   },
   {
    "fieldname": "answer",
@@ -73,7 +89,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-18 12:00:00.000000",
+ "modified": "2026-10-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Answer",
