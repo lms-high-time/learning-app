@@ -18,8 +18,11 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.leak_guards import проверить_ответ
+from lms_frappe_app.agent_learning.releases import service as релизы
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
+	зачислить,
 	создать_вопрос,
 	создать_домашку,
 	создать_квиз,
@@ -273,3 +276,70 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("review.pending_count", review.pending_count())
 		self.проверить("review.submission", review.submission(submission=сдача))
 		self.проверить("review.send_back", review.send_back(submission=сдача, version=1, comment="Доделай"))
+
+
+#: Тексты релиза, которых ученик и руководитель не видят: пояснение верного
+#: ответа (оно — после ответа, а квиза из релиза в этом этапе нет), пакет
+#: агента и карта курса (learning-services#500).
+ПОЯСНЕНИЕ_РЕЛИЗА = "Пояснение верного варианта из релиза"
+ПАКЕТ_АГЕНТА = "Текст пакета агента из релиза"
+КАРТА_КУРСА = "Текст карты курса из релиза"
+
+
+class IntegrationTestNoLeakRelease(IntegrationTestCase):
+	"""Курс из релиза: ответы квиза из индекса, пакет агента и карта не уходят
+	ни в один ответ ученику и руководителю."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		релиз = пример_релиза(f"leak-{суффикс}")
+		for урок in релиз["lessons"]:
+			for ответ in урок["quiz"]["answers"].values():
+				ответ["explanation"] = ПОЯСНЕНИЕ_РЕЛИЗА
+		релиз["agent"] = {"lessons": {"l-1": {"directive": ПАКЕТ_АГЕНТА}}}
+		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
+		frappe.set_user("Administrator")
+		данные = релизы.опубликовать(релиз, None, "Administrator")
+		self.курс = данные["course"]
+		self.урок = frappe.db.get_value("Course Lesson", {"course": self.курс, "title": "Урок первый"})
+		self.ученик = создать_ученика(f"leak-rel-{суффикс}@example.com")
+		зачислить(self.ученик, self.урок)
+		self.организация = создать_организацию(f"Релиз {суффикс}")
+		добавить_в_организацию(self.ученик, self.организация)
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
+		).insert(ignore_permissions=True)
+		self.менеджер = создать_менеджера(f"leak-rel-mg-{суффикс}@example.com", self.организация)
+
+	def проверить(self, что: str, ответ) -> str:
+		return проверить_ответ(
+			self, ответ, что, запрещённые_тексты=(ПОЯСНЕНИЕ_РЕЛИЗА, ПАКЕТ_АГЕНТА, КАРТА_КУРСА)
+		)
+
+	def test_ученик_и_руководитель_не_видят_закрытого_из_релиза(self):
+		frappe.set_user(self.ученик)
+		self.проверить("list_my_courses", student.list_my_courses())
+		self.проверить("get_my_progress", student.get_my_progress())
+		self.проверить("course_outline", student.course_outline(self.курс))
+		урок = student.start_lesson(lesson=self.урок)
+		self.проверить("start_lesson", урок)
+		self.assertTrue(урок["ok"], урок)
+		self.проверить(
+			"update_artifact",
+			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),
+		)
+		self.проверить("artifact", student.artifact(self.курс))
+		# У таблицы документа своё поле `owner` — блок, который её заводит
+		# (CONTRACT.md, «Зачем контракт именно такой»); остальное — полным списком.
+		проверить_ответ(
+			self,
+			student.artifact(self.курс, "notebook"),
+			"artifact",
+			запрещённые_тексты=(ПОЯСНЕНИЕ_РЕЛИЗА, ПАКЕТ_АГЕНТА, КАРТА_КУРСА),
+			кроме=("owner",),
+		)
+
+		frappe.set_user(self.менеджер)
+		self.проверить("org_report", manager.org_report())
+		self.проверить("student_detail", manager.student_detail(self.ученик))

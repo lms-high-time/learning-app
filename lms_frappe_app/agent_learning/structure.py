@@ -18,11 +18,26 @@ from lms_frappe_app.agent_learning.errors import Отказ
 ТАБЛИЦА_ПОРЯДКА = {"LMS Course": ("chapters", "chapter"), "Course Chapter": ("lessons", "lesson")}
 
 
+def _по_релизу(курс: str | None) -> bool:
+	"""Курс собран релизом: состав и порядок — только строки-ссылки (learning-services#500).
+
+	`Why:` снятый из релиза урок остаётся записью — на него ссылаются следы
+	учеников, — и запасной путь `_в_порядке` вернул бы его в конец программы.
+	Проекция релиза держит строки-ссылки полными по построению. Кэш документа,
+	а не запрос: структуру читают на каждом старте занятия.
+	"""
+	return bool(курс and frappe.get_cached_value("LMS Course", курс, "active_release"))
+
+
 def главы_курса(курс: str) -> list[dict]:
 	"""Главы курса по порядку — тем же правилом, что и уроки."""
-	имена = _в_порядке(
-		frappe.get_all("Chapter Reference", filters={"parent": курс}, pluck="chapter", order_by="idx asc"),
-		frappe.get_all("Course Chapter", filters={"course": курс}, pluck="name"),
+	по_ссылкам = frappe.get_all(
+		"Chapter Reference", filters={"parent": курс}, pluck="chapter", order_by="idx asc"
+	)
+	имена = (
+		по_ссылкам
+		if _по_релизу(курс)
+		else _в_порядке(по_ссылкам, frappe.get_all("Course Chapter", filters={"course": курс}, pluck="name"))
 	)
 	названия = (
 		{
@@ -75,10 +90,12 @@ def уроков_в_курсах(курсы: list[str]) -> dict[str, int]:
 def уроки_курсов(курсы: list[str]) -> dict[str, list[str]]:
 	"""Уроки каждого курса по порядку — четырьмя запросами на весь список.
 
-	Порядок тот же, что у `уроки_курса`: тот же союз строк-ссылок и прямых полей.
+	Порядок тот же, что у `уроки_курса`: тот же союз строк-ссылок и прямых полей,
+	у курса по релизу — только строки-ссылки.
 	"""
 	if not курсы:
 		return {}
+	по_релизу = {курс for курс in курсы if _по_релизу(курс)}
 
 	ссылки_глав = _сгруппировать(
 		frappe.get_all(
@@ -98,7 +115,7 @@ def уроки_курсов(курсы: list[str]) -> dict[str, list[str]]:
 		"name",
 	)
 	по_курсам = {
-		курс: _в_порядке(ссылки_глав.get(курс, []), прямые_главы.get(курс, []))
+		курс: _в_порядке(ссылки_глав.get(курс, []), [] if курс in по_релизу else прямые_главы.get(курс, []))
 		for курс in курсы
 	}
 	все_главы = [глава for список in по_курсам.values() for глава in список]
@@ -126,7 +143,9 @@ def уроки_курсов(курсы: list[str]) -> dict[str, list[str]]:
 		курс: [
 			урок
 			for глава in список_глав
-			for урок in _в_порядке(ссылки_уроков.get(глава, []), прямые_уроки.get(глава, []))
+			for урок in _в_порядке(
+				ссылки_уроков.get(глава, []), [] if курс in по_релизу else прямые_уроки.get(глава, [])
+			)
 		]
 		for курс, список_глав in по_курсам.items()
 	}
@@ -141,10 +160,12 @@ def _сгруппировать(записи, ключ: str, значение: s
 
 def уроки_главы(глава: str) -> list[str]:
 	"""Уроки одной главы по порядку."""
-	return _в_порядке(
-		frappe.get_all("Lesson Reference", filters={"parent": глава}, pluck="lesson", order_by="idx asc"),
-		frappe.get_all("Course Lesson", filters={"chapter": глава}, pluck="name"),
+	по_ссылкам = frappe.get_all(
+		"Lesson Reference", filters={"parent": глава}, pluck="lesson", order_by="idx asc"
 	)
+	if _по_релизу(frappe.get_cached_value("Course Chapter", глава, "course")):
+		return по_ссылкам
+	return _в_порядке(по_ссылкам, frappe.get_all("Course Lesson", filters={"chapter": глава}, pluck="name"))
 
 
 def _в_порядке(по_ссылкам: list[str], все: list[str]) -> list[str]:

@@ -1,0 +1,57 @@
+{
+ "actions": [],
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "chapter_key",
+  "title",
+  "description",
+  "chapter"
+ ],
+ "fields": [
+  {
+   "fieldname": "chapter_key",
+   "fieldtype": "Data",
+   "label": "Ключ главы",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Название",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Описание",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chapter",
+   "fieldtype": "Link",
+   "label": "Глава",
+   "options": "Course Chapter",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Release Chapter",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

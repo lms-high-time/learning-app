@@ -164,6 +164,11 @@ def проверить_готовность(курс: str) -> dict:
 	from lms_frappe_app.agent_learning import quiz
 	from lms_frappe_app.agent_learning.structure import уроки_курса
 
+	# Курс из релиза проверен целиком при публикации релиза (learning-services#500):
+	# директив, материала и квизов Learning у него нет, и проверка ниже отказала бы зря.
+	if frappe.db.get_value("LMS Course", курс, "active_release"):
+		return {"blocking": [], "warnings": []}
+
 	мешает, стоит_знать = [], []
 
 	if not frappe.db.get_value("LMS Course", курс, "short_introduction"):

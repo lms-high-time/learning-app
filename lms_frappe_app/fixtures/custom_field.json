@@ -32,5 +32,56 @@
   "insert_after": "member_type",
   "module": "Agent Learning",
   "description": "Тестер курса: записан автором из кабинета, чтобы проверить курс до публикации."
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "LMS Course-course_key",
+  "dt": "LMS Course",
+  "fieldname": "course_key",
+  "fieldtype": "Data",
+  "label": "Ключ курса",
+  "unique": 1,
+  "read_only": 1,
+  "no_copy": 1,
+  "description": "Ключ из релиза: по нему публикация находит курс. Ставится первым релизом и не меняется.",
+  "insert_after": "course_promise",
+  "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "LMS Course-active_release",
+  "dt": "LMS Course",
+  "fieldname": "active_release",
+  "fieldtype": "Link",
+  "label": "Действующий релиз",
+  "options": "Agent Course Release",
+  "read_only": 1,
+  "no_copy": 1,
+  "insert_after": "course_key",
+  "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "LMS Course-course_attribution",
+  "dt": "LMS Course",
+  "fieldname": "course_attribution",
+  "fieldtype": "JSON",
+  "label": "Источник курса",
+  "read_only": 1,
+  "no_copy": 1,
+  "description": "Атрибуция из релиза: name, authors, license, url.",
+  "insert_after": "active_release",
+  "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Course Chapter-chapter_description",
+  "dt": "Course Chapter",
+  "fieldname": "chapter_description",
+  "fieldtype": "Small Text",
+  "label": "Описание главы",
+  "description": "Одна-две фразы ученику: что изменится в работе после главы. Пишется из релиза.",
+  "insert_after": "title",
+  "module": "Agent Learning"
  }
 ]

@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lms-high-time/learning-app/master/lms_frappe_app/agent_learning/releases/release.public.schema.json",
+  "title": "Релиз курса: публичная и серверная часть",
+  "description": "То, что разбирает открытое приложение: курс, главы, уроки с целями, квизом и домашним заданием, документ курса. Части agent и map — непрозрачные объекты: приложение хранит их как есть. Формат — CONTRACT.md, раздел «Релиз курса».",
+  "type": "object",
+  "required": ["format", "course", "chapters", "lessons", "document"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "lms-release/1"},
+    "course": {"$ref": "#/$defs/course"},
+    "chapters": {"type": "array", "items": {"$ref": "#/$defs/chapter"}},
+    "lessons": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/lesson"}},
+    "document": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/document"}]},
+    "agent": {"type": "object", "description": "Пакет агента: приложение хранит как есть, не разбирает."},
+    "map": {"type": "object", "description": "Карта курса, из которой собран релиз: для истории и автора."}
+  },
+  "$defs": {
+    "key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,79}$",
+      "description": "Стабильный ключ узла курса: на нём держится состояние ученика между релизами."
+    },
+    "text": {"type": "string", "minLength": 1},
+    "public_text": {
+      "type": "string",
+      "description": "Текст для ученика; пустая строка — текста нет (сборка с --allow-missing), валидатор сообщает об этом."
+    },
+    "course": {
+      "type": "object",
+      "required": ["key", "title", "summary", "description", "promise", "goal", "attribution", "glossary"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "title": {"$ref": "#/$defs/text"},
+        "summary": {"$ref": "#/$defs/public_text"},
+        "description": {"$ref": "#/$defs/public_text", "description": "markdown"},
+        "promise": {"type": "string"},
+        "goal": {"type": "string"},
+        "attribution": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["name", "authors", "license", "url"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {"type": "string"},
+                "authors": {"type": "string"},
+                "license": {"type": "string"},
+                "url": {"type": "string"}
+              }
+            }
+          ]
+        },
+        "glossary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "term", "definition"],
+            "additionalProperties": false,
+            "properties": {
+              "key": {"$ref": "#/$defs/key"},
+              "term": {"type": ["string", "null"], "description": "null — из определения термин не выделяется"},
+              "definition": {"$ref": "#/$defs/text"}
+            }
+          }
+        }
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "required": ["key", "title", "description", "lessons"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/public_text"},
+        "lessons": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/key"}}
+      }
+    },
+    "lesson": {
+      "type": "object",
+      "required": ["key", "chapter", "title", "hook", "sections", "objectives", "quiz", "homework"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "chapter": {"$ref": "#/$defs/key"},
+        "title": {"$ref": "#/$defs/text"},
+        "hook": {"type": "string"},
+        "sections": {"type": "array", "items": {"$ref": "#/$defs/key"}},
+        "objectives": {"type": "array", "items": {"$ref": "#/$defs/objective"}},
+        "quiz": {"$ref": "#/$defs/quiz"},
+        "homework": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/homework"}]}
+      }
+    },
+    "objective": {
+      "type": "object",
+      "required": ["key", "text", "goals"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "text": {"$ref": "#/$defs/text"},
+        "goals": {"type": "array", "items": {"$ref": "#/$defs/goal"}}
+      }
+    },
+    "goal": {
+      "type": "object",
+      "description": "Пункт цели агента; подробности — в пакете агента по ключу.",
+      "required": ["key", "kind", "required", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "kind": {"enum": ["term", "variant", "execution", "trap", "requirement", "misconception", "return"]},
+        "required": {"type": "boolean"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120}
+      }
+    },
+    "quiz": {
+      "type": "object",
+      "description": "Ученику отдаётся квиз без answers.",
+      "required": ["pass_percentage", "questions", "answers"],
+      "additionalProperties": false,
+      "properties": {
+        "pass_percentage": {"type": "number", "minimum": 0, "maximum": 100},
+        "questions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/question"}},
+        "answers": {
+          "type": "object",
+          "description": "Только сервер: ответы по ключу вопроса. Ученику и агенту не отдаётся; explanation ученик видит после ответа.",
+          "propertyNames": {"$ref": "#/$defs/key"},
+          "additionalProperties": {"$ref": "#/$defs/answer"}
+        }
+      }
+    },
+    "question": {
+      "type": "object",
+      "required": ["key", "objective", "text", "options"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "objective": {"$ref": "#/$defs/key"},
+        "text": {"$ref": "#/$defs/text"},
+        "options": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/option"}}
+      }
+    },
+    "option": {
+      "type": "object",
+      "required": ["key", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "text": {"$ref": "#/$defs/text"}
+      }
+    },
+    "answer": {
+      "type": "object",
+      "required": ["correct", "explanation"],
+      "additionalProperties": false,
+      "properties": {
+        "correct": {"$ref": "#/$defs/key", "description": "Ключ верного варианта вопроса."},
+        "explanation": {"type": "string", "description": "Почему верно — ученику после ответа."}
+      }
+    },
+    "homework": {
+      "type": "object",
+      "required": ["title", "description", "answer_mode", "due_days"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "answer_mode": {"enum": ["text", "files", "text_and_files"]},
+        "due_days": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]}
+      }
+    },
+    "document": {
+      "type": "object",
+      "required": ["key", "title", "purpose", "sections"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "title": {"$ref": "#/$defs/text"},
+        "purpose": {"$ref": "#/$defs/public_text"},
+        "sections": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/section"}}
+      }
+    },
+    "section": {
+      "type": "object",
+      "required": ["key", "title", "description", "rows", "columns"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/public_text"},
+        "rows": {"enum": ["one", "many"]},
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "title", "required"],
+            "additionalProperties": false,
+            "properties": {
+              "key": {"$ref": "#/$defs/key"},
+              "title": {"$ref": "#/$defs/text"},
+              "required": {
+                "anyOf": [
+                  {"type": "boolean"},
+                  {
+                    "type": "object",
+                    "required": ["if_column"],
+                    "additionalProperties": false,
+                    "properties": {"if_column": {"$ref": "#/$defs/key"}}
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

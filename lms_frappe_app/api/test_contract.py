@@ -22,13 +22,16 @@ import importlib
 import json
 import pkgutil
 import re
+import unittest
 from pathlib import Path
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
 import lms_frappe_app.api
+from lms_frappe_app.agent_learning.releases import schema as схема_релиза
 from lms_frappe_app.api import authoring, manager, public, review, student
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	политика_по_умолчанию,
@@ -285,10 +288,20 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def test_ключи_ответов_совпадают_с_примерами_контракта(self):
 		курс, уроки = self._собрать_курс()
+		self._опубликовать_релиз()
 		репорт, сдача = self._пройти_курс(курс, уроки)
 		self._разобрать_репорт(курс, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
+
+	# --- релиз курса ---
+
+	def _опубликовать_релиз(self) -> None:
+		frappe.set_user(self.куратор)
+		релиз = пример_релиза(f"contract-{self.суффикс}")
+		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		# Повтор отвечает теми же ключами, что и публикация.
+		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
 
 	# --- сборка курса ---
 
@@ -667,3 +680,22 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		frappe.set_user(self.менеджер)
 		self.сверить("review.accept", review.accept(submission=сдача, version=2))
 		self.сверить("review.reopen", review.reopen(submission=сдача, version=2, comment="Принял рано"))
+
+
+class TestContractRelease(unittest.TestCase):
+	"""Раздел «Релиз курса» называет схему, которая есть, и формат, который
+	принимает сервер. `Why:` схема — часть контракта, и раздел, указывающий
+	в пустоту, отстал бы молча (learning-services#500)."""
+
+	ПУТЬ_СХЕМЫ = "lms_frappe_app/agent_learning/releases/release.public.schema.json"
+
+	def test_контракт_называет_схему_и_формат(self):
+		текст = КОНТРАКТ.read_text(encoding="utf-8")
+		self.assertIn("# Релиз курса", текст.splitlines())
+		self.assertIn(f"`{self.ПУТЬ_СХЕМЫ}`", текст)
+		self.assertIn(f"`{схема_релиза.ФОРМАТ}`", текст)
+
+	def test_схема_лежит_по_названному_пути(self):
+		путь = КОНТРАКТ.parent / self.ПУТЬ_СХЕМЫ
+		self.assertTrue(путь.exists(), путь)
+		self.assertEqual(путь.resolve(), схема_релиза.СХЕМА.resolve())

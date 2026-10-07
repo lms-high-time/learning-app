@@ -21,6 +21,7 @@ import frappe
 УРОК_НЕ_НАЙДЕН = "lesson_not_found"
 НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА = "unknown_report_kind"
 НЕТ_ПРАВА = "not_allowed"
+КУРС_НЕ_НАЙДЕН = "course_not_found"
 
 
 class Отказ(frappe.ValidationError):

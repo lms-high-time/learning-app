@@ -167,6 +167,8 @@ fixtures = [
 	# версионируются они вместе с уроком, а не с редакцией директивы.
 	# Тестовая запись — отметка на самой записи на курс: доступ по-прежнему даёт
 	# запись, второго основания доступа нет (learning-services#393).
+	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
+	# (learning-services#500).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -177,6 +179,10 @@ fixtures = [
 					"Course Lesson-lesson_hook",
 					"LMS Course-course_promise",
 					"LMS Enrollment-agent_tester",
+					"LMS Course-course_key",
+					"LMS Course-active_release",
+					"LMS Course-course_attribution",
+					"Course Chapter-chapter_description",
 				],
 			]
 		],
@@ -281,6 +287,11 @@ after_migrate = [
 doc_events = {
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
+	},
+	# Ключ курса и действующий релиз ставит только публикация релиза
+	# (learning-services#500).
+	"LMS Course": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
 	},
 }
 
