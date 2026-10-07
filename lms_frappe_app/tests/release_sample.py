@@ -169,7 +169,12 @@ def релиз_двух_целей(ключ: str | None = None, *, порог: f
 						"text": "Цель с обязательными пунктами",
 						"goals": [
 							{"key": "term:T1", "kind": "term", "required": True, "title": "Термин «пример»"},
-							{"key": "exec:E1", "kind": "execution", "required": True, "title": "Сделать пример"},
+							{
+								"key": "exec:E1",
+								"kind": "execution",
+								"required": True,
+								"title": "Сделать пример",
+							},
 							{
 								"key": "refute:M1",
 								"kind": "misconception",
@@ -182,7 +187,12 @@ def релиз_двух_целей(ключ: str | None = None, *, порог: f
 						"key": "l-1-D2",
 						"text": "Цель без обязательных пунктов",
 						"goals": [
-							{"key": "return:R1", "kind": "return", "required": False, "title": "Вернуться к примеру"}
+							{
+								"key": "return:R1",
+								"kind": "return",
+								"required": False,
+								"title": "Вернуться к примеру",
+							}
 						],
 					},
 				],
@@ -197,7 +207,9 @@ def релиз_двух_целей(ключ: str | None = None, *, порог: f
 						}
 						for номер, в in enumerate(вопросы, start=1)
 					],
-					"answers": {в: {"correct": "V1", "explanation": "Потому что так велит условие."} for в in вопросы},
+					"answers": {
+						в: {"correct": "V1", "explanation": "Потому что так велит условие."} for в in вопросы
+					},
 				},
 				"homework": None,
 			}
