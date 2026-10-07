@@ -22,9 +22,9 @@ import frappe
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import structure
+from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import checks, document, index, projection, schema
-from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 РЕЛИЗ = index.РЕЛИЗ

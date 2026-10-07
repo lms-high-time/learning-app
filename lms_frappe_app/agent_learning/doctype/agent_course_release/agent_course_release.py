@@ -4,7 +4,6 @@
 import frappe
 from frappe.model.document import Document
 
-
 #: Флаг запроса: курс с этим именем удаляется целиком, и его релизы — с ним.
 УДАЛЯЕТСЯ_КУРС = "release_course_deleting"
 
