@@ -1,0 +1,192 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "REL-.#####",
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "course",
+  "course_key",
+  "version",
+  "release_format",
+  "digest",
+  "document_key",
+  "published_by",
+  "published_at",
+  "sb_index",
+  "chapters",
+  "lessons",
+  "objectives",
+  "goals",
+  "questions",
+  "sections",
+  "sb_snapshot",
+  "snapshot"
+ ],
+ "fields": [
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Курс",
+   "options": "LMS Course",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "course_key",
+   "fieldtype": "Data",
+   "label": "Ключ курса",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Версия",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Следующий номер для курса",
+   "read_only": 1
+  },
+  {
+   "fieldname": "release_format",
+   "fieldtype": "Data",
+   "label": "Формат",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "digest",
+   "fieldtype": "Data",
+   "label": "Дайджест",
+   "reqd": 1,
+   "description": "sha256 канонического JSON релиза: тот же релиз ещё раз — без новой версии",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_key",
+   "fieldtype": "Data",
+   "label": "Ключ документа",
+   "description": "Пусто — у релиза нет документа",
+   "read_only": 1
+  },
+  {
+   "fieldname": "published_by",
+   "fieldtype": "Link",
+   "label": "Опубликовал",
+   "options": "User",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "published_at",
+   "fieldtype": "Datetime",
+   "label": "Опубликован",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_index",
+   "fieldtype": "Section Break",
+   "label": "Индекс по ключам"
+  },
+  {
+   "fieldname": "chapters",
+   "fieldtype": "Table",
+   "label": "Главы",
+   "options": "Agent Release Chapter",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lessons",
+   "fieldtype": "Table",
+   "label": "Уроки",
+   "options": "Agent Release Lesson",
+   "read_only": 1
+  },
+  {
+   "fieldname": "objectives",
+   "fieldtype": "Table",
+   "label": "Цели уроков",
+   "options": "Agent Release Objective",
+   "read_only": 1
+  },
+  {
+   "fieldname": "goals",
+   "fieldtype": "Table",
+   "label": "Пункты целей агента",
+   "options": "Agent Release Goal",
+   "read_only": 1
+  },
+  {
+   "fieldname": "questions",
+   "fieldtype": "Table",
+   "label": "Вопросы",
+   "options": "Agent Release Question",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sections",
+   "fieldtype": "Table",
+   "label": "Разделы документа",
+   "options": "Agent Release Section",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_snapshot",
+   "fieldtype": "Section Break",
+   "label": "Снимок",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "snapshot",
+   "fieldtype": "Long Text",
+   "label": "Снимок релиза",
+   "reqd": 1,
+   "hidden": 1,
+   "description": "Релиз целиком, как опубликован",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Course Release",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Course Creator",
+   "create": 1,
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Moderator",
+   "create": 1,
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "course_key",
+ "track_changes": 0
+}

@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "lesson_key",
+  "objective_key",
+  "goal_key",
+  "kind",
+  "required",
+  "title"
+ ],
+ "fields": [
+  {
+   "fieldname": "lesson_key",
+   "fieldtype": "Data",
+   "label": "Ключ урока",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "objective_key",
+   "fieldtype": "Data",
+   "label": "Ключ цели",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "goal_key",
+   "fieldtype": "Data",
+   "label": "Ключ пункта",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Вид",
+   "options": "term\nvariant\nexecution\ntrap\nrequirement\nmisconception\nreturn",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "label": "Обязательный",
+   "read_only": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Пункт",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Release Goal",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

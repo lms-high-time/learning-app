@@ -1,0 +1,87 @@
+{
+ "actions": [],
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "lesson_key",
+  "chapter_key",
+  "title",
+  "hook",
+  "lesson",
+  "pass_percentage",
+  "section_keys",
+  "homework"
+ ],
+ "fields": [
+  {
+   "fieldname": "lesson_key",
+   "fieldtype": "Data",
+   "label": "Ключ урока",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "chapter_key",
+   "fieldtype": "Data",
+   "label": "Ключ главы",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Название",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "hook",
+   "fieldtype": "Small Text",
+   "label": "Зачин",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "label": "Урок",
+   "options": "Course Lesson",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "pass_percentage",
+   "fieldtype": "Float",
+   "label": "Проходной процент",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_keys",
+   "fieldtype": "JSON",
+   "label": "Разделы документа",
+   "read_only": 1
+  },
+  {
+   "fieldname": "homework",
+   "fieldtype": "JSON",
+   "label": "Домашнее задание",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Release Lesson",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
