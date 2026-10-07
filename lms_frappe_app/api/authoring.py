@@ -31,6 +31,7 @@ from lms_frappe_app.agent_learning import (
 	testers,
 )
 from lms_frappe_app.agent_learning.artifacts import templates
+from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
@@ -1291,6 +1292,26 @@ def ревизия_замечаний(course: str) -> str | None:
 		"Agent Author Note", filters={"course": course}, pluck="modified", order_by="modified desc", limit=1
 	)
 	return отметки[0].isoformat() if отметки else None
+
+
+# --- релиз курса (learning-services#500) ---
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def publish_release(release, course: str | None = None) -> dict:
+	"""Публикует релиз курса целиком — новой версией.
+
+	`release` — релиз от компилятора курса (объект или строка JSON), формат —
+	`CONTRACT.md`, «Релиз курса». Проверяется публичной схемой и правилами
+	сервера; по нему строятся главы и уроки Learning, схема документа и
+	карточка курса. Курс ищется по ключу из релиза, нет — заводится
+	черновиком. `course` — курс без уроков (анонс), к которому привязать первый
+	релиз. Признак «опубликован» не меняется: новый релиз опубликованного курса
+	действует сразу.
+	"""
+	автор = _автор()
+	return releases.опубликовать(release, course or None, автор)
 
 
 # --- обзор и публикация ---
