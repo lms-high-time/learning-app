@@ -1,0 +1,105 @@
+{
+ "actions": [],
+ "creation": "2026-10-08 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "objective_key",
+  "goal_key",
+  "kind",
+  "required",
+  "title",
+  "status",
+  "evidence",
+  "marked_at",
+  "session",
+  "removed"
+ ],
+ "fields": [
+  {
+   "fieldname": "objective_key",
+   "fieldtype": "Data",
+   "label": "Ключ цели",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "goal_key",
+   "fieldtype": "Data",
+   "label": "Ключ пункта",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Вид",
+   "options": "term\nvariant\nexecution\ntrap\nrequirement\nmisconception\nreturn",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "label": "Обязательный",
+   "read_only": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Пункт",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "default": "open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Статус",
+   "options": "open\ndone\nplanned\nnot_needed",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "evidence",
+   "fieldtype": "Small Text",
+   "label": "Свидетельство",
+   "read_only": 1
+  },
+  {
+   "fieldname": "marked_at",
+   "fieldtype": "Datetime",
+   "label": "Отмечен",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session",
+   "fieldtype": "Link",
+   "label": "Занятие",
+   "options": "Agent Learning Session",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Пункта нет в действующем релизе: отметка хранится, на статусы не влияет",
+   "fieldname": "removed",
+   "fieldtype": "Check",
+   "label": "Снят",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-08 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Lesson Run Goal",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

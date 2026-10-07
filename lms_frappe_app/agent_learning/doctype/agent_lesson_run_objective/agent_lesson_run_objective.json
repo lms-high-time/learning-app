@@ -1,0 +1,61 @@
+{
+ "actions": [],
+ "creation": "2026-10-08 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "objective_key",
+  "status",
+  "quiz_confirmed",
+  "removed"
+ ],
+ "fields": [
+  {
+   "fieldname": "objective_key",
+   "fieldtype": "Data",
+   "label": "Ключ цели",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "default": "not_started",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Статус",
+   "options": "not_started\ntouched\ncovered",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Все вопросы цели верны в сданной попытке квиза",
+   "fieldname": "quiz_confirmed",
+   "fieldtype": "Check",
+   "label": "Подтверждено квизом",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Цели нет в действующем релизе",
+   "fieldname": "removed",
+   "fieldtype": "Check",
+   "label": "Снята",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-08 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Lesson Run Objective",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
