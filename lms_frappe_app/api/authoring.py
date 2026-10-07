@@ -40,6 +40,7 @@ from lms_frappe_app.agent_learning.constants import (
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
+	КУРС_НЕ_НАЙДЕН,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
 	УРОК_НЕ_НАЙДЕН,
@@ -67,7 +68,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 	"remember_about_student",
 )
 
-КУРС_НЕ_НАЙДЕН = "course_not_found"
 ГЛАВА_НЕ_НАЙДЕНА = "chapter_not_found"
 КУРС_НЕ_ГОТОВ = "course_not_ready"
 КВИЗ_УЖЕ_ЕСТЬ = "quiz_exists"

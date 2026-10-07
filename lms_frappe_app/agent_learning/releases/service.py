@@ -1,0 +1,252 @@
+# Copyright (c) 2026, NikoMusaev and contributors
+# For license information, please see license.txt
+
+"""Публикация релиза курса (learning-services#500).
+
+Порядок: разобрать → схема → проверки сервера → курс → без изменений? →
+записи под точкой сохранения: проекция глав и уроков, документ, релиз с
+индексом, карточка курса и действующий релиз. Признак «опубликован» не
+трогается: новый курс выходит черновиком, новый релиз опубликованного курса
+действует сразу (решение владельца, #497).
+
+`Why:` точка сохранения — потому что `@контракт` превращает `Отказ` в
+успешный HTTP-ответ, и Frappe фиксирует всё, что записано до отказа. Все
+проверки — до первой записи; `Отказ` посреди записей откатывает к точке.
+Непредвиденная ошибка уходит HTTP-ошибкой, и запрос откатывается целиком.
+"""
+
+import hashlib
+import json
+
+import frappe
+from frappe.utils import now_datetime
+
+from lms_frappe_app.agent_learning import structure
+from lms_frappe_app.agent_learning.errors import КУРС_В_АРХИВЕ, КУРС_НЕ_НАЙДЕН, Отказ
+from lms_frappe_app.agent_learning.releases import checks, document, index, projection, schema
+
+РЕЛИЗ = index.РЕЛИЗ
+ТОЧКА = "publish_release"
+
+РЕЛИЗ_НЕВЕРЕН = "release_invalid"
+ФОРМАТ_НЕ_ТОТ = "release_format_unsupported"
+РЕЛИЗ_НЕ_СХОДИТСЯ = "release_inconsistent"
+КЛЮЧ_НЕ_ТОТ = "course_key_mismatch"
+КЛЮЧ_ЗАНЯТ = "course_key_taken"
+У_КУРСА_ЕСТЬ_УРОКИ = "course_has_content"
+
+
+def опубликовать(релиз, course: str | None, автор: str) -> dict:
+	"""Релиз — новой версией курса; тот же релиз ещё раз — `unchanged`, без записей."""
+	релиз = _разобрать(релиз)
+	предупреждения = _проверить(релиз)
+	ключ = релиз["course"]["key"]
+	курс = _курс(ключ, course)
+	дайджест = _дайджест(релиз)
+	if курс:
+		# Две публикации одного курса идут по очереди: версия «следующая» не двоится.
+		frappe.db.get_value("LMS Course", курс, "name", for_update=True)
+		действующий = frappe.db.get_value("LMS Course", курс, "active_release")
+		if действующий and frappe.db.get_value(РЕЛИЗ, действующий, "digest") == дайджест:
+			return _ответ(курс, действующий, None, None, предупреждения, создан=False, без_изменений=True)
+
+	frappe.db.savepoint(ТОЧКА)
+	try:
+		создан = курс is None
+		if создан:
+			курс = _завести_курс(релиз["course"], автор)
+		прежний = frappe.db.get_value("LMS Course", курс, "active_release")
+		прежний_документ = frappe.db.get_value(РЕЛИЗ, прежний, "document_key") if прежний else None
+		итог = projection.спроецировать(курс, релиз, index.известные(курс), index.ключи(прежний))
+		схема_документа = document.спроецировать(
+			курс, релиз["document"], релиз["lessons"], итог.уроки, прежний_документ
+		)
+		запись = _записать_релиз(курс, релиз, дайджест, итог, автор)
+		_карточка(курс, релиз["course"], запись.name)
+	except Отказ:
+		frappe.db.rollback(save_point=ТОЧКА)
+		raise
+	return _ответ(
+		курс, запись.name, итог, схема_документа, предупреждения, создан=создан, без_изменений=False
+	)
+
+
+def _разобрать(релиз) -> dict:
+	if isinstance(релиз, str):
+		try:
+			релиз = json.loads(релиз)
+		except ValueError as причина:
+			raise Отказ(
+				РЕЛИЗ_НЕВЕРЕН, "Релиз — не JSON", errors=[{"path": "$", "message": str(причина)}], total=1
+			) from причина
+	if not isinstance(релиз, dict):
+		raise Отказ(
+			РЕЛИЗ_НЕВЕРЕН,
+			"Релиз — объект JSON",
+			errors=[{"path": "$", "message": "ожидается объект"}],
+			total=1,
+		)
+	return релиз
+
+
+def _проверить(релиз: dict) -> list[dict]:
+	if релиз.get("format") != schema.ФОРМАТ:
+		raise Отказ(
+			ФОРМАТ_НЕ_ТОТ,
+			f"Формат релиза — {schema.ФОРМАТ}",
+			format=релиз.get("format"),
+			supported=[schema.ФОРМАТ],
+		)
+	if найдено := schema.ошибки(релиз):
+		raise Отказ(
+			РЕЛИЗ_НЕВЕРЕН,
+			"Релиз не проходит публичную схему",
+			errors=найдено[: schema.ОШИБОК_НЕ_БОЛЬШЕ],
+			total=len(найдено),
+		)
+	критичные, предупреждения = checks.проблемы(релиз)
+	if критичные:
+		raise Отказ(
+			РЕЛИЗ_НЕ_СХОДИТСЯ,
+			"Части релиза не сходятся",
+			problems=критичные[: schema.ОШИБОК_НЕ_БОЛЬШЕ],
+			total=len(критичные),
+		)
+	return предупреждения
+
+
+def _курс(ключ: str, course: str | None) -> str | None:
+	"""Курс под релиз; `None` — завести новый."""
+	по_ключу = frappe.db.get_value("LMS Course", {"course_key": ключ})
+	if not course:
+		if по_ключу and frappe.db.get_value("LMS Course", по_ключу, "archived"):
+			raise Отказ(КУРС_В_АРХИВЕ, "Курс в архиве", course=по_ключу)
+		return по_ключу
+	if not frappe.db.exists("LMS Course", course):
+		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
+	сведения = frappe.db.get_value("LMS Course", course, ["course_key", "archived"], as_dict=True)
+	if сведения.archived:
+		raise Отказ(КУРС_В_АРХИВЕ, "Курс в архиве", course=course)
+	if сведения.course_key:
+		if сведения.course_key != ключ:
+			raise Отказ(
+				КЛЮЧ_НЕ_ТОТ,
+				"У курса другой ключ",
+				course=course,
+				course_key=сведения.course_key,
+				release_key=ключ,
+			)
+		return course
+	if по_ключу:
+		raise Отказ(КЛЮЧ_ЗАНЯТ, "Ключ релиза уже у другого курса", course=по_ключу, release_key=ключ)
+	# Релиз ложится только на курс без уроков — анонс (решение владельца, #500):
+	# прогресс по старым урокам к ключам не привязан и всё равно потерялся бы.
+	if уроки := structure.уроки_курса(course):
+		raise Отказ(
+			У_КУРСА_ЕСТЬ_УРОКИ,
+			"Релиз ложится только на курс без уроков: курс со старыми уроками — в архив, релиз — новым курсом",
+			course=course,
+			lessons=len(уроки),
+		)
+	return course
+
+
+def _дайджест(релиз: dict) -> str:
+	"""sha256 канонического JSON: порядок ключей и пробелы не меняют дайджест."""
+	канон = json.dumps(релиз, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+	return hashlib.sha256(канон.encode("utf-8")).hexdigest()
+
+
+def _завести_курс(данные: dict, автор: str) -> str:
+	return (
+		frappe.get_doc(
+			{
+				"doctype": "LMS Course",
+				"title": данные["title"],
+				"short_introduction": данные["summary"] or данные["title"],
+				"description": данные["description"] or данные["summary"] or данные["title"],
+				"published": 0,
+				"course_key": данные["key"],
+				"instructors": [{"instructor": автор}],
+			}
+		)
+		.insert()
+		.name
+	)
+
+
+def _записать_релиз(курс: str, релиз: dict, дайджест: str, итог, автор: str):
+	последняя = frappe.db.sql("select max(version) from `tabAgent Course Release` where course=%s", курс)[0][
+		0
+	]
+	return frappe.get_doc(
+		{
+			"doctype": РЕЛИЗ,
+			"course": курс,
+			"course_key": релиз["course"]["key"],
+			"version": (последняя or 0) + 1,
+			"release_format": schema.ФОРМАТ,
+			"digest": дайджест,
+			"document_key": (релиз["document"] or {}).get("key"),
+			"published_by": автор,
+			"published_at": now_datetime(),
+			"snapshot": json.dumps(релиз, ensure_ascii=False),
+			**index.строки(релиз, итог.главы, итог.уроки),
+		}
+	).insert()
+
+
+def _карточка(курс: str, данные: dict, релиз: str) -> None:
+	"""Карточка курса — из релиза; пустые тексты Learning не принимает (`reqd`) —
+	на их месте название, о чём сказано в предупреждениях проверки.
+	`description` пишется как есть, как у `update_course`: отрисовку решает этап 6.
+
+	Сохранением документа, а не `db.set_value`: порядок курса и архив читают
+	признаки из кэша документа, и сохранение его сбрасывает."""
+	документ = frappe.get_doc("LMS Course", курс)
+	документ.update(
+		{
+			"title": данные["title"],
+			"short_introduction": данные["summary"] or данные["title"],
+			"description": данные["description"] or данные["summary"] or данные["title"],
+			"course_promise": данные["promise"] or None,
+			"course_attribution": json.dumps(данные["attribution"], ensure_ascii=False)
+			if данные["attribution"]
+			else None,
+			"course_key": данные["key"],
+			"active_release": релиз,
+		}
+	)
+	документ.save()
+
+
+def _ответ(курс, релиз, итог, схема_документа, предупреждения, *, создан: bool, без_изменений: bool) -> dict:
+	def изменения(вид: str) -> dict:
+		if not итог:
+			return {"created": [], "updated": [], "removed": []}
+		return {"created": итог.создано[вид], "updated": итог.обновлено[вид], "removed": итог.снято[вид]}
+
+	if без_изменений:
+		ключ_документа = frappe.db.get_value(РЕЛИЗ, релиз, "document_key")
+		версия = (
+			frappe.db.get_value(
+				"Agent Course Artifact", {"course": курс, "slug": ключ_документа, "is_active": 1}, "version"
+			)
+			if ключ_документа
+			else None
+		)
+		схема_документа = {"artifact": ключ_документа, "version": версия} if ключ_документа else None
+	сведения = frappe.db.get_value("LMS Course", курс, ["course_key", "published"], as_dict=True)
+	return {
+		"course": курс,
+		"course_key": сведения.course_key,
+		"release": релиз,
+		"version": frappe.db.get_value(РЕЛИЗ, релиз, "version"),
+		"unchanged": без_изменений,
+		"course_created": создан,
+		"published": bool(сведения.published),
+		"chapters": изменения("chapters"),
+		"lessons": изменения("lessons"),
+		"document": схема_документа,
+		"warnings": предупреждения,
+	}

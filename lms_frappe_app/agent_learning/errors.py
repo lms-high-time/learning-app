@@ -21,6 +21,9 @@ import frappe
 УРОК_НЕ_НАЙДЕН = "lesson_not_found"
 НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА = "unknown_report_kind"
 НЕТ_ПРАВА = "not_allowed"
+КУРС_НЕ_НАЙДЕН = "course_not_found"
+#: Курс снят и закрыт для занятий; записи и документы учеников целы (learning-services#500).
+КУРС_В_АРХИВЕ = "course_archived"
 
 
 class Отказ(frappe.ValidationError):
