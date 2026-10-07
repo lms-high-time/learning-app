@@ -206,6 +206,8 @@ def строки_схемы(блоки: list) -> list[dict]:
 			{
 				"block_key": блок.get("key"),
 				"title": блок.get("title"),
+				# Что сюда записывают — ученику; у шаблонов описания нет (learning-services#500).
+				"description": блок.get("description") or None,
 				"hint": блок.get("hint"),
 				"lesson": блок.get("lesson") or None,
 				"span": блок.get("span") or 1,
