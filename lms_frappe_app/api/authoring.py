@@ -81,6 +81,7 @@ from lms_frappe_app.api import контракт, список, текущий_п
 НЕТ_АДРЕСОВ = "users_required"
 ТЕСТЕР_НЕ_НАЙДЕН = "tester_not_found"
 КУРС_УЖЕ_ОТКРЫТ = "course_already_published"
+КУРС_ИЗ_РЕЛИЗА = "course_from_release"
 
 
 def _автор() -> str:
@@ -177,6 +178,7 @@ def update_course(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	документ = frappe.get_doc("LMS Course", course)
 	for поле, значение in (
 		("title", title),
@@ -201,6 +203,7 @@ def update_chapter(chapter: str, title: str) -> dict:
 	"""Правит название главы."""
 	_автор()
 	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
+	_не_из_релиза("Course Chapter", chapter)
 	документ = frappe.get_doc("Course Chapter", chapter)
 	документ.title = title
 	документ.save()
@@ -213,6 +216,7 @@ def add_chapter(course: str, title: str) -> dict:
 	"""Добавляет главу в конец курса."""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	глава = frappe.get_doc({"doctype": "Course Chapter", "course": course, "title": title}).insert()
 	structure.привязать(course, "LMS Course", глава.name)
 	return {"id": глава.name, "title": глава.title, "course": course}
@@ -224,6 +228,7 @@ def add_lesson(chapter: str, title: str, body: str) -> dict:
 	"""Добавляет урок в конец главы."""
 	_автор()
 	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
+	_не_из_релиза("Course Chapter", chapter)
 	курс = frappe.db.get_value("Course Chapter", chapter, "course")
 	урок = frappe.get_doc(
 		{"doctype": "Course Lesson", "title": title, "body": body, "chapter": chapter, "course": курс}
@@ -244,6 +249,7 @@ def update_lesson(
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	_не_из_релиза("Course Lesson", lesson)
 	документ = frappe.get_doc("Course Lesson", lesson)
 	if title is not None:
 		документ.title = title
@@ -269,9 +275,11 @@ def move_lesson(lesson: str, chapter: str | None = None, position: int | None = 
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	_не_из_релиза("Course Lesson", lesson)
 	откуда = frappe.db.get_value("Course Lesson", lesson, "chapter")
 	куда = chapter or откуда
 	_должен_существовать("Course Chapter", куда, ГЛАВА_НЕ_НАЙДЕНА)
+	_не_из_релиза("Course Chapter", куда)
 
 	if куда != откуда:
 		structure.отвязать(откуда, "Course Chapter", lesson)
@@ -310,6 +318,7 @@ def remove_lesson(lesson: str) -> dict:
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	_не_из_релиза("Course Lesson", lesson)
 	if следы := _следы_учеников(lesson):
 		raise Отказ(
 			УРОК_В_РАБОТЕ,
@@ -342,6 +351,7 @@ def remove_chapter(chapter: str) -> dict:
 	"""
 	_автор()
 	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
+	_не_из_релиза("Course Chapter", chapter)
 	if уроки := structure.уроки_главы(chapter):
 		raise Отказ(
 			ГЛАВА_НЕ_ПУСТА,
@@ -362,6 +372,7 @@ def reorder_lessons(chapter: str, lessons) -> dict:
 	"""Задаёт порядок уроков главы полным списком."""
 	_автор()
 	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
+	_не_из_релиза("Course Chapter", chapter)
 	порядок = список(lessons)
 	structure.переставить(chapter, "Course Chapter", порядок)
 	return {"chapter": chapter, "lessons": порядок}
@@ -373,6 +384,7 @@ def reorder_chapters(course: str, chapters) -> dict:
 	"""Задаёт порядок глав курса полным списком."""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	порядок = список(chapters)
 	structure.переставить(course, "LMS Course", порядок)
 	return {"course": course, "chapters": порядок}
@@ -397,6 +409,7 @@ def set_directive(
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	_не_из_релиза("Course Lesson", lesson)
 	return directives.записать(
 		"Agent Lesson Directive",
 		{"lesson": lesson},
@@ -432,6 +445,7 @@ def set_course_directive(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	return directives.записать(
 		"Agent Course Directive",
 		{"course": course},
@@ -484,6 +498,7 @@ def set_course_artifact(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	версия = записать_схему(course, artifact, title, список(blocks), layout, canvas, purpose=purpose)
 	# Наружу ключ документа зовётся `artifact`, как в методах ученика.
 	return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
@@ -592,6 +607,7 @@ def set_course_artifact_template(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	return templates.привязать(course, artifact, template, version, overlay, purpose)
 
 
@@ -614,6 +630,7 @@ def upgrade_course_artifact(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	return templates.перейти(course, artifact, version, dry_run=dry_run in (True, 1, "1", "true"))
 
 
@@ -628,6 +645,7 @@ def add_quiz(lesson: str, questions, title: str | None = None, passing_percentag
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	_не_из_релиза("Course Lesson", lesson)
 	вопросы = список(questions)
 	if not вопросы:
 		raise Отказ(course_builder.КВИЗ_БЕЗ_ВОПРОСОВ, "Квизу нужен хотя бы один вопрос", lesson=lesson)
@@ -687,6 +705,7 @@ def add_quiz(lesson: str, questions, title: str | None = None, passing_percentag
 def add_question(lesson: str, question: dict | str) -> dict:
 	"""Добавляет вопрос в существующий квиз урока."""
 	_автор()
+	_не_из_релиза("Course Lesson", lesson)
 	квиз = _квиз_урока_или_отказ(lesson)
 	вопрос = _как_словарь(question)
 	идентификатор, тип = _создать_вопрос_или_отказ(вопрос, lesson)
@@ -747,6 +766,7 @@ def remove_question(lesson: str, question: str) -> dict:
 	стирание записи испортило бы историю зачётов.
 	"""
 	_автор()
+	_не_из_релиза("Course Lesson", lesson)
 	квиз = _квиз_урока_или_отказ(lesson)
 	документ = frappe.get_doc("LMS Quiz", квиз)
 	осталось = [строка for строка in документ.questions if строка.question != question]
@@ -810,6 +830,7 @@ def add_homework(
 	"""
 	_автор()
 	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
+	_не_из_релиза("Course Lesson", lesson)
 	if имя := _имя_задания(lesson):
 		raise Отказ(ЗАДАНИЕ_УЖЕ_ЕСТЬ, "У урока уже есть домашнее задание: правьте его", lesson=lesson, homework=имя)
 	документ = frappe.get_doc(
@@ -844,6 +865,7 @@ def update_homework(
 	просрочку задним числом за правку правила.
 	"""
 	_автор()
+	_не_из_релиза("Course Lesson", lesson)
 	документ = _задание_урока(lesson)
 	for поле, значение in (
 		("title", title),
@@ -867,6 +889,7 @@ def remove_homework(lesson: str) -> dict:
 	Сдачи в счёт — и архивные после сброса прогресса: они ссылаются на задание.
 	"""
 	_автор()
+	_не_из_релиза("Course Lesson", lesson)
 	документ = _задание_урока(lesson)
 	if сдач := frappe.db.count("Agent Homework Submission", {"homework": документ.name}):
 		raise Отказ(
@@ -901,6 +924,7 @@ def set_course_map(course: str, levels, nodes, lessons=None, blocks=None) -> dic
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_из_релиза("LMS Course", course)
 	карта = course_map.нормализовать(список(levels), список(nodes), список(lessons), список(blocks))
 	уроки_курса = set(frappe.get_all("Course Lesson", filters={"course": course}, pluck="name"))
 	for пункт in карта["lessons"]:
@@ -1698,6 +1722,23 @@ def _создать_вопрос_или_отказ(вопрос: dict, lesson: s
 def _должен_существовать(doctype: str, имя: str, код: str) -> None:
 	if not frappe.db.exists(doctype, имя):
 		raise Отказ(код, f"{doctype} не найден", id=имя)
+
+
+def _не_из_релиза(doctype: str, имя: str) -> None:
+	"""Курс, собранный релизом, правится только новым релизом (learning-services#500).
+
+	`Why:` правка по кусочку разошлась бы с действующим релизом: следующая
+	публикация молча переписала бы её, а индекс релиза — то, по чему будут
+	учить агент и квиз, — правки не увидел бы вовсе. `doctype` — курс, глава
+	или урок; записи нет — отказ о ней даст `_должен_существовать`.
+	"""
+	курс = имя if doctype == "LMS Course" else frappe.db.get_value(doctype, имя, "course")
+	if курс and frappe.db.get_value("LMS Course", курс, "active_release"):
+		raise Отказ(
+			КУРС_ИЗ_РЕЛИЗА,
+			"Курс собран из релиза: правьте карту курса и публикуйте новый релиз",
+			course=курс,
+		)
 
 
 #: Больше полусотни жалоб за раз куратор всё равно не разберёт, а выборка без
