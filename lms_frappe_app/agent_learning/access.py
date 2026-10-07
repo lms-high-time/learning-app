@@ -26,6 +26,7 @@ from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation i
 from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
 	политика_квиза,
 )
+from lms_frappe_app.agent_learning.errors import КУРС_В_АРХИВЕ
 
 #: Коды отказов контракта — их видит агент, по ним он объясняет ученику,
 #: что происходит. Тексты меняются, коды нет.
@@ -48,14 +49,24 @@ def назначения_ученика(user: str) -> list:
 	return назначения_пользователя(user)
 
 
-def курсы_ученика(user: str, назначения: list | None = None) -> list[dict]:
+def в_архиве(курс: str) -> bool:
+	"""Курс снят и закрыт для занятий; записи и документы учеников целы (learning-services#500).
+
+	Кэш документа, а не запрос: признак читают на каждом старте занятия, а
+	ставят его сохранением курса, которое кэш и сбрасывает.
+	"""
+	return bool(frappe.get_cached_value("LMS Course", курс, "archived"))
+
+
+def курсы_ученика(user: str, назначения: list | None = None, *, с_архивом: bool = False) -> list[dict]:
 	"""Курсы, доступные ученику, с условиями поверх.
 
 	Список строится по зачислениям, а не по назначениям: иначе ученик, который
 	записался сам, не увидел бы ничего — у него назначений нет вовсе.
 
 	`назначения` — уже прочитанный список (`назначения_ученика`); без него
-	читается свой.
+	читается свой. Курс в архиве в список не входит: занятия по нему закрыты.
+	`с_архивом` — входит: документы ученика по нему читаются.
 	"""
 	зачисления = frappe.get_all(
 		"LMS Enrollment", filters={"member": user}, fields=["name", "course"]
@@ -66,6 +77,8 @@ def курсы_ученика(user: str, назначения: list | None = Non
 	условия = _условия_по_курсам(user, назначения)
 	курсы = []
 	for зачисление in зачисления:
+		if not с_архивом and в_архиве(зачисление.course):
+			continue
 		условие = условия.get(зачисление.course)
 		if условие and условие["suspended"]:
 			# Курс пришёл от приостановленной организации: доступ закрыт, но
@@ -85,12 +98,18 @@ def курсы_ученика(user: str, назначения: list | None = Non
 	return курсы
 
 
-def доступен_курс(user: str, course: str) -> tuple[bool, str | None]:
-	"""Может ли ученик заниматься курсом; при отказе — код причины."""
-	доступные = {к["course"] for к in курсы_ученика(user)}
+def доступен_курс(user: str, course: str, *, читать: bool = False) -> tuple[bool, str | None]:
+	"""Может ли ученик заниматься курсом; при отказе — код причины.
+
+	`читать` — только читать свою работу по курсу: курс в архиве её не
+	закрывает (learning-services#500).
+	"""
+	доступные = {к["course"] for к in курсы_ученика(user, с_архивом=читать)}
 	if course in доступные:
 		return True, None
 	if frappe.db.exists("LMS Enrollment", {"member": user, "course": course}):
+		if в_архиве(course):
+			return False, КУРС_В_АРХИВЕ
 		# Зачисление есть, но курс не в списке — значит его перекрыла
 		# приостановка организации.
 		return False, ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА

@@ -41,6 +41,7 @@ from lms_frappe_app.agent_learning.constants import (
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
+	КУРС_В_АРХИВЕ,
 	КУРС_НЕ_НАЙДЕН,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
@@ -1449,6 +1450,7 @@ def publish_course(course: str) -> dict:
 	"""Открывает курс ученикам, если он к этому готов."""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_в_архиве(course)
 	готовность = course_builder.проверить_готовность(course)
 	if готовность["blocking"]:
 		raise Отказ(
@@ -1480,6 +1482,7 @@ def announce_course(course: str) -> dict:
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
+	_не_в_архиве(course)
 	сведения = frappe.db.get_value("LMS Course", course, ["published", "upcoming"], as_dict=True)
 	if сведения.published and not сведения.upcoming:
 		raise Отказ(КУРС_УЖЕ_ОТКРЫТ, "Курс уже открыт ученикам", course=course)
@@ -1502,6 +1505,13 @@ def unpublish_course(course: str) -> dict:
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	frappe.db.set_value("LMS Course", course, {"published": 0, "upcoming": 0})
 	return {"id": course, "published": False}
+
+
+def _не_в_архиве(course: str) -> None:
+	"""Курс в архиве не открывается и не анонсируется: занятия по нему закрыты
+	(learning-services#500). Вернуть — снять признак в desk."""
+	if frappe.db.get_value("LMS Course", course, "archived"):
+		raise Отказ(КУРС_В_АРХИВЕ, "Курс в архиве: верните его из архива в desk", course=course)
 
 
 # --- тестеры курса (learning-services#393) ---
