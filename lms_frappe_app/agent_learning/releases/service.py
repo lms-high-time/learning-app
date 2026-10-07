@@ -24,6 +24,7 @@ from frappe.utils import now_datetime
 from lms_frappe_app.agent_learning import structure
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import checks, document, index, projection, schema
+from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 РЕЛИЗ = index.РЕЛИЗ
@@ -269,3 +270,27 @@ def _ответ(курс, релиз, итог, схема_документа, �
 		"document": схема_документа,
 		"warnings": предупреждения,
 	}
+
+
+def удалить_курс(курс: str) -> None:
+	"""Курс из релиза целиком: релизы, схемы документа, главы, уроки и сам курс.
+
+	Для курсов, по которым учиться больше не будут (решение владельца: старые
+	курсы удаляются вместе с историей). Релизы и схемы документа — проекции
+	релиза, их удаление здесь; остальное удаляет Learning (`delete_course`).
+	Записи учеников по курсу Learning не трогает: курс с ними удаление
+	остановит ссылками.
+	"""
+	from lms.lms.api import delete_course
+
+	frappe.db.set_value("LMS Course", курс, "active_release", None)
+	frappe.clear_document_cache("LMS Course", курс)
+	frappe.flags[УДАЛЯЕТСЯ_КУРС] = курс
+	try:
+		for имя in frappe.get_all(РЕЛИЗ, filters={"course": курс}, pluck="name"):
+			frappe.delete_doc(РЕЛИЗ, имя, ignore_permissions=True)
+	finally:
+		frappe.flags[УДАЛЯЕТСЯ_КУРС] = None
+	for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
+		frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
+	delete_course(курс)

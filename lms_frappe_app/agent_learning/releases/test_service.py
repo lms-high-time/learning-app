@@ -305,3 +305,28 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 
 		self.assertEqual(ответ["lessons"], {"created": [], "updated": [], "removed": [], "restored": ["l-3"]})
 		self.assertEqual(ответ["chapters"]["restored"], ["ch-2"])
+
+	def test_курс_из_релиза_удаляется_целиком(self):
+		первый = self.опубликовать()
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
+		self.опубликовать(релиз)
+		курс = первый["course"]
+		уроки = frappe.get_all("Course Lesson", filters={"course": курс}, pluck="name")
+		frappe.set_user("Administrator")
+
+		with self.assertRaises(frappe.ValidationError):
+			frappe.delete_doc(РЕЛИЗ, первый["release"])
+		service.удалить_курс(курс)
+
+		self.assertFalse(frappe.db.exists("LMS Course", курс))
+		self.assertFalse(frappe.db.exists(РЕЛИЗ, {"course": курс}))
+		self.assertFalse(frappe.db.exists("Agent Release Lesson", {"lesson": ("in", уроки)}))
+		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": курс}))
+		self.assertFalse(frappe.db.exists("Course Lesson", {"name": ("in", уроки)}))
+		# Флаг снят: релиз другого курса по-прежнему не удаляется.
+		другой = service.опубликовать(
+			пример_релиза(f"other-{frappe.generate_hash(length=6)}"), None, self.куратор
+		)
+		with self.assertRaises(frappe.ValidationError):
+			frappe.delete_doc(РЕЛИЗ, другой["release"])
