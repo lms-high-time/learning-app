@@ -77,6 +77,7 @@ from lms_frappe_app.agent_learning.errors import (
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
 	УРОК_НЕ_НАЙДЕН,
+	ЧУЖОЕ_ЗАНЯТИЕ,
 )
 from lms_frappe_app.agent_learning.normalizer import нормализовать_урок
 from lms_frappe_app.agent_learning.permissions import видит_всё
@@ -89,7 +90,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ЦЕЛИ_ПРОПУЩЕНЫ = "objectives_skipped"
 ЦЕЛИ_НЕ_СОВПАЛИ = "objectives_mismatch"
 НУЖЕН_КВИЗ = "quiz_required"
-ЧУЖОЕ_ЗАНЯТИЕ = "not_your_session"
 ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
 ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН = "user_not_found"
 ЗАНЯТИЕ_ЗАКРЫТО = "session_closed"

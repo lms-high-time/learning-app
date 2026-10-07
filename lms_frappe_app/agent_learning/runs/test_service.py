@@ -13,7 +13,7 @@ from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
+from lms_frappe_app.tests.sample_data import создать_занятие, создать_куратора, создать_ученика
 
 ПРОХОЖДЕНИЕ = "Agent Lesson Run"
 СВЕРКА = "lms_frappe_app.agent_learning.runs.service.сверить_курс"
@@ -32,6 +32,11 @@ def пункт(релиз: dict, ключ: str) -> dict:
 def сверки(очередь) -> list:
 	"""Постановки сверки прохождений среди вызовов `frappe.enqueue`."""
 	return [в for в in очередь.call_args_list if в.args == (СВЕРКА,)]
+
+
+def итог(ответ: dict) -> tuple[str, str]:
+	"""Статус цели пункта и урока из ответа `отметить`."""
+	return ответ["objective"]["status"], ответ["lesson"]["status"]
 
 
 def убрать_пункт(релиз: dict, ключ: str) -> None:
@@ -65,16 +70,12 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 	def цели(self, run) -> dict[str, tuple]:
 		return {ц.objective_key: (ц.status, ц.removed) for ц in run.objectives}
 
-	def отметить(self, run, ключ: str, статус: str = "done", свидетельство: str = "Ученик объяснил сам"):
-		"""Отметка пункта напрямую — как её запишет `отметить` (шаг 3): первая начинает урок."""
-		run = frappe.get_doc(ПРОХОЖДЕНИЕ, run.name, for_update=True)
-		[строка] = [п for п in run.goals if п.goal_key == ключ]
-		строка.status, строка.evidence = статус, свидетельство
-		if статус != "open" and not run.started_at:
-			run.started_at = now_datetime()
-		service.статусы(run)
-		run.save(ignore_permissions=True)
-		return run
+	def отметить(
+		self, run, ключ: str, статус: str = "done", свидетельство: str | None = "Ученик объяснил сам"
+	):
+		"""Отметка пункта; отдаёт прохождение, перечитанное после неё."""
+		service.отметить(run.name, ключ, статус, свидетельство)
+		return self.перечитать(run)
 
 	def перечитать(self, run):
 		return frappe.get_doc(ПРОХОЖДЕНИЕ, run.name)
@@ -488,3 +489,206 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 
 		self.assertEqual(второе.name, первое.name)
 		self.assertEqual(frappe.db.count(ПРОХОЖДЕНИЕ, {"student": self.ученик, "course": курс}), 1)
+
+	def отказ(self, код: str, *args, **kwargs) -> None:
+		with self.assertRaises(Отказ) as пойман:
+			service.отметить(*args, **kwargs)
+		self.assertEqual(пойман.exception.код, код)
+
+	def test_отказы_формы_отметки(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		свидетельство = "Ученик объяснил сам"
+
+		for код, ключ, статус, текст in (
+			("goal_unknown", "term:T404", "done", свидетельство),
+			("not_needed_required", "term:T1", "not_needed", свидетельство),
+			("goal_status_unknown", "term:T1", "skipped", свидетельство),
+			("evidence_required", "term:T1", "done", None),
+			("evidence_required", "exec:E1", "planned", "   "),
+			("evidence_required", "refute:M1", "not_needed", ""),
+			("evidence_too_long", "term:T1", "done", "я" * 501),
+		):
+			with self.subTest(код=код, статус=статус):
+				self.отказ(код, run.name, ключ, статус, текст)
+
+		# Отказ ничего не пишет: урок не начат, пункты открыты.
+		run = self.перечитать(run)
+		self.assertEqual((run.status, run.started_at), ("not_started", None))
+		self.assertEqual({п.status for п in run.goals}, {"open"})
+		# Ровно 500 знаков — ещё можно.
+		self.assertEqual(service.отметить(run.name, "term:T1", "done", "я" * 500)["status"], "done")
+
+	def test_снятый_пункт_не_отмечается(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		второй = релиз_двух_целей(self.ключ)
+		убрать_пункт(второй, "exec:E1")
+		self.опубликовать(второй)
+
+		self.отказ("goal_removed", run.name, "exec:E1", "done", "Ученик объяснил сам")
+
+	def test_отметка_на_снятом_уроке(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-2")
+		без_урока = пример_релиза(self.ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		self.опубликовать(без_урока)
+
+		self.отказ("lesson_not_in_release", run.name, "term:T1", "done", "Ученик объяснил сам")
+		self.assertIsNone(self.перечитать(run).started_at)
+
+	def test_чужое_занятие(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		другой = создать_ученика(f"run-svc-other-{frappe.generate_hash(length=6)}@example.com")
+		другой_урок = service.прохождение(self.ученик, курс, "l-2").lesson
+
+		for занятие in (
+			создать_занятие(другой, run.lesson),
+			создать_занятие(self.ученик, другой_урок),
+			"нет-такого-занятия",
+		):
+			with self.subTest(занятие=занятие):
+				self.отказ("not_your_session", run.name, "term:T1", "done", "Сам", занятие=занятие)
+		self.assertIsNone(self.перечитать(run).started_at)
+
+	def test_отметка_пишет_пункт_и_начинает_урок(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		занятие = создать_занятие(self.ученик, run.lesson)
+
+		ответ = service.отметить(run.name, "term:T1", "done", "  Объяснил своими словами  ", занятие=занятие)
+
+		self.assertEqual(
+			ответ,
+			{
+				"goal": "term:T1",
+				"status": "done",
+				"objective": {"key": "l-1-D1", "status": "touched", "open": ["exec:E1"]},
+				"lesson": {"status": "in_progress"},
+				"next": {"objective": "l-1-D1", "goal": "exec:E1", "title": "Сделать пример"},
+			},
+		)
+		run = self.перечитать(run)
+		[строка] = [п for п in run.goals if п.goal_key == "term:T1"]
+		self.assertEqual((строка.evidence, строка.session), ("Объяснил своими словами", занятие))
+		self.assertIsNotNone(строка.marked_at)
+		self.assertIsNotNone(run.started_at)
+		начат = run.started_at
+
+		# Возврат в `open` — без свидетельства; урок остаётся начатым с первой отметки.
+		ответ = service.отметить(run.name, "term:T1", "open", None)
+		self.assertEqual(
+			(ответ["objective"], ответ["lesson"]),
+			(
+				{"key": "l-1-D1", "status": "not_started", "open": ["term:T1", "exec:E1"]},
+				{"status": "in_progress"},
+			),
+		)
+		run = self.перечитать(run)
+		[строка] = [п for п in run.goals if п.goal_key == "term:T1"]
+		self.assertEqual((строка.status, строка.evidence, строка.session), ("open", None, None))
+		self.assertEqual(run.started_at, начат)
+
+	def test_статусы_по_отметкам(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		имя = service.прохождение(self.ученик, курс, "l-1").name
+
+		# Необязательный пункт цель не двигает, но урок начинает.
+		ответ = service.отметить(имя, "refute:M1", "not_needed", "Не проявилось")
+		self.assertEqual(итог(ответ), ("not_started", "in_progress"))
+		ответ = service.отметить(имя, "term:T1", "done", "Объяснил")
+		self.assertEqual(итог(ответ), ("touched", "in_progress"))
+		# `planned` закрывает пункт для цели, как `done`; обе цели разобраны — урок разобран.
+		ответ = service.отметить(имя, "exec:E1", "planned", "Сделает дома")
+		self.assertEqual(
+			(ответ["objective"], ответ["lesson"]["status"], ответ["next"]),
+			({"key": "l-1-D1", "status": "covered", "open": []}, "covered", None),
+		)
+		ответ = service.отметить(имя, "exec:E1", "open", None)
+		self.assertEqual(итог(ответ), ("touched", "in_progress"))
+
+	def test_следующий_по_порядку_релиза(self):
+		релиз = релиз_двух_целей(self.ключ)
+		пункт(релиз, "return:R1")["required"] = True
+		курс = self.опубликовать(релиз)["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		self.assertEqual(
+			service.открытые_обязательные(run),
+			[
+				{"objective": "l-1-D1", "goal": "term:T1", "title": "Термин «пример»"},
+				{"objective": "l-1-D1", "goal": "exec:E1", "title": "Сделать пример"},
+				{"objective": "l-1-D2", "goal": "return:R1", "title": пункт(релиз, "return:R1")["title"]},
+			],
+		)
+
+		self.assertEqual(service.отметить(run.name, "exec:E1", "done", "Сделал")["next"]["goal"], "term:T1")
+		ответ = service.отметить(run.name, "term:T1", "done", "Объяснил")
+		self.assertEqual(
+			(ответ["objective"]["open"], ответ["next"]["goal"], ответ["next"]["objective"]),
+			([], "return:R1", "l-1-D2"),
+		)
+		service.отметить(run.name, "return:R1", "done", "Вернулся")
+		run = self.перечитать(run)
+		self.assertEqual((service.открытые_обязательные(run), service.следующий(run)), ([], None))
+
+	def test_пункт_стал_обязательным_после_not_needed(self):
+		"""Новый релиз сделал обязательным пункт в `not_needed`: он снова открыт — как и для статуса цели."""
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		self.отметить(run, "refute:M1", "not_needed", "Не нужно")
+		второй = релиз_двух_целей(self.ключ)
+		пункт(второй, "refute:M1")["required"] = True
+		self.опубликовать(второй)
+
+		run = service.прохождение(self.ученик, курс, "l-1")
+
+		self.assertIn("refute:M1", [п["goal"] for п in service.открытые_обязательные(run)])
+		self.assertEqual(self.цели(run)["l-1-D1"][0], "not_started")
+
+	def test_отметка_сверяет_с_новым_релизом(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		второй = релиз_двух_целей(self.ключ)
+		второй["lessons"][0]["objectives"][0]["goals"].append(
+			{"key": "trap:P1", "kind": "trap", "required": True, "title": "Ловушка"}
+		)
+		with patch.object(frappe, "enqueue"):
+			новый = self.опубликовать(второй)["release"]
+
+		ответ = service.отметить(run.name, "trap:P1", "done", "Не попался")
+
+		self.assertEqual(ответ["objective"]["open"], ["term:T1", "exec:E1"])
+		self.assertEqual(self.перечитать(run).release, новый)
+
+	def test_две_отметки_с_разных_копий(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		первая = service.прохождение(self.ученик, курс, "l-1")
+		вторая = frappe.get_doc(ПРОХОЖДЕНИЕ, первая.name)
+
+		service.отметить(первая.name, "term:T1", "done", "Объяснил")
+		service.отметить(вторая.name, "exec:E1", "done", "Сделал")
+
+		run = self.перечитать(первая)
+		self.assertEqual(
+			(self.пункты(run)["term:T1"]["status"], self.пункты(run)["exec:E1"]["status"], run.status),
+			("done", "done", "covered"),
+		)
+
+	def test_отметка_не_пишет_журнал_занятия(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		занятие = создать_занятие(self.ученик, run.lesson)
+
+		def журнал():
+			return frappe.get_all(
+				"Agent Session Event", filters={"session": занятие}, fields=["name", "modified"]
+			)
+
+		было = журнал()
+
+		service.отметить(run.name, "term:T1", "done", "Объяснил", занятие=занятие)
+
+		self.assertEqual(журнал(), было)

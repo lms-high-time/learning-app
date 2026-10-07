@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Прохождение урока: создание, сверка с релизом, статусы (learning-services#504).
+"""Прохождение урока: создание, сверка с релизом, отметки, статусы (learning-services#504).
 
 Прохождение одно на «ученик, курс, ключ урока» и держит пункты и цели урока
 по ключам релиза. Ученик всегда на действующем релизе: прохождение, сверенное
@@ -14,8 +14,9 @@
 """
 
 import frappe
+from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.errors import ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.releases import index
 
 ПРОХОЖДЕНИЕ = "Agent Lesson Run"
@@ -23,9 +24,19 @@ from lms_frappe_app.agent_learning.releases import index
 ТОЧКА_ВСТАВКИ = "lesson_run_insert"
 ТОЧКА_СВЕРКИ = "lesson_run_reconcile"
 
+ПУНКТ_НЕИЗВЕСТЕН = "goal_unknown"
+ПУНКТ_СНЯТ = "goal_removed"
+СТАТУС_НЕИЗВЕСТЕН = "goal_status_unknown"
+НЕ_НУЖЕН_ОБЯЗАТЕЛЬНОМУ = "not_needed_required"
+НУЖНО_СВИДЕТЕЛЬСТВО = "evidence_required"
+ДЛИННОЕ_СВИДЕТЕЛЬСТВО = "evidence_too_long"
+
 ОТКРЫТ = "open"
+НЕ_НУЖЕН = "not_needed"
+СТАТУСЫ_ПУНКТА = (ОТКРЫТ, "done", "planned", НЕ_НУЖЕН)
 #: Статусы пункта, которые закрывают его для цели: разобран или отложен на потом.
 ЗАКРЫВАЮТ_ЦЕЛЬ = frozenset({"done", "planned"})
+ПРЕДЕЛ_СВИДЕТЕЛЬСТВА = 500
 ПРОЙДЕН = "passed"
 
 
@@ -77,6 +88,109 @@ def сверить(run) -> bool:
 		return False
 	урок = index.урок(релиз, run.lesson_key)
 	return _сверить(run, релиз, урок, index.цели_урока(релиз, run.lesson_key) if урок else [])
+
+
+def отметить(
+	имя_прохождения: str,
+	ключ_пункта: str,
+	статус: str,
+	свидетельство: str | None,
+	занятие: str | None = None,
+) -> dict:
+	"""Отметка пункта прохождения; отдаёт остаток по цели пункта и следующий шаг урока.
+
+	Прохождение перечитывается с блокировкой и сверяется с действующим
+	релизом до отметки. Строка пункта получает статус, свидетельство, время
+	и занятие этой отметки; первая отметка не в `open` начинает урок
+	(`started_at`). Вернуть пункт в `open` можно без свидетельства.
+
+	Отказ — только на форме: неизвестный статус или пункт, снятый пункт,
+	`not_needed` у обязательного, закрывающий статус без свидетельства,
+	свидетельство длиннее предела, занятие другого ученика или урока, урок,
+	снятый из релиза.
+
+	`Why:` отметка — запись с предупреждением, а не отказ (#497): пункт,
+	отмеченный «не по порядку», пишется, а в ответе — что по цели ещё открыто
+	и что дальше. В журнал занятия отметки не пишутся: его читают ученик и
+	руководитель, а пункты им не показываются; история — `track_changes`
+	прохождения и поля строки.
+	"""
+	if статус not in СТАТУСЫ_ПУНКТА:
+		raise Отказ(
+			СТАТУС_НЕИЗВЕСТЕН, "Неизвестный статус пункта", status=статус, allowed=list(СТАТУСЫ_ПУНКТА)
+		)
+	свидетельство = (свидетельство or "").strip() or None
+	if статус != ОТКРЫТ and not свидетельство:
+		raise Отказ(НУЖНО_СВИДЕТЕЛЬСТВО, "Отметка пункта требует свидетельства", status=статус)
+	if свидетельство and len(свидетельство) > ПРЕДЕЛ_СВИДЕТЕЛЬСТВА:
+		raise Отказ(
+			ДЛИННОЕ_СВИДЕТЕЛЬСТВО,
+			"Свидетельство длиннее предела",
+			limit=ПРЕДЕЛ_СВИДЕТЕЛЬСТВА,
+			length=len(свидетельство),
+		)
+	run = frappe.get_doc(ПРОХОЖДЕНИЕ, имя_прохождения, for_update=True)
+	сверить(run)
+	if run.release != _действующий(run.course):
+		raise Отказ(
+			УРОК_НЕ_В_РЕЛИЗЕ,
+			"Урока нет в действующем релизе курса",
+			course=run.course,
+			lesson_key=run.lesson_key,
+		)
+	if занятие:
+		_проверить_занятие(run, занятие)
+	строка = next((п for п in run.goals if п.goal_key == ключ_пункта), None)
+	if not строка:
+		raise Отказ(ПУНКТ_НЕИЗВЕСТЕН, "В уроке нет такого пункта", goal=ключ_пункта)
+	if строка.removed:
+		raise Отказ(ПУНКТ_СНЯТ, "Пункт снят из урока новым релизом", goal=ключ_пункта)
+	if статус == НЕ_НУЖЕН and строка.required:
+		raise Отказ(НЕ_НУЖЕН_ОБЯЗАТЕЛЬНОМУ, "Обязательный пункт нельзя отметить ненужным", goal=ключ_пункта)
+
+	строка.status, строка.evidence = статус, свидетельство
+	строка.marked_at, строка.session = now_datetime(), занятие
+	if статус != ОТКРЫТ and not run.started_at:
+		run.started_at = строка.marked_at
+	статусы(run)
+	run.save(ignore_permissions=True)
+
+	[цель] = [ц for ц in run.objectives if ц.objective_key == строка.objective_key]
+	открытые = открытые_обязательные(run)
+	return {
+		"goal": строка.goal_key,
+		"status": строка.status,
+		"objective": {
+			"key": цель.objective_key,
+			"status": цель.status,
+			"open": [п["goal"] for п in открытые if п["objective"] == цель.objective_key],
+		},
+		"lesson": {"status": run.status},
+		"next": открытые[0] if открытые else None,
+	}
+
+
+def открытые_обязательные(run) -> list[dict]:
+	"""Обязательные пункты, не закрытые для цели, — по порядку релиза: `{objective, goal, title}`.
+
+	Ворота квиза (этап 3) и остаток в ответе `отметить`. Снятые не в счёт.
+
+	`Why:` «открыт» — не закрыт для цели (не `done` и не `planned`), а не
+	только `open`: пункт в `not_needed`, который новый релиз сделал
+	обязательным, цель не закрывает (`статусы`), и ворота квиза его тоже
+	должны видеть.
+	"""
+	return [
+		{"objective": п.objective_key, "goal": п.goal_key, "title": п.title}
+		for п in run.goals
+		if п.required and not п.removed and п.status not in ЗАКРЫВАЮТ_ЦЕЛЬ
+	]
+
+
+def следующий(run) -> dict | None:
+	"""Следующий шаг урока — первый открытый обязательный пункт; всё закрыто — `None`."""
+	открытые = открытые_обязательные(run)
+	return открытые[0] if открытые else None
 
 
 def статусы(run) -> None:
@@ -189,6 +303,13 @@ def _найти(ученик: str, курс: str, ключ_урока: str, *, f
 		"name",
 		for_update=for_update,
 	)
+
+
+def _проверить_занятие(run, занятие: str) -> None:
+	"""Занятие отметки — того же ученика и урока, что и прохождение; нет такого — тоже чужое."""
+	своё = frappe.db.get_value("Agent Learning Session", занятие, ["student", "lesson"], as_dict=True)
+	if not своё or (своё.student, своё.lesson) != (run.student, run.lesson):
+		raise Отказ(ЧУЖОЕ_ЗАНЯТИЕ, "Занятие другого ученика или другого урока", session=занятие)
 
 
 def _действующий(курс: str) -> str | None:
