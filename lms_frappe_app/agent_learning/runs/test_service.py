@@ -360,6 +360,49 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		журнал.assert_called_once()
 		self.assertEqual(self.перечитать(хорошее).release, новый)
 
+	def test_сверка_курса_останавливается_на_новом_релизе(self):
+		"""Релиз сменился посреди задачи: остальные прохождения сверит задача новой публикации."""
+		первый = self.опубликовать(релиз_двух_целей(self.ключ))
+		курс = первый["course"]
+		прохождения = self.ученики(курс, 2)
+		новый = self.новый_релиз(курс)
+		сверить = service._сверить
+		сверены = []
+
+		def и_новый_релиз(run, *args):
+			сверены.append(run.name)
+			итог = сверить(run, *args)
+			frappe.db.set_value("LMS Course", курс, "active_release", первый["release"])
+			return итог
+
+		with patch.object(service, "_сверить", side_effect=и_новый_релиз):
+			self.assertEqual(service.сверить_курс(курс), 1)
+
+		[сверено] = сверены
+		[другое] = [run for run in прохождения if run.name != сверено]
+		self.assertEqual(self.перечитать(другое).release, первый["release"])
+		self.assertEqual(frappe.db.get_value(ПРОХОЖДЕНИЕ, сверено, "release"), новый)
+
+	def test_удалённое_после_отбора_пропускается_молча(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		удалённое, хорошее = self.ученики(курс, 2)
+		новый = self.новый_релиз(курс)
+		прочитать = frappe.get_doc
+
+		def прочитать_или_нет(*args, **kwargs):
+			if args[1:2] == (удалённое.name,):
+				raise frappe.DoesNotExistError
+			return прочитать(*args, **kwargs)
+
+		with (
+			patch.object(frappe, "get_doc", side_effect=прочитать_или_нет),
+			patch.object(frappe, "log_error") as журнал,
+		):
+			self.assertEqual(service.сверить_курс(курс), 1)
+
+		журнал.assert_not_called()
+		self.assertEqual(self.перечитать(хорошее).release, новый)
+
 	def test_курс_с_прохождениями_не_удаляется(self):
 		ответ = self.опубликовать(релиз_двух_целей(self.ключ))
 		курс = ответ["course"]
