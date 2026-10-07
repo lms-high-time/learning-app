@@ -114,7 +114,7 @@ def _тип(узел: dict):
 	"""Тип узла с учётом ссылки; без типа — любой."""
 	while "type" not in узел and "$ref" in узел:
 		узел = _по_ссылке(узел["$ref"])
-	return узел.get("type", list(ТИПЫ) + ["integer", "number"])
+	return узел.get("type", [*ТИПЫ, "integer", "number"])
 
 
 def _по_ссылке(ссылка: str) -> dict:
