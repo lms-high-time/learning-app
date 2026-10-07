@@ -3947,7 +3947,9 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 
 Готовности анонс не требует: уроков может ещё не быть. Требует целей курса —
 поля `objectives` действующей директивы курса: у анонса наружу выходят только
-они. Открывает анонс `publish_course`, снимает — `unpublish_course`.
+они. У курса из релиза цели курса — цели глав: названия глав действующего
+релиза по порядку; директивы у такого курса нет (learning-services#500).
+Открывает анонс `publish_course`, снимает — `unpublish_course`.
 
 **Отказы:** `course_not_found`, `course_objectives_missing` — у курса нет
 целей, `course_already_published` — курс уже открыт ученикам.

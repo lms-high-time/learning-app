@@ -15,6 +15,7 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.api import authoring, public, student, team
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_куратора,
@@ -196,3 +197,19 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 		ответ = self.от_имени(self.ученик, student.enroll, course=self.курс)
 		self.assertTrue(ответ["ok"], ответ)
+
+	def test_курс_из_релиза_анонсируется_целями_глав(self):
+		"""Цели курса из релиза — цели глав, их названия по порядку: директивы у
+		такого курса нет, и анонс без неё не отказывает (learning-services#500)."""
+		ключ = f"an-{frappe.generate_hash(length=6)}"
+		курс = self.от_имени(self.куратор, authoring.publish_release, release=пример_релиза(ключ))["data"][
+			"course"
+		]
+
+		ответ = self.от_имени(self.куратор, authoring.announce_course, course=курс)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(ответ["data"]["objectives"], ["Глава первая", "Глава вторая"])
+		каталог = self.от_имени(self.ученик, student.list_catalog)["data"]
+		анонс = next(к for к in каталог["courses"] if к["id"] == курс)
+		self.assertEqual(анонс["objectives"], ["Глава первая", "Глава вторая"])
