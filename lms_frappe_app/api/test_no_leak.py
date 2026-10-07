@@ -330,11 +330,15 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),
 		)
 		self.проверить("artifact", student.artifact(self.курс))
-		# Документ с таблицей — только по текстам: у таблицы есть своё поле
-		# `owner` (блок, который её заводит), и проверка имён Frappe его поймала бы.
-		документ = json.dumps(student.artifact(self.курс, "notebook"), ensure_ascii=False)
-		for текст in (ПОЯСНЕНИЕ_РЕЛИЗА, ПАКЕТ_АГЕНТА, КАРТА_КУРСА):
-			self.assertNotIn(текст, документ)
+		# У таблицы документа своё поле `owner` — блок, который её заводит
+		# (CONTRACT.md, «Зачем контракт именно такой»); остальное — полным списком.
+		проверить_ответ(
+			self,
+			student.artifact(self.курс, "notebook"),
+			"artifact",
+			запрещённые_тексты=(ПОЯСНЕНИЕ_РЕЛИЗА, ПАКЕТ_АГЕНТА, КАРТА_КУРСА),
+			кроме=("owner",),
+		)
 
 		frappe.set_user(self.менеджер)
 		self.проверить("org_report", manager.org_report())
