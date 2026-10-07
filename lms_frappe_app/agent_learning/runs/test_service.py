@@ -421,7 +421,8 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 				raise RuntimeError("сбой сверки")
 			return сверить(run, *args)
 
-		# Коммит подменён: настоящий зафиксировал бы записи теста.
+		# `in_test` снят нарочно: коммит по прохождению идёт только вне тестов.
+		# Сам коммит подменён: настоящий зафиксировал бы записи теста.
 		with (
 			patch.object(frappe, "in_test", False),
 			patch.object(frappe, "get_doc", side_effect=прочитать_или_нет),
@@ -490,10 +491,12 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(второе.name, первое.name)
 		self.assertEqual(frappe.db.count(ПРОХОЖДЕНИЕ, {"student": self.ученик, "course": курс}), 1)
 
-	def отказ(self, код: str, *args, **kwargs) -> None:
+	def отказ(self, код: str, *args, **kwargs) -> dict:
+		"""Отказ `отметить` с этим кодом; отдаёт его подробности."""
 		with self.assertRaises(Отказ) as пойман:
 			service.отметить(*args, **kwargs)
 		self.assertEqual(пойман.exception.код, код)
+		return пойман.exception.подробности
 
 	def test_отказы_формы_отметки(self):
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
@@ -507,7 +510,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 			("evidence_required", "term:T1", "done", None),
 			("evidence_required", "exec:E1", "planned", "   "),
 			("evidence_required", "refute:M1", "not_needed", ""),
-			("evidence_too_long", "term:T1", "done", "я" * 501),
+			("evidence_too_long", "term:T1", "done", "я" * (service.ПРЕДЕЛ_СВИДЕТЕЛЬСТВА + 1)),
 		):
 			with self.subTest(код=код, статус=статус):
 				self.отказ(код, run.name, ключ, статус, текст)
@@ -516,8 +519,29 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		run = self.перечитать(run)
 		self.assertEqual((run.status, run.started_at), ("not_started", None))
 		self.assertEqual({п.status for п in run.goals}, {"open"})
-		# Ровно 500 знаков — ещё можно.
-		self.assertEqual(service.отметить(run.name, "term:T1", "done", "я" * 500)["status"], "done")
+		# Подробности ведут агента к верной отметке.
+		self.assertEqual(
+			self.отказ("goal_unknown", run.name, "term:T404", "done", свидетельство)["goals"], ПУНКТЫ
+		)
+		self.assertEqual(
+			self.отказ("not_needed_required", run.name, "term:T1", "not_needed", свидетельство)["allowed"],
+			["open", "done", "planned"],
+		)
+		# Ровно предел — ещё можно.
+		предел = "я" * service.ПРЕДЕЛ_СВИДЕТЕЛЬСТВА
+		self.assertEqual(service.отметить(run.name, "term:T1", "done", предел)["status"], "done")
+
+	def test_отказ_после_сверки_сверку_не_откатывает(self):
+		"""Сверка сохранена до проверки пункта: отказ `goal_unknown` её оставляет, отметок не пишет."""
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		было = self.пункты(run)
+		новый = self.новый_релиз(курс)
+
+		self.отказ("goal_unknown", run.name, "term:T404", "done", "Ученик объяснил сам")
+
+		run = self.перечитать(run)
+		self.assertEqual((run.release, self.пункты(run)), (новый, было))
 
 	def test_снятый_пункт_не_отмечается(self):
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
@@ -536,22 +560,42 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
 		self.опубликовать(без_урока)
 
-		self.отказ("lesson_not_in_release", run.name, "term:T1", "done", "Ученик объяснил сам")
+		подробности = self.отказ("lesson_not_in_release", run.name, "term:T1", "done", "Ученик объяснил сам")
+		self.assertEqual(
+			подробности,
+			{
+				"course": курс,
+				"lesson_key": "l-2",
+				"release": frappe.db.get_value("LMS Course", курс, "active_release"),
+			},
+		)
 		self.assertIsNone(self.перечитать(run).started_at)
 
 	def test_чужое_занятие(self):
 		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
 		другой = создать_ученика(f"run-svc-other-{frappe.generate_hash(length=6)}@example.com")
-		другой_урок = service.прохождение(self.ученик, курс, "l-2").lesson
+		другое = service.прохождение(self.ученик, курс, "l-2")
+		другого_прохождения = создать_занятие(self.ученик, run.lesson)
+		frappe.db.set_value("Agent Learning Session", другого_прохождения, "run", другое.name)
 
 		for занятие in (
 			создать_занятие(другой, run.lesson),
-			создать_занятие(self.ученик, другой_урок),
+			создать_занятие(self.ученик, другое.lesson),
+			другого_прохождения,
 			"нет-такого-занятия",
 		):
 			with self.subTest(занятие=занятие):
 				self.отказ("not_your_session", run.name, "term:T1", "done", "Сам", занятие=занятие)
+		self.assertIsNone(self.перечитать(run).started_at)
+
+	def test_архивное_прохождение_не_отмечается(self):
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		архив = {"student": None, "archived_student": self.ученик, "archived_at": now_datetime()}
+		frappe.db.set_value(ПРОХОЖДЕНИЕ, run.name, архив)
+
+		self.отказ("not_your_session", run.name, "term:T1", "done", "Ученик объяснил сам")
 		self.assertIsNone(self.перечитать(run).started_at)
 
 	def test_отметка_пишет_пункт_и_начинает_урок(self):
@@ -578,8 +622,8 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertIsNotNone(run.started_at)
 		начат = run.started_at
 
-		# Возврат в `open` — без свидетельства; урок остаётся начатым с первой отметки.
-		ответ = service.отметить(run.name, "term:T1", "open", None)
+		# Возврат в `open` стирает свидетельство, даже присланное; урок остаётся начатым.
+		ответ = service.отметить(run.name, "term:T1", "open", "Передумали")
 		self.assertEqual(
 			(ответ["objective"], ответ["lesson"]),
 			(
@@ -663,7 +707,10 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(ответ["objective"]["open"], ["term:T1", "exec:E1"])
 		self.assertEqual(self.перечитать(run).release, новый)
 
-	def test_две_отметки_с_разных_копий(self):
+	def test_отметка_перечитывает_прохождение(self):
+		"""Две отметки подряд при устаревшей копии у вызывающего — обе записаны.
+
+		Без `TimestampMismatchError`: `отметить` берёт имя и читает прохождение сама."""
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
 		первая = service.прохождение(self.ученик, курс, "l-1")
 		вторая = frappe.get_doc(ПРОХОЖДЕНИЕ, первая.name)
@@ -714,11 +761,14 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 
 	def test_главы_начатая_и_пройденная(self):
 		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
-		self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
+		начатое = self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
 		пройденное = service.прохождение(self.ученик, курс, "l-3")
 		frappe.db.set_value(ПРОХОЖДЕНИЕ, пройденное.name, "status", "passed")
 
 		self.assertEqual(self.главы(курс), {"ch-1": ("in_progress", 2, 1, 0), "ch-2": ("passed", 1, 1, 1)})
+		# Пройден один урок из двух — глава ещё в работе.
+		frappe.db.set_value(ПРОХОЖДЕНИЕ, начатое.name, "status", "passed")
+		self.assertEqual(self.главы(курс)["ch-1"], ("in_progress", 2, 1, 1))
 		# Чужие прохождения в счёт не идут.
 		другой = создать_ученика(f"run-svc-other-{frappe.generate_hash(length=6)}@example.com")
 		self.assertEqual([г["status"] for г in service.главы(другой, курс)], ["not_started", "not_started"])
@@ -735,16 +785,22 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 
 		self.assertEqual(self.главы(курс)["ch-1"], ("not_started", 1, 0, 0))
 
-	def test_главы_сверяют_прохождения_ученика(self):
-		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
-		run = self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
+	def test_главы_считают_несверенное_прохождение(self):
+		"""Прохождение на прошлом релизе посчитано верно и не тронуто: `главы` не пишет."""
+		первый = self.опубликовать(пример_релиза(self.ключ))
+		курс = первый["course"]
+		начатое = self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
+		пройденное = service.прохождение(self.ученик, курс, "l-3")
+		frappe.db.set_value(ПРОХОЖДЕНИЕ, пройденное.name, "status", "passed")
 		второй = пример_релиза(self.ключ)
 		второй["lessons"][0]["title"] = "Урок первый, исправленный"
 		with patch.object(frappe, "enqueue"):
-			новый = self.опубликовать(второй)["release"]
+			self.опубликовать(второй)
 
-		self.assertEqual(self.главы(курс)["ch-1"], ("in_progress", 2, 1, 0))
-		self.assertEqual(self.перечитать(run).release, новый)
+		self.assertEqual(self.главы(курс), {"ch-1": ("in_progress", 2, 1, 0), "ch-2": ("passed", 1, 1, 1)})
+		self.assertEqual(
+			{self.перечитать(начатое).release, self.перечитать(пройденное).release}, {первый["release"]}
+		)
 
 	def test_главы_без_релиза(self):
 		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
