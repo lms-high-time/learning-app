@@ -164,6 +164,17 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 	def test_отказы_схемы_и_проверок(self):
 		self.отказ(service.РЕЛИЗ_НЕВЕРЕН, "{не json")
 		self.отказ(service.РЕЛИЗ_НЕВЕРЕН, "[]")
+		отказ = self.отказ(service.РЕЛИЗ_НЕВЕРЕН, '{"format": "lms-release/1", "x": NaN}')
+		self.assertIn("NaN", отказ.подробности["errors"][0]["message"])
+		релиз = пример_релиза(self.ключ)
+		релиз["agent"] = {"порог": float("inf"), "список": [1, float("nan")]}
+		отказ = self.отказ(service.РЕЛИЗ_НЕВЕРЕН, релиз)
+		self.assertEqual(
+			[о["path"] for о in отказ.подробности["errors"]], ["$.agent.порог", "$.agent.список[1]"]
+		)
+		релиз = пример_релиза(self.ключ)
+		релиз["map"] = {"вес": float("-inf")}
+		self.отказ(service.РЕЛИЗ_НЕВЕРЕН, json.dumps(релиз))
 		релиз = пример_релиза(self.ключ)
 		релиз["format"] = "lms-release/2"
 		отказ = self.отказ(service.ФОРМАТ_НЕ_ТОТ, релиз)

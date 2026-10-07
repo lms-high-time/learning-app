@@ -17,6 +17,7 @@
 
 import hashlib
 import json
+import math
 
 import frappe
 from frappe.utils import now_datetime
@@ -74,10 +75,20 @@ def опубликовать(релиз, course: str | None, автор: str) ->
 	)
 
 
+def _не_json(константа: str):
+	raise ValueError(f"{константа} — не значение JSON")
+
+
 def _разобрать(релиз) -> dict:
+	"""Релиз — объект JSON без `NaN` и бесконечностей в любой части.
+
+	`Why:` `json.loads` по умолчанию принимает `NaN` и `Infinity`, которых в
+	JSON нет; в непрозрачных `agent` и `map` их не поймала бы схема, а снимок
+	с ними не прочитал бы ни один строгий разборщик.
+	"""
 	if isinstance(релиз, str):
 		try:
-			релиз = json.loads(релиз)
+			релиз = json.loads(релиз, parse_constant=_не_json)
 		except ValueError as причина:
 			raise Отказ(
 				РЕЛИЗ_НЕВЕРЕН, "Релиз — не JSON", errors=[{"path": "$", "message": str(причина)}], total=1
@@ -89,7 +100,27 @@ def _разобрать(релиз) -> dict:
 			errors=[{"path": "$", "message": "ожидается объект"}],
 			total=1,
 		)
+	if найдено := _не_конечные(релиз, "$"):
+		raise Отказ(
+			РЕЛИЗ_НЕВЕРЕН,
+			"В релизе — не значения JSON",
+			errors=найдено[: schema.ОШИБОК_НЕ_БОЛЬШЕ],
+			total=len(найдено),
+		)
 	return релиз
+
+
+def _не_конечные(значение, путь: str) -> list[dict]:
+	"""`NaN` и бесконечности где угодно в релизе, включая `agent` и `map`."""
+	if isinstance(значение, float) and not math.isfinite(значение):
+		return [{"path": путь, "message": "не конечное число"}]
+	if isinstance(значение, dict):
+		return [о for ключ, вложенное in значение.items() for о in _не_конечные(вложенное, f"{путь}.{ключ}")]
+	if isinstance(значение, list):
+		return [
+			о for номер, вложенное in enumerate(значение) for о in _не_конечные(вложенное, f"{путь}[{номер}]")
+		]
+	return []
 
 
 def _проверить(релиз: dict) -> list[dict]:
@@ -152,7 +183,7 @@ def _курс(ключ: str, course: str | None) -> str | None:
 
 def _дайджест(релиз: dict) -> str:
 	"""sha256 канонического JSON: порядок ключей и пробелы не меняют дайджест."""
-	канон = json.dumps(релиз, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+	канон = json.dumps(релиз, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
 	return hashlib.sha256(канон.encode("utf-8")).hexdigest()
 
 
@@ -204,7 +235,7 @@ def _записать_релиз(курс: str, релиз: dict, дайджес
 			"document_key": (релиз["document"] or {}).get("key"),
 			"published_by": автор,
 			"published_at": now_datetime(),
-			"snapshot": json.dumps(релиз, ensure_ascii=False),
+			"snapshot": json.dumps(релиз, ensure_ascii=False, allow_nan=False),
 			**index.строки(релиз, итог.главы, итог.уроки),
 		}
 	).insert(ignore_permissions=True)
