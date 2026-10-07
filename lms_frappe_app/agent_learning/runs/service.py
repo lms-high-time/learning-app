@@ -162,12 +162,10 @@ def сверить_курс(курс: str) -> int:
 				reference_doctype=ПРОХОЖДЕНИЕ,
 				reference_name=имя,
 			)
-			continue
 		except frappe.DoesNotExistError:
 			# Прохождение удалили после отбора — сверять нечего.
 			frappe.db.rollback(save_point=ТОЧКА_СВЕРКИ)
 			frappe.clear_last_message()
-			continue
 		except Exception:
 			frappe.db.rollback(save_point=ТОЧКА_СВЕРКИ)
 			frappe.log_error(
@@ -175,8 +173,9 @@ def сверить_курс(курс: str) -> int:
 				reference_doctype=ПРОХОЖДЕНИЕ,
 				reference_name=имя,
 			)
-			continue
-		frappe.db.release_savepoint(ТОЧКА_СВЕРКИ)
+		else:
+			frappe.db.release_savepoint(ТОЧКА_СВЕРКИ)
+		# Коммит — на любом исходе: следующее прохождение читает релиз новым снимком.
 		# В тестах — без коммита: тест откатывает свои записи сам.
 		if not frappe.in_test:
 			frappe.db.commit()

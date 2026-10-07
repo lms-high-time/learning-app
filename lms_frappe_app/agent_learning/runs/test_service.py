@@ -403,6 +403,35 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		журнал.assert_not_called()
 		self.assertEqual(self.перечитать(хорошее).release, новый)
 
+	def test_сверка_курса_коммитит_каждое_прохождение(self):
+		"""Вне тестов коммит — и после сбоя, и после удалённого: следующее читает релиз заново."""
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		удалённое, плохое, хорошее = self.ученики(курс, 3)
+		self.новый_релиз(курс)
+		прочитать, сверить = frappe.get_doc, service._сверить
+
+		def прочитать_или_нет(*args, **kwargs):
+			if args[1:2] == (удалённое.name,):
+				raise frappe.DoesNotExistError
+			return прочитать(*args, **kwargs)
+
+		def сбой(run, *args):
+			if run.name == плохое.name:
+				raise RuntimeError("сбой сверки")
+			return сверить(run, *args)
+
+		# Коммит подменён: настоящий зафиксировал бы записи теста.
+		with (
+			patch.object(frappe, "in_test", False),
+			patch.object(frappe, "get_doc", side_effect=прочитать_или_нет),
+			patch.object(service, "_сверить", side_effect=сбой),
+			patch.object(frappe.db, "commit") as коммит,
+			patch.object(frappe, "log_error"),
+		):
+			self.assertEqual(service.сверить_курс(курс), 1)
+
+		self.assertEqual(коммит.call_count, 3)
+
 	def test_курс_с_прохождениями_не_удаляется(self):
 		ответ = self.опубликовать(релиз_двух_целей(self.ключ))
 		курс = ответ["course"]
