@@ -12,6 +12,7 @@ from lms.lms.utils import get_lessons
 
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service
+from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_урок
 
@@ -240,3 +241,23 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertIsNone(ответ["document"])
 		self.assertIsNone(frappe.db.get_value(РЕЛИЗ, ответ["release"], "document_key"))
 		self.assertTrue(self.опубликовать(релиз)["unchanged"])
+
+	def test_курс_из_релиза_открывается_публикацией(self):
+		"""Директив и квизов Learning у курса из релиза нет: релиз проверен целиком при публикации."""
+		первый = self.опубликовать()
+
+		ответ = authoring.publish_course(course=первый["course"])
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(ответ["data"]["warnings"], [])
+		self.assertEqual(frappe.db.get_value("LMS Course", первый["course"], "published"), 1)
+
+	def test_новый_релиз_двигает_ревизию(self):
+		первый = self.опубликовать()
+		до = authoring.course_revision(course=первый["course"])["data"]["revision"]
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][2]["homework"]["due_days"] = 5
+
+		self.опубликовать(релиз)
+
+		self.assertGreater(authoring.course_revision(course=первый["course"])["data"]["revision"], до)

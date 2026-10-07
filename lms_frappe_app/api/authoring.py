@@ -1390,6 +1390,8 @@ def ревизия(course: str) -> str:
 		("Agent Course Directive", {"course": course}),
 		("Agent Course Artifact", {"course": course}),
 		("Agent Course Map", {"course": course}),
+		# Новый релиз — новая запись: зеркало автора замечает его (learning-services#500).
+		("Agent Course Release", {"course": course}),
 	]
 	if квизы:
 		источники.append(("LMS Quiz", {"name": ["in", list(квизы)]}))
