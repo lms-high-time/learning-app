@@ -167,8 +167,8 @@ fixtures = [
 	# версионируются они вместе с уроком, а не с редакцией директивы.
 	# Тестовая запись — отметка на самой записи на курс: доступ по-прежнему даёт
 	# запись, второго основания доступа нет (learning-services#393).
-	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза;
-	# признак архива — правило доступа (learning-services#500).
+	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
+	# (learning-services#500).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -182,7 +182,6 @@ fixtures = [
 					"LMS Course-course_key",
 					"LMS Course-active_release",
 					"LMS Course-course_attribution",
-					"LMS Course-archived",
 					"Course Chapter-chapter_description",
 				],
 			]

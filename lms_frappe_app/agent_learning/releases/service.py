@@ -22,7 +22,7 @@ import frappe
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import structure
-from lms_frappe_app.agent_learning.errors import КУРС_В_АРХИВЕ, КУРС_НЕ_НАЙДЕН, Отказ
+from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import checks, document, index, projection, schema
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
@@ -120,14 +120,10 @@ def _курс(ключ: str, course: str | None) -> str | None:
 	"""Курс под релиз; `None` — завести новый."""
 	по_ключу = frappe.db.get_value("LMS Course", {"course_key": ключ})
 	if not course:
-		if по_ключу and frappe.db.get_value("LMS Course", по_ключу, "archived"):
-			raise Отказ(КУРС_В_АРХИВЕ, "Курс в архиве", course=по_ключу)
 		return по_ключу
 	if not frappe.db.exists("LMS Course", course):
 		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
-	сведения = frappe.db.get_value("LMS Course", course, ["course_key", "archived"], as_dict=True)
-	if сведения.archived:
-		raise Отказ(КУРС_В_АРХИВЕ, "Курс в архиве", course=course)
+	сведения = frappe.db.get_value("LMS Course", course, ["course_key"], as_dict=True)
 	if сведения.course_key:
 		if сведения.course_key != ключ:
 			raise Отказ(
@@ -145,7 +141,7 @@ def _курс(ключ: str, course: str | None) -> str | None:
 	if уроки := structure.уроки_курса(course):
 		raise Отказ(
 			У_КУРСА_ЕСТЬ_УРОКИ,
-			"Релиз ложится только на курс без уроков: курс со старыми уроками — в архив, релиз — новым курсом",
+			"Релиз ложится только на курс без уроков: опубликуйте его без `course` — новым курсом",
 			course=course,
 			lessons=len(уроки),
 		)
@@ -202,8 +198,8 @@ def _карточка(курс: str, данные: dict, релиз: str) -> Non
 	на их месте название, о чём сказано в предупреждениях проверки.
 	`description` пишется как есть, как у `update_course`: отрисовку решает этап 6.
 
-	Сохранением документа, а не `db.set_value`: порядок курса и архив читают
-	признаки из кэша документа, и сохранение его сбрасывает."""
+	Сохранением документа, а не `db.set_value`: порядок курса читает
+	действующий релиз из кэша документа, и сохранение его сбрасывает."""
 	документ = frappe.get_doc("LMS Course", курс)
 	документ.update(
 		{

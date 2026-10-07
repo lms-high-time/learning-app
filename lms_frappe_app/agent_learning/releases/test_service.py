@@ -192,8 +192,6 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		frappe.db.set_value(
 			"LMS Course", с_другим_ключом, "course_key", f"other-{frappe.generate_hash(length=6)}"
 		)
-		в_архиве = создать_курс(f"Архив {frappe.generate_hash(length=6)}")
-		frappe.db.set_value("LMS Course", в_архиве, "archived", 1)
 		ещё_анонс = создать_курс(f"Анонс {frappe.generate_hash(length=6)}")
 		frappe.set_user(self.куратор)
 
@@ -208,16 +206,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.отказ(service.КЛЮЧ_НЕ_ТОТ, пример_релиза(другой_ключ), с_другим_ключом)
 		self.отказ(service.КЛЮЧ_ЗАНЯТ, пример_релиза(self.ключ), ещё_анонс)
 		self.отказ("course_not_found", пример_релиза(другой_ключ), "нет-такого-курса")
-		self.отказ("course_archived", пример_релиза(другой_ключ), в_архиве)
 		self.assertIsNone(self.курс_по_ключу(другой_ключ))
-
-	def test_курс_в_архиве_по_ключу(self):
-		первый = self.опубликовать()
-		frappe.db.set_value("LMS Course", первый["course"], "archived", 1)
-		релиз = пример_релиза(self.ключ)
-		релиз["course"]["title"] = "Пример курса, второе издание"
-
-		self.отказ("course_archived", релиз)
 
 	def test_предупреждения_и_запасная_карточка(self):
 		релиз = пример_релиза(self.ключ)

@@ -307,12 +307,6 @@ Frappe заворачивает результат whitelisted-метода в �
 урок в компании, пишет документ туда же, не повторяя `space`. Названное
 пространство, в котором курса нет, — отказ `course_not_in_space`.
 
-**Курс в архиве** (learning-services#500) — снят и закрыт для занятий:
-его нет в `list_my_courses`, а методы курса отказывают `course_archived` там
-же, где курс без зачисления дал бы `not_enrolled`. Читать свои документы по
-нему (`artifact`) ученик может: это его работа, а не занятие. Записи,
-занятия, попытки и документы целы; вернуть курс — снять признак.
-
 ## `lms_frappe_app.api.student.whoami`
 
 Под какой учётной записью вошёл ученик и в каких он организациях.
@@ -768,7 +762,6 @@ Frappe Learning, медиа вынесены в `media`. Длинный урок
 
 **Отказы:** `not_enrolled`; `organization_suspended` — организация ученика
 приостановлена, зачисление цело и доступ вернётся вместе со статусом;
-`course_archived` — курс в архиве, занятия по нему закрыты;
 `lesson_not_found`; `nothing_to_study` — незакрытых уроков не осталось (только
 при вызове без `lesson`; с `course` — в этом курсе, с полем `course`); `web_demo_exhausted` (с `lessons_used` и
 `lessons_limit`) — пробные уроки веб-чата пройдены, занятие не заводится;
@@ -1873,7 +1866,7 @@ Frappe.
 { "ok": true, "data": { "space": "personal",
   "courses_total": 3, "courses_overdue": 1,
   "courses": [ { "id": "course-basics", "title": "Основы", "deadline": "2026-09-15",
-                 "overdue": false, "archived": false, "completion": 0.42,
+                 "overdue": false, "completion": 0.42,
                  "documents": [ { "artifact": "summary", "title": "Резюме проекта",
                                   "purpose": "Проект на одной странице.",
                                   "layout": "sections",
@@ -1889,8 +1882,6 @@ Frappe.
 документ. У курса без документов — пустой список.
 `documents` — документы этого пространства. `recent_sessions` — последние
 занятия ученика в этом пространстве, свежие вперёд.
-Курс в архиве в списке есть — с `archived: true` и без просрочки: занятия
-по нему закрыты, а документы ученик читает и выгружает (learning-services#500).
 
 **Отказов нет.**
 
@@ -3892,7 +3883,7 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 `document_key`, `text_too_long`; `total`), `course_not_found`,
 `course_key_mismatch` — у переданного курса другой ключ, `course_key_taken` —
 ключ релиза уже у другого курса, `course_has_content` — у переданного курса
-без ключа есть уроки (`lessons`), `course_archived`.
+без ключа есть уроки (`lessons`).
 
 ## `lms_frappe_app.api.authoring.publish_course`
 
@@ -3930,8 +3921,7 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 Курс из релиза (`publish_release`) старой проверки готовности не проходит:
 релиз проверен целиком при публикации.
 
-**Отказы:** `course_not_found`, `course_not_ready` (с `problems`),
-`course_archived` — курс в архиве: вернуть его — снять признак в desk.
+**Отказы:** `course_not_found`, `course_not_ready` (с `problems`).
 
 ## `lms_frappe_app.api.authoring.announce_course`
 
@@ -3951,8 +3941,7 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 они. Открывает анонс `publish_course`, снимает — `unpublish_course`.
 
 **Отказы:** `course_not_found`, `course_objectives_missing` — у курса нет
-целей, `course_already_published` — курс уже открыт ученикам,
-`course_archived`.
+целей, `course_already_published` — курс уже открыт ученикам.
 
 ## `lms_frappe_app.api.authoring.unpublish_course`
 

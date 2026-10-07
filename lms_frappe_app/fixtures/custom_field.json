@@ -75,18 +75,6 @@
  },
  {
   "doctype": "Custom Field",
-  "name": "LMS Course-archived",
-  "dt": "LMS Course",
-  "fieldname": "archived",
-  "fieldtype": "Check",
-  "label": "В архиве",
-  "default": "0",
-  "description": "Курс снят и закрыт для занятий; записи и документы учеников сохранены (learning-services#500).",
-  "insert_after": "upcoming",
-  "module": "Agent Learning"
- },
- {
-  "doctype": "Custom Field",
   "name": "Course Chapter-chapter_description",
   "dt": "Course Chapter",
   "fieldname": "chapter_description",

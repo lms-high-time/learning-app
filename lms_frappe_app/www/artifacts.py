@@ -38,8 +38,7 @@ def адрес_в_spa(course: str | None = None, artifact: str | None = None) ->
 def download(course: str, artifact: str, format: str = "md", space: str | None = None):
 	"""Отдаёт документ файлом: markdown или книга Excel — из пространства `space`."""
 	пользователь = текущий_пользователь()
-	# Выгрузка — чтение своей работы: курс в архиве её не закрывает (learning-services#500).
-	student._требовать_доступ_к_курсу(пользователь, course, читать=True)
+	student._требовать_доступ_к_курсу(пользователь, course)
 	пространство = пространства.пространство_курса(пользователь, course, space)
 	frappe.response["filename"], frappe.response["filecontent"] = выгрузка(
 		пользователь, course, пространство, artifact, format
