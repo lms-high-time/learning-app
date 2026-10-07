@@ -193,6 +193,57 @@ def следующий(run) -> dict | None:
 	return открытые[0] if открытые else None
 
 
+def главы(ученик: str, курс: str) -> list[dict]:
+	"""Главы действующего релиза с прогрессом ученика по курсу.
+
+	Глава — `{key, status, lessons_total, lessons_started, lessons_passed}`,
+	по порядку релиза. Урок начат, когда статус его прохождения не
+	`not_started`, пройден — когда `passed`. Глава пройдена, когда пройдены
+	все её уроки; начата — хоть один; иначе не начата. Считаются только уроки
+	действующего релиза: прохождение снятого урока в счёт не идёт.
+	Прохождения ученика по урокам релиза, не сверенные с ним, сверяются здесь;
+	новых `главы` не заводит. Нет действующего релиза — пусто.
+	"""
+	релиз = _действующий(курс)
+	if not релиз:
+		return []
+	уроки_глав = index.уроки_глав(релиз)
+	в_релизе = {ключ for уроки in уроки_глав.values() for ключ in уроки}
+	статус: dict[str, str] = {}
+	for р in frappe.get_all(
+		ПРОХОЖДЕНИЕ,
+		filters={"student": ученик, "course": курс},
+		fields=["name", "lesson_key", "release", "status"],
+	):
+		if р.lesson_key not in в_релизе:
+			continue
+		if р.release != релиз:
+			run = frappe.get_doc(ПРОХОЖДЕНИЕ, р.name, for_update=True)
+			сверить(run)
+			р.status = run.status
+		статус[р.lesson_key] = р.status
+	итог = []
+	for ключ, уроки in уроки_глав.items():
+		начато = sum(статус.get(у, "not_started") != "not_started" for у in уроки)
+		пройдено = sum(статус.get(у) == ПРОЙДЕН for у in уроки)
+		if уроки and пройдено == len(уроки):
+			состояние = ПРОЙДЕН
+		elif начато:
+			состояние = "in_progress"
+		else:
+			состояние = "not_started"
+		итог.append(
+			{
+				"key": ключ,
+				"status": состояние,
+				"lessons_total": len(уроки),
+				"lessons_started": начато,
+				"lessons_passed": пройдено,
+			}
+		)
+	return итог
+
+
 def статусы(run) -> None:
 	"""Статусы целей — по пунктам прохождения, урока — по целям и `started_at`.
 

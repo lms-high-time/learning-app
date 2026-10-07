@@ -692,3 +692,62 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		service.отметить(run.name, "term:T1", "done", "Объяснил", занятие=занятие)
 
 		self.assertEqual(журнал(), было)
+
+	def главы(self, курс: str) -> dict[str, tuple]:
+		"""Главы ученика: ключ → (статус, всего, начато, пройдено)."""
+		return {
+			г["key"]: (г["status"], г["lessons_total"], г["lessons_started"], г["lessons_passed"])
+			for г in service.главы(self.ученик, курс)
+		}
+
+	def test_главы_без_прохождений(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+
+		self.assertEqual([г["key"] for г in service.главы(self.ученик, курс)], ["ch-1", "ch-2"])
+		self.assertEqual(
+			self.главы(курс), {"ch-1": ("not_started", 2, 0, 0), "ch-2": ("not_started", 1, 0, 0)}
+		)
+		# Прохождение, принятое без отметок, урок не начинает; `главы` прохождений не заводит.
+		service.прохождение(self.ученик, курс, "l-1")
+		self.assertEqual(self.главы(курс)["ch-1"], ("not_started", 2, 0, 0))
+		self.assertEqual(frappe.db.count(ПРОХОЖДЕНИЕ, {"student": self.ученик}), 1)
+
+	def test_главы_начатая_и_пройденная(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
+		пройденное = service.прохождение(self.ученик, курс, "l-3")
+		frappe.db.set_value(ПРОХОЖДЕНИЕ, пройденное.name, "status", "passed")
+
+		self.assertEqual(self.главы(курс), {"ch-1": ("in_progress", 2, 1, 0), "ch-2": ("passed", 1, 1, 1)})
+		# Чужие прохождения в счёт не идут.
+		другой = создать_ученика(f"run-svc-other-{frappe.generate_hash(length=6)}@example.com")
+		self.assertEqual([г["status"] for г in service.главы(другой, курс)], ["not_started", "not_started"])
+
+	def test_главы_снятый_урок_не_в_счёт(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		снятое = service.прохождение(self.ученик, курс, "l-2")
+		self.отметить(снятое, "term:T1")
+		frappe.db.set_value(ПРОХОЖДЕНИЕ, снятое.name, "status", "passed")
+		без_урока = пример_релиза(self.ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		self.опубликовать(без_урока)
+
+		self.assertEqual(self.главы(курс)["ch-1"], ("not_started", 1, 0, 0))
+
+	def test_главы_сверяют_прохождения_ученика(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		run = self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
+		второй = пример_релиза(self.ключ)
+		второй["lessons"][0]["title"] = "Урок первый, исправленный"
+		with patch.object(frappe, "enqueue"):
+			новый = self.опубликовать(второй)["release"]
+
+		self.assertEqual(self.главы(курс)["ch-1"], ("in_progress", 2, 1, 0))
+		self.assertEqual(self.перечитать(run).release, новый)
+
+	def test_главы_без_релиза(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		frappe.db.set_value("LMS Course", курс, "active_release", None)
+
+		self.assertEqual(service.главы(self.ученик, курс), [])

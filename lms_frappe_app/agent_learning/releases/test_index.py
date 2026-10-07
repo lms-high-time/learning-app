@@ -53,6 +53,9 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		)
 		self.assertEqual(index.ключи(None), {"chapters": [], "lessons": []})
 
+	def test_уроки_глав(self):
+		self.assertEqual(index.уроки_глав(self.релиз), {"ch-1": ["l-1", "l-2"], "ch-2": ["l-3"]})
+
 	def test_урок_и_ключ_урока_в_обе_стороны(self):
 		урок = index.урок(self.релиз, "l-2")
 		self.assertEqual(урок["lesson"], self.итог.уроки["l-2"])
