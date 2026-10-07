@@ -148,6 +148,21 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.отказ("lesson_not_in_release", release_quiz.начать, run, занятие)
 		self.assertFalse(frappe.db.exists(ПОПЫТКА, {"student": self.ученик}))
 
+	def test_открытая_попытка_продолжается_после_снятия_урока(self):
+		run, занятие = self.урок(пример_релиза(self.ключ), "l-2")
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		без_урока = пример_релиза(self.ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		self.опубликовать(без_урока)
+		run = прохождения.прохождение(self.ученик, run.course, "l-2")
+
+		повтор = release_quiz.начать(run, занятие)
+
+		self.assertEqual(повтор["attempt"], попытка)
+		self.assertEqual(повтор["question"]["id"], self.снимок(попытка)[0]["key"])
+		self.assertTrue(self.ответить(попытка, повтор["question"]["id"], "V1")["verdict"]["correct"])
+
 	def test_без_доступа_к_курсу_не_начать(self):
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))
 		run = прохождения.прохождение(self.ученик, курс, "l-1")
