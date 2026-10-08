@@ -4,6 +4,7 @@
 """Квиз урока из релиза: старт, ответ, итог и закрытие урока (learning-services#504)."""
 
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import patch
 
@@ -39,8 +40,10 @@ from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	настроить_квиз,
 	политика_по_умолчанию,
+	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
+	создать_квиз,
 	создать_куратора,
 	создать_ученика,
 )
@@ -48,7 +51,7 @@ from lms_frappe_app.tests.sample_data import (
 ПОПЫТКА = "Agent Quiz Attempt"
 ОТВЕТ = "Agent Quiz Answer"
 ПОЯСНЕНИЕ = "Потому что так велит условие."
-С1, С2, С3, С4 = (f"S{номер}/l-1-D1" for номер in range(1, 5))
+С1, С2 = "S1/l-1-D1", "S2/l-1-D1"
 
 
 class IntegrationTestКвизИзРелиза(IntegrationTestCase):
@@ -479,10 +482,13 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 				self.assertIsNotNone(попытка.finished_at)
 
 	def релиз_по_целям(self) -> dict:
-		"""4 вопроса: S1, S2 — на `l-1-D1`, S3, S4 — на `l-1-D2`."""
+		"""4 вопроса: `S1/l-1-D1`, `S2/l-1-D1` — на `l-1-D1`, `S3/l-1-D2`, `S4/l-1-D2` — на `l-1-D2`."""
 		релиз = релиз_двух_целей(self.ключ, вопросов=4)
-		for вопрос in релиз["lessons"][0]["quiz"]["questions"][2:]:
-			вопрос["objective"] = "l-1-D2"
+		квиз = релиз["lessons"][0]["quiz"]
+		for вопрос in квиз["questions"][2:]:
+			прежний = вопрос["key"]
+			вопрос["key"], вопрос["objective"] = прежний.replace("l-1-D1", "l-1-D2"), "l-1-D2"
+			квиз["answers"][вопрос["key"]] = квиз["answers"].pop(прежний)
 		return релиз
 
 	def подтверждены(self, run) -> dict:
@@ -662,3 +668,103 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			прохождения.ПРОЙДЕН,
 		)
 		self.assertEqual(прохождения.главы(self.ученик, курс)[0]["status"], прохождения.ПРОЙДЕН)
+
+	def test_дробный_порог_в_целых(self):
+		"""3 вопроса, 2 верных (66,666…%): порог 66.67 не сдан, 66.66 — сдан."""
+		for порог, сдан in ((66.67, False), (66.66, True)):
+			with self.subTest(порог=порог):
+				релиз = релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=3)
+				run, занятие = self.урок(релиз)
+
+				итог = self.сдать(run, занятие, ["V1", "V1", "V2"])["result"]
+
+				self.assertEqual(итог["passed"], сдан)
+
+	def test_порог_из_релиза_попытки_а_не_нового(self):
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=70, вопросов=4))
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		for вопрос in (С1, С2, "S3/l-1-D1"):
+			self.ответить(попытка, вопрос, "V1")
+		self.опубликовать(релиз_двух_целей(self.ключ, порог=80, вопросов=4))
+		self.assertNotEqual(frappe.db.get_value("LMS Course", run.course, "active_release"), run.release)
+
+		итог = self.ответить(попытка, "S4/l-1-D1", "V2")["result"]
+
+		self.assertEqual((итог["passed"], итог["pass_threshold"]), (True, 0.7))
+
+	def test_повторный_зачёт_не_двигает_прохождение(self):
+		настроить_квиз(max_attempts=5, retry_delay_minutes=0)
+		run, занятие = self.урок()
+		self.assertTrue(self.сдать(run, занятие, ["V1", "V1"])["result"]["passed"])
+		было = frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run.name, ["passed_at", "modified"], as_dict=True)
+
+		повтор = self.сдать(run, создать_занятие(self.ученик, run.lesson), ["V1", "V1"])
+
+		self.assertTrue(повтор["result"]["passed"])
+		стало = frappe.db.get_value(
+			прохождения.ПРОХОЖДЕНИЕ, run.name, ["passed_at", "modified"], as_dict=True
+		)
+		self.assertEqual(стало, было)
+
+	def test_завершённую_попытку_не_завершить_повторно(self):
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=1))
+		попытка = self.сдать(run, занятие, ["V1"])["attempt"]
+
+		self.отказ(ПОПЫТКА_ЗАВЕРШЕНА, release_quiz.завершить, frappe.get_doc(ПОПЫТКА, попытка))
+
+	def test_попытка_без_вопросов_не_сдана(self):
+		run, занятие = self.урок()
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, попытка, "questions", "[]")
+
+		итог = release_quiz.завершить(frappe.get_doc(ПОПЫТКА, попытка))
+
+		self.assertEqual((итог["passed"], итог["total"], итог["score"]), (False, 0, 0.0))
+
+	def test_снятая_цель_не_подтверждается(self):
+		run, _ = self.урок()
+		frappe.db.set_value(
+			"Agent Lesson Run Objective", {"parent": run.name, "objective_key": "l-1-D2"}, "removed", 1
+		)
+
+		прохождения.отметить_пройденным(self.ученик, run.course, "l-1", {"l-1-D1", "l-1-D2"})
+
+		self.assertEqual(self.подтверждены(run), {"l-1-D1": 1, "l-1-D2": 0})
+
+	# --- гонка за прохождение в методах контракта ---
+
+	@contextmanager
+	def гонка_за_прохождение(self):
+		"""Блокировка прохождения падает взаимоблокировкой; отдаёт подменённый откат — тест держит свои записи."""
+		with (
+			patch.object(прохождения, "прохождение", side_effect=frappe.QueryDeadlockError("1213")),
+			patch.object(frappe.db, "rollback") as откат,
+		):
+			yield откат
+
+	def test_complete_lesson_при_гонке_за_прохождение_busy(self):
+		настроить_квиз(quiz_required=0)
+		_, занятие = self.урок()
+
+		with self.гонка_за_прохождение() as откат:
+			ответ = self.закрыть(занятие)
+
+		self.assertEqual(ответ["error"]["code"], "busy")
+		self.assertEqual(ответ["error"]["session"], занятие)
+		откат.assert_called_once_with()
+
+	def test_submit_answer_при_гонке_за_прохождение_busy(self):
+		"""Квиз Learning у урока из релиза: сданная попытка закрывает урок и пишет прохождение."""
+		run, занятие = self.урок()
+		frappe.set_user("Administrator")
+		вопрос = создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])
+		создать_квиз(run.lesson, [вопрос])
+		frappe.set_user(self.ученик)
+		попытка = student.request_quiz(занятие)["data"]["attempt"]
+
+		with self.гонка_за_прохождение() as откат:
+			ответ = student.submit_answer(попытка, вопрос, "1", "слова ученика")
+
+		self.assertEqual(ответ["error"]["code"], "busy")
+		self.assertEqual(ответ["error"]["attempt"], попытка)
+		откат.assert_called_once_with()

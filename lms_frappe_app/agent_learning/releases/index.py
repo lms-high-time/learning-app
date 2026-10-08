@@ -212,6 +212,11 @@ def вопросы_урока(релиз: str, ключ: str, *, с_ответа
 	return итог
 
 
+def есть_вопросы(релиз: str, ключ: str) -> bool:
+	"""Есть ли у урока релиза квиз — хоть один вопрос."""
+	return bool(frappe.db.exists(ВОПРОС, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}))
+
+
 def эталон(релиз: str, ключ_урока: str, ключ_вопроса: str) -> dict | None:
 	"""Верный вариант и пояснение вопроса урока: `{correct, explanation}`; нет вопроса — `None`."""
 	найдено = frappe.get_all(
