@@ -11,7 +11,7 @@ from frappe.tests import IntegrationTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
 from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.agent_learning.releases import index, service
+from lms_frappe_app.agent_learning.releases import index, places, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_урок
@@ -363,6 +363,10 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc(РЕЛИЗ, первый["release"])
+		дайджест = frappe.db.get_value(РЕЛИЗ, первый["release"], "digest")
+		places.узлы_карты(первый["release"], дайджест)
+		кэш = places.ключ_кэша(первый["release"], дайджест)
+		self.assertIsNotNone(frappe.cache.get_value(кэш))
 		service.удалить_курс(курс)
 
 		self.assertFalse(frappe.db.exists("LMS Course", курс))
@@ -372,6 +376,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("Agent Author Note", заметка))
 		self.assertFalse(frappe.db.exists("Agent Note Reply", {"parent": заметка}))
 		self.assertFalse(frappe.db.exists("Course Lesson", {"name": ("in", уроки)}))
+		self.assertIsNone(frappe.cache.get_value(кэш))
 		# Флаг снят: релиз другого курса по-прежнему не удаляется.
 		другой = service.опубликовать(
 			пример_релиза(f"other-{frappe.generate_hash(length=6)}"), None, self.куратор

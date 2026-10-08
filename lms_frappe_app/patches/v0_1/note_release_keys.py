@@ -36,7 +36,8 @@ def execute():
 	if "release" not in колонки:
 		print("note_release_keys: у заметок нет поля release — сначала синхронизация доктайпа")
 		return
-	урок = "lesson" if "lesson" in колонки else "NULL"
+	есть_урок = "lesson" in колонки
+	урок = "lesson" if есть_урок else "NULL"
 	заметки = frappe.db.sql(
 		f"SELECT name, course, {урок} AS lesson, target, status, `release` FROM `tab{ЗАМЕТКА}` "
 		"ORDER BY creation ASC",
@@ -67,12 +68,10 @@ def execute():
 				continue
 			новое = перевод(заметка)
 			if новое:
-				frappe.db.set_value(
-					ЗАМЕТКА,
-					заметка.name,
-					{"target": новое[0], "lesson": новое[1], "release": курсы[курс]},
-					update_modified=False,
-				)
+				поля = {"target": новое[0], "release": курсы[курс]}
+				if есть_урок:
+					поля["lesson"] = новое[1]
+				frappe.db.set_value(ЗАМЕТКА, заметка.name, поля, update_modified=False)
 				перенесено += 1
 			elif заметка.status != "accepted":
 				_в_архив(заметка.name, ответы)
@@ -85,7 +84,8 @@ def _перевод(курс: str, релиз: str | None):
 	if not релиз:
 		return lambda заметка: None
 	уроки = {запись: ключ for ключ, запись in index.известные(курс)["lessons"].items()}
-	документ = index.сведения(релиз).document_key
+	# Битая ссылка на действующий релиз миграцию не останавливает: разделов просто нет.
+	документ = (index.сведения(релиз) or {}).get("document_key")
 
 	def перевод(заметка) -> tuple[str, str | None] | None:
 		место = (заметка.target or "").strip()

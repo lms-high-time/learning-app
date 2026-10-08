@@ -336,10 +336,63 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 			with self.assertRaises(frappe.PermissionError):
 				вызов()
 
+	def test_тестеру_403_гостю_401(self):
+		"""Заметки и репорты — авторским ролям: тестер курса — ученик с ранним
+		доступом, а не автор. Гостю — 401: сначала вход."""
+		тестер = создать_ученика(f"notes-t-{frappe.generate_hash(length=6)}@example.com")
+		self.assertTrue(authoring.add_testers(course=self.курс, users=тестер)["ok"])
+		for пользователь, ошибка in ((тестер, frappe.PermissionError), ("Guest", frappe.AuthenticationError)):
+			frappe.set_user(пользователь)
+			for вызов in (
+				lambda: authoring.add_note(course=self.курс, target="course", text="Не автор"),
+				lambda: authoring.list_notes(course=self.курс),
+				lambda: authoring.course_reports(course=self.курс),
+			):
+				with self.subTest(пользователь=пользователь), self.assertRaises(ошибка):
+					вызов()
+
+	# --- заметки без места ---
+
+	def вставить(self, target: str, release: str | None) -> str:
+		"""Заметка, какой её оставил патч переноса или ручная правка: мимо `add_note`."""
+		return (
+			frappe.get_doc(
+				{
+					"doctype": "Agent Author Note",
+					"course": self.курс,
+					"release": release,
+					"target": target,
+					"status": "accepted",
+					"via": "author",
+					"text": "Заметка",
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+
+	def test_архивная_заметка_без_места_даже_у_курса(self):
+		архив = self.вставить("course", None)
+
+		заметка = next(з for з in self.очередь() if з["id"] == архив)
+
+		self.assertEqual(
+			(заметка["target"], заметка["label"], заметка["missing"], заметка["release"]),
+			("course", "course", True, None),
+		)
+
+	def test_неразборчивый_адрес_не_роняет_очередь(self):
+		живая = self.записать("course")
+		кривая = self.вставить("lesson.", self.первый)
+
+		заметки = {з["id"]: з for з in self.очередь()}
+
+		self.assertEqual((заметки[кривая]["label"], заметки[кривая]["missing"]), ("lesson.", True))
+		self.assertEqual((заметки[живая]["label"], заметки[живая]["missing"]), ("Курс", False))
+
 	# --- карта ---
 
 	def test_узлы_карты_читаются_из_снимка_один_раз_на_релиз(self):
-		frappe.cache.delete_value(f"{places.КЭШ_УЗЛОВ}:{self.первый}")
 		with patch.object(index, "снимок", wraps=index.снимок) as снимок:
 			self.записать("map.G1")
 			self.записать("map.F1")
@@ -348,7 +401,7 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 
 		снимок.assert_called_once_with(self.первый)
 		self.assertEqual(
-			places.узлы_карты(self.первый),
+			places.Места(self.первый).узлы,
 			{
 				"G1": "Цель курса",
 				"l-2-D1": "Решение",
@@ -485,8 +538,16 @@ class IntegrationTestПереносЗаметок(IntegrationTestCase):
 		удалить = self.старая(self.удалённый, "course")
 		колонки = frappe.db.get_table_columns
 		таблица = frappe.db.table_exists
+		записать = frappe.db.set_value
+
+		def записать_без_урока(doctype, name, поля=None, *args, **kwargs):
+			"""Колонки `lesson` «нет» — запись в неё упала бы на настоящей базе."""
+			if doctype == note_release_keys.ЗАМЕТКА and isinstance(поля, dict):
+				self.assertNotIn("lesson", поля)
+			return записать(doctype, name, поля, *args, **kwargs)
 
 		with (
+			patch.object(frappe.db, "set_value", side_effect=записать_без_урока),
 			patch.object(
 				frappe.db,
 				"get_table_columns",
@@ -505,6 +566,20 @@ class IntegrationTestПереносЗаметок(IntegrationTestCase):
 		self.assertEqual((self.запись(урок)["status"], self.запись(урок)["replies"]), ("accepted", []))
 		self.assertEqual(self.запись(блок)["target"], "section.log")
 		self.assertIsNone(self.запись(удалить))
+
+	def test_битая_ссылка_на_релиз_не_останавливает_перенос(self):
+		курс = создать_курс(f"Битый релиз {frappe.generate_hash(length=6)}")
+		frappe.db.set_value("LMS Course", курс, "active_release", "REL-нет-такого")
+		блок = self.старая(курс, "block.notebook/log")
+		место = self.старая(курс, "course")
+
+		вывод = self.выполнить()
+
+		self.assertEqual(self.запись(блок)["status"], "accepted")
+		self.assertEqual(
+			(self.запись(место)["target"], self.запись(место)["release"]), ("course", "REL-нет-такого")
+		)
+		self.assertIn(f"note_release_keys: {курс} — перенесено 1, в архиве 1, удалено 0", вывод)
 
 
 def создать_урок_без_релиза(курс: str) -> str:
