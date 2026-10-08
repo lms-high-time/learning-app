@@ -15,7 +15,8 @@ from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	политика_по_умолчанию,
 	создать_ученика,
-	создать_урок,
+	урок_релиза,
+	курс_из_релиза,
 )
 from lms_frappe_app.api import student
 
@@ -28,7 +29,8 @@ class IntegrationTestWebDemo(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"web-{суффикс}@example.com")
 		# Уроки из разных курсов: лимит общий на учётную запись, а не на курс.
-		self.уроки = [создать_урок(f"Веб {н} {суффикс}") for н in range(3)]
+		# Курсы из релиза: `start_lesson` открывает только их (learning-services#506).
+		self.уроки = [урок_релиза(курс_из_релиза()[0], "l-1") for _ in range(3)]
 		for урок in self.уроки:
 			зачислить(self.ученик, урок)
 		frappe.set_user(self.ученик)

@@ -26,6 +26,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
+	курс_из_релиза,
+	урок_релиза,
 )
 
 
@@ -58,6 +60,19 @@ def написать(ученик: str, курс: str, текст: str, space: s
 		{"student": ученик, "course": курс, "artifact": "summary"},
 		order_by="modified desc",
 	)
+
+
+def курс_релиза(организация: str) -> tuple[str, str]:
+	"""Курс из релиза со схемой `summary`, назначенный организацией, и его первый урок:
+	`start_lesson` открывает только курс из релиза (learning-services#506)."""
+	курс, _ = курс_из_релиза()
+	завести_схему(курс)
+	документ = frappe.get_doc("Learning Organization", организация)
+	if документ.allowed_courses:
+		документ.append("allowed_courses", {"course": курс})
+		документ.save(ignore_permissions=True)
+	назначить(организация, курс)
+	return курс, урок_релиза(курс, "l-1")
 
 
 def выйти(user: str, организация: str) -> None:
@@ -98,10 +113,10 @@ class IntegrationTestDocumentSpace(IntegrationTestCase):
 		self.assertFalse(frappe.db.get_value("Agent Student Artifact", документ, "organization"))
 
 	def test_занятие_помнит_пространство(self):
-		назначить(self.компания, self.курс)
+		_, урок = курс_релиза(self.компания)
 		frappe.set_user(self.ученик)
 
-		занятие = student.start_lesson(self.урок)["data"]["session"]
+		занятие = student.start_lesson(урок)["data"]["session"]
 
 		self.assertEqual(
 			frappe.db.get_value("Agent Learning Session", занятие, "organization"), self.компания
@@ -460,10 +475,13 @@ class IntegrationTestSpaceChoice(IntegrationTestCase):
 		)
 
 	def test_документ_пишется_в_пространство_открытого_занятия(self):
+		frappe.set_user("Administrator")
+		курс, урок = курс_релиза(self.компания)
+		frappe.set_user(self.ученик)
 		student.set_space("personal")
-		занятие = student.start_lesson(self.урок_компании, space=self.компания)["data"]
+		занятие = student.start_lesson(урок, space=self.компания)["data"]
 
-		документ = написать(self.ученик, self.курс_компании, "По ходу урока")
+		документ = написать(self.ученик, курс, "По ходу урока")
 
 		self.assertEqual(занятие["space"], self.компания)
 		self.assertEqual(
@@ -471,9 +489,12 @@ class IntegrationTestSpaceChoice(IntegrationTestCase):
 		)
 
 	def test_урок_в_двух_пространствах_два_занятия(self):
-		первое = student.start_lesson(self.урок_компании, space=self.компания)["data"]["session"]
-		второе = student.start_lesson(self.урок_компании, space="personal")["data"]["session"]
-		повтор = student.start_lesson(self.урок_компании, space=self.компания)["data"]["session"]
+		frappe.set_user("Administrator")
+		_, урок = курс_релиза(self.компания)
+		frappe.set_user(self.ученик)
+		первое = student.start_lesson(урок, space=self.компания)["data"]["session"]
+		второе = student.start_lesson(урок, space="personal")["data"]["session"]
+		повтор = student.start_lesson(урок, space=self.компания)["data"]["session"]
 
 		self.assertNotEqual(первое, второе)
 		self.assertEqual(повтор, первое)

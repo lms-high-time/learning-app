@@ -79,9 +79,11 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 
 	def итоги_на_занятии(self) -> list[dict]:
 		frappe.set_user(self.ученик)
-		данные = student.start_lesson(lesson=self.урок)["data"]
+		# Курс старой модели: итоги доставляет `student_context` — тем же
+		# правилом, что и `start_lesson` курса из релиза.
+		данные = student.student_context(создать_занятие(self.ученик, self.урок))["data"]
 		frappe.set_user("Administrator")
-		return данные["student_context"]["closed_reports"]
+		return данные["closed_reports"]
 
 	def мои_репорты(self, **параметры) -> list[dict]:
 		frappe.set_user(self.ученик)

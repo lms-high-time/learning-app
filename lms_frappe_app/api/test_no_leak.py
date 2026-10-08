@@ -106,12 +106,9 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("list_my_courses", student.list_my_courses())
 		self.проверить("get_my_progress", student.get_my_progress())
 
-		урок = student.start_lesson()
-		выдано = self.проверить("start_lesson", урок)
-		# Директива в start_lesson быть обязана — она адресована агенту.
-		self.assertIn("Спросить, какие города", выдано)
-
-		занятие = урок["data"]["session"]
+		# Курс старой модели: `start_lesson` ему отказывает, занятие для старых
+		# методов заводится напрямую; старт проверяет класс курса из релиза.
+		занятие = создать_занятие(self.ученик, self.урок)
 		self.проверить(
 			"report_issue",
 			student.report_issue(занятие, kind="stuck", text="Ученик встал на примере"),
@@ -163,7 +160,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		занятие — устройство платформы, идентификатор вопроса квиза ученику ни
 		о чём не говорит, а `owner` у перенесённого репорта — сотрудник."""
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		репорт = student.report_issue(
 			занятие, kind="quiz_question_issue", text="Вопрос двусмысленный", question=self.вопрос
 		)["data"]["report"]
@@ -176,32 +173,15 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 
 		мои = student.my_reports()
 		проверить_ответ(self, мои, "my_reports", запрещённые_тексты=запрещённые)
-		итоги = student.start_lesson(lesson=self.урок)["data"]["student_context"]["closed_reports"]
+		итоги = student.student_context(занятие)["data"]["closed_reports"]
 		проверить_ответ(self, итоги, "closed_reports", запрещённые_тексты=запрещённые)
 
 		self.assertEqual([р["id"] for р in мои["data"]["reports"]], [репорт])
 		self.assertEqual([р["id"] for р in итоги], [репорт])
 
-	def test_зачин_и_обещание_адресованы_ученику_а_не_утечка(self):
-		"""Зачин урока и обещание курса — для ученика, в отличие от директивы
-		с грифом `teacher_only`. Лежат верхним уровнем ответа и проверку утечек
-		проходят; спрятать их под гриф значило бы запретить агенту произносить
-		то, ради чего они заведены (#238)."""
-		frappe.db.set_value("Course Lesson", self.урок, "lesson_hook", "Зачем тема сейчас")
-		frappe.db.set_value("LMS Course", self.курс, "course_promise", "Что получите к концу")
-		frappe.set_user(self.ученик)
-
-		ответ = student.start_lesson(lesson=self.урок)
-		self.проверить("start_lesson", ответ)
-		данные = ответ["data"]
-
-		self.assertEqual(данные["lesson_hook"], "Зачем тема сейчас")
-		self.assertEqual(данные["course_promise"], "Что получите к концу")
-		self.assertNotIn("lesson_hook", данные["directive"] or {})
-
 	def test_пояснение_приходит_только_к_верному_ответу(self):
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 
 		ответ = student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
@@ -213,7 +193,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		"""Ошибившийся получает «почему нет» к своему варианту, но не текст,
 		поясняющий верный: тот называет ответ до следующей попытки."""
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 
 		ответ = student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
@@ -225,7 +205,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 
 	def test_ни_один_метод_руководителя_не_отдаёт_эталон(self):
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 		student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
 
@@ -244,7 +224,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 			"Отличать столицу от крупнейшего города",
 		)
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		# Заметка агента о том, что сделал ученик, — ровно то, что отчёт
 		# руководителя не имеет права раскрывать (learning-services#409).
 		self.проверить(
@@ -358,8 +338,13 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.проверить("get_my_progress", student.get_my_progress())
 		self.проверить("course_outline", student.course_outline(self.курс))
 		урок = student.start_lesson(lesson=self.урок)
-		self.проверить("start_lesson", урок)
 		self.assertTrue(урок["ok"], урок)
+		# Пакет агента — только агентским методам, и старт отдаёт его урок
+		# (learning-services#506); ответы, карта и свидетельство — никому.
+		выдано = проверить_ответ(
+			self, урок, "start_lesson", запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПАКЕТ_АГЕНТА)
+		)
+		self.assertIn(ПАКЕТ_АГЕНТА, выдано)
 		self.проверить(
 			"update_artifact",
 			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),

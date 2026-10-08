@@ -104,88 +104,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		for поле in ("doctype", "docstatus", "modified_by", "owner"):
 			self.assertNotIn(поле, выдано)
 
-	# --- начало урока ---
-
-	def test_урок_отдаётся_с_материалом_целями_и_директивой(self):
-		данные = student.start_lesson()["data"]
-
-		self.assertEqual(данные["lesson"]["id"], self.урок)
-		self.assertIn("Цикл повторяет действие", данные["content"]["markdown"])
-		self.assertEqual(данные["objectives"], ["Понимать цикл", "Уметь читать код"])
-		self.assertEqual(данные["directive"]["audience"], "teacher_only")
-		self.assertIn("Начать с примера", данные["directive"]["teaching_directive"])
-
-		# Материал и директива — разными полями: одна из трёх митигаций против
-		# пересказа директивы ученику.
-		self.assertNotIn("Начать с примера", данные["content"]["markdown"])
-
-		# Макрос видео ушёл в медиа.
-		self.assertEqual([м["kind"] for м in данные["media"]], ["video"])
-		self.assertNotIn("{{", данные["content"]["markdown"])
-
-		занятие = frappe.get_doc("Agent Learning Session", данные["session"])
-		self.assertEqual(занятие.student, self.ученик)
-		self.assertTrue(занятие.via_trusted_service)
-
-	def test_директива_курса_приходит_отдельным_полем(self):
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Directive",
-				"course": self.курс,
-				"objectives": "Вести проект по системе",
-				"teaching_directive": "Разбирай всё на проекте ученика",
-				"student_profile": "Руководители малого бизнеса",
-				"glossary": "Цикл — месяц работы проекта",
-			}
-		).insert(ignore_permissions=True)
-
-		данные = student.start_lesson()["data"]
-
-		self.assertEqual(данные["course_objectives"], ["Вести проект по системе"])
-		self.assertEqual(данные["course_directive"]["audience"], "teacher_only")
-		self.assertIn("Разбирай всё", данные["course_directive"]["teaching_directive"])
-		self.assertEqual(данные["course_directive"]["glossary"], ["Цикл — месяц работы проекта"])
-
-	def test_курс_без_директивы_не_ломает_урок(self):
-		# Директива курса необязательна: урок обязан открываться и без неё.
-		данные = student.start_lesson()["data"]
-
-		self.assertIsNone(данные["course_directive"])
-		self.assertEqual(данные["course_objectives"], [])
-
-	def test_без_аргумента_берётся_урок_с_ближайшим_дедлайном(self):
-		# Ученик, сказавший «давай заниматься», должен получить то, что горит.
-		frappe.set_user("Administrator")
-		срочный_урок = создать_урок(f"Срочный {frappe.generate_hash(length=6)}")
-		срочный_курс = frappe.db.get_value(
-			"Course Chapter",
-			frappe.db.get_value("Course Lesson", срочный_урок, "chapter"),
-			"course",
-		)
-		frappe.get_doc(
-			{
-				"doctype": "Course Allocation",
-				"organization": self.организация,
-				"course": срочный_курс,
-				"deadline": "2026-06-30",
-				"mandatory": 1,
-			}
-		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-
-		данные = student.start_lesson()["data"]
-
-		self.assertEqual(данные["lesson"]["id"], срочный_урок)
-
-	def test_без_аргумента_продолжается_курс_последнего_занятия(self):
-		# Кто занимается курсом, продолжает его, а не попадает в чужой курс
-		# со сроком (learning-services#403).
-		self._срочный_курс()
-		создать_занятие(self.ученик, self.урок)
-
-		данные = student.start_lesson()["data"]
-
-		self.assertEqual(данные["lesson"]["id"], self.урок)
+	# --- что продолжать ---
 
 	def _второй_урок(self) -> str:
 		"""Второй урок того же курса, после первого."""
@@ -230,21 +149,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertTrue(ответ["recommended"]["web"])
 		self.assertFalse(ответ["others"][0]["web"])
 
-	def test_урок_знает_своё_место_а_веб_чат_остаток_пробы(self):
-		# Шапка веб-чата: «курс · урок 2 из 2 · пробных осталось» (#404).
-		второй = self._второй_урок()
-
-		у_агента = student.start_lesson(lesson=второй)["data"]
-		в_браузере = student.start_lesson(lesson=второй, channel="web")["data"]
-
-		урок = в_браузере["lesson"]
-		self.assertEqual((урок["number"], урок["total"]), (2, 2))
-		self.assertEqual(урок["course_title"], frappe.db.get_value("LMS Course", self.курс, "title"))
-		self.assertEqual(в_браузере["web_demo"]["used"], 1)
-		# Своему агенту — ни места урока, ни пробы: порядок уроков стоит запросов.
-		self.assertNotIn("number", у_агента["lesson"])
-		self.assertNotIn("web_demo", у_агента)
-
 	def test_развилка_без_курсов_пуста(self):
 		frappe.set_user("Administrator")
 		одинокий = создать_ученика(f"api-solo-{frappe.generate_hash(length=6)}@example.com")
@@ -274,51 +178,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		return курс
 
-	def test_с_курсом_берётся_урок_этого_курса(self):
-		# «Продолжим Lean Canvas» не должно открывать урок курса, который
-		# горит сильнее (lms-platform#337).
-		self._срочный_курс()
-
-		данные = student.start_lesson(course=self.курс)["data"]
-
-		self.assertEqual(данные["lesson"]["id"], self.урок)
-
-	def test_урок_важнее_курса(self):
-		срочный = self._срочный_курс()
-
-		данные = student.start_lesson(lesson=self.урок, course=срочный)["data"]
-
-		self.assertEqual(данные["lesson"]["id"], self.урок)
-
-	def test_пройденный_курс_отказ_нечего_учить(self):
-		frappe.set_user("Administrator")
-		frappe.get_doc(
-			{"doctype": "LMS Course Progress", "member": self.ученик, "lesson": self.урок, "status": "Complete"}
-		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-
-		ответ = student.start_lesson(course=self.курс)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.НЕЧЕГО_УЧИТЬ)
-		self.assertEqual(ответ["error"]["course"], self.курс)
-
-	def test_чужой_курс_отказ_по_доступу_а_не_по_пройденности(self):
-		frappe.set_user("Administrator")
-		чужой_урок = создать_урок(f"Чужой {frappe.generate_hash(length=6)}")
-		чужой = frappe.db.get_value(
-			"Course Chapter", frappe.db.get_value("Course Lesson", чужой_урок, "chapter"), "course"
-		)
-		frappe.set_user(self.ученик)
-
-		ответ = student.start_lesson(course=чужой)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], НЕ_ЗАЧИСЛЕН)
-		self.assertFalse(
-			frappe.db.exists("Agent Learning Session", {"student": self.ученик, "course": чужой})
-		)
-
 	# --- квиз через методы ---
 
 	def test_полный_проход_квиза_через_методы(self):
@@ -327,7 +186,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		создать_квиз(self.урок, [вопрос])
 		frappe.set_user(self.ученик)
 
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		сдать_отчёт(занятие)
 		начало = student.request_quiz(занятие)["data"]
 		итог = student.submit_answer(начало["attempt"], вопрос, "1", "слова ученика")["data"]
@@ -347,7 +206,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		вопрос = создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])
 		создать_квиз(self.урок, [вопрос])
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		сдать_отчёт(занятие)
 		начало = student.request_quiz(занятие)["data"]
 		frappe.db.set_value("Learning Organization", self.организация, "status", "Suspended")
@@ -369,7 +228,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		создать_квиз(self.урок, [вопрос])
 		frappe.set_user(self.ученик)
 
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		сдать_отчёт(занятие)
 		выдано = json.dumps(student.request_quiz(занятие), ensure_ascii=False, default=str)
 
@@ -382,7 +241,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 	def test_отметка_по_номеру_с_прогрессом_и_следом_на_странице_курса(self):
 		from lms_frappe_app.api import public
 
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		ответ = student.mark_objective(занятие, 2, "covered", "Прочитал цикл в своём скрипте")
 		self.assertTrue(ответ["ok"], ответ)
 		данные = ответ["data"]
@@ -398,7 +257,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		)
 
 	def test_разобранная_цель_без_заметки_и_skipped_по_ходу_отклоняются(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		без_заметки = student.mark_objective(занятие, 1, "covered")
 		self.assertEqual(без_заметки["error"]["code"], student.ЦЕЛИ_НЕ_СОВПАЛИ)
 		пропуск = student.mark_objective(занятие, 1, "skipped", "не дошли")
@@ -410,7 +269,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		создать_квиз(self.урок, [создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])])
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		student.mark_objective(занятие, 1, "covered", "Объяснил цикл своими словами")
 		рано = student.request_quiz(занятие)
 		self.assertEqual(рано["error"]["code"], student.НЕТ_ОТЧЁТА)
@@ -420,7 +279,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertTrue(student.request_quiz(занятие)["ok"])
 
 	def test_итог_дополняет_отметки_и_не_стирает_сделанное(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		student.mark_objective(занятие, 1, "covered", "Объяснил цикл своими словами")
 		ответ = student.report_outcomes(занятие, [{"objective": 2, "status": "touched", "resume_from": "с чтения"}])
 		self.assertTrue(ответ["ok"], ответ)
@@ -433,13 +292,11 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(строки["Понимать цикл"], ("covered", "Объяснил цикл своими словами", None))
 		self.assertEqual(строки["Уметь читать код"], ("touched", None, "с чтения"))
 
-		неполный = student.report_outcomes(
-			student.start_lesson()["data"]["session"], [{"objective": 1, "status": "covered"}]
-		)
+		неполный = student.report_outcomes(занятие, [{"objective": 1, "status": "covered"}])
 		self.assertTrue(неполный["ok"], "то же занятие: вторая цель уже отмечена")
 
 	def test_отметки_брошенного_занятия_доходят_до_следующего_урока(self):
-		занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		student.mark_objective(занятие, 1, "covered", "Объяснил цикл своими словами")
 		student.mark_objective(занятие, 2, "touched", "начать с чтения чужого кода")
 		frappe.set_user("Administrator")
@@ -449,7 +306,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		привязать_урок(глава, второй)
 		frappe.set_user(self.ученик)
 
-		контекст = student.start_lesson(lesson=второй)["data"]["student_context"]
+		контекст = student.student_context(создать_занятие(self.ученик, второй))["data"]
 		self.assertEqual(
 			[(п["objective"], п["resume_from"]) for п in контекст["carried_over"]],
 			[("Уметь читать код", "начать с чтения чужого кода")],
@@ -460,16 +317,14 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		)
 
 	def test_напоминание_об_отметках_в_ответах_посреди_занятия(self):
-		занятие = student.start_lesson()["data"]["session"]
-		старт = student.start_lesson()["data"]
-		self.assertEqual(старт["objectives_progress"]["total"], 2)
+		занятие = создать_занятие(self.ученик, self.урок)
 		ответ = student.remember(kind="observation", key="pace", text="Торопится", session=занятие)
 		self.assertEqual(ответ["data"]["objectives_progress"]["marked"], 0)
 		факт = student.remember(kind="fact", key="role", text="Руководитель")
 		self.assertNotIn("objectives_progress", факт["data"], "вне занятия ключа нет")
 
 	def test_отметка_цели_пишется_в_журнал(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		ответ = student.mark_objective(занятие, 1, "touched", "начать с примера")
 		self.assertTrue(ответ["ok"], ответ)
 		self.assertTrue(
@@ -497,7 +352,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_issue(
 			session=занятие, kind="material_issue", text="В примере перепутаны роли"
@@ -517,7 +372,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		приходят из `objectives` директивы, где длина ничем не ограничена.
 		Длинная цель уезжала бы агенту ошибкой базы мимо контракта, да ещё с
 		присланным текстом в сообщении."""
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		длинная = "Понимать цикл и всё, что с ним связано, " * 10
 
 		своя = student.report_issue(
@@ -544,7 +399,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		высыпет в репорт весь разговор, а читает список человек. Обрезка, а не
 		отказ: сигнал нужнее хвоста текста. Предел молчаливый, и без пина он
 		уедет незамеченным вместе с концом описания."""
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		длинное = "Материал противоречит сам себе. " * 200
 
 		ответ = student.report_issue(session=занятие, kind="material_issue", text=длинное)
@@ -567,7 +422,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(set(student.ВИДЫ_РЕПОРТОВ.values()), set(опции))
 
 	def test_неизвестный_вид_репорта_отклоняется(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_issue(session=занятие, kind="нытьё", text="всё плохо")
 
@@ -578,7 +433,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		"""Why: без машинного кода пустой текст упирается в обязательное поле
 		схемы и уезжает агенту ошибкой сервера, а не отказом, который он умеет
 		разобрать."""
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_issue(session=занятие, kind="stuck", text="   ")
 
@@ -606,7 +461,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		чужой_вопрос = создать_вопрос("Чужой вопрос", варианты=[("1", True), ("2", False)])
 		создать_квиз(чужой_урок, [чужой_вопрос])
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		свой = student.report_issue(
 			session=занятие,
@@ -660,20 +515,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		for поле in ("roles", "LMS Student", "System Manager", "doctype"):
 			self.assertNotIn(поле, выдано)
 
-	# --- контекст ученика ---
-
-	def test_заметки_приходят_вне_директивной_рамки(self):
-		"""Ученику они доступны, грифа «не показывать» на них нет."""
-		student.remember(kind="fact", key="role", text="Директор")
-
-		данные = student.start_lesson()["data"]
-
-		контекст = данные["student_context"]
-		self.assertEqual([ф["key"] for ф in контекст["facts"]], ["role"])
-		self.assertEqual(контекст["carried_over"], [])
-		self.assertNotIn("Директор", json.dumps(данные["directive"], ensure_ascii=False))
-		self.assertIn("Директор", json.dumps(данные["student_context"], ensure_ascii=False))
-
 	# --- заметки об ученике ---
 
 	def test_заметка_замещается_по_ключу(self):
@@ -689,7 +530,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		)
 
 	def test_наблюдение_живёт_при_курсе_и_помнит_занятие(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		student.remember(
 			kind="observation", key="pace", text="Торопится", session=занятие
@@ -704,7 +545,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 	def test_проект_живёт_при_курсе_и_в_другом_курсе_приходит_вопросом(self):
 		"""#408: учебный сценарий одного курса не подставляется в другой молча."""
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		ответ = student.remember(
 			kind="project", key="scenario", text="Учебный сценарий «Северный склад»", session=занятие
 		)
@@ -721,14 +562,14 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		другой_урок = создать_урок(f"Другой курс {frappe.generate_hash(length=6)}")
 		другой_курс = зачислить(self.ученик, другой_урок)
 		frappe.set_user(self.ученик)
-		чужие = student.start_lesson(lesson=другой_урок)["data"]["student_context"]
+		чужие = student.my_notes(course=другой_курс)["data"]
 		self.assertEqual(чужие["project"], [])
 		self.assertEqual(
 			[(з["key"], з["course"]) for з in чужие["projects_elsewhere"]], [("scenario", self.курс)]
 		)
 		self.assertTrue(чужие["projects_elsewhere"][0]["course_title"])
 
-		своё = student.start_lesson(lesson=другой_урок)["data"]["session"]
+		своё = создать_занятие(self.ученик, другой_урок)
 		student.remember(kind="project", key="project", text="Свой проект", session=своё)
 		теперь = student.my_notes(course=другой_курс)["data"]
 		self.assertEqual([з["key"] for з in теперь["project"]], ["project"])
@@ -835,7 +676,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 	# --- отчёт по целям ---
 
 	def test_отчёт_по_целям_сохраняется(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_outcomes(
 			занятие,
@@ -854,7 +695,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		)
 
 	def test_отчёт_с_пропущенной_целью_отклоняется(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_outcomes(
 			занятие, outcomes=[{"objective": "Понимать цикл", "status": "covered"}]
@@ -865,7 +706,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(ответ["error"]["missing"], ["Уметь читать код"])
 
 	def test_отчёт_с_чужой_целью_отклоняется(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_outcomes(
 			занятие,
@@ -880,7 +721,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(ответ["error"]["unexpected"], ["Выдуманная цель"])
 
 	def test_неизвестный_статус_отклоняется(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.report_outcomes(
 			занятие, outcomes=[{"objective": "Понимать цикл", "status": "почти"}]
@@ -891,7 +732,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 	def test_повторный_отчёт_замещает_прежний(self):
 		"""Занятие продолжили — отчёт должен обновиться, а не удвоиться."""
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		сдать_отчёт(занятие)
 
 		student.report_outcomes(
@@ -907,7 +748,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(документ.outcomes[1].status, "touched")
 
 	def test_урок_не_закрывается_без_отчёта(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.complete_lesson(занятие)
 
@@ -918,7 +759,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		создать_квиз(self.урок, [создать_вопрос("Два?", варианты=[("2", True), ("3", False)])])
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		ответ = student.request_quiz(занятие)
 
@@ -929,7 +770,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		создать_квиз(self.урок, [создать_вопрос("Два?", варианты=[("2", True), ("3", False)])])
 		frappe.set_user(self.ученик)
-		return student.start_lesson()["data"]["session"]
+		return создать_занятие(self.ученик, self.урок)
 
 	def test_квиз_не_начинается_с_пропущенной_целью(self):
 		"""Иначе ученик получает вопрос по теме, которой на занятии не было."""
@@ -983,7 +824,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(ответ["data"]["touched_objectives"], ["Уметь читать код"])
 
 	def test_после_отчёта_урок_закрывается(self):
-		занятие = student.start_lesson()["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		сдать_отчёт(занятие)
 
 		self.assertTrue(student.complete_lesson(занятие)["ok"])
@@ -991,58 +832,13 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 	# --- сводка ---
 
 	def test_сводка_считает_курсы_и_последние_занятия(self):
-		student.start_lesson()
+		создать_занятие(self.ученик, self.урок)
 		сводка = student.get_my_progress()["data"]
 
 		# Ровно один: «не меньше» замаскировало бы утечку чужих зачислений.
 		self.assertEqual(сводка["courses_total"], 1)
 		self.assertEqual(сводка["courses_overdue"], 0)
 		self.assertEqual(сводка["recent_sessions"][0]["lesson"], self.урок)
-
-
-class IntegrationTestLongLesson(IntegrationTestCase):
-	"""Длинный урок: агент должен уметь дочитать его до конца."""
-
-	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"seg-{суффикс}@example.com")
-		self.урок = создать_урок(f"Длинный {суффикс}")
-		frappe.db.set_value(
-			"Course Lesson",
-			self.урок,
-			"body",
-			"\n\n".join(f"## Часть {i}\n\n" + "текст. " * 400 for i in range(4)),
-		)
-		зачислить(self.ученик, self.урок)
-		frappe.set_user(self.ученик)
-
-	def test_урок_режется_на_сегменты(self):
-		данные = student.start_lesson(lesson=self.урок)["data"]
-		self.assertGreater(данные["content"]["total_segments"], 1)
-		self.assertEqual(данные["content"]["segment_index"], 1)
-
-	def test_второй_сегмент_достижим(self):
-		# Без параметра сегмента агент видел только начало урока: способа
-		# попросить продолжение не было вовсе.
-		первый = student.start_lesson(lesson=self.урок)["data"]["content"]["markdown"]
-		второй = student.start_lesson(lesson=self.урок, segment=2)["data"]
-
-		self.assertEqual(второй["content"]["segment_index"], 2)
-		self.assertNotEqual(второй["content"]["markdown"], первый)
-
-	def test_продолжение_не_плодит_занятия(self):
-		# Иначе на один урок копятся незакрытые сессии, которые потом
-		# закрывает фоновая задача, засоряя журнал и отчётность.
-		первое = student.start_lesson(lesson=self.урок)["data"]["session"]
-		второе = student.start_lesson(lesson=self.урок, segment=2)["data"]["session"]
-		self.assertEqual(первое, второе)
-
-	def test_номер_за_границами_не_роняет_выдачу(self):
-		данные = student.start_lesson(lesson=self.урок, segment=99)["data"]
-		self.assertEqual(
-			данные["content"]["segment_index"], данные["content"]["total_segments"]
-		)
 
 
 class IntegrationTestCompleteLesson(IntegrationTestCase):
@@ -1070,7 +866,7 @@ class IntegrationTestCompleteLesson(IntegrationTestCase):
 		Директивы у этого урока нет, значит нет и целей: отчёт не требуется —
 		требовать было бы нечего, а отказ загнал бы агента в тупик.
 		"""
-		занятие = student.start_lesson(lesson=self.теория)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.теория)
 
 		ответ = student.complete_lesson(занятие)["data"]
 
@@ -1083,16 +879,16 @@ class IntegrationTestCompleteLesson(IntegrationTestCase):
 		)
 
 	def test_после_закрытия_приходит_следующий_урок(self):
-		занятие = student.start_lesson(lesson=self.теория)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.теория)
 		student.complete_lesson(занятие)
 
-		следующий = student.start_lesson()["data"]
+		следующий = student.study_options()["data"]["recommended"]
 
 		self.assertEqual(следующий["lesson"]["id"], self.практика)
 
 	def test_урок_с_обязательным_квизом_так_не_закрыть(self):
 		"""Несущее ограничение: иначе метод стал бы обходом проверки."""
-		занятие = student.start_lesson(lesson=self.практика)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.практика)
 
 		ответ = student.complete_lesson(занятие)
 
@@ -1107,11 +903,10 @@ class IntegrationTestCompleteLesson(IntegrationTestCase):
 
 	def test_курс_проходится_целиком(self):
 		# Критерий готовности: оба урока закрыты, курс пройден.
-		занятие = student.start_lesson(lesson=self.теория)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.теория)
 		student.complete_lesson(занятие)
 
-		практика = student.start_lesson()["data"]
-		квиз = student.request_quiz(практика["session"])["data"]
+		квиз = student.request_quiz(создать_занятие(self.ученик, self.практика))["data"]
 		student.submit_answer(квиз["attempt"], квиз["question"]["id"], "1", "слова ученика")
 
 		курс = next(
@@ -1131,7 +926,7 @@ class IntegrationTestCompleteLesson(IntegrationTestCase):
 		Статус ставится прямо: в жизни его ставит фоновая задача по
 		бездействию, ждать её в тесте нечем.
 		"""
-		занятие = student.start_lesson(lesson=self.теория)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.теория)
 		frappe.db.set_value("Agent Learning Session", занятие, "status", "Abandoned")
 
 		ответ = student.complete_lesson(занятие)
@@ -1271,7 +1066,7 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
 
-		первое = student.start_lesson(lesson=self.первый)["data"]["session"]
+		первое = создать_занятие(self.ученик, self.первый)
 		student.report_outcomes(
 			первое,
 			outcomes=[
@@ -1281,9 +1076,7 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 		)
 		student.complete_lesson(первое)
 
-		перенос = student.start_lesson(lesson=self.второй)["data"]["student_context"][
-			"carried_over"
-		]
+		перенос = student.student_context(создать_занятие(self.ученик, self.второй))["data"]["carried_over"]
 
 		self.assertEqual(
 			[(п["objective"], п["status"]) for п in перенос],
@@ -1311,7 +1104,7 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 			{"doctype": "Agent Lesson Directive", "lesson": self.первый, "objectives": "Посчитать сроки"}
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
-		занятие = student.start_lesson(lesson=self.первый)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.первый)
 
 		ответ = student.report_outcomes(
 			занятие,
@@ -1327,10 +1120,10 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 			{"doctype": "Agent Lesson Directive", "lesson": self.первый, "objectives": "Посчитать сроки"}
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
-		первое = student.start_lesson(lesson=self.первый)["data"]["session"]
+		первое = создать_занятие(self.ученик, self.первый)
 		student.report_outcomes(первое, outcomes=строки)
 		student.complete_lesson(первое)
-		return student.start_lesson(lesson=self.второй)["data"]["student_context"]["carried_over"]
+		return student.student_context(создать_занятие(self.ученик, self.второй))["data"]["carried_over"]
 
 	def test_глубина_переноса_читается_из_настроек(self):
 		"""С глубиной в один урок цель позапрошлого занятия уже не переносится."""
@@ -1352,13 +1145,11 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
 		frappe.set_user(self.ученик)
 		for урок, цель in занятия:
-			занятие = student.start_lesson(lesson=урок)["data"]["session"]
+			занятие = создать_занятие(self.ученик, урок)
 			student.report_outcomes(занятие, outcomes=[{"objective": цель, "status": "skipped"}])
 			student.complete_lesson(занятие)
 
-		перенос = student.start_lesson(lesson=третий)["data"]["student_context"][
-			"carried_over"
-		]
+		перенос = student.student_context(создать_занятие(self.ученик, третий))["data"]["carried_over"]
 
 		self.assertEqual([п["objective"] for п in перенос], ["Цель второго"])
 
@@ -1374,7 +1165,7 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 		self.assertFalse(уроки[0]["completed"])
 
 	def test_после_прохождения_урок_помечен_пройденным(self):
-		student.complete_lesson(student.start_lesson()["data"]["session"])
+		student.complete_lesson(создать_занятие(self.ученик, self.первый))
 
 		уроки = self.уроки()
 
@@ -1384,17 +1175,12 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 	def test_повтор_пройденного_не_двигает_прогресс(self):
 		# Ровно то, ради чего метод и нужен: идентификатор пройденного урока
 		# больше неоткуда взять — list_my_courses отдаёт только следующий.
-		student.complete_lesson(student.start_lesson()["data"]["session"])
+		student.complete_lesson(создать_занятие(self.ученик, self.первый))
 		до = student.list_my_courses()["data"]["courses"][0]["progress"]
 
 		пройденный = next(у["id"] for у in self.уроки() if у["completed"])
 		self.assertEqual(пройденный, self.первый)
-		повтор = student.start_lesson(lesson=пройденный)["data"]
-
-		self.assertEqual(повтор["lesson"]["id"], пройденный)
-		self.assertTrue(повтор["content"]["markdown"] is not None)
-
-		student.complete_lesson(повтор["session"])
+		student.complete_lesson(создать_занятие(self.ученик, пройденный))
 
 		self.assertEqual(student.list_my_courses()["data"]["courses"][0]["progress"], до)
 
@@ -1603,36 +1389,6 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 		)
 		self.assertEqual(документ.schema_version, вторая.name)
 
-	# --- блоки урока ---
-
-	def test_start_lesson_приносит_блоки_своего_урока(self):
-		"""Подсказка «сегодня собираем резюме», а не ограничение."""
-		frappe.set_user("Administrator")
-		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
-		другой = frappe.get_doc(
-			{"doctype": "Course Lesson", "title": "Другой", "chapter": глава}
-		).insert(ignore_permissions=True).name
-		привязать_урок(глава, другой)
-		frappe.set_user(self.ученик)
-		self.схема(
-			blocks=[
-				{"block_key": "goal", "title": "Цель", "lesson": self.урок},
-				{"block_key": "sponsor", "title": "Спонсор", "lesson": другой},
-			]
-		)
-		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
-
-		блоки = student.start_lesson(lesson=self.урок)["data"]["artifact_blocks"]
-
-		self.assertEqual(
-			[(б["artifact"], б["key"], б["content"]) for б in блоки],
-			[("summary", "goal", "Открыть кофейню")],
-			"блок другого урока не приходит",
-		)
-
-	def test_урок_без_блоков_отдаёт_пустой_список(self):
-		self.assertEqual(student.start_lesson(lesson=self.урок)["data"]["artifact_blocks"], [])
-
 	# --- готовность документа (learning-services#296) ---
 
 	def test_отчёт_и_закрытие_предупреждают_о_пустом_блоке_урока(self):
@@ -1643,7 +1399,7 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 				{"block_key": "sponsor", "title": "Спонсор"},
 			]
 		)
-		занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 		пустые = [{"artifact": "summary", "key": "goal", "title": "Цель"}]
 
 		отчёт = student.report_outcomes(занятие, outcomes=[])["data"]
@@ -1656,7 +1412,7 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 	def test_заполненный_блок_урока_не_предупреждает(self):
 		self.схема(blocks=[{"block_key": "goal", "title": "Цель", "lesson": self.урок}])
 		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
-		занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.урок)
 
 		отчёт = student.report_outcomes(занятие, outcomes=[])["data"]
 

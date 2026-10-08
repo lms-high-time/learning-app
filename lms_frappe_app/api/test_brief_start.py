@@ -1,12 +1,17 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""Лёгкий старт и контекст по запросу (learning-services#410)."""
+"""Материал, указания и контекст по занятию — методы лёгкого старта (learning-services#410).
+
+Сам лёгкий старт ушёл из `start_lesson` (learning-services#506); методы
+живут до удаления старого пути и проверяются на занятии курса старой модели.
+"""
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
+	создать_занятие,
 	создать_ученика,
 	создать_урок,
 )
@@ -33,40 +38,21 @@ class IntegrationTestBriefStart(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
 
-	def _старт(self, **параметры) -> dict:
-		ответ = student.start_lesson(lesson=self.урок, **параметры)
-		self.assertTrue(ответ["ok"], ответ)
-		return ответ["data"]
+	def _занятие(self, brief: bool = False) -> str:
+		"""Занятие курса старой модели — `start_lesson` таким курсам отказывает
+		(learning-services#506); `brief_start` ставится так, как его ставил
+		лёгкий старт."""
+		занятие = создать_занятие(self.ученик, self.урок)
+		frappe.db.set_value("Agent Learning Session", занятие, "brief_start", int(brief))
+		return занятие
 
 	def _события(self, занятие: str) -> list[str]:
 		return frappe.get_all(
 			"Agent Session Event", filters={"session": занятие}, pluck="kind", ignore_permissions=True
 		)
 
-	def test_лёгкий_старт_без_материала_указаний_и_контекста(self):
-		данные = self._старт(brief=True)
-
-		self.assertNotIn("markdown", данные["content"])
-		self.assertEqual(данные["content"]["total_segments"], 1)
-		for поле in ("directive", "course_directive", "student_context", "artifact_blocks", "media"):
-			self.assertNotIn(поле, данные)
-		self.assertEqual(данные["objectives"], ["Понимать цикл", "Уметь читать код"])
-		self.assertEqual(данные["start"]["opening"], "first_in_course")
-		self.assertEqual(
-			данные["context"], {"notes": 0, "carried_over": 0, "recent_work": 0, "closed_reports": 0}
-		)
-		self.assertNotIn("Directive Issued", self._события(данные["session"]), "указания не выданы")
-
-	def test_без_brief_прежний_полный_ответ(self):
-		данные = self._старт()
-
-		self.assertIn("Цикл повторяет действие", данные["content"]["markdown"])
-		self.assertEqual(данные["directive"]["audience"], "teacher_only")
-		self.assertIn("student_context", данные)
-		self.assertNotIn("context", данные)
-
 	def test_материал_указания_и_контекст_по_занятию(self):
-		занятие = self._старт(brief="true")["session"]
+		занятие = self._занятие(brief=True)
 
 		материал = student.lesson_material(занятие)["data"]
 		self.assertIn("Цикл повторяет действие", материал["content"]["markdown"])
@@ -86,7 +72,7 @@ class IntegrationTestBriefStart(IntegrationTestCase):
 		)
 
 	def test_отметка_предупреждает_о_невзятых_указаниях_и_материале(self):
-		занятие = self._старт(brief=True)["session"]
+		занятие = self._занятие(brief=True)
 
 		первая = student.mark_objective(занятие, 1, "touched", "с примера")["data"]
 		self.assertEqual(
@@ -98,15 +84,15 @@ class IntegrationTestBriefStart(IntegrationTestCase):
 		вторая = student.mark_objective(занятие, 2, "touched", "с чтения")["data"]
 		self.assertEqual(вторая["warnings"], [])
 
-	def test_полный_старт_не_предупреждает(self):
-		занятие = self._старт()["session"]
+	def test_без_лёгкого_старта_не_предупреждает(self):
+		занятие = self._занятие()
 
 		ответ = student.mark_objective(занятие, 1, "touched", "с примера")["data"]
 
 		self.assertEqual(ответ["warnings"], [])
 
 	def test_чужое_занятие_не_читается(self):
-		занятие = self._старт(brief=True)["session"]
+		занятие = self._занятие(brief=True)
 		frappe.set_user("Administrator")
 		чужой = создать_ученика(f"brief-other-{frappe.generate_hash(length=6)}@example.com")
 		frappe.set_user(чужой)

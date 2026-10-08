@@ -39,6 +39,9 @@ from lms_frappe_app.tests.sample_data import (
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
+	создать_занятие,
+	урок_релиза,
+	зачислить_на_курс,
 )
 
 #: Документ контракта лежит в корне репозитория, рядом с README и CONTRIBUTING.
@@ -288,20 +291,21 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def test_ключи_ответов_совпадают_с_примерами_контракта(self):
 		курс, уроки = self._собрать_курс()
-		self._опубликовать_релиз()
-		репорт, сдача = self._пройти_курс(курс, уроки)
+		курс_релиза = self._опубликовать_релиз()
+		репорт, сдача = self._пройти_курс(курс, уроки, курс_релиза)
 		self._разобрать_репорт(курс, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
 
 	# --- релиз курса ---
 
-	def _опубликовать_релиз(self) -> None:
+	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
 		релиз = пример_релиза(f"contract-{self.суффикс}")
-		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		курс = self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))["course"]
 		# Повтор отвечает теми же ключами, что и публикация.
 		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		return курс
 
 	# --- сборка курса ---
 
@@ -544,7 +548,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	# --- учебный поток ---
 
-	def _пройти_курс(self, курс: str, уроки: list[str]) -> tuple[str, str]:
+	def _пройти_курс(self, курс: str, уроки: list[str], курс_релиза: str) -> tuple[str, str]:
 		с_квизом, без_квиза = уроки
 		frappe.set_user(self.ученик)
 
@@ -559,12 +563,16 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("public.lesson_entry", public.lesson_entry(lesson=с_квизом))
 		self.сверить("public.course_map", public.course_map(course=курс))
 
-		занятие = self.сверить(
-			"student.start_lesson", student.start_lesson(lesson=с_квизом)
-		)["session"]
+		# `start_lesson` открывает только курс из релиза (learning-services#506);
+		# занятие курса старой модели для старых методов заводится напрямую.
+		frappe.set_user("Administrator")
+		зачислить_на_курс(self.ученик, курс_релиза)
+		frappe.set_user(self.ученик)
+		self.сверить(
+			"student.start_lesson", student.start_lesson(lesson=урок_релиза(курс_релиза, "l-1"))
+		)
+		занятие = создать_занятие(self.ученик, с_квизом)
 		self.сверить("student.lesson_session", student.lesson_session(lesson=с_квизом))
-		# Лёгкий старт по тому же уроку продолжает то же занятие (#410).
-		self.сверить("student.start_lesson", student.start_lesson(lesson=с_квизом, brief=True))
 		self.сверить("student.lesson_material", student.lesson_material(session=занятие))
 		self.сверить("student.teaching_notes", student.teaching_notes(session=занятие))
 		self.сверить("student.student_context", student.student_context(session=занятие))
@@ -637,7 +645,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("student.my_homework", student.my_homework())
 		self.сверить("student.my_homework", student.my_homework(lesson=с_квизом))
 
-		второе = student.start_lesson(lesson=без_квиза)["data"]["session"]
+		второе = создать_занятие(self.ученик, без_квиза)
 		self.сверить("student.complete_lesson", student.complete_lesson(session=второе))
 		self.сверить("student.get_my_progress", student.get_my_progress())
 		return репорт, сдача

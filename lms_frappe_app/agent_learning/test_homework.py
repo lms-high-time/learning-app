@@ -128,9 +128,9 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 
 		создать_домашку(self.урок, due_mode="relative", due_days=2)
 		frappe.set_user(self.ученик)
-		старт = student.start_lesson(lesson=self.урок)["data"]
-		сдать_отчёт(старт["session"])
-		ответ = student.complete_lesson(старт["session"])
+		занятие = создать_занятие(self.ученик, self.урок)
+		сдать_отчёт(занятие)
+		ответ = student.complete_lesson(занятие)
 		self.assertTrue(ответ["ok"], ответ)
 		frappe.set_user("Administrator")
 		[сдача] = self.сдачи()

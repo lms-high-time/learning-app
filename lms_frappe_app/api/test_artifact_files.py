@@ -176,10 +176,13 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertIsNone(self.блок("money")["file"])
 		self.assertFalse(frappe.db.exists("File", файл))
 
-	def test_start_lesson_приносит_файл_блока_урока(self):
+	def test_блоки_урока_приносят_файл(self):
+		"""`artifact_blocks` старта урока — те же блоки урока с файлом."""
+		from lms_frappe_app.agent_learning.artifacts.document import _блоки_урока
+
 		self.загрузить()
 
-		блоки = student.start_lesson(lesson=self.урок)["data"]["artifact_blocks"]
+		блоки = _блоки_урока(self.ученик, self.курс, self.урок, пространство_курса(self.ученик, self.курс))
 
 		self.assertEqual([б["key"] for б in блоки], ["money"])
 		self.assertEqual(блоки[0]["file"]["name"], "plan.csv")
