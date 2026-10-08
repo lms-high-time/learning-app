@@ -16,40 +16,6 @@
 	{%- else -%}ждёт агента{%- endif -%}
 {%- endmacro %}
 
-{#
-	Разница места с прошлого визита (lms-high-time/learning-services#271): удалённое
-	зачёркнуто, добавленное подчёркнуто — правка видна и без цвета. Текст —
-	исходный, как его пишет агент: разница честная, и полуизменённую разметку
-	отрисовывать не нужно.
-#}
-{% macro множ(n, формы) -%}
-	{%- set н = n % 100 -%}
-	{%- if н % 10 == 1 and н != 11 -%}{{ формы[0] }}
-	{%- elif н % 10 in [2, 3, 4] and н not in [12, 13, 14] -%}{{ формы[1] }}
-	{%- else -%}{{ формы[2] }}{%- endif -%}
-{%- endmacro %}
-
-{% macro блоки_разницы(р) %}
-	{% set формы = ["строка", "строки", "строк"] if р.mode == "lines" else ["абзац", "абзаца", "абзацев"] %}
-	{% for б in р.blocks %}
-		{% if б.kind == "same" %}<p class="d-same">{{ б.text | e }}</p>
-		{% elif б.kind == "gap" %}<details class="d-gap"><summary>… {{ б.texts | length }} {{ множ(б.texts | length, формы) }} без изменений …</summary>
-			{% for т in б.texts %}<p class="d-same">{{ т | e }}</p>{% endfor %}</details>
-		{% elif б.kind == "changed" %}<p class="d-changed">{% for знак, текст in б.parts %}{% if знак == "=" %}{{ текст | e }}{% elif знак == "-" %}<del>{{ текст | e }}</del>{% else %}<ins>{{ текст | e }}</ins>{% endif %}{% endfor %}</p>
-		{% elif б.kind == "added" %}<p class="d-added"><ins>{{ б.text | e }}</ins></p>
-		{% elif б.kind == "removed" %}<p class="d-removed"><del>{{ б.text | e }}</del></p>
-		{% endif %}
-	{% endfor %}
-{% endmacro %}
-
-{% macro текст_разницы(р) %}
-	{% if р.rewritten %}
-		<p class="note-diff-state">Переписано почти целиком — новый текст:</p>
-		<p class="d-new">{{ р.new | e }}</p>
-		<details class="d-gap"><summary>Прежний текст</summary><p class="d-same">{{ р.old | e }}</p></details>
-	{% else %}{{ блоки_разницы(р) }}{% endif %}
-{% endmacro %}
-
 {% macro карточка(з, с_адресом=False) %}
 	<article class="note-card is-{{ з.status }}{% if з.waiting_on == 'author' %} is-yours{% endif %}" id="note-card-{{ з.id }}">
 		<div class="note-head">
@@ -81,13 +47,13 @@
 {% endmacro %}
 
 {#
-	Место на странице: якорь, кнопка «Замечание» и замечания этого места.
+	Место на странице: якорь, кнопка «Заметка» и заметки этого места.
 	Принятые свёрнуты: они история, а не работа. `data-live` — область,
-	которую скрипт замечаний обновляет с сервера без перезагрузки.
+	которую скрипт заметок обновляет с сервера без перезагрузки.
 #}
-{% macro место(target, label, замечания, якорь, кнопка="Замечание") %}
-	{% set открытые = замечания | rejectattr("status", "equalto", "accepted") | list %}
-	{% set принятые = замечания | selectattr("status", "equalto", "accepted") | list %}
+{% macro место(target, label, заметки, якорь, кнопка="Заметка") %}
+	{% set открытые = заметки | rejectattr("status", "equalto", "accepted") | list %}
+	{% set принятые = заметки | selectattr("status", "equalto", "accepted") | list %}
 	<div class="note-place" id="{{ якорь }}" data-live="{{ якорь }}">
 		<button type="button" class="note-add" {{ атрибуты(target, label) }}>{{ кнопка }}</button>
 		<div class="notes-list" data-for="{{ target | e }}">

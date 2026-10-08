@@ -32,6 +32,7 @@ from lms_frappe_app.tests.sample_data import (
 	отметить_все_пункты,
 	урок_релиза,
 	зачислить,
+	зачислить_на_курс,
 	привязать_главу,
 	привязать_урок,
 	политика_по_умолчанию,
@@ -113,6 +114,10 @@ from lms_frappe_app.testing import сколько_запросов
 	# релизов страницы — одной выборкой, а не на релиз и не на строку.
 	# Редакций директив у репортов курса из релиза нет — их выборки тоже.
 	"course_reports": 3,
+	# Список курсов кабинета автора (learning-services#512): `list_courses`
+	# (курсы, число уроков, действующие релизы), открытые заметки и ответы в
+	# их нитях, тестеры — по выборке на весь список, а не на курс.
+	"author_courses": 9,
 }
 
 
@@ -284,6 +289,30 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 			with self.subTest(релизов=релизов):
 				self._ворота("course_reports", lambda курс=курс: authoring.course_reports(course=курс))
 				self.assertEqual(len(authoring.course_reports(course=курс)["data"]["reports"]), релизов * 2)
+			frappe.set_user("Administrator")
+
+	def test_бюджет_списка_курсов_кабинета_не_растёт_с_курсами(self):
+		"""Страница списка кабинета до и после ещё трёх курсов из релиза с
+		заметками и тестерами: бюджет один на оба."""
+		from lms_frappe_app.www.author import сведения
+
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qba-{frappe.generate_hash(length=6)}@example.com")
+		for курсов in (1, 3):
+			for _ in range(курсов):
+				курс, _ = курс_из_релиза()
+				frappe.set_user(куратор)
+				заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Заметка")["data"]["id"]
+				authoring.reply_note(note=заметка, text="Ответ", via="agent")
+				frappe.set_user("Administrator")
+				ученик = создать_ученика(f"qba-{frappe.generate_hash(length=6)}@example.com")
+				зачислить_на_курс(ученик, курс)
+				frappe.db.set_value("LMS Enrollment", {"course": курс, "member": ученик}, "agent_tester", 1)
+			frappe.set_user(куратор)
+			with self.subTest(курсов=курсов):
+				self._ворота("author_courses", lambda: сведения(куратор))
+				курсы = {к["id"]: к for к in сведения(куратор)["courses"]}
+				self.assertEqual((курсы[курс]["testers_count"], курсы[курс]["open_notes"]), (1, 1))
 			frappe.set_user("Administrator")
 
 	# --- механика ворот ---
