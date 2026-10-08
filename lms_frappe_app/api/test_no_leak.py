@@ -17,14 +17,17 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.leak_guards import проверить_ответ
 from lms_frappe_app.agent_learning.releases import service as релизы
+from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
 	создать_вопрос,
 	создать_домашку,
+	создать_занятие,
 	создать_квиз,
 	создать_менеджера,
 	создать_организацию,
@@ -278,17 +281,29 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("review.send_back", review.send_back(submission=сдача, version=1, comment="Доделай"))
 
 
-#: Тексты релиза, которых ученик и руководитель не видят: пояснение верного
-#: ответа (оно — после ответа, а квиза из релиза в этом этапе нет), пакет
-#: агента и карта курса (learning-services#500).
+#: Тексты релиза, которых ученик и руководитель не видят: пояснения верных
+#: ответов, пакет агента и карта курса (learning-services#500). Пояснение
+#: приходит только к верному ответу и в итоге сданной попытки (F2,
+#: learning-services#504) — их проверяют тесты квиза ниже.
 ПОЯСНЕНИЕ_РЕЛИЗА = "Пояснение верного варианта из релиза"
+ПОЯСНЕНИЕ_ВТОРОГО = "Пояснение второго вопроса из релиза"
 ПАКЕТ_АГЕНТА = "Текст пакета агента из релиза"
 КАРТА_КУРСА = "Текст карты курса из релиза"
+#: Свидетельство агента к пункту прохождения: пункты — инструмент агента,
+#: ученику и руководителю они не показываются (learning-services#504).
+СВИДЕТЕЛЬСТВО = "Свидетельство агента к пункту прохождения"
+СЛОВА_УЧЕНИКА = "Слова ученика в ответ на вопрос из релиза"
+#: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
+ЗАКРЫТОЕ_РЕЛИЗА = (ПОЯСНЕНИЕ_РЕЛИЗА, ПОЯСНЕНИЕ_ВТОРОГО, ПАКЕТ_АГЕНТА, КАРТА_КУРСА, СВИДЕТЕЛЬСТВО)
+ВОПРОС_1, ВОПРОС_2 = "S1/l-1-D1", "S2/l-1-D1"
+ПОПЫТКА = "Agent Quiz Attempt"
+ОТВЕТ = "Agent Quiz Answer"
+ПРОХОЖДЕНИЕ = "Agent Lesson Run"
 
 
 class IntegrationTestNoLeakRelease(IntegrationTestCase):
-	"""Курс из релиза: ответы квиза из индекса, пакет агента и карта не уходят
-	ни в один ответ ученику и руководителю."""
+	"""Курс из релиза: ответы квиза из индекса, пакет агента, карта и пункты
+	прохождения не уходят ни в один ответ ученику и руководителю."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -297,6 +312,19 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		for урок in релиз["lessons"]:
 			for ответ in урок["quiz"]["answers"].values():
 				ответ["explanation"] = ПОЯСНЕНИЕ_РЕЛИЗА
+		# Второй вопрос первого урока и порог 50: один неверный ответ из двух
+		# сдаёт попытку — так видно, что пояснение к нему приходит в итоге.
+		квиз = релиз["lessons"][0]["quiz"]
+		квиз["pass_percentage"] = 50
+		квиз["questions"].append(
+			{
+				"key": ВОПРОС_2,
+				"objective": "l-1-D1",
+				"text": "Второй вопрос",
+				"options": [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "Второй"}],
+			}
+		)
+		квиз["answers"][ВОПРОС_2] = {"correct": "V2", "explanation": ПОЯСНЕНИЕ_ВТОРОГО}
 		релиз["agent"] = {"lessons": {"l-1": {"directive": ПАКЕТ_АГЕНТА}}}
 		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
 		frappe.set_user("Administrator")
@@ -311,11 +339,18 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
 		).insert(ignore_permissions=True)
 		self.менеджер = создать_менеджера(f"leak-rel-mg-{суффикс}@example.com", self.организация)
+		# Прохождение с отметкой: свидетельство не должно уйти ни в один ответ.
+		self.run = прохождения.прохождение(self.ученик, self.курс, "l-1")
+		прохождения.отметить(self.run.name, "term:T1", "done", СВИДЕТЕЛЬСТВО)
 
-	def проверить(self, что: str, ответ) -> str:
-		return проверить_ответ(
-			self, ответ, что, запрещённые_тексты=(ПОЯСНЕНИЕ_РЕЛИЗА, ПАКЕТ_АГЕНТА, КАРТА_КУРСА)
-		)
+	def проверить(self, что: str, ответ, *ещё: str) -> str:
+		return проверить_ответ(self, ответ, что, запрещённые_тексты=(*ЗАКРЫТОЕ_РЕЛИЗА, *ещё))
+
+	def ответить(self, попытка: str, вопрос: str, вариант: str) -> dict:
+		return release_quiz.ответить(попытка, вопрос, вариант, СЛОВА_УЧЕНИКА)
+
+	def попытка(self) -> dict:
+		return release_quiz.начать(self.run, создать_занятие(self.ученик, self.урок))
 
 	def test_ученик_и_руководитель_не_видят_закрытого_из_релиза(self):
 		frappe.set_user(self.ученик)
@@ -336,10 +371,81 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			self,
 			student.artifact(self.курс, "notebook"),
 			"artifact",
-			запрещённые_тексты=(ПОЯСНЕНИЕ_РЕЛИЗА, ПАКЕТ_АГЕНТА, КАРТА_КУРСА),
+			запрещённые_тексты=ЗАКРЫТОЕ_РЕЛИЗА,
 			кроме=("owner",),
 		)
 
 		frappe.set_user(self.менеджер)
 		self.проверить("org_report", manager.org_report())
 		self.проверить("student_detail", manager.student_detail(self.ученик))
+
+	def test_снимок_и_ответ_не_называют_верного(self):
+		"""Снимок попытки — без `correct`; неверный ответ — только `correct: false`,
+		несданная попытка — без пояснений (F2)."""
+		начало = self.попытка()
+		попытка = начало["attempt"]
+
+		снимок = frappe.db.get_value(ПОПЫТКА, попытка, "questions")
+		self.assertNotIn("correct", снимок)
+		self.проверить("снимок попытки", снимок)
+		выдано = self.проверить("начало попытки", начало)
+		self.assertNotIn("correct", выдано)
+
+		первый = self.ответить(попытка, ВОПРОС_1, "V2")
+		self.assertEqual(первый["verdict"], {"correct": False})
+		self.assertNotIn("correct", json.dumps(первый["next_question"], ensure_ascii=False))
+		self.проверить("ответ на вопрос", первый)
+
+		второй = self.ответить(попытка, ВОПРОС_2, "V1")
+		self.assertEqual(второй["verdict"], {"correct": False})
+		self.assertFalse(второй["result"]["passed"])
+		self.assertNotIn("explanations", второй["result"])
+		self.проверить("итог несданной попытки", второй)
+
+	def test_пояснение_к_неверному_только_в_итоге_сданной(self):
+		"""F2: к верному ответу — сразу, к неверному — только в итоге сданной попытки."""
+		попытка = self.попытка()["attempt"]
+
+		неверный = self.ответить(попытка, ВОПРОС_1, "V2")
+		self.assertEqual(неверный["verdict"], {"correct": False})
+		self.проверить("неверный ответ", неверный)
+
+		верный = self.ответить(попытка, ВОПРОС_2, "V2")
+		self.assertEqual(верный["verdict"], {"correct": True, "explanation": ПОЯСНЕНИЕ_ВТОРОГО})
+		итог = верный["result"]
+		self.assertTrue(итог["passed"])
+		self.assertEqual(
+			[(п["id"], п["explanation"]) for п in итог["explanations"]], [(ВОПРОС_1, ПОЯСНЕНИЕ_РЕЛИЗА)]
+		)
+		# Оба пояснения здесь законны: к верному ответу и в итоге сданной попытки.
+		законные = (ПОЯСНЕНИЕ_РЕЛИЗА, ПОЯСНЕНИЕ_ВТОРОГО)
+		проверить_ответ(
+			self,
+			верный,
+			"итог сданной попытки",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные),
+		)
+
+	def test_прохождение_не_читают_ученик_и_руководитель(self):
+		for кто in (self.ученик, self.менеджер):
+			frappe.set_user(кто)
+			self.assertFalse(frappe.has_permission(ПРОХОЖДЕНИЕ, "read", doc=self.run.name), кто)
+			with self.assertRaises(frappe.PermissionError, msg=кто):
+				frappe.get_list(ПРОХОЖДЕНИЕ, fields=["name"])
+			for строки in ("Agent Lesson Run Goal", "Agent Lesson Run Objective"):
+				with self.assertRaises(frappe.PermissionError, msg=f"{кто}: {строки}"):
+					frappe.get_list(строки, parent_doctype=ПРОХОЖДЕНИЕ, fields=["name"])
+
+	def test_ответы_попытки_по_релизу_не_читает_руководитель(self):
+		"""Итог попытки руководителю виден, ответы — нет: в записи ответа лежит эталон."""
+		попытка = self.попытка()["attempt"]
+		self.ответить(попытка, ВОПРОС_1, "V1")
+		[ответ] = frappe.get_all(ОТВЕТ, filters={"attempt": попытка}, pluck="name")
+
+		frappe.set_user(self.менеджер)
+		self.assertTrue(frappe.has_permission(ПОПЫТКА, "read", doc=попытка), "попытка сотрудника видна")
+		self.assertFalse(frappe.has_permission(ОТВЕТ, "read", doc=ответ))
+		with self.assertRaises(frappe.PermissionError):
+			frappe.get_list(ОТВЕТ, filters={"attempt": попытка}, fields=["question_key", "is_correct"])
+		self.проверить("student_detail", manager.student_detail(self.ученик), СЛОВА_УЧЕНИКА)
+		self.проверить("org_report", manager.org_report(), СЛОВА_УЧЕНИКА)

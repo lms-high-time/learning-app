@@ -37,8 +37,8 @@ function сбросить(frm) {
 					frappe.show_alert(
 						{
 							message: __(
-								"Прогресс сброшен: занятий в архиве — {0}, попыток — {1}, документов — {2}, заметок — {3}, сдач домашки — {4}; отметок пройденного удалено — {5}.",
-								[д.sessions_archived, д.attempts_archived, д.artifacts_archived, д.notes_archived, д.homework_archived, д.progress_deleted]
+								"Прогресс сброшен: занятий в архиве — {0}, попыток — {1}, документов — {2}, заметок — {3}, сдач домашки — {4}, прохождений уроков — {5}; отметок пройденного удалено — {6}.",
+								[д.sessions_archived, д.attempts_archived, д.artifacts_archived, д.notes_archived, д.homework_archived, д.runs_archived, д.progress_deleted]
 							) + (д.enrolled_again ? " " + __("Курс назначен организацией — запись выдана заново.") : ""),
 							indicator: "green",
 						},

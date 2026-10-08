@@ -53,6 +53,9 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		)
 		self.assertEqual(index.ключи(None), {"chapters": [], "lessons": []})
 
+	def test_уроки_глав(self):
+		self.assertEqual(index.уроки_глав(self.релиз), {"ch-1": ["l-1", "l-2"], "ch-2": ["l-3"]})
+
 	def test_урок_и_ключ_урока_в_обе_стороны(self):
 		урок = index.урок(self.релиз, "l-2")
 		self.assertEqual(урок["lesson"], self.итог.уроки["l-2"])
@@ -78,6 +81,14 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		с_ответами = index.вопросы_урока(self.релиз, "l-1", с_ответами=True)
 		self.assertEqual(с_ответами[0]["correct"], "V1")
 		self.assertEqual(с_ответами[0]["explanation"], "Потому что так велит условие.")
+
+	def test_эталон_вопроса(self):
+		self.assertEqual(
+			dict(index.эталон(self.релиз, "l-1", "S1/l-1-D1")),
+			{"correct": "V1", "explanation": "Потому что так велит условие."},
+		)
+		self.assertIsNone(index.эталон(self.релиз, "l-2", "S1/l-1-D1"))
+		self.assertIsNone(index.эталон(self.релиз, "l-1", "S9/l-1-D1"))
 
 	def test_известные_помнят_снятый_ключ(self):
 		релиз = пример_релиза()

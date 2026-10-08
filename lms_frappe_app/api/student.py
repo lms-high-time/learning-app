@@ -74,9 +74,11 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	веб_уроки_ученика,
 )
 from lms_frappe_app.agent_learning.errors import (
+	ЗАНЯТО,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
 	УРОК_НЕ_НАЙДЕН,
+	ЧУЖОЕ_ЗАНЯТИЕ,
 )
 from lms_frappe_app.agent_learning.normalizer import нормализовать_урок
 from lms_frappe_app.agent_learning.permissions import видит_всё
@@ -89,7 +91,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ЦЕЛИ_ПРОПУЩЕНЫ = "objectives_skipped"
 ЦЕЛИ_НЕ_СОВПАЛИ = "objectives_mismatch"
 НУЖЕН_КВИЗ = "quiz_required"
-ЧУЖОЕ_ЗАНЯТИЕ = "not_your_session"
 ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
 ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН = "user_not_found"
 ЗАНЯТИЕ_ЗАКРЫТО = "session_closed"
@@ -885,8 +886,13 @@ def homework(lesson: str, space: str | None = None) -> dict:
 	_требовать_доступ_к_курсу(ученик, курс)
 	пространство = пространства.пространство_курса(ученик, курс, space)
 	задание = домашка.задание_урока(lesson)
+	имя = домашка.найти_сдачу(задание.name, ученик, пространство) if задание else None
+	# Why: снятое из релиза задание (`retired`) — только ученику с выданной
+	# сдачей, как на старте урока (`homework.для_старта`): новым его не выдают.
+	if задание and задание.retired and not имя:
+		задание = None
 	сдача = None
-	if задание and (имя := домашка.найти_сдачу(задание.name, ученик, пространство)):
+	if имя:
 		сдача = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, имя), с_версиями=True, читатель=ученик)
 	return {
 		"space": пространства.наружу(пространство),
@@ -949,7 +955,10 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 	строки = []
 	for сдача in сдачи:
 		курс = курсы[сдача.lesson]
-		задание = задания[сдача.homework]
+		# Why: сдача без задания — след сбоя, а не данные ученика: перечень её
+		# пропускает, а не падает на каждом вызове.
+		if not (задание := задания.get(сдача.homework)):
+			continue
 		строка = {
 			"course": курс,
 			"course_title": frappe.get_cached_value("LMS Course", курс, "title"),
@@ -1409,10 +1418,18 @@ def complete_lesson(session: str) -> dict:
 			session=session,
 		)
 
-	quiz.отметить_урок_пройденным(занятие)
-	занятие.status = ЗАНЯТИЕ_ЗАВЕРШЕНО
-	занятие.save(ignore_permissions=True)
-	занятие.записать_событие(СОБЫТИЕ_ВЕРДИКТ, "урок закрыт без квиза")
+	try:
+		quiz.отметить_урок_пройденным(занятие)
+		занятие.status = ЗАНЯТИЕ_ЗАВЕРШЕНО
+		занятие.save(ignore_permissions=True)
+		занятие.записать_событие(СОБЫТИЕ_ВЕРДИКТ, "урок закрыт без квиза")
+	except frappe.QueryDeadlockError:
+		# Why: закрытие пишет прохождение урока с блокировкой, а его же сверяет
+		# фоновая задача после публикации релиза и параллельные вызовы агента.
+		# Гонку MariaDB стенда отдаёт взаимоблокировкой (снимочная изоляция), и
+		# транзакция уже испорчена — откат и отказ «повторите», а не 500.
+		frappe.db.rollback()
+		raise Отказ(ЗАНЯТО, "Урок сейчас меняет другой запрос — повторите", session=session)
 
 	return {
 		"lesson": занятие.lesson,
@@ -1464,7 +1481,15 @@ def submit_answer(
 	# приостановка организации или снятое зачисление посреди квиза иначе не
 	# мешали довести попытку до зачёта по курсу, которого у ученика уже нет.
 	_требовать_доступ_к_курсу(попытка.student, попытка.course)
-	return quiz.принять_ответ(attempt, question, answer, student_words)
+	try:
+		return quiz.принять_ответ(attempt, question, answer, student_words)
+	except frappe.QueryDeadlockError:
+		# Why: сданная попытка закрывает урок и пишет его прохождение с
+		# блокировкой — гонка с фоновой сверкой прохождений или параллельным
+		# ответом приходит взаимоблокировкой (как в `complete_lesson`): откат и
+		# отказ «повторите», а не 500. Ответ не принят.
+		frappe.db.rollback()
+		raise Отказ(ЗАНЯТО, "Попытку сейчас меняет другой запрос — повторите", attempt=attempt)
 
 
 @frappe.whitelist()
@@ -1672,7 +1697,7 @@ def _с_повтором_при_гонке(ключ: str, действие, *arg
 			frappe.local.message_log = frappe.local.message_log[:сообщений]
 			if попытка:
 				raise Отказ(
-					домашка.ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
+					ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
 				)
 
 
@@ -2505,4 +2530,4 @@ def _осталось_попыток(ученик: str, lesson: str, полит�
 	квиз = quiz._квиз_урока(lesson)
 	if not квиз:
 		return None
-	return quiz.осталось_попыток(ученик, квиз, политика)
+	return quiz.осталось_попыток(quiz.попытки_квиза(ученик, квиз), политика)

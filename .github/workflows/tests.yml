@@ -1,11 +1,15 @@
 # Прогон серверных тестов приложения. Основан на ci.yml из frappe/lms —
-# связка та же, отличается набором приложений и веткой Frappe.
+# связка та же, отличается набором приложений и закреплённой ревизией Frappe.
 name: Тесты
 
 on:
   push:
     branches: [master]
   pull_request: {}
+
+env:
+  # Ревизия Frappe образа стенда, двигается вместе с ним.
+  FRAPPE_REV: c1f1e8ec3708750d7254f7f99d869ffb9886f19f
 
 jobs:
   tests:
@@ -37,9 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Строго 3.14: frappe 16.32.0 объявляет Python>=3.14,<3.15, и на 3.12
+      # Строго 3.14: frappe 16 объявляет Python>=3.14,<3.15, и на 3.12
       # установка падает на разрешении зависимостей, а не на тестах.
       - uses: actions/setup-python@v6
+        id: python
         with:
           python-version: "3.14"
 
@@ -47,15 +52,26 @@ jobs:
         with:
           node-version: "24"
 
-      # Кэш складывается сразу после `bench init` — в нём только Frappe,
+      # Кэш складывается после `bench init` и перехода на ревизию — в нём только Frappe,
       # приложения подключаются следующим шагом и в архив не попадают.
       # Why: поэтому ключ не завязан на источник Learning — смена репозитория
       # или ветки Learning не может достать сборку от прежнего источника.
+      # Точная версия Python — в ключе: окружение bench ссылается на
+      # интерпретатор раннера по пути с версией, и после обновления раннера
+      # до 3.14.8 архив отдавал окружение без Python — `uv` падал на
+      # подключении приложений, а не на тестах.
+      #
+      # Frappe — ровно та ревизия `version-16`, что в образе стенда (полный
+      # sha, двигается вместе с ним). Why: вершина ветки уходит вперёд, и CI
+      # проверял бы код на другом Frappe, чем работает стенд: 8 октября 2026
+      # свежий кэш с вершины ветки уронил тесты навигации desk, которые на
+      # ревизии стенда проходят. `v2` в ключе — номер схемы кэша: поднимать
+      # при правке шага «Развернуть bench», иначе достанется старый архив.
       - name: Кэш bench
         uses: actions/cache@v4
         with:
           path: ~/bench-cache
-          key: ${{ runner.os }}-bench-version-16
+          key: ${{ runner.os }}-${{ env.ImageOS }}-bench-v2-${{ env.FRAPPE_REV }}-py${{ steps.python.outputs.python-version }}
 
       - name: Установить bench
         run: pip3 install frappe-bench
@@ -70,6 +86,9 @@ jobs:
               --skip-redis-config-generation \
               --skip-assets \
               --python "$(which python)"
+            git -C ~/frappe-bench/apps/frappe fetch --quiet --depth 1 upstream "$FRAPPE_REV"
+            git -C ~/frappe-bench/apps/frappe checkout --quiet "$FRAPPE_REV"
+            (cd ~/frappe-bench && bench setup requirements)
             mkdir -p ~/bench-cache
             (cd && tar czf ~/bench-cache/bench.tgz frappe-bench)
           fi

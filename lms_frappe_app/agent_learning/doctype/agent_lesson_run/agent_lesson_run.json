@@ -1,0 +1,183 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-10-08 12:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "course",
+  "lesson_key",
+  "lesson",
+  "release",
+  "status",
+  "sb_time",
+  "accepted_at",
+  "started_at",
+  "passed_at",
+  "resume_from",
+  "sb_goals",
+  "objectives",
+  "goals",
+  "sb_archive",
+  "archived_student",
+  "archived_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ученик",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Курс",
+   "options": "LMS Course",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Опора прохождения: ключ стабилен между релизами",
+   "fieldname": "lesson_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ключ урока",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "label": "Урок",
+   "options": "Course Lesson",
+   "read_only": 1
+  },
+  {
+   "description": "Релиз, с которым сверены пункты и цели",
+   "fieldname": "release",
+   "fieldtype": "Link",
+   "label": "Релиз",
+   "options": "Agent Course Release",
+   "read_only": 1
+  },
+  {
+   "default": "not_started",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Статус",
+   "options": "not_started\nin_progress\ncovered\npassed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_time",
+   "fieldtype": "Section Break",
+   "label": "Время"
+  },
+  {
+   "description": "Когда агент впервые получил список пунктов",
+   "fieldname": "accepted_at",
+   "fieldtype": "Datetime",
+   "label": "Список принят",
+   "read_only": 1
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Начат",
+   "read_only": 1
+  },
+  {
+   "fieldname": "passed_at",
+   "fieldtype": "Datetime",
+   "label": "Пройден",
+   "read_only": 1
+  },
+  {
+   "description": "Заметка агента",
+   "fieldname": "resume_from",
+   "fieldtype": "Small Text",
+   "label": "С чего продолжить",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_goals",
+   "fieldtype": "Section Break",
+   "label": "Цели и пункты"
+  },
+  {
+   "fieldname": "objectives",
+   "fieldtype": "Table",
+   "label": "Цели урока",
+   "options": "Agent Lesson Run Objective",
+   "read_only": 1
+  },
+  {
+   "fieldname": "goals",
+   "fieldtype": "Table",
+   "label": "Пункты целей агента",
+   "options": "Agent Lesson Run Goal",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sb_archive",
+   "fieldtype": "Section Break",
+   "label": "Архив"
+  },
+  {
+   "description": "Запись заархивирована сбросом прогресса: ученик перенесён сюда, поле «Ученик» пусто.",
+   "fieldname": "archived_student",
+   "fieldtype": "Link",
+   "label": "Ученик до сброса",
+   "options": "User",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "archived_at",
+   "fieldtype": "Datetime",
+   "label": "Сброшено",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-10-08 12:00:00",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Lesson Run",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "lesson_key",
+ "track_changes": 1
+}

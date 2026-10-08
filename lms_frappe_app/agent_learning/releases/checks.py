@@ -168,6 +168,8 @@ def _длины(р: dict, к: list) -> None:
 		длинно(г["title"], ДЛИНА_С_НОМЕРОМ, f"chapters[{г['key']}].title")
 	for у in р["lessons"]:
 		длинно(у["title"], ДЛИНА_С_НОМЕРОМ, f"lessons[{у['key']}].title")
+		if у["homework"]:
+			длинно(у["homework"]["title"], ДЛИНА_DATA, f"lessons[{у['key']}].homework.title")
 	if р["document"]:
 		длинно(р["document"]["title"], ДЛИНА_DATA, "document.title")
 		for с in р["document"]["sections"]:

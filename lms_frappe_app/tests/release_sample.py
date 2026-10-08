@@ -130,3 +130,91 @@ def пример_релиза(ключ: str | None = None) -> dict:
 	if ключ:
 		релиз["course"]["key"] = ключ
 	return релиз
+
+
+def релиз_двух_целей(ключ: str | None = None, *, порог: float = 70, вопросов: int = 2) -> dict:
+	"""Курс из одного урока `l-1` с двумя целями — для прохождения и квиза (learning-services#504).
+
+	У цели `l-1-D1` два обязательных пункта (`term:T1`, `exec:E1`) и
+	необязательный (`refute:M1`); у `l-1-D2` — только необязательный
+	(`return:R1`): она разобрана сразу. Все `вопросов` вопросов — на `l-1-D1`,
+	верный вариант у каждого `V1`; `порог` — `pass_percentage` урока. Документа нет.
+	"""
+	вопросы = [f"S{номер}/l-1-D1" for номер in range(1, вопросов + 1)]
+	return {
+		"format": "lms-release/1",
+		"course": {
+			"key": ключ or "two-objectives",
+			"title": "Курс с двумя целями",
+			"summary": "Короткая карточка",
+			"description": "Описание курса для его страницы.",
+			"promise": "",
+			"goal": "Уметь пример",
+			"attribution": None,
+			"glossary": [],
+		},
+		"chapters": [
+			{"key": "ch-1", "title": "Глава", "description": "Что изменится после главы.", "lessons": ["l-1"]}
+		],
+		"lessons": [
+			{
+				"key": "l-1",
+				"chapter": "ch-1",
+				"title": "Урок с двумя целями",
+				"hook": "Зачин урока",
+				"sections": [],
+				"objectives": [
+					{
+						"key": "l-1-D1",
+						"text": "Цель с обязательными пунктами",
+						"goals": [
+							{"key": "term:T1", "kind": "term", "required": True, "title": "Термин «пример»"},
+							{
+								"key": "exec:E1",
+								"kind": "execution",
+								"required": True,
+								"title": "Сделать пример",
+							},
+							{
+								"key": "refute:M1",
+								"kind": "misconception",
+								"required": False,
+								"title": "Если проявится: «пример не нужен»",
+							},
+						],
+					},
+					{
+						"key": "l-1-D2",
+						"text": "Цель без обязательных пунктов",
+						"goals": [
+							{
+								"key": "return:R1",
+								"kind": "return",
+								"required": False,
+								"title": "Вернуться к примеру",
+							}
+						],
+					},
+				],
+				"quiz": {
+					"pass_percentage": порог,
+					"questions": [
+						{
+							"key": в,
+							"objective": "l-1-D1",
+							"text": f"Ситуация и вопрос {номер}",
+							"options": [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "Второй"}],
+						}
+						for номер, в in enumerate(вопросы, start=1)
+					],
+					"answers": {
+						в: {"correct": "V1", "explanation": "Потому что так велит условие."} for в in вопросы
+					},
+				},
+				"homework": None,
+			}
+		],
+		"document": None,
+		"agent": {"opaque": True},
+		"map": {"opaque": True},
+	}

@@ -1,15 +1,22 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning.releases import service as релизы
+from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import admin, student
+from lms_frappe_app.tests.release_sample import релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
 	создать_вопрос,
 	создать_домашку,
+	создать_занятие,
 	создать_квиз,
 	создать_куратора,
 	создать_организацию,
@@ -184,3 +191,59 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], admin.ЗАПИСЬ_НЕ_НАЙДЕНА)
+
+
+class IntegrationTestResetProgressRelease(IntegrationTestCase):
+	"""Сброс по курсу из релиза: прохождения уроков — в архив (learning-services#504)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.ученик = создать_ученика(f"reset-run-{суффикс}@example.com")
+		self.ключ = f"reset-{суффикс}"
+		self.курс = релизы.опубликовать(релиз_двух_целей(self.ключ), None, "Administrator")["course"]
+		self.run = прохождения.прохождение(self.ученик, self.курс, "l-1")
+		зачислить(self.ученик, self.run.lesson)
+		прохождения.отметить(self.run.name, "term:T1", "done", "Ученик объяснил сам")
+		self.попытка = release_quiz.начать(self.run, создать_занятие(self.ученик, self.run.lesson))["attempt"]
+
+	def сбросить(self) -> dict:
+		запись = frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+		return admin.reset_student_progress(запись)["data"]
+
+	def test_прохождение_и_попытка_по_релизу_уходят_в_архив(self):
+		итог = self.сбросить()
+
+		self.assertEqual((итог["runs_archived"], итог["attempts_archived"]), (1, 1))
+		run = frappe.db.get_value(
+			"Agent Lesson Run", self.run.name, ["student", "archived_student", "archived_at"], as_dict=True
+		)
+		self.assertIsNone(run.student)
+		self.assertEqual(run.archived_student, self.ученик)
+		self.assertIsNotNone(run.archived_at)
+		self.assertEqual(
+			frappe.db.get_value("Agent Quiz Attempt", self.попытка, ["student", "status"]),
+			(None, "Abandoned"),
+		)
+
+	def test_после_сброса_урок_проходится_заново(self):
+		"""Архивное прохождение не мешает новому и не идёт в счёт глав и сверки."""
+		прежний_релиз = self.run.release
+		self.сбросить()
+		зачислить(self.ученик, self.run.lesson)
+
+		заново = прохождения.прохождение(self.ученик, self.курс, "l-1")
+
+		self.assertNotEqual(заново.name, self.run.name)
+		self.assertEqual((заново.status, заново.started_at), ("not_started", None))
+		self.assertEqual({п.status for п in заново.goals}, {"open"})
+		[глава] = прохождения.главы(self.ученик, self.курс)
+		self.assertEqual((глава["status"], глава["lessons_started"]), ("not_started", 0))
+
+		второй = релиз_двух_целей(self.ключ)
+		второй["lessons"][0]["objectives"][0]["goals"][0]["title"] = "Термин «другой пример»"
+		with patch.object(frappe, "enqueue"):
+			релизы.опубликовать(второй, None, "Administrator")
+		self.assertEqual(прохождения.сверить_курс(self.курс), 1, "сверено только живое прохождение")
+		self.assertEqual(frappe.db.get_value("Agent Lesson Run", self.run.name, "release"), прежний_релиз)

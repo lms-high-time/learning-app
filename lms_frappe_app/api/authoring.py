@@ -335,7 +335,7 @@ def remove_lesson(lesson: str) -> dict:
 		frappe.delete_doc("Agent Lesson Directive", директива, ignore_permissions=True)
 	# Сдач по уроку нет — проверено следами выше, задание уходит вместе с уроком.
 	if задание := _имя_задания(lesson):
-		_снять_сроки_назначений(задание)
+		homework.снять_сроки_назначений(задание)
 		frappe.delete_doc(homework.ЗАДАНИЕ, задание, ignore_permissions=True)
 	frappe.delete_doc("Course Lesson", lesson)
 	return {"removed": lesson, "chapter": глава, "lessons": structure.уроки_главы(глава)}
@@ -799,16 +799,6 @@ def _имя_задания(lesson: str) -> str | None:
 	return frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson})
 
 
-def _снять_сроки_назначений(задание: str) -> None:
-	"""Сроки задания в назначениях курса уходят вместе с заданием (learning-services#452).
-
-	`Why:` строка назначения ссылается на задание, и без уборки удаление
-	упало бы `LinkExistsError`. Срок назначения — не след ученика: сдач по
-	заданию нет, выставлять его больше некому.
-	"""
-	frappe.db.delete("Course Allocation Homework Due", {"homework": задание})
-
-
 def _задание_урока(lesson: str):
 	if имя := _имя_задания(lesson):
 		return frappe.get_doc(homework.ЗАДАНИЕ, имя)
@@ -898,7 +888,7 @@ def remove_homework(lesson: str) -> dict:
 		raise Отказ(
 			ЗАДАНИЕ_СДАЮТ, "По заданию уже есть сдачи: его можно только переписать", lesson=lesson, submissions=сдач
 		)
-	_снять_сроки_назначений(документ.name)
+	homework.снять_сроки_назначений(документ.name)
 	frappe.delete_doc(homework.ЗАДАНИЕ, документ.name)
 	# Why: удаление записи не двигает ничьего `modified`, и `ревизия` не заметила
 	# бы, что задания больше нет, — зеркало автора осталось бы старым. Отметка
@@ -1464,8 +1454,9 @@ def get_lesson(lesson: str) -> dict:
 		"directive": _действующая_директива(lesson),
 		"course_directive": _действующая_директива_курса(сведения.course),
 		"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
+		# Снятое из релиза задание (`retired`) у урока больше не действует.
 		"homework": _задание_автора(frappe.get_doc(homework.ЗАДАНИЕ, задание))
-		if (задание := _имя_задания(lesson))
+		if (задание := frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson, "retired": 0}))
 		else None,
 	}
 
@@ -1595,7 +1586,7 @@ def _уроки_главы(глава: str, предел: int) -> list[dict]:
 			запись.lesson: {"title": запись.title, "answer_mode": запись.answer_mode, "due_mode": запись.due_mode}
 			for запись in frappe.get_all(
 				homework.ЗАДАНИЕ,
-				filters={"lesson": ("in", уроки)},
+				filters={"lesson": ("in", уроки), "retired": 0},
 				fields=["lesson", "title", "answer_mode", "due_mode"],
 			)
 		}

@@ -132,6 +132,17 @@ def ключи(релиз: str | None) -> dict[str, list[str]]:
 	}
 
 
+def уроки_глав(релиз: str) -> dict[str, list[str]]:
+	"""Ключи уроков по главам релиза: глава → её уроки; главы по порядку релиза."""
+	фильтр = {"parenttype": РЕЛИЗ, "parent": релиз}
+	главы: dict[str, list[str]] = {
+		к: [] for к in frappe.get_all(ГЛАВА, filters=фильтр, pluck="chapter_key", order_by="idx asc")
+	}
+	for у in frappe.get_all(УРОК, filters=фильтр, fields=["lesson_key", "chapter_key"], order_by="idx asc"):
+		главы[у.chapter_key].append(у.lesson_key)
+	return главы
+
+
 def урок(релиз: str, ключ: str) -> dict | None:
 	"""Урок релиза по ключу: его запись Learning, глава, порог квиза, разделы, домашка."""
 	найдено = frappe.get_all(
@@ -199,6 +210,22 @@ def вопросы_урока(релиз: str, ключ: str, *, с_ответа
 			вопрос.update(correct=в.correct, explanation=в.explanation)
 		итог.append(вопрос)
 	return итог
+
+
+def есть_вопросы(релиз: str, ключ: str) -> bool:
+	"""Есть ли у урока релиза квиз — хоть один вопрос."""
+	return bool(frappe.db.exists(ВОПРОС, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}))
+
+
+def эталон(релиз: str, ключ_урока: str, ключ_вопроса: str) -> dict | None:
+	"""Верный вариант и пояснение вопроса урока: `{correct, explanation}`; нет вопроса — `None`."""
+	найдено = frappe.get_all(
+		ВОПРОС,
+		filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ_урока, "question_key": ключ_вопроса},
+		fields=["correct", "explanation"],
+		limit=1,
+	)
+	return найдено[0] if найдено else None
 
 
 def снимок(релиз: str) -> dict:

@@ -177,6 +177,16 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 			quiz.отметить_урок_пройденным(занятие(self.ученик, self.урок))
 		очередь.assert_not_called()
 
+	def test_снятое_из_релиза_задание_не_ставит_задачу(self):
+		from unittest.mock import patch
+
+		from lms_frappe_app.agent_learning import quiz
+
+		создать_домашку(self.урок, retired=1)
+		with patch.object(frappe, "enqueue") as очередь:
+			quiz.отметить_урок_пройденным(занятие(self.ученик, self.урок))
+		очередь.assert_not_called()
+
 	def test_сбой_очереди_не_срывает_закрытие_урока(self):
 		from unittest.mock import patch
 
