@@ -212,6 +212,17 @@ def вопросы_урока(релиз: str, ключ: str, *, с_ответа
 	return итог
 
 
+def эталон(релиз: str, ключ_урока: str, ключ_вопроса: str) -> dict | None:
+	"""Верный вариант и пояснение вопроса урока: `{correct, explanation}`; нет вопроса — `None`."""
+	найдено = frappe.get_all(
+		ВОПРОС,
+		filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ_урока, "question_key": ключ_вопроса},
+		fields=["correct", "explanation"],
+		limit=1,
+	)
+	return найдено[0] if найдено else None
+
+
 def снимок(релиз: str) -> dict:
 	"""Релиз целиком, как опубликован: части `agent` и `map` — как есть."""
 	return json.loads(frappe.db.get_value(РЕЛИЗ, релиз, "snapshot"))

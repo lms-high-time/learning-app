@@ -5,6 +5,7 @@
 
 import json
 from datetime import datetime
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -13,7 +14,9 @@ from frappe.utils import add_to_date, now_datetime
 from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН
 from lms_frappe_app.agent_learning.constants import (
+	ЗАНЯТИЕ_БРОШЕНО,
 	ЗАНЯТИЕ_ЖДЁТ_КВИЗ,
+	ПОПЫТКА_ИДЁТ,
 	ПОПЫТКА_НЕ_ЗАЧТЕНА,
 	ПРОВЕРКА_ВОПРОС_ВЫДАН,
 	ПРОВЕРКА_ОТВЕТ_ПРИНЯТ,
@@ -40,6 +43,7 @@ from lms_frappe_app.tests.sample_data import (
 )
 
 ПОПЫТКА = "Agent Quiz Attempt"
+ОТВЕТ = "Agent Quiz Answer"
 ПОЯСНЕНИЕ = "Потому что так велит условие."
 С1, С2 = "S1/l-1-D1", "S2/l-1-D1"
 
@@ -124,6 +128,22 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		release_quiz.начать(run, занятие)
 
 		self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "status"), ЗАНЯТИЕ_ЖДЁТ_КВИЗ)
+
+	def test_старт_не_меняет_занятие_не_в_работе(self):
+		"""Как у `quiz.начать_попытку`: в ожидание квиза переводится только занятие в работе."""
+		настроить_квиз(max_attempts=5, retry_delay_minutes=0)
+		run, занятие = self.урок()
+		первая = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, первая, {"status": ПОПЫТКА_НЕ_ЗАЧТЕНА, "finished_at": now_datetime()})
+
+		for статус in (ЗАНЯТИЕ_ЖДЁТ_КВИЗ, ЗАНЯТИЕ_БРОШЕНО):
+			with self.subTest(статус=статус):
+				frappe.db.set_value("Agent Learning Session", занятие, "status", статус)
+				попытка = release_quiz.начать(run, занятие)["attempt"]
+				frappe.db.set_value(ПОПЫТКА, попытка, "status", ПОПЫТКА_НЕ_ЗАЧТЕНА)
+
+				self.assertNotEqual(попытка, первая)
+				self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "status"), статус)
 
 	def test_открытая_попытка_занятия_переиспользуется(self):
 		run, занятие = self.урок()
@@ -214,6 +234,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(ответ["verdict"], {"correct": False})
 		self.assertIsNone(ответ["next_question"])
 		self.assertTrue(ответ["all_answered"])
+		self.assertEqual(frappe.db.get_value(ПОПЫТКА, попытка, "status"), ПОПЫТКА_ИДЁТ)
 		выдано = json.dumps(ответ, ensure_ascii=False)
 		for утечка in ("V1", "Первый", ПОЯСНЕНИЕ, "explanation", "why_wrong"):
 			self.assertNotIn(утечка, выдано)
@@ -230,6 +251,14 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			),
 			[1, 0],
 		)
+
+	def test_ключ_варианта_без_учёта_регистра_и_списком_из_одного(self):
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=3))
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+
+		self.assertTrue(self.ответить(попытка, С1, " v1 ")["verdict"]["correct"])
+		self.assertTrue(self.ответить(попытка, С2, ["V1"])["verdict"]["correct"])
+		self.assertFalse(self.ответить(попытка, "S3/l-1-D1", ["V1", "V2"])["verdict"]["correct"])
 
 	def test_неизвестный_ответ_неверен_а_не_ошибка(self):
 		run, занятие = self.урок()
@@ -293,6 +322,29 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1, "V2")
 
+	def test_дубль_ответа_не_пускает_база(self):
+		run, занятие = self.урок()
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		self.ответить(попытка, С1)
+
+		with self.assertRaises((frappe.UniqueValidationError, frappe.DuplicateEntryError)):
+			frappe.get_doc({"doctype": ОТВЕТ, "attempt": попытка, "question_key": С1}).insert(
+				ignore_permissions=True
+			)
+
+	def test_параллельный_ответ_на_тот_же_вопрос_отклоняется(self):
+		"""Проверка «уже отвечено» не увидела ответ соседа — держит индекс, попытка цела."""
+		run, занятие = self.урок()
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		self.ответить(попытка, С1)
+
+		with patch.object(release_quiz, "_отвечено", return_value=False):
+			отказ = self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1, "V2")
+
+		self.assertNotIn("V1", json.dumps(отказ.подробности, ensure_ascii=False))
+		self.assertEqual(frappe.db.count(ОТВЕТ, {"attempt": попытка}), 1)
+		self.assertTrue(self.ответить(попытка, С2)["all_answered"])
+
 	def test_ответ_в_завершённую_попытку_отклоняется(self):
 		run, занятие = self.урок()
 		попытка = release_quiz.начать(run, занятие)["attempt"]
@@ -326,7 +378,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		)
 		self.assertEqual(отказ.подробности["attempts_used"], 1)
 
-	def test_лимит_считается_по_уроку_релиза(self):
+	def test_попытки_другого_урока_не_в_счёт(self):
 		настроить_квиз(max_attempts=1, retry_delay_minutes=0)
 		run, занятие = self.урок(пример_релиза(self.ключ), "l-1")
 		release_quiz.начать(run, занятие)
@@ -335,6 +387,32 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		начало = release_quiz.начать(второй, создать_занятие(self.ученик, второй.lesson))
 
 		self.assertEqual(frappe.db.get_value(ПОПЫТКА, начало["attempt"], "lesson_key"), "l-2")
+
+	def новый_релиз_урока(self, run):
+		"""Новый релиз того же урока; отдаёт прохождение, сверенное с ним."""
+		новый = релиз_двух_целей(self.ключ)
+		новый["lessons"][0]["quiz"]["questions"][0]["text"] = "Другой вопрос"
+		self.опубликовать(новый)
+		run = прохождения.прохождение(self.ученик, run.course, run.lesson_key)
+		self.assertNotEqual(run.release, frappe.db.get_value(ПОПЫТКА, {"student": self.ученик}, "release"))
+		return run
+
+	def test_лимит_переживает_новый_релиз(self):
+		настроить_квиз(max_attempts=1, retry_delay_minutes=0)
+		run, занятие = self.урок()
+		release_quiz.начать(run, занятие)
+		run = self.новый_релиз_урока(run)
+
+		self.отказ(ПОПЫТКИ_ИСЧЕРПАНЫ, release_quiz.начать, run, создать_занятие(self.ученик, run.lesson))
+
+	def test_пауза_переживает_новый_релиз(self):
+		настроить_квиз(max_attempts=5, retry_delay_minutes=1440)
+		run, занятие = self.урок()
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, попытка, {"status": ПОПЫТКА_НЕ_ЗАЧТЕНА, "finished_at": now_datetime()})
+		run = self.новый_релиз_урока(run)
+
+		self.отказ(СЛИШКОМ_РАНО, release_quiz.начать, run, создать_занятие(self.ученик, run.lesson))
 
 	def test_повтор_раньше_паузы_отклоняется_с_временем(self):
 		настроить_квиз(max_attempts=5, retry_delay_minutes=1440)
