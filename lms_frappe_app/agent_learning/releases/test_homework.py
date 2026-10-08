@@ -7,6 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import homework as домашка
+from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.api import student
 from lms_frappe_app.patches.v0_1 import release_homework
@@ -180,6 +181,42 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		мои = student.my_homework(lesson=урок)
 		self.assertTrue(мои["ok"], мои)
 		self.assertEqual([с["title"] for с in мои["data"]["items"]], ["Задание"])
+
+	def test_снятую_домашку_новый_ученик_не_видит_и_не_сдаёт(self):
+		курс = self.опубликовать()["course"]
+		урок = self.урок(курс)
+		первый = self.ученик(курс, урок)
+		второй = self.ученик(курс, урок, "second")
+		self.закрыть_урок(первый, урок)
+
+		self.опубликовать(self.релиз(None))
+
+		старт = домашка.для_старта(второй, урок, курс, None, полное=True)
+		self.assertIsNone(старт["homework"])
+		with self.assertRaises(Отказ) as пойман:
+			домашка.сохранить(второй, урок, None, answer="Ответ без выдачи")
+		self.assertEqual(пойман.exception.код, домашка.ЗАДАНИЯ_НЕТ)
+		self.assertEqual(self.сдачи(второй), [])
+		# Ученик с выданной сдачей видит задание на старте и сдаёт его.
+		старт = домашка.для_старта(первый, урок, курс, None, полное=True)
+		self.assertEqual(старт["homework"]["title"], "Задание")
+		self.assertEqual(домашка.сохранить(первый, урок, None, answer="Мой ответ").version, 1)
+
+	def test_снятая_домашка_прошлого_урока_только_со_сдачей(self):
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][1]["homework"] = ДОМАШКА
+		курс = self.опубликовать(релиз)["course"]
+		прошлый, урок = self.урок(курс, "l-2"), self.урок(курс, "l-3")
+		первый = self.ученик(курс, прошлый)
+		второй = self.ученик(курс, прошлый, "second")
+		self.закрыть_урок(первый, прошлый)
+
+		self.опубликовать()
+
+		self.assertIsNone(домашка.для_старта(второй, урок, курс, None, полное=True)["previous_homework"])
+		прошлое = домашка.для_старта(первый, урок, курс, None, полное=True)["previous_homework"]
+		self.assertEqual((прошлое["lesson"], прошлое["title"]), (прошлый, "Задание"))
+		self.assertIsNotNone(прошлое["submission"])
 
 	def test_урок_ушёл_из_релиза_как_убранная_домашка(self):
 		курс = self.опубликовать()["course"]
