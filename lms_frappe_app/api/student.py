@@ -74,6 +74,7 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	веб_уроки_ученика,
 )
 from lms_frappe_app.agent_learning.errors import (
+	ЗАНЯТО,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
 	УРОК_НЕ_НАЙДЕН,
@@ -1428,7 +1429,7 @@ def complete_lesson(session: str) -> dict:
 		# Гонку MariaDB стенда отдаёт взаимоблокировкой (снимочная изоляция), и
 		# транзакция уже испорчена — откат и отказ «повторите», а не 500.
 		frappe.db.rollback()
-		raise Отказ(домашка.ЗАНЯТО, "Урок сейчас меняет другой запрос — повторите", session=session)
+		raise Отказ(ЗАНЯТО, "Урок сейчас меняет другой запрос — повторите", session=session)
 
 	return {
 		"lesson": занятие.lesson,
@@ -1488,7 +1489,7 @@ def submit_answer(
 		# ответом приходит взаимоблокировкой (как в `complete_lesson`): откат и
 		# отказ «повторите», а не 500. Ответ не принят.
 		frappe.db.rollback()
-		raise Отказ(домашка.ЗАНЯТО, "Попытку сейчас меняет другой запрос — повторите", attempt=attempt)
+		raise Отказ(ЗАНЯТО, "Попытку сейчас меняет другой запрос — повторите", attempt=attempt)
 
 
 @frappe.whitelist()
@@ -1696,7 +1697,7 @@ def _с_повтором_при_гонке(ключ: str, действие, *arg
 			frappe.local.message_log = frappe.local.message_log[:сообщений]
 			if попытка:
 				raise Отказ(
-					домашка.ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
+					ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
 				)
 
 

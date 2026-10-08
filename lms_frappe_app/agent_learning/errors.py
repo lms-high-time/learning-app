@@ -23,6 +23,7 @@ import frappe
 НЕТ_ПРАВА = "not_allowed"
 КУРС_НЕ_НАЙДЕН = "course_not_found"
 ЧУЖОЕ_ЗАНЯТИЕ = "not_your_session"
+ЗАНЯТО = "busy"
 
 
 class Отказ(frappe.ValidationError):

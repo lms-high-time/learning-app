@@ -27,7 +27,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ДОМАШКА_ПРИНЯТА,
 	ДОМАШКА_СДАНА,
 )
-from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.errors import ЗАНЯТО, Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
 
 ЗАДАНИЕ = "Agent Lesson Homework"
@@ -49,7 +49,6 @@ from lms_frappe_app.agent_learning.structure import уроки_курса, ур�
 ФАЙЛ_ПУСТ = "file_missing"
 НЕВЕРНЫЕ_ФАЙЛЫ = "invalid_files"
 УЖЕ_ПРИНЯТА = "accepted_locked"
-ЗАНЯТО = "busy"
 
 ТОЧКА_СОХРАНЕНИЯ = "agent_homework_save"
 ТОЧКА_ВСТАВКИ = "agent_homework_insert"

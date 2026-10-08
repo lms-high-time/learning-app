@@ -80,6 +80,15 @@ class TestПроверкиРелиза(unittest.TestCase):
 		р["chapters"][0]["title"] = "г" * 136
 		self.assertIn("text_too_long", _коды(р))
 
+	def test_длинное_название_домашки(self):
+		"""Название шаблона `Agent Lesson Homework` — Data, без номера."""
+		р = пример_релиза()
+		р["lessons"][2]["homework"]["title"] = "д" * 141
+		self.assertIn(
+			("text_too_long", "lessons[l-3].homework.title"),
+			[(п["code"], п["where"]) for п in checks.проблемы(р)[0]],
+		)
+
 	def test_пустые_тексты_ученику_предупреждения(self):
 		р = пример_релиза()
 		р["course"]["summary"] = ""

@@ -77,7 +77,7 @@ def начать(run, занятие: str) -> dict:
 
 	Блокировки — в порядке «прохождение, затем занятие»: прохождение читает с
 	блокировкой `runs.service.прохождение`, занятие — здесь. Метод контракта
-	(этап 3) обязан брать их в том же порядке.
+	обязан брать их в том же порядке.
 
 	`Why:` занятие читается с блокировкой, чтобы два параллельных старта по
 	одному занятию не завели две попытки. Держит это не ожидание, а запись:
@@ -249,7 +249,7 @@ def _записать_ответ(поля: dict) -> None:
 	frappe.db.savepoint(ТОЧКА_ОТВЕТА)
 	try:
 		frappe.get_doc(поля).insert(ignore_permissions=True)
-	except frappe.UniqueValidationError, frappe.DuplicateEntryError:
+	except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
 		frappe.db.rollback(save_point=ТОЧКА_ОТВЕТА)
 		# Сообщение Frappe «must be unique» ответ не несёт: отказ скажет сам.
 		frappe.clear_last_message()

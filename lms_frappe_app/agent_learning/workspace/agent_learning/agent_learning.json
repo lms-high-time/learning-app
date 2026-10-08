@@ -125,7 +125,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Ученики",
-   "link_count": 9,
+   "link_count": 10,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -135,6 +135,16 @@
    "label": "Занятия",
    "link_count": 0,
    "link_to": "Agent Learning Session",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Прохождения уроков",
+   "link_count": 0,
+   "link_to": "Agent Lesson Run",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -278,7 +288,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",
