@@ -20,6 +20,7 @@
 """
 
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -120,6 +121,11 @@ from lms_frappe_app.testing import сколько_запросов
 	# открытые заметки и ответы в их нитях, тестеры — по выборке на весь
 	# список, а не на курс; кэш документов курсов на замере холодный.
 	"author_courses": 10,
+	# Прохождения курса автору (learning-services#512): курс, инструктор ли
+	# вызвавший, прохождения страницы с именами учеников и названиями уроков
+	# из индекса их релизов — одной выборкой, цели и пункты страницы — по
+	# одной, а не на прохождение и не на релиз.
+	"goal_runs": 5,
 }
 
 
@@ -321,6 +327,38 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 				курсы = {к["id"]: к for к in сведения(куратор)["courses"]}
 				self.assertEqual((курсы[курс]["testers_count"], курсы[курс]["open_notes"]), (1, 1))
 			frappe.set_user("Administrator")
+
+	def test_бюджет_goal_runs_не_растёт_со_страницей_и_релизами(self):
+		"""Страница из одного прохождения одного релиза и из четырёх прохождений
+		двух релизов: бюджет один на обе."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbg-{frappe.generate_hash(length=6)}@example.com")
+		ключ = f"qbg-{frappe.generate_hash(length=8)}"
+		курс, _ = курс_из_релиза(куратор, релиз=пример_релиза(ключ))
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
+		frappe.set_user(куратор)
+		with self.subTest(прохождений=1, релизов=1):
+			self._ворота("goal_runs", lambda: authoring.goal_runs(course=курс, limit=1))
+
+		релиз = пример_релиза(ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, второе издание"
+		# Без фоновой сверки: прошлое прохождение остаётся на первом релизе.
+		with patch.object(frappe, "enqueue"):
+			курс_из_релиза(куратор, релиз=релиз)
+		frappe.set_user("Administrator")
+		for номер, ключ_урока in enumerate(("l-1", "l-2", "l-3")):
+			ученик = создать_ученика(f"qbg-{номер}-{frappe.generate_hash(length=6)}@example.com")
+			run = прохождения.прохождение(ученик, курс, ключ_урока)
+			прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
+		frappe.set_user(куратор)
+		страница = authoring.goal_runs(course=курс)["data"]["runs"]
+		self.assertEqual(
+			sorted(r["lesson"]["title"] for r in страница),
+			["Урок второй", "Урок первый", "Урок первый, второе издание", "Урок третий"],
+		)
+		with self.subTest(прохождений=4, релизов=2):
+			self._ворота("goal_runs", lambda: authoring.goal_runs(course=курс))
 
 	# --- механика ворот ---
 

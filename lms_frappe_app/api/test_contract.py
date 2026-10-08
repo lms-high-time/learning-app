@@ -294,6 +294,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		курс, уроки = self._собрать_курс()
 		курс_релиза = self._опубликовать_релиз()
 		репорт, сдача = self._пройти_курс(курс, уроки, курс_релиза)
+		self._посмотреть_прохождения(курс_релиза)
 		self._разобрать_репорт(курс_релиза, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
@@ -526,6 +527,14 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 							session=занятие, goal=пункт["key"], status="done", evidence="Ученик сделал сам"
 						),
 					)
+
+	# --- прохождения уроков для автора ---
+
+	def _посмотреть_прохождения(self, курс: str) -> None:
+		frappe.set_user(self.куратор)
+		прохождения = self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс))["runs"]
+		self.assertTrue(прохождения, "у ученика нет прохождений — сверять нечего")
+		self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс, lesson="l-1", start=0, limit=1))
 
 	# --- репорт: разбор и итог ---
 

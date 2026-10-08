@@ -5,8 +5,8 @@
 
 Курс компилируется вне платформы и публикуется целиком релизом
 (`publish_release`); здесь — публикация, открытие и снятие курса, анонс,
-просмотр релиза, заметки, тестеры и репорты. Чем курс хорош — дело автора и
-его агента, не этого файла.
+просмотр релиза и прохождений, заметки, тестеры и репорты. Чем курс хорош —
+дело автора и его агента, не этого файла.
 
 Удаления курса здесь нет намеренно: снятая с публикации ошибка обратима,
 удалённый курс с прогрессом учеников — нет.
@@ -29,6 +29,7 @@ from lms_frappe_app.agent_learning.releases import places
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
 from lms_frappe_app.agent_learning.runs import service as прохождения
+from lms_frappe_app.agent_learning.runs import view as просмотр_прохождений
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
 	ИМЯ_ВИДА_РЕПОРТА,
@@ -603,6 +604,88 @@ def course_releases(course: str) -> dict:
 	if not сведения:
 		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
 	return {"course": course, "releases": просмотр_релиза.история(course, сведения.active_release)}
+
+
+# --- прохождения уроков (learning-services#512) ---
+
+#: Предел страницы `goal_runs`, он же размер по умолчанию. `Why:` у прохождения
+#: все пункты урока со свидетельствами до `runs.service.ПРЕДЕЛ_СВИДЕТЕЛЬСТВА`
+#: символов каждое, и страница растёт с уроком, а не только с числом строк.
+ПРОХОЖДЕНИЙ_ЗА_РАЗ = 20
+НЕВЕРНАЯ_СТРАНИЦА = "invalid_page"
+#: Кто читает прохождения любого курса; остальные авторы — только курсов, где
+#: они инструкторы. Модератор — как в `can_modify_course` Learning, плюс
+#: администраторы платформы.
+ВИДЯТ_ВСЕ_ПРОХОЖДЕНИЯ = frozenset({"Moderator", "System Manager", "Administrator"})
+
+
+@frappe.whitelist()
+@контракт
+def goal_runs(course: str, lesson: str | None = None, start=0, limit=None) -> dict:
+	"""Прохождения уроков курса учениками — только чтение: статусы урока, целей и
+	пунктов, свидетельства и время отметок.
+
+	`lesson` — ключ урока: только его прохождения; ключ ищется в самих
+	прохождениях, поэтому находятся и прохождения урока, снятого из релиза.
+	`start` — смещение, `limit` — размер страницы, не больше
+	`ПРОХОЖДЕНИЙ_ЗА_РАЗ`. Порядок и подписи — `runs.view.страница`.
+
+	Читает инструктор курса, модератор и администратор (`_видит_прохождения`):
+	свидетельства не отдаёт ни один метод ученика и руководителя.
+	"""
+	пользователь = _автор()
+	сведения = frappe.db.get_value("LMS Course", course, ["name", "active_release"], as_dict=True)
+	if not сведения:
+		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
+	_видит_прохождения(course, пользователь)
+	if not сведения.active_release:
+		raise Отказ(
+			КУРС_БЕЗ_РЕЛИЗА, "У курса нет релиза: прохождения ведутся по урокам релиза", course=course
+		)
+	начало = _целое(start, 0, "start", 0)
+	предел = min(_целое(limit, ПРОХОЖДЕНИЙ_ЗА_РАЗ, "limit", 1), ПРОХОЖДЕНИЙ_ЗА_РАЗ)
+	ключ_урока = (lesson or "").strip() or None
+	строки, ещё = просмотр_прохождений.страница(course, ключ_урока, начало, предел)
+	return {
+		"course": course,
+		"lesson": ключ_урока,
+		"start": начало,
+		"limit": предел,
+		"has_more": ещё,
+		"runs": строки,
+	}
+
+
+def _видит_прохождения(курс: str, пользователь: str) -> None:
+	"""Инструктор курса (`LMS Course.instructors`) или роль из
+	`ВИДЯТ_ВСЕ_ПРОХОЖДЕНИЯ` — иначе 403, как у `_автор`."""
+	if set(frappe.get_roles(пользователь)) & ВИДЯТ_ВСЕ_ПРОХОЖДЕНИЯ:
+		return
+	if not frappe.db.exists(
+		"Course Instructor", {"parenttype": "LMS Course", "parent": курс, "instructor": пользователь}
+	):
+		frappe.throw(frappe._("Прохождения курса видят его инструкторы"), frappe.PermissionError)
+
+
+def _целое(значение, по_умолчанию: int, поле: str, наименьшее: int) -> int:
+	"""Целое не меньше `наименьшее` — число или строка цифр; пусто — `по_умолчанию`.
+	Иначе — отказ `invalid_page` с полем `where`.
+
+	`Why:` Frappe отдаёт параметры GET и формы строками, а `cint` молча
+	превратил бы опечатку в ноль — и страница ушла бы на начало.
+	"""
+	if значение is None or значение == "":
+		return по_умолчанию
+	if isinstance(значение, str) and значение.strip().isdecimal():
+		значение = int(значение.strip())
+	if isinstance(значение, bool) or not isinstance(значение, int) or значение < наименьшее:
+		raise Отказ(
+			НЕВЕРНАЯ_СТРАНИЦА,
+			f"{поле} — целое не меньше {наименьшее}",
+			where=поле,
+			value=значение,
+		)
+	return значение
 
 
 def _курс_с_релизом(course: str) -> tuple[dict, str]:
