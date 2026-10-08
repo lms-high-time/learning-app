@@ -136,7 +136,10 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 	def test_неизвестный_урок_и_урок_снятый_из_релиза(self):
 		ответ = authoring.course_release(course=self.курс, lesson="l-9")
 		self.assertEqual(self.код(ответ), "lesson_not_in_release")
-		self.assertEqual((ответ["error"]["course"], ответ["error"]["lesson"]), (self.курс, "l-9"))
+		self.assertEqual(
+			(ответ["error"]["course"], ответ["error"]["lesson_key"], ответ["error"]["release"]),
+			(self.курс, "l-9", self.первый["release"]),
+		)
 
 		релиз = пример_релиза(self.ключ)
 		релиз["chapters"].pop()
@@ -161,16 +164,24 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 		self.assertEqual(self.код(authoring.course_releases(course="такого-курса-нет")), "course_not_found")
 		self.assertEqual(authoring.course_releases(course=анонс)["data"], {"course": анонс, "releases": []})
 
-	def test_ученику_просмотр_и_история_закрыты(self):
-		frappe.set_user(создать_ученика(f"rel-view-s-{frappe.generate_hash(length=6)}@example.com"))
-
-		for вызов in (
-			lambda: authoring.course_release(course=self.курс),
-			lambda: authoring.course_release(course=self.курс, lesson="l-1"),
-			lambda: authoring.course_releases(course=self.курс),
+	def test_ученику_тестеру_и_гостю_просмотр_и_история_закрыты(self):
+		"""Ответы квиза — только авторским ролям: тестер курса — ученик с
+		ранним доступом, а не автор. Гостю — 401: сначала вход."""
+		тестер = создать_ученика(f"rel-view-t-{frappe.generate_hash(length=6)}@example.com")
+		self.assertTrue(authoring.add_testers(course=self.курс, users=тестер)["ok"])
+		for пользователь, ошибка in (
+			(создать_ученика(f"rel-view-s-{frappe.generate_hash(length=6)}@example.com"), frappe.PermissionError),
+			(тестер, frappe.PermissionError),
+			("Guest", frappe.AuthenticationError),
 		):
-			with self.assertRaises(frappe.PermissionError):
-				вызов()
+			frappe.set_user(пользователь)
+			for вызов in (
+				lambda: authoring.course_release(course=self.курс),
+				lambda: authoring.course_release(course=self.курс, lesson="l-1"),
+				lambda: authoring.course_releases(course=self.курс),
+			):
+				with self.subTest(пользователь=пользователь), self.assertRaises(ошибка):
+					вызов()
 
 	def test_методы_читаются_и_get_и_post(self):
 		for метод in (authoring.course_release, authoring.course_releases):

@@ -705,16 +705,27 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 
 		self.assertEqual(self.ревизия(), до)
 
+	def test_снятие_с_публикации_и_анонс_двигают_ревизию(self):
+		authoring.publish_course(course=self.курс)
+		до = self.ревизия()
+		authoring.unpublish_course(course=self.курс)
+		после_снятия = self.ревизия()
+		self.assertGreater(после_снятия, до)
+
+		ответ = authoring.announce_course(course=self.курс)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertGreater(self.ревизия(), после_снятия)
+
 	def test_анонс_без_релиза_отмечается_карточкой(self):
 		анонс = authoring.create_course(title="Анонс", summary="было")["data"]["id"]
 		до = authoring.course_revision(course=анонс)["data"]["revision"]
 		authoring.update_course(course=анонс, summary="стало")
 
 		self.assertGreater(authoring.course_revision(course=анонс)["data"]["revision"], до)
-		self.assertEqual(
-			authoring.course_draft(course=анонс)["data"]["revision"],
-			authoring.course_revision(course=анонс)["data"]["revision"],
-		)
+		черновик = authoring.course_draft(course=анонс)["data"]
+		self.assertEqual(черновик["revision"], authoring.course_revision(course=анонс)["data"]["revision"])
+		self.assertTrue(черновик["author_url"].endswith(f"/author?course={анонс}"))
 
 	def test_ученику_ревизия_недоступна(self):
 		ученик = создать_ученика(f"revision-s-{frappe.generate_hash(length=6)}@example.com")

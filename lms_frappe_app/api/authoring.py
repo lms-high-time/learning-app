@@ -34,6 +34,7 @@ from lms_frappe_app.agent_learning.releases import index as releases_index
 from lms_frappe_app.agent_learning.releases import places
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
+from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
@@ -47,7 +48,6 @@ from lms_frappe_app.agent_learning.errors import (
 	КУРС_НЕ_НАЙДЕН,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
-	УРОК_НЕ_В_РЕЛИЗЕ,
 	УРОК_НЕ_НАЙДЕН,
 )
 from lms_frappe_app.api import контракт, список, текущий_пользователь
@@ -1481,9 +1481,7 @@ def course_release(course: str, lesson: str | None = None) -> dict:
 	if lesson:
 		if урок := просмотр_релиза.урок_релиза(курс, релиз, lesson):
 			return урок
-		raise Отказ(
-			УРОК_НЕ_В_РЕЛИЗЕ, "Урока с этим ключом нет в действующем релизе", course=course, lesson=lesson
-		)
+		raise прохождения.урок_не_в_релизе(course, lesson, релиз)
 	return просмотр_релиза.релиз_целиком(курс, релиз)
 
 
