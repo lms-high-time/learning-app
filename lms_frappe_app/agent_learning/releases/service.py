@@ -381,15 +381,17 @@ def удалить_курс(курс: str) -> None:
 		)
 	frappe.db.set_value("LMS Course", курс, "active_release", None)
 	frappe.clear_document_cache("LMS Course", курс)
+	# Флаг — до конца `delete_course`: релизы курса и его главы с уроками
+	# удаляются только вместе с курсом (`course_guard`).
 	frappe.flags[УДАЛЯЕТСЯ_КУРС] = курс
 	try:
 		for имя in frappe.get_all(РЕЛИЗ, filters={"course": курс}, pluck="name"):
 			frappe.delete_doc(РЕЛИЗ, имя, ignore_permissions=True)
+		for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
+			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
+		for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
+			frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
+		homework.удалить_шаблоны(курс)
+		delete_course(курс)
 	finally:
 		frappe.flags[УДАЛЯЕТСЯ_КУРС] = None
-	for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
-		frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
-	for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
-		frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
-	homework.удалить_шаблоны(курс)
-	delete_course(курс)

@@ -8,6 +8,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime
 
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import релиз_двух_целей
@@ -304,9 +305,11 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 	def test_урок_не_из_релиза_отказ_без_записей(self):
 		frappe.set_user("Administrator")
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
-		лишний = frappe.get_doc({"doctype": "Course Lesson", "title": "Вне релиза", "chapter": глава}).insert(
-			ignore_permissions=True
-		)
+		лишний = frappe.get_doc({"doctype": "Course Lesson", "title": "Вне релиза", "chapter": глава})
+		# Мимо охраны курса из релиза: урок вне релиза у такого курса бывает
+		# только из правки, сделанной до неё.
+		лишний.flags[ИЗ_РЕЛИЗА] = True
+		лишний.insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
 
 		ответ = student.start_lesson(lesson=лишний.name)

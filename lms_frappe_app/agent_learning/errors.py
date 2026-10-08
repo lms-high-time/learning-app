@@ -31,6 +31,9 @@ import frappe
 УРОК_НЕ_В_РЕЛИЗЕ = "lesson_not_in_release"
 #: Прохождение урока в архиве: сброс прогресса отвязал его от ученика.
 ПРОХОЖДЕНИЕ_В_АРХИВЕ = "run_archived"
+#: Курс собран из релиза и правится только новым релизом: методы авторинга и
+#: охрана структуры курса в Learning (`releases.course_guard`).
+КУРС_ИЗ_РЕЛИЗА = "course_from_release"
 
 
 class Отказ(frappe.ValidationError):

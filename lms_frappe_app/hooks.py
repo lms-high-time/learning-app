@@ -289,10 +289,19 @@ doc_events = {
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
 	},
-	# Ключ курса и действующий релиз ставит только публикация релиза
-	# (learning-services#500).
+	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
+	# публикация релиза (learning-services#500, #512).
 	"LMS Course": {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
+	},
+	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512).
+	"Course Chapter": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+	},
+	"Course Lesson": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 	},
 }
 
@@ -334,6 +343,8 @@ before_tests = "lms_frappe_app.testing.before_tests"
 # Overriding Methods
 # ------------------------------
 
+_редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
+
 # Урок закрывает занятие с агентом, а не время на странице урока —
 # обоснование в модуле (lms-platform#305).
 override_whitelisted_methods = {
@@ -345,6 +356,14 @@ override_whitelisted_methods = {
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
 	"lms.lms.user.sign_up": "lms_frappe_app.access.sign_up_learning",
 	"frappe.core.doctype.user.user.update_password": "lms_frappe_app.access.update_password",
+	# Редактор Learning не правит главы и уроки курса из релиза: порядок он пишет
+	# мимо `validate` — обоснование в модуле (learning-services#512).
+	"lms.lms.api.delete_chapter": f"{_редактор}.delete_chapter",
+	"lms.lms.api.update_lesson_index": f"{_редактор}.update_lesson_index",
+	"lms.lms.api.update_chapter_index": f"{_редактор}.update_chapter_index",
+	"lms.lms.api.delete_lesson": f"{_редактор}.delete_lesson",
+	"lms.lms.api.create_lesson": f"{_редактор}.create_lesson",
+	"lms.lms.api.upsert_chapter": f"{_редактор}.upsert_chapter",
 }
 #
 # each overriding function accepts a `data` argument;

@@ -44,6 +44,7 @@ from lms_frappe_app.agent_learning.constants import (
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
+	КУРС_ИЗ_РЕЛИЗА,
 	КУРС_НЕ_В_РЕЛИЗЕ,
 	КУРС_НЕ_НАЙДЕН,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
@@ -84,7 +85,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 НЕТ_АДРЕСОВ = "users_required"
 ТЕСТЕР_НЕ_НАЙДЕН = "tester_not_found"
 КУРС_УЖЕ_ОТКРЫТ = "course_already_published"
-КУРС_ИЗ_РЕЛИЗА = "course_from_release"
 КУРС_БЕЗ_РЕЛИЗА = КУРС_НЕ_В_РЕЛИЗЕ
 ИНСТРУКТОРОВ_НЕТ = "instructors_empty"
 ИНСТРУКТОР_НЕ_НАЙДЕН = "instructor_not_found"
