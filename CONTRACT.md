@@ -1121,7 +1121,9 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
               "objective_results": { "l-6-D1": { "correct": 2, "total": 3 },
                                      "l-6-D2": { "correct": 2, "total": 2 } },
               "session_status": "Completed",
-              "explanations": [ { "id": "S3/l-6-D1", "text": "…", "explanation": "…" } ] } } }
+              "explanations": [ { "id": "S3/l-6-D1", "text": "…", "explanation": "…" } ],
+              "next_lesson": { "id": "lesson-7", "title": "Функции" },
+              "empty_blocks": [] } } }
 ```
 
 Попытка не зачтена:
@@ -1142,7 +1144,8 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 `score` — доля верных; `pass_threshold` — порог урока в релизе попытки долей;
 `objective_results` — верных из всех по каждой цели урока. Сданная попытка
 закрывает урок, как `complete_lesson`, и подтверждает квизом цели, все вопросы
-которых отвечены верно (см. «Квиз урока из релиза»).
+которых отвечены верно (см. «Квиз урока из релиза»). Её итог несёт
+`next_lesson` и `empty_blocks` — то же, что у `complete_lesson`.
 
 `explanation` — пояснение вопроса — приходит только **вместе с верным**
 ответом. Пояснения к неверно отвеченным вопросам — `explanations` — только в

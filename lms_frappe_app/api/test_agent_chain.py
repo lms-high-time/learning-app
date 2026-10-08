@@ -301,12 +301,33 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertTrue(ответ["attempt_finished"])
 		self.assertTrue(ответ["result"]["passed"])
 		self.assertEqual(ответ["result"]["session_status"], "Completed")
+		self.assertEqual((ответ["result"]["next_lesson"], ответ["result"]["empty_blocks"]), (None, []))
 		self.assertEqual(self.прохождение(курс).status, прохождения.ПРОЙДЕН)
 		self.assertEqual(прохождения.главы(self.ученик, курс)[0]["status"], прохождения.ПРОЙДЕН)
 		self.assertIsNone(self.старт(урок)["next_step"])
 		[мой] = [к for к in self.данные(student.list_my_courses())["courses"] if к["id"] == курс]
 		self.assertEqual(мой["progress"], {"lessons_total": 1, "lessons_completed": 1})
 		self.assertIsNone(мой["next_lesson"])
+
+	def test_итог_сданного_квиза_как_у_закрытия_урока(self):
+		"""Сданная попытка закрывает урок: итог несёт следующий урок и пустые блоки
+		документа урока; несданная — нет."""
+		старт = self.старт()
+		self.отметить_обязательные(старт["session"], старт["lesson_map"])
+		попытка = self.данные(student.request_quiz(старт["session"]))["attempt"]
+		провал = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "V2", "Второй"))["result"]
+		self.assertFalse(провал["passed"])
+		self.assertNotIn("next_lesson", провал)
+		self.assertNotIn("empty_blocks", провал)
+
+		frappe.db.set_value("Agent Quiz Attempt", попытка, "finished_at", "2000-01-01 00:00:00")
+		старт = self.старт()
+		попытка = self.данные(student.request_quiz(старт["session"]))["attempt"]
+		итог = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "V1", "Первый"))["result"]
+
+		self.assertTrue(итог["passed"])
+		self.assertEqual(итог["next_lesson"], {"id": урок_релиза(self.курс, "l-2"), "title": "Урок второй"})
+		self.assertEqual([(б["artifact"], б["key"]) for б in итог["empty_blocks"]], [("notebook", "log")])
 
 	def test_квиз_закрыт_пока_открыты_пункты(self):
 		курс, урок = self.курс_двух_целей()

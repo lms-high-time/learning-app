@@ -149,6 +149,7 @@ class IntegrationTestDropObjectiveOutcomes(IntegrationTestCase):
 	def test_патч_убирает_доктайп_таблицу_колонку_и_события(self):
 		from lms_frappe_app.patches.v0_1.drop_objective_outcomes import execute
 
+		начало = now_datetime()
 		frappe.db.sql_ddl(
 			f"CREATE TABLE IF NOT EXISTS `tab{self.ОТМЕТКИ}` (`name` varchar(140) PRIMARY KEY, `parent` varchar(140))"
 		)
@@ -181,5 +182,12 @@ class IntegrationTestDropObjectiveOutcomes(IntegrationTestCase):
 		self.assertFalse(frappe.db.table_exists(self.ОТМЕТКИ, cached=False))
 		self.assertFalse(frappe.db.exists("DocType", self.ОТМЕТКИ))
 		self.assertFalse(frappe.db.exists("DocField", {"parent": self.ОТМЕТКИ}))
+		self.assertFalse(
+			frappe.db.exists(
+				"Deleted Document",
+				{"deleted_doctype": "DocType", "deleted_name": self.ОТМЕТКИ, "creation": (">=", начало)},
+			),
+			"доктайп удалён насовсем, без копии в корзине",
+		)
 		self.assertFalse(frappe.db.has_column(DOCTYPE, "brief_start"))
 		self.assertFalse(frappe.db.exists("Agent Session Event", событие.name))

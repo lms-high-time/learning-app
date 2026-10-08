@@ -453,7 +453,7 @@ def start_lesson(
 		"signals": _сигналы_старта(ученик, курс, lesson, занятие, сведения, run, блоки),
 		# Задание урока — целиком; по прошлому — статус и комментарий куратора,
 		# ответ ученика — `my_homework(lesson=…)` (learning-services#439).
-		**домашка.для_старта(ученик, lesson, курс, пространство, полное=False),
+		**домашка.для_старта(ученик, lesson, курс, пространство),
 	}
 	if _флаг(frame):
 		ответ["course_frame"] = рамка
@@ -1354,10 +1354,15 @@ def complete_lesson(session: str) -> dict:
 	return {
 		"lesson": занятие.lesson,
 		"session_status": занятие.status,
-		"next_lesson": _следующий_урок(занятие.student, занятие.course),
-		"empty_blocks": _пустые_блоки_урока(
-			занятие.student, занятие.course, занятие.lesson, занятие.organization or None
-		),
+		**_после_закрытия(занятие.student, занятие.course, занятие.lesson, занятие.organization),
+	}
+
+
+def _после_закрытия(ученик: str, курс: str, lesson: str, пространство: str | None) -> dict:
+	"""Что дальше после закрытого урока: `next_lesson` и `empty_blocks` — пустые блоки документа урока."""
+	return {
+		"next_lesson": _следующий_урок(ученик, курс),
+		"empty_blocks": _пустые_блоки_урока(ученик, курс, lesson, пространство or None),
 	}
 
 
@@ -1394,9 +1399,12 @@ def submit_answer(
 	журнал проверки и на вердикт не влияет (`release_quiz.ответить`). По
 	умолчанию `None`, а не обязательный аргумент: без него вызов падал бы
 	ошибкой Frappe мимо контракта, а агенту нужен код `student_words_required`.
+
+	Итог сданной попытки закрывает урок и несёт то же, что `complete_lesson`:
+	`next_lesson` и `empty_blocks`.
 	"""
 	попытка = frappe.db.get_value(
-		"Agent Quiz Attempt", attempt, ["student", "course", "release"], as_dict=True
+		"Agent Quiz Attempt", attempt, ["student", "course", "release", "lesson", "session"], as_dict=True
 	)
 	if not попытка:
 		raise frappe.DoesNotExistError(f"Agent Quiz Attempt {attempt} not found")
@@ -1409,7 +1417,7 @@ def submit_answer(
 		raise Отказ(КУРС_НЕ_В_РЕЛИЗЕ, "Попытка не по уроку из релиза", course=попытка.course, attempt=attempt)
 	try:
 		# Доступ к курсу перепроверяет `ответить` — на каждом ответе.
-		return release_quiz.ответить(attempt, question, answer, student_words)
+		ответ = release_quiz.ответить(attempt, question, answer, student_words)
 	except frappe.QueryDeadlockError:
 		# Why: сданная попытка закрывает урок и пишет его прохождение с
 		# блокировкой — гонка с фоновой сверкой прохождений или параллельным
@@ -1417,6 +1425,11 @@ def submit_answer(
 		# отказ «повторите», а не 500. Ответ не принят.
 		frappe.db.rollback()
 		raise Отказ(ЗАНЯТО, "Попытку сейчас меняет другой запрос — повторите", attempt=attempt)
+	итог = ответ.get("result")
+	if итог and итог["passed"]:
+		пространство = frappe.db.get_value("Agent Learning Session", попытка.session, "organization")
+		итог.update(_после_закрытия(попытка.student, попытка.course, попытка.lesson, пространство))
+	return ответ
 
 
 @frappe.whitelist()
