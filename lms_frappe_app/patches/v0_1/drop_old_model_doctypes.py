@@ -11,15 +11,19 @@ learning-services#500, а цели анонсов перенёс раньше п
 
 - записи, настроенные на него, — `frappe.delete_doc` каждой, с её строками
   и файлами (`ДОКУМЕНТЫ`): отчёты, клиентские и серверные скрипты,
-  уведомления, карточки и графики дашбордов, канбан-доски, форматы печати —
-  нестандартные (стандартные лежат в коде приложений), вложения и письма;
+  уведомления, карточки и графики дашбордов, канбан-доски, форматы печати,
+  процессы, правила назначения и именования, вебхуки, вложения.
+  Стандартные — с признаком стандартности — не трогаются: они лежат в коде
+  приложений;
+- письма к его записям отвязываются, а не удаляются, — как при удалении
+  записи во Frappe (`delete_dynamic_links`);
 - метаданные, которые ссылаются на него и которые `frappe.delete_doc` не
   удаляет, — строками (`МЕТАДАННЫЕ`): поля и свойства (`Custom Field`,
   `Property Setter`, `Custom DocPerm`), связи других доктайпов (`DocType
   Link`), ссылки workspace и сайдбара, следы записей (`Version`, `Comment`,
-  `DocShare`, `Tag Link`, `ToDo`, ссылки писем, журналы действий, просмотров
-  и уведомлений, `User Permission` на доктайп и для доктайпа, `Deleted
-  Document`, настройки списков);
+  `DocShare`, `Tag Link`, `ToDo`, ссылки писем, подписки, журналы действий,
+  просмотров и уведомлений, `User Permission` на доктайп и для доктайпа,
+  `Deleted Document`, настройки списков и глобального поиска);
 - запись `DocType` — `frappe.delete_doc`: она снимает поля, права, действия
   и связи самого доктайпа. Папки контроллера у доктайпа нет, и это ей не
   мешает: контроллер `DocType` — общий, а удаление папки она делает только в
@@ -30,10 +34,20 @@ learning-services#500, а цели анонсов перенёс раньше п
 ссылки на доктайп оставляет. Ссылка workspace на несуществующий доктайп прятала
 у Administrator все карточки workspace.
 
+`Agent Course Directive` ждёт патча `announce_objectives`: тот переносит из
+неё цели анонсов. Миграция с `--skip-failing` продолжает после упавшего
+патча; пока он не выполнен (`patch_log.выполнен`), доктайп остаётся целиком
+и патч печатает почему. Директиву урока не читает ни один патч.
+
+Автоповторы (`Auto Repeat`) патч не трогает: ни у одного доктайпа старой
+модели их не включали, а удаление автоповтора пишет в саму запись доктайпа.
+
 Повторный запуск ничего не находит и ничего не удаляет.
 """
 
 import frappe
+
+from lms_frappe_app.patches.v0_1.patch_log import выполнен
 
 ДОКТАЙПЫ = (
 	"Agent Lesson Directive",
@@ -43,22 +57,32 @@ import frappe
 	"Agent Artifact Template",
 )
 
+#: Доктайп → патч, который читает его и должен отработать до его удаления.
+ЖДУТ_ПАТЧА = {"Agent Course Directive": "announce_objectives"}
+
 #: Записи, настроенные на доктайп, — удаляются `frappe.delete_doc` со своими
 #: строками и файлами: доктайп → поле со ссылкой на доктайп. Пара — ещё и
-#: условие: стандартный отчёт и формат печати лежат в коде приложения.
-#: Поля — по схемам Frappe 16.
+#: условие: только нестандартные. У `Server Script` признака стандартности
+#: нет — он живёт только в базе. Поля — по схемам Frappe 16.
 ДОКУМЕНТЫ = (
 	("Report", "ref_doctype", ("is_standard", "No")),
 	("Client Script", "dt", None),
 	("Server Script", "reference_doctype", None),
-	("Notification", "document_type", None),
-	("Number Card", "document_type", None),
-	("Dashboard Chart", "document_type", None),
+	("Notification", "document_type", ("is_standard", 0)),
+	("Number Card", "document_type", ("is_standard", 0)),
+	("Dashboard Chart", "document_type", ("is_standard", 0)),
 	("Kanban Board", "reference_doctype", None),
 	("Print Format", "doc_type", ("standard", "No")),
+	("Workflow", "document_type", None),
+	("Assignment Rule", "document_type", None),
+	("Document Naming Rule", "document_type", None),
+	("Webhook", "webhook_doctype", None),
 	("File", "attached_to_doctype", None),
-	("Communication", "reference_doctype", None),
 )
+
+#: Записи, которые отвязываются от доктайпа: таблица → поля ссылки (доктайп,
+#: запись) — они очищаются.
+ОТВЯЗАТЬ = (("Communication", "reference_doctype", "reference_name"),)
 
 #: Метаданные о доктайпе — удаляются строками: таблица → поле со ссылкой на
 #: него. Пара — ещё и условие на вид ссылки, где ссылка бывает не только на
@@ -77,6 +101,7 @@ import frappe
 	("Tag Link", "document_type", None),
 	("ToDo", "reference_type", None),
 	("Communication Link", "link_doctype", None),
+	("Document Follow", "ref_doctype", None),
 	("Activity Log", "reference_doctype", None),
 	("View Log", "reference_doctype", None),
 	("Notification Log", "document_type", None),
@@ -84,11 +109,18 @@ import frappe
 	("User Permission", "applicable_for", None),
 	("List View Settings", "name", None),
 	("Deleted Document", "deleted_doctype", None),
+	("Global Search DocType", "document_type", None),
 )
+
+#: Таблицы без префикса `tab` — `table_exists` их не найдёт: таблица → поле.
+СЛУЖЕБНЫЕ = (("__UserSettings", "doctype"), ("__global_search", "doctype"))
 
 
 def execute():
 	for доктайп in ДОКТАЙПЫ:
+		if (патч := ЖДУТ_ПАТЧА.get(доктайп)) and not выполнен(патч):
+			print(f"drop_old_model_doctypes: {доктайп} оставлен — патч {патч} ещё не выполнен")
+			continue
 		удалено = _метаданные(доктайп)
 		if ссылок := _ссылки_workspace(доктайп):
 			удалено["Workspace Link"] = ссылок
@@ -126,6 +158,12 @@ def _метаданные(доктайп: str) -> dict[str, int]:
 				delete_permanently=True,
 			)
 			удалено[таблица] = удалено.get(таблица, 0) + 1
+	for таблица, поле, запись in ОТВЯЗАТЬ:
+		if not frappe.db.table_exists(таблица):
+			continue
+		if сколько := frappe.db.count(таблица, {поле: доктайп}):
+			frappe.db.set_value(таблица, {поле: доктайп}, {поле: None, запись: None}, update_modified=False)
+			удалено[f"{таблица} отвязано"] = сколько
 	for таблица, поле, вид in МЕТАДАННЫЕ:
 		if not frappe.db.table_exists(таблица):
 			continue
@@ -133,12 +171,14 @@ def _метаданные(доктайп: str) -> dict[str, int]:
 		if сколько := frappe.db.count(таблица, условие):
 			frappe.db.delete(таблица, условие)
 			удалено[таблица] = удалено.get(таблица, 0) + сколько
-	# Таблица настроек вида без префикса `tab`: `table_exists` её не найдёт.
-	if "__UserSettings" in frappe.db.get_tables(cached=False):
-		[[сколько]] = frappe.db.sql("SELECT COUNT(*) FROM `__UserSettings` WHERE doctype = %s", доктайп)
+	таблицы = frappe.db.get_tables(cached=False)
+	for таблица, поле in СЛУЖЕБНЫЕ:
+		if таблица not in таблицы:
+			continue
+		[[сколько]] = frappe.db.sql(f"SELECT COUNT(*) FROM `{таблица}` WHERE `{поле}` = %s", доктайп)
 		if сколько:
-			frappe.db.sql("DELETE FROM `__UserSettings` WHERE doctype = %s", доктайп)
-			удалено["__UserSettings"] = сколько
+			frappe.db.sql(f"DELETE FROM `{таблица}` WHERE `{поле}` = %s", доктайп)
+			удалено[таблица] = сколько
 	return удалено
 
 

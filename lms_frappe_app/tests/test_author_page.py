@@ -138,7 +138,8 @@ def неэкранированные(исходник: str, макросы: set[
 	запрещены фильтры `ФИЛЬТРЫ_MARKUP` и `tojson` вне вершины вывода в
 	`<script>`: их `Markup` проходит сквозь любое выражение до `e` и
 	отключает его. Блок `{% filter %}` запрещён: его фильтр переписывает уже
-	экранированный вывод. Содержимое `{% raw %}` — текст, а не вывод. Шаблон
+	экранированный вывод; `{% autoescape %}` — тоже: он меняет экранирование
+	всех выводов внутри. Содержимое `{% raw %}` — текст, а не вывод. Шаблон
 	только разбирается, без загрузчика: `extends` и `import` не открываются.
 
 	Чего правило не делает: контекст URL — `href="{{ x | e }}"` пропустит
@@ -148,7 +149,8 @@ def неэкранированные(исходник: str, макросы: set[
 	узлы = jinja2.nodes
 	строки = исходник.splitlines()
 	дерево = jinja2.Environment().parse(исходник)
-	найдено = [(блок.lineno, строки[блок.lineno - 1].strip()) for блок in дерево.find_all(узлы.FilterBlock)]
+	блоки = (узлы.FilterBlock, узлы.ScopedEvalContextModifier, узлы.EvalContextModifier)
+	найдено = [(блок.lineno, строки[блок.lineno - 1].strip()) for блок in дерево.find_all(блоки)]
 	законный_tojson: set[int] = set()
 	контекст = (False, False)
 	for вывод in дерево.find_all(узлы.Output):
@@ -605,7 +607,7 @@ class TestЭкранированиеШаблонов(unittest.TestCase):
 	def test_правило_ловит_вывод_без_экранирования(self):
 		"""Проверка проверки: голый вывод, фильтр не последним, чужой вызов,
 		фильтр только у правой части выражения, `tojson` вне `<script>`, `e`
-		поверх `Markup`, блок `filter`, `e` в `<script>`, `<script>` в
+		поверх `Markup`, блоки `filter` и `autoescape`, `e` в `<script>`, `<script>` в
 		комментарии, `Markup` в глубине выражения — в сложении, срезе, методе,
 		ветке `if`, аргументе макроса, `{% set %}` — и `tojson` в `<script>`
 		не на вершине — нарушения."""
@@ -623,6 +625,7 @@ class TestЭкранированиеШаблонов(unittest.TestCase):
 			'<div data-x="{{ x | tojson | e }}"></div>\n'
 			"{{ x | safe | upper | e }}\n"
 			"{% filter upper %}{{ x | e }}{% endfilter %}\n"
+			"{% autoescape false %}{{ x | e }}{% endautoescape %}\n"
 			"<script>const x = {{ x | e }};</script>\n"
 			"<!-- <script> -->{{ x | tojson }}\n"
 			'{{ ((x | safe) + "") | e }}\n'
@@ -643,5 +646,5 @@ class TestЭкранированиеШаблонов(unittest.TestCase):
 		)
 		self.assertEqual(
 			[строка for строка, _ in неэкранированные(исходник, {"место"})],
-			list(range(1, 27)),
+			list(range(1, 28)),
 		)

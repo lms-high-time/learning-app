@@ -55,6 +55,8 @@ class TestLeakGuard(UnitTestCase):
 			({"options": [{"key": "V2", "correct": True}]}, {}),
 			({"question": {"text": "Вопрос", "correct": 1, "total": 2}}, {}),
 			({"verdict": {"key": "V1", "correct": True}}, {}),
+			({"verdict": {"id": "V1", "correct": True}}, {}),
+			({"next_question": {"id": "S2", "index": 2, "total": 5, "correct": 1}}, {}),
 			# Число без `total` — не счёт, а номер варианта.
 			({"correct": 2}, {}),
 			({"verdict": {"correct": 2}}, {}),
@@ -102,6 +104,32 @@ class TestLeakGuard(UnitTestCase):
 			with self.subTest(ответ=ответ):
 				self.assertFalse(self.утечка(ответ, кроме=("explanation",)))
 				self.assertTrue(self.утечка(ответ), "без `кроме` пояснение — утечка")
+
+
+	def test_формы_квиза_из_контракта_не_утечка(self):
+		"""Примеры ответов `request_quiz` и `submit_answer` в CONTRACT.md — законные
+		формы `correct` и пояснений: сторож их пропускает."""
+		from lms_frappe_app.api.test_contract import КОНТРАКТ
+
+		примеры = []
+		метод = None
+		блок: list[str] | None = None
+		for строка in КОНТРАКТ.read_text(encoding="utf-8").splitlines():
+			if строка.startswith("## "):
+				квиз = ("request_quiz", "submit_answer")
+				метод = next((м for м in квиз if f"student.{м}`" in строка), None)
+			elif метод and строка.strip() == "```json":
+				блок = []
+			elif блок is not None and строка.strip() == "```":
+				if '"ok": true' in (текст := "\n".join(блок)):
+					примеры.append((метод, json.loads(текст)))
+				блок = None
+			elif блок is not None:
+				блок.append(строка)
+		self.assertEqual({м for м, _ in примеры}, {"request_quiz", "submit_answer"})
+		for метод, ответ in примеры:
+			with self.subTest(метод=метод, ответ=ответ):
+				self.assertFalse(self.утечка(ответ, кроме=("explanation",)))
 
 
 class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):

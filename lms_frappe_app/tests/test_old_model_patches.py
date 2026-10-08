@@ -25,6 +25,7 @@ from lms_frappe_app.patches.v0_1 import (
 	drop_removed_columns,
 	drop_removed_settings,
 	old_quiz_attempts,
+	patch_log,
 )
 
 ПРИЛОЖЕНИЕ = Path(drop_removed_columns.__file__).parents[2]
@@ -138,15 +139,38 @@ class TestPatchOrder(IntegrationTestCase):
 		self.assertEqual(номера, sorted(номера))
 
 
-#: Патч, которого ждёт колонка `submission` попытки.
-ПАТЧ_ПОПЫТОК = "lms_frappe_app.patches.v0_1.old_quiz_attempts"
+def отметить_патч(патч: str, состояние: str) -> None:
+	"""`Patch Log` патча `патч`: `выполнен`, `пропущен` (упал при `--skip-failing`,
+	`skipped=1`) или `нет` — записи нет. Запись откатится с тестом."""
+	имя = patch_log.полное_имя(патч)
+	frappe.db.delete("Patch Log", {"patch": имя})
+	if состояние != "нет":
+		frappe.get_doc(
+			{"doctype": "Patch Log", "patch": имя, "skipped": int(состояние == "пропущен")}
+		).insert(ignore_permissions=True)
 
 
-def отметить_патч(выполнен: bool) -> None:
-	"""`Patch Log` патча попыток: выполнен он или нет — запись откатится с тестом."""
-	frappe.db.delete("Patch Log", {"patch": ПАТЧ_ПОПЫТОК})
-	if выполнен:
-		frappe.get_doc({"doctype": "Patch Log", "patch": ПАТЧ_ПОПЫТОК}).insert(ignore_permissions=True)
+class IntegrationTestPatchLog(IntegrationTestCase):
+	"""Выполнен — только `Patch Log` со `skipped=0`, как решает сам Frappe."""
+
+	def test_выполнен_только_без_пропуска(self):
+		for состояние, ожидается in (("выполнен", True), ("пропущен", False), ("нет", False)):
+			with self.subTest(состояние=состояние):
+				отметить_патч("old_quiz_attempts", состояние)
+				self.assertIs(patch_log.выполнен("old_quiz_attempts"), ожидается)
+
+	def test_ждут_патчей_из_списка(self):
+		"""Патчи, которых ждут удаления, есть в `patches.txt` и идут раньше ждущих."""
+		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
+		for ждущий, ждут in (
+			("drop_removed_columns", drop_removed_columns.ЖДУТ_ПАТЧА.values()),
+			("drop_old_model_doctypes", drop_old_model_doctypes.ЖДУТ_ПАТЧА.values()),
+		):
+			for патч in ждут:
+				with self.subTest(ждущий=ждущий, патч=патч):
+					self.assertLess(
+						строки.index(patch_log.полное_имя(патч)), строки.index(patch_log.полное_имя(ждущий))
+					)
 
 
 class IntegrationTestDropRemovedColumns(IntegrationTestCase):
@@ -154,7 +178,7 @@ class IntegrationTestDropRemovedColumns(IntegrationTestCase):
 	те, что есть в базе сайта."""
 
 	def setUp(self):
-		отметить_патч(выполнен=True)
+		отметить_патч("old_quiz_attempts", "выполнен")
 
 	def старый_сайт(self) -> Схема:
 		return Схема(
@@ -208,9 +232,9 @@ class IntegrationTestDropRemovedColumns(IntegrationTestCase):
 		self.assertIn("Agent Quiz Event — удалены колонки: нет", вывод)
 
 	def test_submission_ждёт_патча_попыток(self):
-		"""`--skip-failing`: патч попыток упал и не записан в `Patch Log` — его
-		колонка остаётся, прочие уходят."""
-		отметить_патч(выполнен=False)
+		"""`--skip-failing`: патч попыток упал и записан в `Patch Log` со
+		`skipped=1` — его колонка остаётся, прочие уходят."""
+		отметить_патч("old_quiz_attempts", "пропущен")
 		схема = self.старый_сайт()
 
 		with схема.подменить():
@@ -218,10 +242,12 @@ class IntegrationTestDropRemovedColumns(IntegrationTestCase):
 
 		self.assertIn("ALTER TABLE `tabAgent Quiz Attempt` DROP COLUMN IF EXISTS `quiz`", схема.ddl)
 		self.assertEqual(схема.таблицы["Agent Quiz Attempt"], {"name", "creation", "submission"})
-		self.assertIn(f"Agent Quiz Attempt.submission оставлена — патч {ПАТЧ_ПОПЫТОК} ещё не выполнен", вывод)
+		self.assertIn(
+			"Agent Quiz Attempt.submission оставлена — патч old_quiz_attempts ещё не выполнен", вывод
+		)
 		self.assertIn("Agent Quiz Attempt — удалены колонки: quiz\n", вывод)
 
-		отметить_патч(выполнен=True)
+		отметить_патч("old_quiz_attempts", "выполнен")
 		with схема.подменить():
 			выполнить(drop_removed_columns)
 
@@ -405,15 +431,62 @@ class IntegrationTestDropOldModelDoctypes(IntegrationTestCase):
 		self.карточки = self.страница_workspace()
 
 	def записи_о_доктайпе(self, суффикс: str) -> None:
-		"""По записи на каждую строку `ДОКУМЕНТЫ` и `МЕТАДАННЫЕ`, которых нет выше, и
-		стандартные отчёт и формат печати — они остаются."""
+		"""По записи на каждую строку `ДОКУМЕНТЫ`, `ОТВЯЗАТЬ`, `МЕТАДАННЫЕ` и
+		`СЛУЖЕБНЫЕ`, которых нет выше, и стандартные записи — они остаются."""
 		д = self.доктайп
 		self.стандартные = [
 			("Report", f"Gone std report {суффикс}"),
 			("Print Format", f"Gone std print {суффикс}"),
+			("Notification", f"Gone std notification {суффикс}"),
+			("Number Card", f"Gone std card {суффикс}"),
+			("Dashboard Chart", f"Gone std chart {суффикс}"),
 		]
-		письмо = f"gone-comm-{суффикс}"
+		self.письмо = письмо = f"gone-comm-{суффикс}"
+		# `__global_search` — MyISAM: откат теста её не чистит.
+		frappe.db.sql("INSERT INTO `__global_search` (doctype, name, content) VALUES (%s, 'X-1', 'x')", д)
+		self.addCleanup(frappe.db.sql, "DELETE FROM `__global_search` WHERE doctype = %s", д)
+		for таблица, имя in self.стандартные[2:]:
+			поле = "chart_name" if таблица == "Dashboard Chart" else "label"
+			frappe.get_doc(
+				{
+					"doctype": таблица,
+					"name": имя,
+					поле: имя,
+					"document_type": д,
+					"is_standard": 1,
+					"module": "Agent Learning",
+				}
+			).db_insert()
 		for запись in (
+			{
+				"doctype": "Workflow",
+				"name": f"Gone workflow {суффикс}",
+				"workflow_name": f"Gone workflow {суффикс}",
+				"document_type": д,
+				"workflow_state_field": "workflow_state",
+			},
+			{
+				"doctype": "Assignment Rule",
+				"name": f"Gone rule {суффикс}",
+				"document_type": д,
+				"rule": "Round Robin",
+			},
+			{"doctype": "Document Naming Rule", "document_type": д, "prefix": "GONE-"},
+			{
+				"doctype": "Webhook",
+				"name": f"Gone webhook {суффикс}",
+				"webhook_doctype": д,
+				"webhook_docevent": "after_insert",
+				"request_url": "https://example.com/hook",
+			},
+			{"doctype": "Document Follow", "ref_doctype": д, "ref_docname": "X-1", "user": "Administrator"},
+			{
+				"doctype": "Global Search DocType",
+				"parent": "Global Search Settings",
+				"parenttype": "Global Search Settings",
+				"parentfield": "allowed_in_global_search",
+				"document_type": д,
+			},
 			{
 				"doctype": "Report",
 				"name": f"Gone report {суффикс}",
@@ -603,6 +676,12 @@ class IntegrationTestDropOldModelDoctypes(IntegrationTestCase):
 		for таблица, имя in self.стандартные:
 			self.assertTrue(frappe.db.exists(таблица, имя), f"стандартный {таблица} на месте")
 		self.assertFalse(frappe.db.exists("Communication Link", {"link_doctype": self.доктайп}))
+		self.assertEqual(
+			frappe.db.get_value("Communication", self.письмо, ["reference_doctype", "reference_name"]),
+			(None, None),
+			"письмо отвязано, а не удалено",
+		)
+		self.assertFalse(frappe.db.sql("SELECT 1 FROM `__global_search` WHERE doctype = %s", self.доктайп))
 		self.assertFalse(frappe.db.sql("SELECT 1 FROM `__UserSettings` WHERE doctype = %s", self.доктайп))
 		self.assertFalse(
 			frappe.db.exists(
@@ -635,8 +714,15 @@ class IntegrationTestDropOldModelDoctypes(IntegrationTestCase):
 			"Dashboard Chart 1",
 			"Kanban Board 1",
 			"Print Format 1",
+			"Workflow 1",
+			"Assignment Rule 1",
+			"Document Naming Rule 1",
+			"Webhook 1",
 			"File 1",
-			"Communication 1",
+			"Communication отвязано 1",
+			"Document Follow 1",
+			"Global Search DocType 1",
+			"__global_search 1",
 			"Custom Field 1",
 			"Property Setter 1",
 			"Version 1",
@@ -650,6 +736,25 @@ class IntegrationTestDropOldModelDoctypes(IntegrationTestCase):
 			self.assertIn(что, первый)
 		self.assertIn("Workspace Link 1, DocType 1, записей 4, таблица 1", первый)
 		self.assertIn(f"{self.доктайп} — нечего удалять", второй)
+
+	def test_директива_курса_ждёт_переноса_целей(self):
+		"""`--skip-failing`: `announce_objectives` упал (`skipped=1`) — доктайп,
+		из которого он читает, остаётся целиком; выполнен — уходит."""
+		схема = Схема({self.доктайп: {"name", "objectives"}})
+		отметить_патч("announce_objectives", "пропущен")
+		with patch.object(drop_old_model_doctypes, "ЖДУТ_ПАТЧА", {self.доктайп: "announce_objectives"}):
+			вывод = self.выполнить(схема)
+
+			self.assertIn(f"{self.доктайп} оставлен — патч announce_objectives ещё не выполнен", вывод)
+			self.assertEqual(схема.ddl, [])
+			self.assertTrue(frappe.db.exists("DocType", self.доктайп))
+			self.assertTrue(frappe.db.exists("Custom Field", {"dt": self.доктайп}))
+
+			отметить_патч("announce_objectives", "выполнен")
+			self.выполнить(схема)
+
+		self.assertEqual(схема.ddl, [f"DROP TABLE IF EXISTS `tab{self.доктайп}`"])
+		self.assertFalse(frappe.db.exists("DocType", self.доктайп))
 
 	def test_ничего_нет_ничего_не_удаляет(self):
 		"""Свежий сайт: ни записи, ни таблицы, ни метаданных."""

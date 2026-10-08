@@ -23,11 +23,14 @@ EXISTS` — только те, что есть в базе сайта. Коло�
 `submission` попытки ждёт патча `old_quiz_attempts`: по ней тот находит
 сдачи Learning, сделанные приложением. Миграция с `--skip-failing`
 продолжает после упавшего патча, и без этой проверки колонка ушла бы
-раньше сдач; пока `old_quiz_attempts` нет в `Patch Log`, колонка остаётся,
-и патч печатает почему.
+раньше сдач; пока `old_quiz_attempts` не выполнен (`patch_log.выполнен`),
+колонка остаётся, и патч печатает почему. `baseline` заметки не ждёт
+`note_release_keys`: перенос заметок её не читает.
 """
 
 import frappe
+
+from lms_frappe_app.patches.v0_1.patch_log import выполнен
 
 #: Доктайп → колонки снятых полей.
 КОЛОНКИ = {
@@ -39,8 +42,8 @@ import frappe
 	"Agent Course Artifact": ("template", "template_version", "overlay"),
 }
 
-#: Колонка → патч, который должен отработать до её удаления.
-ЖДУТ_ПАТЧА = {("Agent Quiz Attempt", "submission"): "lms_frappe_app.patches.v0_1.old_quiz_attempts"}
+#: Колонка → патч, который читает её и должен отработать до её удаления.
+ЖДУТ_ПАТЧА = {("Agent Quiz Attempt", "submission"): "old_quiz_attempts"}
 
 
 def execute():
@@ -50,9 +53,7 @@ def execute():
 		for поле in поля:
 			if поле not in есть:
 				continue
-			if (патч := ЖДУТ_ПАТЧА.get((доктайп, поле))) and not frappe.db.exists(
-				"Patch Log", {"patch": патч}
-			):
+			if (патч := ЖДУТ_ПАТЧА.get((доктайп, поле))) and not выполнен(патч):
 				print(f"drop_removed_columns: {доктайп}.{поле} оставлена — патч {патч} ещё не выполнен")
 				continue
 			удалить.append(поле)
