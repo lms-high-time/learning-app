@@ -12,11 +12,14 @@ from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
+from lms_frappe_app.www import author
 
 #: Текст пояснения к ответу квиза образца релиза: его видит только автор.
 ПОЯСНЕНИЕ = "Потому что так велит условие."
 #: Текст из среза пакета агента урока `l-1` образца.
 ПАКЕТ_УРОКА = "Директива урока l-1"
+#: Строка, которая без экранирования закрыла бы атрибут и вставила тег.
+ВРЕД = 'x"><img src=x onerror=alert(1)>'
 
 
 def сведения_для(пользователь: str, **параметры) -> dict:
@@ -80,6 +83,17 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertTrue(с["is_guest"])
 		self.assertIn("redirect-to=/author", с["login_url"])
 		self.assertEqual(с["courses"], [])
+
+	def test_гостю_страница_только_зовёт_войти(self):
+		"""Гостю — то же, что ученику: ни курсов, ни релиза, ни ответов квиза."""
+		for параметры in ({}, {"course": self.курс}, {"course": self.курс, "lesson": "l-1"}):
+			with self.subTest(**параметры):
+				html = страница("Guest", **параметры)
+				self.assertIn("чтобы открыть кабинет", html)
+				self.assertNotIn(ПОЯСНЕНИЕ, html)
+				self.assertNotIn(ПАКЕТ_УРОКА, html)
+				self.assertNotIn("Урок первый", html)
+				self.assertNotIn("note-add", html)
 
 	def test_ученик_и_тестер_получают_отказ(self):
 		"""Кабинет — только авторским ролям: ответов квиза и пакета агента
@@ -208,6 +222,49 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertIn("Директива урока l-2", пакет.group(1))
 		self.assertEqual(html.count("Директива урока l-2"), 1)
 
+	def test_ключи_и_тексты_релиза_экранируются(self):
+		"""Ключи пакета агента — произвольные строки, названия и заметки — текст
+		автора: ни один не выходит в HTML тегом или концом атрибута. Названия
+		курса и урока — имена записей Learning, `<` и `>` в них Frappe не
+		пускает: в названии урока — кавычка, тег — в карточке курса и зачине."""
+		релиз = пример_релиза(f"xss-{self.ключ}")
+		релиз["course"]["summary"] = f"Карточка {ВРЕД}"
+		релиз["lessons"][0]["title"] = 'Урок x" data-x="1'
+		релиз["lessons"][0]["hook"] = f"Зачин {ВРЕД}"
+		пакет = релиз["agent"]["lessons"]["l-1"]
+		пакет[ВРЕД] = "Часть пакета с таким ключом"
+		пакет["extra"] = {ВРЕД: "Запись с таким ключом"}
+		пакет["items"][ВРЕД] = "Пункт пакета с таким ключом"
+		ответ = authoring.publish_release(release=релиз)
+		self.assertTrue(ответ["ok"], ответ)
+		курс = ответ["data"]["course"]
+		self.assertTrue(authoring.add_note(course=курс, target="lesson.l-1", text=f"Заметка {ВРЕД}")["ok"])
+
+		for параметры, дошло in (
+			({}, None),
+			({"course": курс}, "Урок x&#34; data-x=&#34;1"),
+			({"course": курс, "view": "notes"}, "Заметка x&#34;"),
+			({"course": курс, "lesson": "l-1"}, "onerror=alert(1)&gt;"),
+		):
+			with self.subTest(**параметры):
+				# `<title>` — текст, а не разметка: его базовый шаблон Frappe
+				# чистит `striptags`, и кавычка там ничего не закрывает.
+				html = re.sub(r"<title>.*?</title>", "", страница(self.куратор, **параметры), flags=re.S)
+				if дошло:
+					self.assertIn(дошло, html, "строка не дошла до страницы — проверять нечего")
+				self.assertNotIn("<img src=x", html)
+				self.assertNotIn('<img src="x"', html)
+				self.assertNotIn('x"><img', html)
+				self.assertNotIn('x" data-x', html)
+				for имя, значение in re.findall(r'\s(id|data-live)="([^"]*)"', html):
+					self.assertRegex(значение, r"^[\w-]+$", имя)
+				for адрес in re.findall(r'\shref="([^"]*)"', html):
+					self.assertNotRegex(адрес, r"[<>]")
+
+	def test_якорь_различает_места(self):
+		self.assertNotEqual(author.якорь("objective.a.b"), author.якорь("objective.a-b"))
+		self.assertRegex(author.якорь(f"agent.item.l-1/{ВРЕД}"), r"^n-[0-9a-f]+$")
+
 	def test_урок_не_из_релиза_и_неизвестный_курс_дают_пометку(self):
 		self.assertTrue(сведения_для(self.куратор, course=self.курс, lesson="l-9")["missing"])
 		self.assertTrue(сведения_для(self.куратор, course="такого-курса-нет")["missing"])
@@ -253,7 +310,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 
 		for место, ид in заметки.items():
 			with self.subTest(место=место):
-				якорь = "note-" + место.replace(".", "-").replace("/", "-")
+				якорь = author.якорь(место)
 				if место in экран_курса:
 					html, адрес = курс, f"/author?course={quote(self.курс)}#{якорь}"
 				elif место in страница_урока:
@@ -358,7 +415,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		)
 
 		html = страница(self.куратор, course=self.курс)
-		self.assertIn("/api/method/lms_frappe_app.api.authoring.course_revision?course=", html)
+		self.assertIn('"/api/method/" + "lms_frappe_app.api.authoring.course_revision" + "?course="', html)
 		self.assertIn(frappe.as_json(отметки["revision"]), html)
 
 		self.заметка("course")

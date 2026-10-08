@@ -17,13 +17,13 @@
 {%- endmacro %}
 
 {% macro карточка(з, с_адресом=False) %}
-	<article class="note-card is-{{ з.status }}{% if з.waiting_on == 'author' %} is-yours{% endif %}" id="note-card-{{ з.id }}">
+	<article class="note-card is-{{ з.status | e }}{% if з.waiting_on == 'author' %} is-yours{% endif %}" id="note-card-{{ з.id | e }}">
 		<div class="note-head">
 			<span class="note-status">{{ статус(з) }}</span>
-			<span class="muted">{{ "агент" if з.via == "agent" else (з.author_name or з.author) | e }} · {{ frappe.utils.format_datetime(з.created_at, "dd.MM HH:mm") }}</span>
+			<span class="muted">{{ "агент" if з.via == "agent" else (з.author_name or з.author) | e }} · {{ frappe.utils.format_datetime(з.created_at, "dd.MM HH:mm") | e }}</span>
 		</div>
 		{% if с_адресом %}
-		<a class="note-place-link{% if з.missing %} gone{% endif %}" href="{{ з.url }}">{{ з.label | e }}{% if з.missing %} — места больше нет{% endif %}</a>
+		<a class="note-place-link{% if з.missing %} gone{% endif %}" href="{{ з.url | e }}">{{ з.label | e }}{% if з.missing %} — места больше нет{% endif %}</a>
 		{% endif %}
 		{% if з.quote %}<blockquote class="note-quote">{{ з.quote | e }}</blockquote>{% endif %}
 		<p class="note-text">{{ з.text | e }}</p>
@@ -32,15 +32,15 @@
 		{% endfor %}
 		<div class="note-actions">
 			{% if з.status == "done" %}
-				<button type="button" class="note-btn primary" data-note-action="accept" data-note="{{ з.id }}">Принять</button>
-				<button type="button" class="note-btn" data-note-action="return" data-note="{{ з.id }}" data-note-text="{{ з.text | e }}">Вернуть…</button>
+				<button type="button" class="note-btn primary" data-note-action="accept" data-note="{{ з.id | e }}">Принять</button>
+				<button type="button" class="note-btn" data-note-action="return" data-note="{{ з.id | e }}" data-note-text="{{ з.text | e }}">Вернуть…</button>
 			{% elif з.status == "open" and з.waiting_on == "author" %}
-				<button type="button" class="note-btn primary" data-note-action="reply" data-note="{{ з.id }}" data-note-text="{{ з.text | e }}">Ответить…</button>
+				<button type="button" class="note-btn primary" data-note-action="reply" data-note="{{ з.id | e }}" data-note-text="{{ з.text | e }}">Ответить…</button>
 			{% elif з.status == "open" %}
-				<button type="button" class="note-btn" data-note-action="reply" data-note="{{ з.id }}" data-note-text="{{ з.text | e }}">Дополнить…</button>
-				<button type="button" class="note-btn" data-note-action="accept" data-note="{{ з.id }}">Снять</button>
+				<button type="button" class="note-btn" data-note-action="reply" data-note="{{ з.id | e }}" data-note-text="{{ з.text | e }}">Дополнить…</button>
+				<button type="button" class="note-btn" data-note-action="accept" data-note="{{ з.id | e }}">Снять</button>
 			{% else %}
-				<button type="button" class="note-btn" data-note-action="return" data-note="{{ з.id }}" data-note-text="{{ з.text | e }}">Вернуть…</button>
+				<button type="button" class="note-btn" data-note-action="return" data-note="{{ з.id | e }}" data-note-text="{{ з.text | e }}">Вернуть…</button>
 			{% endif %}
 		</div>
 	</article>
@@ -54,13 +54,13 @@
 {% macro место(target, label, заметки, якорь, кнопка="Заметка") %}
 	{% set открытые = заметки | rejectattr("status", "equalto", "accepted") | list %}
 	{% set принятые = заметки | selectattr("status", "equalto", "accepted") | list %}
-	<div class="note-place" id="{{ якорь }}" data-live="{{ якорь }}">
-		<button type="button" class="note-add" {{ атрибуты(target, label) }}>{{ кнопка }}</button>
+	<div class="note-place" id="{{ якорь | e }}" data-live="{{ якорь | e }}">
+		<button type="button" class="note-add" {{ атрибуты(target, label) }}>{{ кнопка | e }}</button>
 		<div class="notes-list" data-for="{{ target | e }}">
 			{% for з in открытые %}{{ карточка(з) }}{% endfor %}
 		</div>
 		{% if принятые %}
-		<details class="notes-accepted"><summary>Принятые · {{ принятые | length }}</summary>
+		<details class="notes-accepted"><summary>Принятые · {{ принятые | length | e }}</summary>
 			{% for з in принятые %}{{ карточка(з) }}{% endfor %}
 		</details>
 		{% endif %}

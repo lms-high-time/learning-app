@@ -1,9 +1,7 @@
 {% extends "templates/web.html" %}
 {% from "lms_frappe_app/templates/includes/author_notes_macros.html" import место, карточка, атрибуты, статус %}
 
-{% block title %}{{ title }}{% endblock %}
-
-{% macro дата(значение) %}{{ frappe.utils.format_datetime(значение, "dd.MM.yyyy HH:mm") if значение else "—" }}{% endmacro %}
+{% macro дата(значение) %}{{ (frappe.utils.format_datetime(значение, "dd.MM.yyyy HH:mm") if значение else "—") | e }}{% endmacro %}
 
 {#
 	Урок релиза: зачин, цели с пунктами, квиз с ответами, домашка. Один и тот
@@ -13,19 +11,19 @@
 {% macro тело_урока(у, заметки) %}
 	{% if у.hook %}<p class="hook" {{ атрибуты(у.target, у.label) }}>{{ у.hook | e }}</p>{% endif %}
 	<div class="facts">
-		<span class="tile">порог квиза {{ у.pass_percentage | round | int }}%</span>
+		<span class="tile">порог квиза {{ у.pass_percentage | round | int | e }}%</span>
 		<span class="tile">{% if у.section_titles %}разделы документа: {{ у.section_titles | join(", ") | e }}{% else %}разделов документа нет{% endif %}</span>
 	</div>
 
 	<h3>Цели</h3>
 	{% for ц in у.objectives %}
 	<div class="objective" {{ атрибуты(ц.target, ц.label) }}>
-		<div class="part-head"><span>{{ ц.text | e }}</span> <code>{{ ц.key }}</code></div>
+		<div class="part-head"><span>{{ ц.text | e }}</span> <code>{{ ц.key | e }}</code></div>
 		{{ место(ц.target, ц.label, заметки.get(ц.target, []), ц.anchor, "Заметка к цели") }}
 		<ul class="goals">
 			{% for п in ц.goals %}
 			<li {{ атрибуты(п.target, п.label) }}>
-				<div class="part-head"><span>{{ п.title | e }} <span class="kind{% if not п.required %} optional{% endif %}">{{ п.kind }}{% if not п.required %} · необязательный{% endif %}</span></span> <code>{{ п.key }}</code></div>
+				<div class="part-head"><span>{{ п.title | e }} <span class="kind{% if not п.required %} optional{% endif %}">{{ п.kind | e }}{% if not п.required %} · необязательный{% endif %}</span></span> <code>{{ п.key | e }}</code></div>
 				{{ место(п.target, п.label, заметки.get(п.target, []), п.anchor, "Заметка к пункту") }}
 			</li>
 			{% endfor %}
@@ -36,7 +34,7 @@
 	<h3>Квиз</h3>
 	{% for в in у.questions %}
 	<div class="question" {{ атрибуты(в.target, в.label) }}>
-		<div class="part-head"><span><span class="num muted">{{ loop.index }}.</span> {{ в.text | e }}</span> <code>{{ в.key }}</code></div>
+		<div class="part-head"><span><span class="num muted">{{ loop.index | e }}.</span> {{ в.text | e }}</span> <code>{{ в.key | e }}</code></div>
 		{% if в.objective_text %}<p class="why">Цель: {{ в.objective_text | e }}</p>{% endif %}
 		<ol type="a">
 			{% for о in в.options %}
@@ -54,7 +52,7 @@
 	<div class="homework" {{ атрибуты(у.target, у.label) }}>
 		<strong>{{ д.title | e }}</strong>
 		<p class="pre">{{ д.description | e }}</p>
-		<p class="why">Ответ {{ д.answer_mode_text }}{% if д.due_days is not none %} · срок {{ д.due_days }} дн.{% else %} · без срока{% endif %}</p>
+		<p class="why">Ответ {{ д.answer_mode_text | e }}{% if д.due_days is not none %} · срок {{ д.due_days | e }} дн.{% else %} · без срока{% endif %}</p>
 	</div>
 	{% else %}<p class="muted">Домашки нет.</p>{% endif %}
 {% endmacro %}
@@ -66,13 +64,13 @@
 {% macro части_пакета(части, заметки) %}
 	{% for ч in части %}
 	<div class="pack-part">
-		<h4>{{ ч.title | e }} <code>{{ ч.name }}</code></h4>
+		<h4>{{ ч.title | e }} <code>{{ ч.name | e }}</code></h4>
 		{% if ч.text is not none %}<div class="pre">{{ ч.text | e }}</div>{% endif %}
 		{% if ч.entries is not none %}
 		<ul class="pack-entries">
 			{% for э in ч.entries %}
 			<li{% if э.target %} {{ атрибуты(э.target, э.label) }}{% endif %}>
-				{% if э.key is not none or э.title %}<div class="part-head"><span>{{ (э.title or "") | e }}</span>{% if э.key is not none %} <code>{{ э.key }}</code>{% endif %}</div>{% endif %}
+				{% if э.key is not none or э.title %}<div class="part-head"><span>{{ (э.title or "") | e }}</span>{% if э.key is not none %} <code>{{ э.key | e }}</code>{% endif %}</div>{% endif %}
 				<div class="pre">{{ э.text | e }}</div>
 				{% if э.target %}{{ место(э.target, э.label, заметки.get(э.target, []), э.anchor, "Заметка к пункту пакета") }}{% endif %}
 			</li>
@@ -84,7 +82,7 @@
 {% endmacro %}
 
 {% macro обязательность(значение) -%}
-	{%- if значение is mapping -%}обязательна, если заполнено «{{ значение.if_column }}»
+	{%- if значение is mapping -%}обязательна, если заполнено «{{ значение.if_column | e }}»
 	{%- elif значение -%}обязательна
 	{%- else -%}необязательна{%- endif -%}
 {%- endmacro %}
@@ -172,7 +170,7 @@
 	.author-page h2 { font-size: 17px; font-weight: 600; margin: 0 0 12px; color: var(--ink); }
 	.author-page h3 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; color: var(--ink); }
 	.author-page h4 { font-size: 14px; font-weight: 600; margin: 0 0 6px; color: var(--ink); }
-	.author-page .mono, .author-page code, .author-page .num {
+	.author-page code, .author-page .num {
 		font-family: "IBM Plex Mono", Consolas, monospace; font-variant-numeric: tabular-nums;
 	}
 	.author-page code { font-size: 12px; color: var(--muted); background: none; padding: 0; overflow-wrap: anywhere; }
@@ -314,7 +312,7 @@
 {% if is_guest %}
 	<div class="panel">
 		<h1>Кабинет автора</h1>
-		<p class="intro">Здесь виден действующий релиз курса. <a href="{{ login_url }}">Войдите</a>, чтобы открыть кабинет.</p>
+		<p class="intro">Здесь виден действующий релиз курса. <a href="{{ login_url | e }}">Войдите</a>, чтобы открыть кабинет.</p>
 	</div>
 
 {% elif not allowed %}
@@ -327,19 +325,19 @@
 	<div class="panel">
 		<h1>Такого нет</h1>
 		<p class="intro">Курса с таким адресом нет, или урока с таким ключом нет в действующем релизе: новый релиз мог его убрать.
-		{% if course %}<a href="{{ course.url }}">Открыть курс</a>{% else %}<a href="{{ page_url }}">Все курсы</a>{% endif %}</p>
+		{% if course %}<a href="{{ course.url | e }}">Открыть курс</a>{% else %}<a href="{{ page_url | e }}">Все курсы</a>{% endif %}</p>
 	</div>
 
 {% elif lesson %}
 	{% set заметки = release.notes %}
-	<div class="crumbs"><a href="{{ page_url }}">Все курсы</a> / <a href="{{ course.url }}">{{ course.title | e }}</a> / {{ lesson.chapter_title | e }}</div>
+	<div class="crumbs"><a href="{{ page_url | e }}">Все курсы</a> / <a href="{{ course.url | e }}">{{ course.title | e }}</a> / {{ lesson.chapter_title | e }}</div>
 	<div>
-		<h1><span class="num muted">{{ lesson.number }}.</span> {{ lesson.title | e }}</h1>
-		<p class="meta"><code>{{ lesson.key }}</code> · релиз v{{ release.version }}</p>
+		<h1><span class="num muted">{{ lesson.number | e }}.</span> {{ lesson.title | e }}</h1>
+		<p class="meta"><code>{{ lesson.key | e }}</code> · релиз v{{ release.version | e }}</p>
 	</div>
 	<div class="pager">
-		<span>{% if lesson.prev %}<a href="{{ lesson.prev.url }}">← {{ lesson.prev.number }}. {{ lesson.prev.title | e }}</a>{% endif %}</span>
-		<span>{% if lesson.next %}<a href="{{ lesson.next.url }}">{{ lesson.next.number }}. {{ lesson.next.title | e }} →</a>{% endif %}</span>
+		<span>{% if lesson.prev %}<a href="{{ lesson.prev.url | e }}">← {{ lesson.prev.number | e }}. {{ lesson.prev.title | e }}</a>{% endif %}</span>
+		<span>{% if lesson.next %}<a href="{{ lesson.next.url | e }}">{{ lesson.next.number | e }}. {{ lesson.next.title | e }} →</a>{% endif %}</span>
 	</div>
 	{# Плашка «обновить» живёт в липкой панели: две липкие полосы налезали бы друг на друга. #}
 	<div class="lesson-bar" id="lesson-bar">
@@ -347,7 +345,7 @@
 		<nav class="lesson-nav" aria-label="Разделы урока">
 			<a href="#section-lesson">Урок</a>
 			<a href="#section-agent">Пакет агента</a>
-			<a href="#section-notes">Заметки<span data-live="nav-notes">{% if lesson.open_notes %} <span class="note-count">{{ lesson.open_notes }}</span>{% endif %}</span></a>
+			<a href="#section-notes">Заметки<span data-live="nav-notes">{% if lesson.open_notes %} <span class="note-count">{{ lesson.open_notes | e }}</span>{% endif %}</span></a>
 		</nav>
 	</div>
 	{{ место(lesson.target, lesson.label, заметки.get(lesson.target, []), lesson.anchor, "Заметка к уроку") }}
@@ -368,23 +366,23 @@
 			<summary>Пакет агента урока</summary>
 			{{ части_пакета(lesson.agent, заметки) }}
 		</details>
-		{% else %}<p class="muted">У урока нет среза в пакете агента.</p>{% endif %}
+		{% else %}<p class="muted">В пакете агента нет части для этого урока.</p>{% endif %}
 		{% if lesson.frame %}
 		<details class="pack" {{ атрибуты("agent.frame", "Пакет агента · рамка курса") }}>
 			<summary>Рамка курса — общая для всех уроков</summary>
 			{{ части_пакета(lesson.frame, заметки) }}
 		</details>
-		{{ место("agent.frame", "Пакет агента · рамка курса", заметки.get("agent.frame", []), "note-agent-frame", "Заметка к рамке") }}
+		{{ место("agent.frame", "Пакет агента · рамка курса", заметки.get("agent.frame", []), frame_anchor, "Заметка к рамке") }}
 		{% endif %}
 	</section>
 
 	<section class="panel" id="section-notes" data-live="notes-index">
-		<h2>Заметки к уроку <span class="muted num">{{ lesson.open_notes }}</span></h2>
+		<h2>Заметки к уроку <span class="muted num">{{ lesson.open_notes | e }}</span></h2>
 		{% if lesson.notes_index %}
 		<ul class="note-index">
 			{% for з in lesson.notes_index %}
-			<li class="is-{{ з.status }}{% if з.waiting_on == 'author' %} is-yours{% endif %}">
-				<a href="{% if з.missing %}{{ з.url }}{% else %}#note-card-{{ з.id }}{% endif %}">
+			<li class="is-{{ з.status | e }}{% if з.waiting_on == 'author' %} is-yours{% endif %}">
+				<a href="{% if з.missing %}{{ з.url | e }}{% else %}#note-card-{{ з.id | e }}{% endif %}">
 					<span class="note-status">{{ статус(з) }}</span>
 					<span>{{ з.label | e }}{% if з.missing %} — места нет в действующем релизе{% endif %}</span>
 				</a>
@@ -399,15 +397,15 @@
 	<div class="quiet" id="author-quiet"></div>
 
 {% elif course %}
-	<div class="crumbs"><a href="{{ page_url }}">Все курсы</a></div>
+	<div class="crumbs"><a href="{{ page_url | e }}">Все курсы</a></div>
 	<div class="notice" id="author-notice" role="status"><span data-notice-text>Курс изменился.</span><button type="button" onclick="location.reload()">Обновить</button></div>
 	<div>
 		<h1>{{ course.title | e }}</h1>
 		{% if course.summary %}<p class="intro">{{ course.summary | e }}</p>{% endif %}
 		<p class="meta">
-			<span class="status{% if course.upcoming %} soon{% elif course.published %} live{% endif %}">{{ course.status }}</span>
+			<span class="status{% if course.upcoming %} soon{% elif course.published %} live{% endif %}">{{ course.status | e }}</span>
 			{% if release %}
-			<code>{{ release.key }}</code> · релиз v{{ release.version }} от {{ дата(release.published_at) }}{% if release.published_by_name %}, {{ release.published_by_name | e }}{% endif %}
+			<code>{{ release.key | e }}</code> · релиз v{{ release.version | e }} от {{ дата(release.published_at) }}{% if release.published_by_name %}, {{ release.published_by_name | e }}{% endif %}
 			{% else %}
 			релиза нет
 			{% endif %}
@@ -426,12 +424,12 @@
 	{% else %}
 
 	<nav class="tabs" aria-label="Вкладки курса" data-live="tabs">
-		<a class="tab{% if view == 'release' %} active{% endif %}" href="{{ course.url }}"{% if view == 'release' %} aria-current="page"{% endif %}>Релиз</a>
-		<a class="tab{% if view == 'notes' %} active{% endif %}" href="{{ course.url }}&view=notes"{% if view == 'notes' %} aria-current="page"{% endif %}>Заметки
-			{% if course.notes_attention %}<span class="n" title="Ждут вас">{{ course.notes_attention }}</span>{% endif %}</a>
-		<a class="tab{% if view == 'history' %} active{% endif %}" href="{{ course.url }}&view=history"{% if view == 'history' %} aria-current="page"{% endif %}>История</a>
-		<a class="tab{% if view == 'testers' %} active{% endif %}" href="{{ course.url }}&view=testers"{% if view == 'testers' %} aria-current="page"{% endif %}>Тестеры
-			{% if course.testers_count %}<span class="n calm">{{ course.testers_count }}</span>{% endif %}</a>
+		<a class="tab{% if view == 'release' %} active{% endif %}" href="{{ course.url | e }}"{% if view == 'release' %} aria-current="page"{% endif %}>Релиз</a>
+		<a class="tab{% if view == 'notes' %} active{% endif %}" href="{{ course.url | e }}&view=notes"{% if view == 'notes' %} aria-current="page"{% endif %}>Заметки
+			{% if course.notes_attention %}<span class="n" title="Ждут вас">{{ course.notes_attention | e }}</span>{% endif %}</a>
+		<a class="tab{% if view == 'history' %} active{% endif %}" href="{{ course.url | e }}&view=history"{% if view == 'history' %} aria-current="page"{% endif %}>История</a>
+		<a class="tab{% if view == 'testers' %} active{% endif %}" href="{{ course.url | e }}&view=testers"{% if view == 'testers' %} aria-current="page"{% endif %}>Тестеры
+			{% if course.testers_count %}<span class="n calm">{{ course.testers_count | e }}</span>{% endif %}</a>
 	</nav>
 
 	{% if view == "testers" %}
@@ -447,11 +445,11 @@
 			<tbody>
 			{% for р in history %}
 			<tr>
-				<td class="num">v{{ р.version }}{% if р.active %} <span class="status live">действующий</span>{% endif %}</td>
+				<td class="num">v{{ р.version | e }}{% if р.active %} <span class="status live">действующий</span>{% endif %}</td>
 				<td>{{ дата(р.published_at) }}</td>
 				<td>{{ (р.published_by_name or р.published_by or "—") | e }}</td>
-				<td>{% if р.document_key %}<code>{{ р.document_key }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
-				<td><code title="{{ р.digest }}">{{ (р.digest or "")[:12] }}</code></td>
+				<td>{% if р.document_key %}<code>{{ р.document_key | e }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
+				<td><code title="{{ р.digest | e }}">{{ (р.digest or "")[:12] | e }}</code></td>
 			</tr>
 			{% endfor %}
 			</tbody>
@@ -462,7 +460,7 @@
 	{% elif view == "notes" %}
 	{% set q = notes_queue %}
 	<p class="intro">Заметки к курсу. Агент берёт те, что ждут его, правит курс новым релизом и отмечает «сделано»; вы принимаете или возвращаете с ответом.</p>
-	{{ место("course", "Курс", [], "note-course", "Заметка к курсу") }}
+	{{ место("course", "Курс", [], course_anchor, "Заметка к курсу") }}
 	<div class="queue" data-live="queue">
 	{% for ключ, заголовок, пояснение in [
 		("check", "Проверьте", "Агент отметил «сделано»: примите или верните с ответом."),
@@ -470,13 +468,13 @@
 		("agent", "Ждут агента", "Агент возьмёт их, когда начнёт работу над курсом."),
 	] %}
 	<section class="queue-group">
-		<h2>{{ заголовок }} <span class="muted num">{{ q[ключ] | length }}</span></h2>
-		<p class="muted">{{ пояснение }}</p>
+		<h2>{{ заголовок | e }} <span class="muted num">{{ q[ключ] | length | e }}</span></h2>
+		<p class="muted">{{ пояснение | e }}</p>
 		<div class="notes-list">{% for з in q[ключ] %}{{ карточка(з, True) }}{% else %}<p class="muted">Нет.</p>{% endfor %}</div>
 	</section>
 	{% endfor %}
 	{% if q.accepted %}
-	<details class="queue-group"><summary>Принятые · {{ q.accepted | length }}</summary>
+	<details class="queue-group"><summary>Принятые · {{ q.accepted | length | e }}</summary>
 		<div class="notes-list">{% for з in q.accepted %}{{ карточка(з, True) }}{% endfor %}</div>
 	</details>
 	{% endif %}
@@ -484,26 +482,26 @@
 
 	{% else %}
 	{% set заметки = release.notes %}
-	{{ место("course", "Курс", заметки.get("course", []), "note-course", "Заметка к курсу") }}
+	{{ место("course", "Курс", заметки.get("course", []), course_anchor, "Заметка к курсу") }}
 
 	{% for г in release.chapters %}
-	<section class="chapter ch{{ г.color }}" {{ атрибуты(г.target, г.label) }}>
+	<section class="chapter ch{{ г.color | e }}" {{ атрибуты(г.target, г.label) }}>
 		<div class="chapter-head">
-			<h2><span class="num">{{ г.number }}.</span> {{ г.title | e }} <code>{{ г.key }}</code></h2>
+			<h2><span class="num">{{ г.number | e }}.</span> {{ г.title | e }} <code>{{ г.key | e }}</code></h2>
 			{% if г.description %}<p>{{ г.description | e }}</p>{% endif %}
 		</div>
 		{{ место(г.target, г.label, заметки.get(г.target, []), г.anchor, "Заметка к главе") }}
 		{% for у in г.lessons %}
 		<details class="row lesson-row" {{ атрибуты(у.target, у.label) }}>
 			<summary>
-				<span class="num muted">{{ у.number }}.</span>
+				<span class="num muted">{{ у.number | e }}.</span>
 				<span class="row-title">{{ у.title | e }}</span>
-				<code>{{ у.key }}</code>
-				<span data-live="{{ у.anchor }}-count">{% if у.open_notes %}<span class="note-count" title="Открытых заметок к уроку">✎ {{ у.open_notes }}</span>{% endif %}</span>
-				<span class="row-side">целей {{ у.objectives | length }} · вопросов {{ у.questions | length }}{% if у.homework %} · домашка{% endif %}</span>
+				<code>{{ у.key | e }}</code>
+				<span data-live="{{ у.anchor | e }}-count">{% if у.open_notes %}<span class="note-count" title="Открытых заметок к уроку">✎ {{ у.open_notes | e }}</span>{% endif %}</span>
+				<span class="row-side">целей {{ у.objectives | length | e }} · вопросов {{ у.questions | length | e }}{% if у.homework %} · домашка{% endif %}</span>
 			</summary>
 			<div class="row-body">
-				<p class="meta"><a href="{{ у.url }}">Урок целиком и пакет агента →</a></p>
+				<p class="meta"><a href="{{ у.url | e }}">Урок целиком и пакет агента →</a></p>
 				{{ место(у.target, у.label, заметки.get(у.target, []), у.anchor, "Заметка к уроку") }}
 				{{ тело_урока(у, заметки) }}
 			</div>
@@ -515,26 +513,26 @@
 	{% set д = release.document %}
 	<section>
 		{% if д %}
-		<h2>Документ «{{ (д.title or д.key) | e }}» <code>{{ д.key }}</code></h2>
+		<h2>Документ «{{ (д.title or д.key) | e }}» <code>{{ д.key | e }}</code></h2>
 		{% if д.purpose %}<p class="intro">{{ д.purpose | e }}</p>{% endif %}
 		<div class="chapter">
 		{% for р in д.sections %}
 		<details class="row" {{ атрибуты(р.target, р.label) }}>
 			<summary>
-				<code>{{ р.key }}</code>
+				<code>{{ р.key | e }}</code>
 				<span class="row-title">{{ р.title | e }}</span>
-				<span data-live="{{ р.anchor }}-count">{% set открытые = заметки.get(р.target, []) | rejectattr("status", "equalto", "accepted") | list %}{% if открытые %}<span class="note-count" title="Открытых заметок к разделу">✎ {{ открытые | length }}</span>{% endif %}</span>
-				<span class="row-side">{{ "одна запись" if р.rows == "one" else "много записей" }}</span>
+				<span data-live="{{ р.anchor | e }}-count">{% set открытые = заметки.get(р.target, []) | rejectattr("status", "equalto", "accepted") | list %}{% if открытые %}<span class="note-count" title="Открытых заметок к разделу">✎ {{ открытые | length | e }}</span>{% endif %}</span>
+				<span class="row-side">{{ ("одна запись" if р.rows == "one" else "много записей") | e }}</span>
 			</summary>
 			<div class="row-body">
 				{% if р.description %}<p class="pre">{{ р.description | e }}</p>{% endif %}
 				{% if р.columns %}
 				<table class="columns">
 					<thead><tr><th>Колонка</th><th>Ключ</th><th>Заполнение</th></tr></thead>
-					<tbody>{% for к in р.columns %}<tr><td>{{ к.title | e }}</td><td><code>{{ к.key }}</code></td><td>{{ обязательность(к.required) }}</td></tr>{% endfor %}</tbody>
+					<tbody>{% for к in р.columns %}<tr><td>{{ к.title | e }}</td><td><code>{{ к.key | e }}</code></td><td>{{ обязательность(к.required) }}</td></tr>{% endfor %}</tbody>
 				</table>
 				{% endif %}
-				<p class="why">{% if р.lessons %}Заполняют: {% for у in р.lessons %}<a href="{{ у.url }}">{{ у.number }}. {{ у.title | e }}</a>{{ "" if loop.last else ", " }}{% endfor %}{% else %}Ни один урок раздел не заполняет.{% endif %}</p>
+				<p class="why">{% if р.lessons %}Заполняют: {% for у in р.lessons %}<a href="{{ у.url | e }}">{{ у.number | e }}. {{ у.title | e }}</a>{{ "" if loop.last else ", " }}{% endfor %}{% else %}Ни один урок раздел не заполняет.{% endif %}</p>
 				{{ место(р.target, р.label, заметки.get(р.target, []), р.anchor, "Заметка к разделу") }}
 			</div>
 		</details>
@@ -556,19 +554,19 @@
 	{% if courses %}
 	<ul class="courses">
 		{% for к in courses %}
-		<li><a href="{{ к.url }}">
+		<li><a href="{{ к.url | e }}">
 			<strong>{{ к.title | e }}</strong>
-			<span class="status{% if к.upcoming %} soon{% elif к.published %} live{% endif %}">{{ к.status }}</span>
+			<span class="status{% if к.upcoming %} soon{% elif к.published %} live{% endif %}">{{ к.status | e }}</span>
 			<span class="course-facts">
-				{% if к.release %}<span class="num">релиз v{{ к.release.version }} от {{ дата(к.release.published_at) }}</span>{% else %}<span>релиза нет</span>{% endif %}
-				{% if к.open_notes %}<span class="note-count" title="Открытых заметок">заметок {{ к.open_notes }}{% if к.notes_attention %}, ждут вас {{ к.notes_attention }}{% endif %}</span>{% endif %}
-				{% if к.testers_count %}<span>тестеров {{ к.testers_count }}</span>{% endif %}
+				{% if к.release %}<span class="num">релиз v{{ к.release.version | e }} от {{ дата(к.release.published_at) }}</span>{% else %}<span>релиза нет</span>{% endif %}
+				{% if к.open_notes %}<span class="note-count" title="Открытых заметок">заметок {{ к.open_notes | e }}{% if к.notes_attention %}, ждут вас {{ к.notes_attention | e }}{% endif %}</span>{% endif %}
+				{% if к.testers_count %}<span>тестеров {{ к.testers_count | e }}</span>{% endif %}
 			</span>
 		</a></li>
 		{% endfor %}
 	</ul>
 	{% else %}
-	<p class="intro">Курсов пока нет. Курс появится здесь с первым релизом или анонсом.</p>
+	<p class="intro">Курсов пока нет. Курс появится здесь, как только его заведут: карточкой без программы — до первого релиза — или сразу релизом.</p>
 	{% endif %}
 {% endif %}
 
@@ -587,7 +585,7 @@
 	let известныеЗаметки = {{ course.notes_revision | tojson }};
 	const плашка = document.getElementById("author-notice");
 	const тихо = document.getElementById("author-quiet");
-	const адрес = "/api/method/{{ revision_method }}?course=" + encodeURIComponent(курс);
+	const адрес = "/api/method/" + {{ revision_method | tojson }} + "?course=" + encodeURIComponent(курс);
 	let таймер = setInterval(проверить, 15000);
 
 	async function метки() {
