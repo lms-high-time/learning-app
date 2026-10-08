@@ -64,12 +64,16 @@ class IntegrationTestФикстурыРелиза(IntegrationTestCase):
 
 	def test_все_обязательные_пункты_отмечены(self):
 		курс, _ = курс_из_релиза()
-		run = frappe.db.get_value("Agent Learning Session", занятие_релиза(self.ученик, курс, "l-1"), "run")
+		занятие = занятие_релиза(self.ученик, курс, "l-1")
+		run = frappe.db.get_value("Agent Learning Session", занятие, "run")
 
-		ответ = отметить_все_пункты(run)
+		ответ = отметить_все_пункты(run, занятие)
 
 		self.assertEqual(ответ["lesson"]["status"], "covered")
 		self.assertIsNone(ответ["next"])
-		пункты = {п.goal_key: п.status for п in frappe.get_doc("Agent Lesson Run", run).goals}
-		self.assertEqual(пункты, {"term:T1": "done", "l-1-D1/V1": "done", "refute:M1": "open"})
+		пункты = {п.goal_key: (п.status, п.session) for п in frappe.get_doc("Agent Lesson Run", run).goals}
+		self.assertEqual(
+			пункты,
+			{"term:T1": ("done", занятие), "l-1-D1/V1": ("done", занятие), "refute:M1": ("open", None)},
+		)
 		self.assertIsNone(отметить_все_пункты(run))

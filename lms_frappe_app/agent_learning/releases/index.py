@@ -6,8 +6,8 @@
 Индекс — дочерние таблицы релиза. Читается `frappe.get_all` и
 `frappe.db.get_value` по строкам с фильтром `parent`, никогда не
 `frappe.get_doc` релиза: он потянул бы все строки разом (у большого курса —
-сотни). Ответы квиза — только с явным
-`с_ответами`: ими сервер сверяет ответ, наружу они не уходят (CLAUDE.md §10).
+сотни). Ответы квиза — только с явным `с_ответами`: ими сервер сверяет
+ответ, наружу они не уходят (CLAUDE.md §10).
 
 Пакет агента раскладывается при записи (learning-services#506): срез урока —
 в строку урока, рамка курса — в запись релиза. Внутри срезов приложение
@@ -29,7 +29,8 @@ import frappe
 РАЗДЕЛ = "Agent Release Section"
 
 
-def _json(значение) -> str:
+def в_json(значение) -> str:
+	"""Значение JSON-поля индекса — строкой, как его пишет `строки`."""
 	return json.dumps(значение, ensure_ascii=False)
 
 
@@ -85,9 +86,9 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 				"hook": у["hook"],
 				"lesson": уроки[у["key"]],
 				"pass_percentage": у["quiz"]["pass_percentage"],
-				"section_keys": _json(у["sections"]),
-				"homework": _json(у["homework"]) if у["homework"] else None,
-				"agent": _json(срезы_уроков[у["key"]]),
+				"section_keys": в_json(у["sections"]),
+				"homework": в_json(у["homework"]) if у["homework"] else None,
+				"agent": в_json(срезы_уроков[у["key"]]),
 			}
 		)
 		for ц in у["objectives"]:
@@ -113,7 +114,7 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 					"question_key": в["key"],
 					"objective_key": в["objective"],
 					"text": в["text"],
-					"option_list": _json(в["options"]),
+					"option_list": в_json(в["options"]),
 					"correct": ответ["correct"],
 					"explanation": ответ["explanation"],
 				}
@@ -125,10 +126,10 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 				"title": с["title"],
 				"description": с["description"],
 				"rows": с["rows"],
-				"columns": _json(с["columns"]),
+				"columns": в_json(с["columns"]),
 			}
 		)
-	таблицы["agent_frame"] = _json(рамка_курса)
+	таблицы["agent_frame"] = в_json(рамка_курса)
 	return таблицы
 
 
