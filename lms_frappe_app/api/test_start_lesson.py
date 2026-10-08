@@ -88,6 +88,9 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 			),
 			["Directive Issued"],
 		)
+		занятие = frappe.get_doc("Agent Learning Session", данные["session"])
+		self.assertEqual((занятие.student, занятие.lesson, занятие.course), (self.ученик, self.урок, self.курс))
+		self.assertTrue(занятие.via_trusted_service)
 
 	def test_срез_без_директивы_и_материала_пустые_строки(self):
 		frappe.db.set_value(
@@ -382,9 +385,14 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 
 	# --- блоки документа ---
 
-	def test_блоки_документа_своего_урока(self):
+	def test_блоки_документа_своего_урока_с_содержимым(self):
+		student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}])
+
+		[журнал] = self.старт(lesson=self.урок)["artifact_blocks"]
 		блоки = self.старт(lesson=урок_релиза(self.курс, "l-2"))["artifact_blocks"]
 
+		self.assertEqual((журнал["artifact"], журнал["key"]), ("notebook", "log"))
+		self.assertIn("Первая встреча", журнал["table_markdown"])
 		self.assertEqual([(б["artifact"], б["key"]) for б in блоки], [("notebook", "rules")])
 		self.assertEqual(self.старт(lesson=урок_релиза(self.курс, "l-3"))["artifact_blocks"], [])
 

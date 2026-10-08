@@ -43,6 +43,8 @@ from lms_frappe_app.agent_learning.releases import index
 ЗАКРЫВАЮТ_ЦЕЛЬ = frozenset({"done", "planned"})
 ПРЕДЕЛ_СВИДЕТЕЛЬСТВА = 500
 ПРОЙДЕН = "passed"
+#: Время раньше любого настоящего — подстановка вместо пустого в сравнении времён.
+НИКОГДА = "1000-01-01 00:00:00"
 
 
 def прохождение(ученик: str, курс: str, ключ_урока: str):
@@ -240,13 +242,13 @@ def следующий(run) -> dict | None:
 	return _первый(открытые_обязательные(run))
 
 
-def следующий_шаг(run, есть_квиз: bool, квиз_обязателен: bool) -> dict | None:
+def следующий_шаг(run, квиз_обязателен: bool) -> dict | None:
 	"""Следующий шаг урока данными: пункт, квиз, закрытие или ничего.
 
 	`{"kind": "goal", objective, goal, title}` — первый открытый обязательный
-	пункт по порядку релиза; `{"kind": "quiz"}` — обязательные закрыты, у урока
-	есть вопросы и квиз обязателен; `{"kind": "complete"}` — закрыты, а квиза
-	нет или он не обязателен; `None` — урок пройден.
+	пункт по порядку релиза; `{"kind": "quiz"}` — обязательные закрыты, а квиз
+	обязателен (у урока есть вопросы, и политика его требует); `{"kind":
+	"complete"}` — закрыты, а квиз не обязателен; `None` — урок пройден.
 
 	`Why:` данные, а не фраза: шаг читают и агентский MCP, и веб-чат, и каждый
 	складывает свой текст.
@@ -255,7 +257,7 @@ def следующий_шаг(run, есть_квиз: bool, квиз_обяза�
 		return None
 	if пункт := следующий(run):
 		return {"kind": "goal", **пункт}
-	return {"kind": "quiz"} if есть_квиз and квиз_обязателен else {"kind": "complete"}
+	return {"kind": "quiz"} if квиз_обязателен else {"kind": "complete"}
 
 
 def карта(run, тексты: dict[str, str]) -> list[dict]:
@@ -290,8 +292,8 @@ def карта(run, тексты: dict[str, str]) -> list[dict]:
 def история(ученик: str, курс: str, кроме: str, глубина: int) -> list[dict]:
 	"""Прошлые уроки ученика по курсу — `глубина` последних начатых или пройденных, кроме урока `кроме`.
 
-	Урок — `{key, title, status, objectives_open}`: незакрытые цели — те, что
-	не `covered`, с текстом из релиза прохождения, по порядку. Последний — по
+	Урок — `{key, title, status, objectives_open}`: название и тексты
+	незакрытых целей (не `covered`, по порядку) — из релиза прохождения. Последний — по
 	последней отметке пункта, началу или зачёту, что позже. Ничего не пишет и
 	прохождений не сверяет: читает сохранённые статусы.
 
@@ -302,21 +304,27 @@ def история(ученик: str, курс: str, кроме: str, глуби
 		return []
 	уроки = frappe.db.sql(
 		"""
-		select r.name, r.lesson_key, l.title, r.status
+		select r.name, r.lesson_key, rl.title, r.status
 		from `tabAgent Lesson Run` r
-		left join `tabCourse Lesson` l on l.name = r.lesson
-		left join `tabAgent Lesson Run Goal` g
-			on g.parent = r.name and g.parenttype = 'Agent Lesson Run'
+		left join `tabAgent Release Lesson` rl
+			on rl.parenttype = 'Agent Course Release' and rl.parent = r.release
+			and rl.lesson_key = r.lesson_key
 		where r.student = %(student)s and r.course = %(course)s
 			and r.lesson_key != %(except)s and r.status != 'not_started'
-		group by r.name
 		order by greatest(
-			coalesce(max(g.marked_at), r.started_at, r.passed_at),
-			coalesce(r.passed_at, r.started_at, max(g.marked_at))
+			coalesce(
+				(
+					select max(g.marked_at) from `tabAgent Lesson Run Goal` g
+					where g.parent = r.name and g.parenttype = 'Agent Lesson Run'
+				),
+				cast(%(never)s as datetime(6))
+			),
+			coalesce(r.started_at, cast(%(never)s as datetime(6))),
+			coalesce(r.passed_at, cast(%(never)s as datetime(6)))
 		) desc, r.name
 		limit %(depth)s
 		""",
-		{"student": ученик, "course": курс, "except": кроме, "depth": глубина},
+		{"student": ученик, "course": курс, "except": кроме, "depth": глубина, "never": НИКОГДА},
 		as_dict=True,
 	)
 	if not уроки:

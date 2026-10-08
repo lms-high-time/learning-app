@@ -179,9 +179,18 @@ def уроки_глав(релиз: str) -> dict[str, list[str]]:
 
 def урок(релиз: str, ключ: str) -> dict | None:
 	"""Урок релиза по ключу: его запись Learning, глава, порог квиза, разделы, домашка."""
+	return _урок(релиз, {"lesson_key": ключ})
+
+
+def урок_по_записи(релиз: str, lesson: str) -> dict | None:
+	"""Урок релиза по записи `Course Lesson` — те же поля, что у `урок`, с ключом."""
+	return _урок(релиз, {"lesson": lesson})
+
+
+def _урок(релиз: str, отбор: dict) -> dict | None:
 	найдено = frappe.get_all(
 		УРОК,
-		filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ},
+		filters={"parenttype": РЕЛИЗ, "parent": релиз, **отбор},
 		fields=[
 			"lesson_key",
 			"chapter_key",
