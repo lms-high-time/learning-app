@@ -5,7 +5,8 @@
 
 Поведение публикации проверяет `agent_learning/releases/test_service.py`;
 здесь — что оно дошло до метода: кто может звать, что релиз принимается и
-объектом, и строкой JSON, и что отказ едет кодом контракта.
+объектом, и строкой JSON, что отказ едет кодом контракта; инструкторы курса
+по списку (learning-services#512), список курсов с релизом и открытие курса.
 """
 
 import json
@@ -134,3 +135,160 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 		frappe.set_user(руководитель)
 		with self.assertRaises(frappe.PermissionError):
 			authoring.publish_release(release=пример_релиза(self.ключ))
+
+
+class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
+	"""`publish_release(…, instructors)`: список заменяет инструкторов курса (learning-services#512)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.публикатор = создать_куратора(f"rel-pub-{суффикс}@example.com")
+		self.первый = создать_куратора(f"rel-a-{суффикс}@example.com")
+		self.второй = создать_куратора(f"rel-b-{суффикс}@example.com", роль="Moderator")
+		self.ученик = создать_ученика(f"rel-pupil-{суффикс}@example.com")
+		self.ключ = f"ins-{суффикс}"
+		frappe.set_user(self.публикатор)
+
+	def опубликовать(self, релиз: dict | None = None, **аргументы) -> dict:
+		return authoring.publish_release(release=релиз or пример_релиза(self.ключ), **аргументы)
+
+	def инструкторы(self, курс: str) -> list[str]:
+		return frappe.get_all(
+			"Course Instructor",
+			filters={"parenttype": "LMS Course", "parent": курс},
+			pluck="instructor",
+			order_by="idx asc",
+		)
+
+	def другой_релиз(self) -> dict:
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, второе издание"
+		return релиз
+
+	def test_без_списка_новый_курс_получает_публикатора(self):
+		данные = self.опубликовать()["data"]
+
+		self.assertEqual(данные["instructors"], [self.публикатор])
+		self.assertEqual(self.инструкторы(данные["course"]), [self.публикатор])
+
+	def test_список_заменяет_набор_и_публикатор_не_добавляется(self):
+		данные = self.опубликовать(instructors=[self.первый, self.второй.upper()])["data"]
+
+		self.assertEqual(данные["instructors"], [self.первый, self.второй])
+		self.assertEqual(self.инструкторы(данные["course"]), [self.первый, self.второй])
+
+		данные = self.опубликовать(self.другой_релиз(), instructors=json.dumps([self.второй]))["data"]
+
+		self.assertEqual((данные["version"], данные["instructors"]), (2, [self.второй]))
+
+	def test_без_списка_инструкторы_не_трогаются(self):
+		курс = self.опубликовать(instructors=[self.первый])["data"]["course"]
+
+		данные = self.опубликовать(self.другой_релиз())["data"]
+
+		self.assertEqual((данные["version"], данные["instructors"]), (2, [self.первый]))
+		self.assertEqual(self.инструкторы(курс), [self.первый])
+
+	def test_список_применяется_к_неизменному_релизу(self):
+		"""Инструкторы не входят в дайджест: смена кураторов — без новой версии."""
+		курс = self.опубликовать()["data"]["course"]
+
+		данные = self.опубликовать(instructors=[self.первый])["data"]
+
+		self.assertTrue(данные["unchanged"])
+		self.assertEqual((данные["version"], данные["instructors"]), (1, [self.первый]))
+		self.assertEqual(self.инструкторы(курс), [self.первый])
+		self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
+
+	def test_отказы_до_первой_записи(self):
+		курс = self.опубликовать(instructors=[self.первый])["data"]["course"]
+		for инструкторы, код, лишние in (
+			([], "instructors_empty", None),
+			("[]", "instructors_empty", None),
+			([self.первый, "nobody-here@example.com"], "instructor_not_found", ["nobody-here@example.com"]),
+			([self.второй, self.ученик], "instructor_not_author", [self.ученик]),
+		):
+			for релиз in (self.другой_релиз(), пример_релиза(f"new-{self.ключ}")):
+				ответ = self.опубликовать(релиз, instructors=инструкторы)
+
+				self.assertEqual(ответ.get("error", {}).get("code"), код, (инструкторы, ответ))
+				if лишние:
+					self.assertEqual(ответ["error"]["users"], лишние)
+		self.assertEqual(self.инструкторы(курс), [self.первый])
+		self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
+		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": f"new-{self.ключ}"}))
+
+	def test_другой_куратор_переопубликует_курс(self):
+		"""Уроки курса, опубликованного одним куратором, правит релиз другого:
+		Learning даёт Course Creator запись `Course Lesson` только своих."""
+		frappe.set_user(self.первый)
+		курс = self.опубликовать()["data"]["course"]
+		коллега = создать_куратора(f"rel-c-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(коллега)
+
+		данные = self.опубликовать(self.другой_релиз(), instructors=[self.первый])
+
+		self.assertTrue(данные["ok"], данные)
+		self.assertEqual(данные["data"]["lessons"]["updated"], ["l-1"])
+		self.assertEqual(
+			frappe.db.get_value("Course Lesson", {"course": курс, "title": "Урок первый, второе издание"}, "owner"),
+			self.первый,
+		)
+		self.assertEqual(self.инструкторы(курс), [self.первый])
+
+
+class IntegrationTestКурсыИОткрытие(IntegrationTestCase):
+	"""`list_courses` с релизом и `publish_course` курса из релиза."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.куратор = создать_куратора(f"rel-list-{суффикс}@example.com")
+		self.ключ = f"list-{суффикс}"
+		frappe.set_user(self.куратор)
+
+	def test_список_курсов_с_ключом_и_действующим_релизом(self):
+		анонс = authoring.create_course(title="Анонс", summary="к")["data"]["id"]
+		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Другой"
+		authoring.publish_release(release=релиз)
+
+		строки = {к["id"]: к for к in authoring.list_courses()["data"]["courses"]}
+
+		self.assertEqual((строки[анонс]["course_key"], строки[анонс]["release"]), (None, None))
+		self.assertEqual(строки[курс]["course_key"], self.ключ)
+		self.assertEqual(строки[курс]["release"]["version"], 2)
+		действующий = frappe.db.get_value("LMS Course", курс, "active_release")
+		self.assertEqual(
+			строки[курс]["release"]["published_at"],
+			frappe.db.get_value("Agent Course Release", действующий, "published_at").isoformat(),
+		)
+
+	def test_курс_снимается_с_публикации_и_возвращается_обратно(self):
+		"""Снятие — обратимая правка каталога: прогресс ученика переживает и
+		снятие, и повторную публикацию."""
+		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		урок = frappe.db.get_value("Course Lesson", {"course": курс, "title": "Урок первый"})
+		ученик = создать_ученика(f"reader-{frappe.generate_hash(length=6)}@example.com")
+		self.assertTrue(authoring.publish_course(course=курс)["data"]["published"])
+		frappe.get_doc(
+			{
+				"doctype": "LMS Course Progress",
+				"lesson": урок,
+				"member": ученик,
+				"course": курс,
+				"status": "Complete",
+			}
+		).insert(ignore_permissions=True)
+
+		ответ = authoring.unpublish_course(course=курс)["data"]
+
+		self.assertFalse(ответ["published"])
+		self.assertFalse(frappe.db.get_value("LMS Course", курс, "published"))
+		self.assertTrue(
+			frappe.db.exists("LMS Course Progress", {"member": ученик, "lesson": урок}),
+			"прогресс ученика пропал вместе с публикацией",
+		)
+		self.assertTrue(authoring.publish_course(course=курс)["data"]["published"])

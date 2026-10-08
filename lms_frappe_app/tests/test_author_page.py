@@ -93,10 +93,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 
 	def test_анонс_отмечен_на_экране_курса_и_в_списке(self):
 		"""Анонс — не «опубликован»: он в каталоге, но записи нет (learning-services#391)."""
-		authoring.set_course_directive(
-			course=self.курс, teaching_directive="Вести на проекте", objectives="Цель курса"
-		)
-		authoring.announce_course(course=self.курс)
+		authoring.announce_course(course=self.курс, objectives="Цель курса")
 		с = self.сведения_для(self.куратор, course=self.курс)
 		self.assertTrue(с["course"]["upcoming"])
 		с = self.сведения_для(self.куратор)

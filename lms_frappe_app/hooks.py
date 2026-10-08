@@ -168,7 +168,7 @@ fixtures = [
 	# Тестовая запись — отметка на самой записи на курс: доступ по-прежнему даёт
 	# запись, второго основания доступа нет (learning-services#393).
 	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
-	# (learning-services#500).
+	# (learning-services#500). Цели анонса — у курса без релиза (learning-services#512).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -182,6 +182,7 @@ fixtures = [
 					"LMS Course-course_key",
 					"LMS Course-active_release",
 					"LMS Course-course_attribution",
+					"LMS Course-announce_objectives",
 					"Course Chapter-chapter_description",
 				],
 			]

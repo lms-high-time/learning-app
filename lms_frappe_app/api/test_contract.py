@@ -301,9 +301,14 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
 		релиз = пример_релиза(f"contract-{self.суффикс}")
-		курс = self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))["course"]
+		курс = self.сверить(
+			"authoring.publish_release", authoring.publish_release(release=релиз, instructors=[self.куратор])
+		)["course"]
 		# Повтор отвечает теми же ключами, что и публикация.
 		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		self.сверить("authoring.publish_course", authoring.publish_course(course=курс))
+		self.сверить("authoring.unpublish_course", authoring.unpublish_course(course=курс))
+		authoring.publish_course(course=курс)
 		return курс
 
 	# --- сборка курса ---
@@ -516,16 +521,19 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			"authoring.remove_tester", authoring.remove_tester(course=курс, user=тестер)
 		)
 		# Анонс до выхода: у него своя карта и подписка на письмо о выходе.
-		self.сверить("authoring.announce_course", authoring.announce_course(course=курс))
+		self.сверить(
+			"authoring.announce_course",
+			authoring.announce_course(course=курс, objectives="Писать циклы\nВыделять функции"),
+		)
 		frappe.set_user(self.ученик)
 		self.сверить(
 			"student.notify_when_released", student.notify_when_released(course=курс)
 		)
 		self.сверить("public.course_map", public.course_map(course=курс))
+		# Открывает `publish_course` только курс из релиза; этот курс — запись напрямую.
+		frappe.set_user("Administrator")
+		frappe.db.set_value("LMS Course", курс, {"published": 1, "upcoming": 0})
 		frappe.set_user(self.куратор)
-		self.сверить("authoring.publish_course", authoring.publish_course(course=курс))
-		self.сверить("authoring.unpublish_course", authoring.unpublish_course(course=курс))
-		authoring.publish_course(course=курс)
 		return курс, [с_квизом, без_квиза]
 
 	def _назначить_курс(self, курс: str) -> None:

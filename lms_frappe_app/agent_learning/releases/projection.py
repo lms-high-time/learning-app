@@ -8,6 +8,11 @@
 главами. Снятое из релиза не удаляется — уходит из порядка (строк-ссылок
 Learning): на урок ссылаются следы учеников, а вернувшийся ключ получает ту же
 запись. Материала у урока нет: он только агенту (решение владельца, #497).
+
+Главы и уроки пишутся без проверки прав, как и сам релиз (`service._записать_релиз`).
+`Why:` Learning даёт Course Creator запись `Course Lesson` только своих
+(`if_owner`) — иначе куратор не переопубликовал бы курс, который опубликовал
+другой куратор или Administrator. Метод публикации закрыт авторскими ролями.
 """
 
 from dataclasses import dataclass, field
@@ -89,14 +94,14 @@ def _записать(doctype: str, курс: str, имя: str | None, поля:
 		документ = frappe.get_doc(doctype, имя)
 		if any((документ.get(поле) or None) != (значение or None) for поле, значение in поля.items()):
 			документ.update(поля)
-			документ.save()
+			документ.save(ignore_permissions=True)
 			итог.обновлено[вид].append(ключ)
 		return имя
 	новое = {"doctype": doctype, **поля}
 	if doctype == УРОК:
 		новое["body"] = ""
 	итог.создано[вид].append(ключ)
-	return frappe.get_doc(новое).insert().name
+	return frappe.get_doc(новое).insert(ignore_permissions=True).name
 
 
 def _порядок(курс: str, главы: list[str], уроки_глав: dict[str, list[str]]) -> None:
@@ -115,4 +120,4 @@ def _порядок(курс: str, главы: list[str], уроки_глав: d
 		документ = frappe.get_doc(ГЛАВА, глава)
 		if [строка.lesson for строка in документ.lessons] != нужно:
 			документ.set("lessons", [{"lesson": урок} for урок in нужно])
-			документ.save()
+			документ.save(ignore_permissions=True)

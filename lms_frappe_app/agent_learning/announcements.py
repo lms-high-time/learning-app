@@ -6,8 +6,9 @@
 
 Анонс — это `published` и `upcoming` у `LMS Course` одновременно, как в самом
 Learning: его вкладка каталога «Предстоящие» отбирает курсы ровно так. Наружу у
-анонса выходят только цели курса: из действующей директивы, а у курса из
-релиза — названия глав. Уроки и документы остаются закрытыми до выхода курса.
+анонса выходят только цели курса: у курса из релиза — названия глав
+действующего релиза, у курса без релиза — поле `announce_objectives`
+(learning-services#512). Уроки и документы остаются закрытыми до выхода курса.
 
 Подписка «сообщить, когда выйдет» — запись `LMS Course Interest` из Learning.
 Её отметка `email_sent` служит журналом письма о выходе: письмо уходит один
@@ -16,9 +17,12 @@ Learning: его вкладка каталога «Предстоящие» от
 
 from __future__ import annotations
 
+import json
+
 import frappe
 
-from lms_frappe_app.agent_learning import directives
+#: Поле курса с целями анонса: текст, по строке на цель.
+ПОЛЕ_ЦЕЛЕЙ = "announce_objectives"
 
 
 def анонсирован(course: str) -> bool:
@@ -41,23 +45,40 @@ def анонсы(courses: list[str]) -> set[str]:
 
 
 def цели_курса(course: str) -> list[str]:
-	"""Цели из действующей директивы курса, по строке на цель.
+	"""Цели курса по порядку: главы действующего релиза, иначе цели анонса.
 
-	Из директивы наружу выходит только это поле. Как вести курс, кого учим и
-	что запоминать об ученике остаётся на сервере.
-
-	У курса из релиза цели курса — цели глав: их названия по порядку релиза
-	(learning-services#500). Директивы у такого курса нет.
+	У курса из релиза цели — названия его глав по порядку релиза
+	(learning-services#500); поле анонса у него не читается.
 	"""
-	if релиз := frappe.get_cached_value("LMS Course", course, "active_release"):
+	релиз, цели = frappe.get_cached_value("LMS Course", course, ["active_release", ПОЛЕ_ЦЕЛЕЙ]) or (None, None)
+	if релиз:
 		return frappe.get_all(
 			"Agent Release Chapter",
 			filters={"parenttype": "Agent Course Release", "parent": релиз},
 			pluck="title",
 			order_by="idx asc",
 		)
-	найденная = directives.запись("Agent Course Directive", {"course": course}, ("objectives",))
-	return directives.строки(найденная.objectives) if найденная else []
+	return строки(цели)
+
+
+def строки(значение) -> list[str]:
+	"""Цели — списком: из списка, строки JSON со списком или текста по строке на цель.
+
+	Пустые строки и пробелы по краям отбрасываются; элемент списка с
+	переводами строк — несколько целей: поле хранит цель на строку. Строка
+	JSON — потому что Frappe отдаёт тело формы строками.
+	"""
+	if isinstance(значение, str) and значение.strip().startswith("["):
+		# Текст, который лишь начинается со скобки, — тоже цели, а не ошибка.
+		try:
+			значение = json.loads(значение)
+		except ValueError:
+			pass
+	if isinstance(значение, str):
+		части = [значение]
+	else:
+		части = [str(часть) for часть in (значение or []) if часть is not None]
+	return [строка.strip() for часть in части for строка in часть.splitlines() if строка.strip()]
 
 
 def подписан(user: str, course: str) -> bool:

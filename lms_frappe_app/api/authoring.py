@@ -31,6 +31,7 @@ from lms_frappe_app.agent_learning import (
 	testers,
 )
 from lms_frappe_app.agent_learning.artifacts import templates
+from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
@@ -70,7 +71,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 )
 
 ГЛАВА_НЕ_НАЙДЕНА = "chapter_not_found"
-КУРС_НЕ_ГОТОВ = "course_not_ready"
 КВИЗ_УЖЕ_ЕСТЬ = "quiz_exists"
 КВИЗА_НЕТ = "quiz_missing"
 ВОПРОС_НЕ_НАЙДЕН = "question_not_found"
@@ -82,6 +82,10 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ТЕСТЕР_НЕ_НАЙДЕН = "tester_not_found"
 КУРС_УЖЕ_ОТКРЫТ = "course_already_published"
 КУРС_ИЗ_РЕЛИЗА = "course_from_release"
+КУРС_БЕЗ_РЕЛИЗА = "course_not_released"
+ИНСТРУКТОРОВ_НЕТ = "instructors_empty"
+ИНСТРУКТОР_НЕ_НАЙДЕН = "instructor_not_found"
+ИНСТРУКТОР_НЕ_АВТОР = "instructor_not_author"
 
 
 def _автор() -> str:
@@ -106,7 +110,11 @@ def _автор() -> str:
 @frappe.whitelist(methods=["POST"])
 @контракт
 def create_course(title: str, summary: str, description: str | None = None) -> dict:
-	"""Заводит черновик курса. Публикуется отдельным вызовом."""
+	"""Заводит курс-анонс: карточку без уроков.
+
+	Программу курсу даёт первый релиз (`publish_release` с `course`), до него
+	курс можно анонсировать (`announce_course`).
+	"""
 	автор = _автор()
 	курс = frappe.get_doc(
 		{
@@ -124,11 +132,7 @@ def create_course(title: str, summary: str, description: str | None = None) -> d
 @frappe.whitelist()
 @контракт
 def list_courses(published: bool | None = None) -> dict:
-	"""Курсы платформы: черновики и опубликованные.
-
-	Без этого метода сборка разваливается на второй сессии: все остальные
-	инструменты требуют идентификатор, а взять его было негде — куратор,
-	вернувшийся назавтра, не мог найти собственный курс.
+	"""Курсы платформы: черновики, анонсы и опубликованные — с действующим релизом.
 
 	Курсы общие, поэтому список полный, а не «мои». Фильтр `published`
 	сужает до одного состояния.
@@ -140,12 +144,21 @@ def list_courses(published: bool | None = None) -> dict:
 	курсы = frappe.get_all(
 		"LMS Course",
 		filters=отбор,
-		fields=["name", "title", "short_introduction", "published", "upcoming", "modified"],
+		fields=[
+			"name",
+			"title",
+			"short_introduction",
+			"published",
+			"upcoming",
+			"modified",
+			"course_key",
+			"active_release",
+		],
 		order_by="modified desc",
 	)
-	# Число уроков — одним обходом на весь список: порядок глав и уроков,
-	# собираемый на каждый курс отдельно, давал по пять запросов на строку.
+	# Число уроков и релизы — одним запросом на весь список, а не на строку.
 	уроков = structure.уроков_в_курсах([курс.name for курс in курсы])
+	релизы = _действующие_релизы([курс.active_release for курс in курсы if курс.active_release])
 	return {
 		"courses": [
 			{
@@ -154,11 +167,30 @@ def list_courses(published: bool | None = None) -> dict:
 				"summary": курс.short_introduction,
 				"published": bool(курс.published),
 				"upcoming": bool(курс.published and курс.upcoming),
+				"course_key": курс.course_key or None,
+				"release": релизы.get(курс.active_release),
 				"lessons_total": уроков.get(курс.name, 0),
 				"updated_at": курс.modified.isoformat() if курс.modified else None,
 			}
 			for курс in курсы
 		]
+	}
+
+
+def _действующие_релизы(имена: list[str]) -> dict[str, dict]:
+	"""Релиз → `{version, published_at}` одним запросом."""
+	if not имена:
+		return {}
+	return {
+		релиз.name: {
+			"version": релиз.version,
+			"published_at": релиз.published_at.isoformat() if релиз.published_at else None,
+		}
+		for релиз in frappe.get_all(
+			releases.РЕЛИЗ,
+			filters={"name": ("in", имена)},
+			fields=["name", "version", "published_at"],
+		)
 	}
 
 
@@ -171,14 +203,22 @@ def update_course(
 	description: str | None = None,
 	promise: str | None = None,
 ) -> dict:
-	"""Правит название, описания или обещание курса.
+	"""Правит название, описания или обещание анонса — курса без релиза и уроков.
 
 	`promise` — что человек получит к концу курса; звучит ученику на первом
-	занятии по курсу. Пустая строка очищает (#238).
+	занятии по курсу. Пустая строка очищает (#238). Карточку курса из релиза
+	пишет релиз (`course_from_release`).
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	_не_из_релиза("LMS Course", course)
+	if уроки := structure.уроки_курса(course):
+		raise Отказ(
+			releases.У_КУРСА_ЕСТЬ_УРОКИ,
+			"Правится только анонс — курс без уроков: программу и карточку курса даёт релиз",
+			course=course,
+			lessons=len(уроки),
+		)
 	документ = frappe.get_doc("LMS Course", course)
 	for поле, значение in (
 		("title", title),
@@ -1316,7 +1356,7 @@ def ревизия_замечаний(course: str) -> str | None:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def publish_release(release, course: str | None = None) -> dict:
+def publish_release(release, course: str | None = None, instructors=None) -> dict:
 	"""Публикует релиз курса целиком — новой версией.
 
 	`release` — релиз от компилятора курса (объект или строка JSON), формат —
@@ -1326,9 +1366,59 @@ def publish_release(release, course: str | None = None) -> dict:
 	черновиком. `course` — курс без уроков (анонс), к которому привязать первый
 	релиз. Признак «опубликован» не меняется: новый релиз опубликованного курса
 	действует сразу.
+
+	`instructors` — почты или имена пользователей: список заменяет
+	инструкторов курса, и вызвавший без места в нём инструктором не
+	становится; не передан — инструкторы не трогаются (новый курс получает
+	вызвавшего). Применяется и к неизменному релизу: в дайджест релиза
+	инструкторы не входят.
 	"""
 	автор = _автор()
-	return releases.опубликовать(release, course or None, автор)
+	инструкторы = None if instructors is None else _инструкторы(instructors)
+	return releases.опубликовать(release, course or None, автор, инструкторы)
+
+
+def _инструкторы(значение) -> list[str]:
+	"""Имена пользователей Frappe по списку почт или имён — или отказ.
+
+	Проверка — до первой записи публикации: отказ здесь ничего не оставляет.
+	Пустой список — отказ: курс без инструкторов некому вести. Пользователь —
+	действующая учётная запись с одной из авторских ролей (`АВТОРСКИЕ_РОЛИ`,
+	как у `_автор`). Два запроса на весь список, а не на адрес.
+	"""
+	if isinstance(значение, str) and значение.strip().startswith("["):
+		значение = frappe.parse_json(значение)
+	адреса = testers.адреса(значение)
+	if not адреса:
+		raise Отказ(ИНСТРУКТОРОВ_НЕТ, "Список инструкторов пуст: у курса должен быть инструктор")
+	найдены = frappe.get_all(
+		"User",
+		filters={"enabled": 1},
+		or_filters={"name": ("in", адреса), "email": ("in", адреса)},
+		fields=["name", "email"],
+	)
+	по_адресу = {}
+	for пользователь in найдены:
+		for адрес in (пользователь.name, пользователь.email):
+			if адрес:
+				по_адресу.setdefault(адрес.lower(), пользователь.name)
+	if нет := [адрес for адрес in адреса if адрес not in по_адресу]:
+		raise Отказ(ИНСТРУКТОР_НЕ_НАЙДЕН, "Нет таких пользователей", users=нет)
+	имена = list(dict.fromkeys(по_адресу[адрес] for адрес in адреса))
+	авторы = set(
+		frappe.get_all(
+			"Has Role",
+			filters={"parenttype": "User", "parent": ("in", имена), "role": ("in", list(АВТОРСКИЕ_РОЛИ))},
+			pluck="parent",
+		)
+	)
+	if не_авторы := [имя for имя in имена if имя not in авторы]:
+		raise Отказ(
+			ИНСТРУКТОР_НЕ_АВТОР,
+			"Инструктор курса — пользователь с ролью Course Creator или Moderator",
+			users=не_авторы,
+		)
+	return имена
 
 
 # --- обзор и публикация ---
@@ -1464,51 +1554,79 @@ def get_lesson(lesson: str) -> dict:
 @frappe.whitelist(methods=["POST"])
 @контракт
 def publish_course(course: str) -> dict:
-	"""Открывает курс ученикам, если он к этому готов."""
+	"""Открывает ученикам курс с действующим релизом.
+
+	Релиз проверен целиком при публикации (`publish_release`); `warnings` —
+	предупреждения проверок его снимка, те же, что вернула его публикация.
+	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	готовность = course_builder.проверить_готовность(course)
-	if готовность["blocking"]:
+	релиз = frappe.db.get_value("LMS Course", course, "active_release")
+	if not релиз:
 		raise Отказ(
-			КУРС_НЕ_ГОТОВ,
-			"Курс не готов к публикации",
+			КУРС_БЕЗ_РЕЛИЗА,
+			"У курса нет релиза: откройте его ученикам после публикации релиза",
 			course=course,
-			problems=готовность["blocking"],
 		)
+	_, предупреждения = проверки_релиза.проблемы(
+		json.loads(frappe.db.get_value(releases.РЕЛИЗ, релиз, "snapshot"))
+	)
 	# Анонс выходит той же публикацией: флаг снимается, и тем, кто просил
 	# сообщить о выходе, уходит письмо (learning-services#389).
 	frappe.db.set_value("LMS Course", course, {"published": 1, "upcoming": 0})
 	return {
 		"id": course,
 		"published": True,
-		"warnings": готовность["warnings"],
+		"warnings": предупреждения,
 		"notified": notices.уведомить_о_выходе(course),
 	}
 
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def announce_course(course: str) -> dict:
+def announce_course(course: str, objectives=None) -> dict:
 	"""Показывает курс в каталоге как анонс: записаться нельзя, можно
 	попросить сообщить о выходе.
 
 	Готовности курса анонс не требует — уроков может ещё не быть. Требует
 	целей курса: у анонса наружу выходят только они (learning-services#389).
-	Открытый курс анонсом не становится: на него уже записаны ученики.
+	У курса из релиза цели — названия глав действующего релиза, `objectives`
+	к нему не передаются. У курса без релиза `objectives` (список или текст по
+	строке на цель) пишутся в поле курса; не переданы — действуют записанные
+	раньше (learning-services#512). Открытый курс анонсом не становится: на
+	него уже записаны ученики.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	сведения = frappe.db.get_value("LMS Course", course, ["published", "upcoming"], as_dict=True)
+	сведения = frappe.db.get_value(
+		"LMS Course",
+		course,
+		["published", "upcoming", "active_release", announcements.ПОЛЕ_ЦЕЛЕЙ],
+		as_dict=True,
+	)
+	if сведения.active_release and objectives is not None:
+		raise Отказ(
+			КУРС_ИЗ_РЕЛИЗА,
+			"Цели курса из релиза — названия его глав: правьте карту курса и публикуйте новый релиз",
+			course=course,
+		)
 	if сведения.published and not сведения.upcoming:
 		raise Отказ(КУРС_УЖЕ_ОТКРЫТ, "Курс уже открыт ученикам", course=course)
-	цели = announcements.цели_курса(course)
+	поля = {"published": 1, "upcoming": 1}
+	if сведения.active_release:
+		цели = announcements.цели_курса(course)
+	elif objectives is not None:
+		цели = announcements.строки(objectives)
+		поля[announcements.ПОЛЕ_ЦЕЛЕЙ] = "\n".join(цели)
+	else:
+		цели = announcements.строки(сведения.get(announcements.ПОЛЕ_ЦЕЛЕЙ))
 	if not цели:
 		raise Отказ(
 			НЕТ_ЦЕЛЕЙ_КУРСА,
-			"У курса нет целей: задайте их в директиве курса (objectives)",
+			"У курса нет целей: передайте их в objectives, по строке на цель",
 			course=course,
 		)
-	frappe.db.set_value("LMS Course", course, {"published": 1, "upcoming": 1})
+	frappe.db.set_value("LMS Course", course, поля)
 	return {"id": course, "published": True, "upcoming": True, "objectives": цели}
 
 

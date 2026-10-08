@@ -60,39 +60,12 @@ class IntegrationTestAuthoring(IntegrationTestCase):
 		self.assertEqual(ответ["error"]["code"], "order_mismatch")
 		self.assertEqual(уроки_главы(self.глава), self.уроки)
 
-	def test_публикация_блокируется_пока_курс_не_готов(self):
-		authoring.update_lesson(lesson=self.уроки[0], body="")
-
+	def test_курс_без_релиза_не_открывается(self):
+		"""Открывается только курс с действующим релизом."""
 		ответ = authoring.publish_course(course=self.курс)
 
-		self.assertEqual(ответ["error"]["code"], "course_not_ready")
-		self.assertIn("empty_lesson", [п["code"] for п in ответ["error"]["problems"]])
+		self.assertEqual(ответ["error"]["code"], "course_not_released")
 		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "published"))
-
-	def test_курс_снимается_с_публикации_и_возвращается_обратно(self):
-		"""`Why:` снятие — обратимая правка каталога, а не откат обучения:
-		прогресс ученика переживает и снятие, и повторную публикацию."""
-		ученик = создать_ученика(f"reader-{frappe.generate_hash(length=6)}@example.com")
-		self.assertTrue(authoring.publish_course(course=self.курс)["data"]["published"])
-		frappe.get_doc(
-			{
-				"doctype": "LMS Course Progress",
-				"lesson": self.уроки[0],
-				"member": ученик,
-				"course": self.курс,
-				"status": "Complete",
-			}
-		).insert(ignore_permissions=True)
-
-		ответ = authoring.unpublish_course(course=self.курс)["data"]
-
-		self.assertFalse(ответ["published"])
-		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "published"))
-		self.assertTrue(
-			frappe.db.exists("LMS Course Progress", {"member": ученик, "lesson": self.уроки[0]}),
-			"прогресс ученика пропал вместе с публикацией",
-		)
-		self.assertTrue(authoring.publish_course(course=self.курс)["data"]["published"])
 
 	def test_снятие_несуществующего_курса_даёт_код(self):
 		ответ = authoring.unpublish_course(course="нет-такого-курса")
@@ -163,12 +136,22 @@ class IntegrationTestAuthoringEdits(IntegrationTestCase):
 		self.assertFalse(наш[0]["published"])
 		self.assertEqual(наш[0]["lessons_total"], 1)
 
-	def test_название_курса_и_главы_правятся(self):
-		authoring.update_course(course=self.курс, title="Стало", summary="и описание")
+	def test_название_главы_правится(self):
 		authoring.update_chapter(chapter=self.глава, title="Стало")
 
-		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "title"), "Стало")
 		self.assertEqual(frappe.db.get_value("Course Chapter", self.глава, "title"), "Стало")
+
+	def test_правится_только_анонс_без_уроков(self):
+		ответ = authoring.update_course(course=self.курс, title="Стало")
+
+		self.assertEqual(ответ["error"]["code"], "course_has_content")
+		self.assertEqual(ответ["error"]["lessons"], 1)
+		self.assertNotEqual(frappe.db.get_value("LMS Course", self.курс, "title"), "Стало")
+
+		анонс = authoring.create_course(title="Анонс", summary="было")["data"]["id"]
+		ответ = authoring.update_course(course=анонс, title="Стало", summary="и описание")
+		self.assertEqual(ответ["data"]["title"], "Стало")
+		self.assertEqual(frappe.db.get_value("LMS Course", анонс, "short_introduction"), "и описание")
 
 	def test_второй_квиз_на_уроке_отклоняется(self):
 		"""`Why:` урок отдаёт агенту ровно один квиз, второй становится
@@ -1094,14 +1077,15 @@ class IntegrationTestLessonHookAndPromise(IntegrationTestCase):
 		self.assertFalse(frappe.db.get_value("Course Lesson", self.урок, "lesson_hook"))
 
 	def test_обещание_курса_задаётся_и_очищается(self):
-		ответ = authoring.update_course(course=self.курс, promise="Уйдёте с готовым канвасом")
+		анонс = authoring.create_course(title="Анонс", summary="Без уроков")["data"]["id"]
+		ответ = authoring.update_course(course=анонс, promise="Уйдёте с готовым канвасом")
 		self.assertEqual(ответ["data"]["promise"], "Уйдёте с готовым канвасом")
 		self.assertEqual(
-			frappe.db.get_value("LMS Course", self.курс, "course_promise"), "Уйдёте с готовым канвасом"
+			frappe.db.get_value("LMS Course", анонс, "course_promise"), "Уйдёте с готовым канвасом"
 		)
 
-		authoring.update_course(course=self.курс, promise="")
-		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "course_promise"))
+		authoring.update_course(course=анонс, promise="")
+		self.assertFalse(frappe.db.get_value("LMS Course", анонс, "course_promise"))
 
 
 class IntegrationTestReadinessHookAndPromise(IntegrationTestCase):
@@ -1128,7 +1112,7 @@ class IntegrationTestReadinessHookAndPromise(IntegrationTestCase):
 		self.assertNotIn("lesson_without_hook", [п["code"] for п in готовность["blocking"]])
 
 	def test_с_обещанием_и_зачином_предупреждений_нет(self):
-		authoring.update_course(course=self.курс, promise="Уйдёте с канвасом")
+		frappe.db.set_value("LMS Course", self.курс, "course_promise", "Уйдёте с канвасом")
 		authoring.update_lesson(lesson=self.урок, lesson_hook="Зачем это сейчас")
 
 		коды = [п["code"] for п in self.готовность()["warnings"]]

@@ -13,7 +13,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import notices
+from lms_frappe_app.agent_learning import announcements, notices
 from lms_frappe_app.api import authoring, public, student, team
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -50,14 +50,17 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 			frappe.set_user("Administrator")
 
 	def анонсировать(self) -> dict:
-		self.от_имени(
+		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, objectives=ЦЕЛИ)
+		self.assertTrue(ответ["ok"], ответ)
+		return ответ["data"]
+
+	def опубликовать_релиз(self, **аргументы) -> dict:
+		ответ = self.от_имени(
 			self.куратор,
-			authoring.set_course_directive,
-			course=self.курс,
-			teaching_directive="Вести на примерах ученика",
-			objectives=ЦЕЛИ,
+			authoring.publish_release,
+			release=аргументы.pop("release", None) or пример_релиза(f"an-{frappe.generate_hash(length=6)}"),
+			**аргументы,
 		)
-		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
 		self.assertTrue(ответ["ok"], ответ)
 		return ответ["data"]
 
@@ -67,17 +70,49 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 	# --- куратор ---
 
 	def test_анонс_без_целей_курса_отклоняется(self):
-		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
-		self.assertEqual(self.код_отказа(ответ), authoring.НЕТ_ЦЕЛЕЙ_КУРСА)
-		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "published"))
+		for цели in (None, "", " \n ", []):
+			аргументы = {} if цели is None else {"objectives": цели}
+			ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, **аргументы)
+			self.assertEqual(self.код_отказа(ответ), authoring.НЕТ_ЦЕЛЕЙ_КУРСА, цели)
+		сведения = frappe.db.get_value(
+			"LMS Course", self.курс, ["published", "announce_objectives"], as_dict=True
+		)
+		self.assertFalse(сведения.published)
+		self.assertFalse(сведения.announce_objectives)
 
 	def test_анонс_не_требует_уроков_и_отдаёт_цели(self):
 		данные = self.анонсировать()
 		self.assertEqual(
 			данные["objectives"], ["Описать процесс в пять колонок", "Найти стыки между отделами"]
 		)
-		сведения = frappe.db.get_value("LMS Course", self.курс, ["published", "upcoming"], as_dict=True)
+		сведения = frappe.db.get_value(
+			"LMS Course", self.курс, ["published", "upcoming", "announce_objectives"], as_dict=True
+		)
 		self.assertEqual((сведения.published, сведения.upcoming), (1, 1))
+		self.assertEqual(сведения.announce_objectives, ЦЕЛИ)
+
+	def test_цели_анонса_списком_и_повторный_анонс_без_целей(self):
+		"""Список и строка JSON — те же цели; без `objectives` действуют записанные."""
+		for цели in (["Первая", " ", "Вторая "], '["Первая", "Вторая"]'):
+			ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, objectives=цели)
+			self.assertEqual(ответ["data"]["objectives"], ["Первая", "Вторая"], цели)
+		self.от_имени(self.куратор, authoring.unpublish_course, course=self.курс)
+
+		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
+
+		self.assertEqual(ответ["data"]["objectives"], ["Первая", "Вторая"])
+		self.assertTrue(frappe.db.get_value("LMS Course", self.курс, "upcoming"))
+
+	def test_новые_цели_заменяют_прежние(self):
+		self.анонсировать()
+
+		ответ = self.от_имени(
+			self.куратор, authoring.announce_course, course=self.курс, objectives="Одна цель"
+		)
+
+		self.assertEqual(ответ["data"]["objectives"], ["Одна цель"])
+		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
+		self.assertEqual(next(к for к in курсы if к["id"] == self.курс)["objectives"], ["Одна цель"])
 
 	def test_открытый_курс_анонсом_не_становится(self):
 		frappe.db.set_value("LMS Course", self.курс, "published", 1)
@@ -180,19 +215,28 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 	# --- выход ---
 
+	def test_анонс_без_релиза_не_открывается(self):
+		self.анонсировать()
+
+		ответ = self.от_имени(self.куратор, authoring.publish_course, course=self.курс)
+
+		self.assertEqual(self.код_отказа(ответ), authoring.КУРС_БЕЗ_РЕЛИЗА)
+		self.assertTrue(frappe.db.get_value("LMS Course", self.курс, "upcoming"))
+		self.письма.assert_not_called()
+
 	def test_выход_анонса_пишет_подписавшимся_один_раз(self):
 		self.анонсировать()
 		self.от_имени(self.ученик, student.notify_when_released, course=self.курс)
-		with patch.object(authoring.course_builder, "проверить_готовность") as готовность:
-			готовность.return_value = {"blocking": [], "warnings": []}
-			первый = self.от_имени(self.куратор, authoring.publish_course, course=self.курс)
-			self.assertEqual(первый["data"]["notified"], 1)
-			self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "upcoming"))
-			self.assertEqual(self.письма.call_args.kwargs["recipients"], [self.ученик])
+		self.опубликовать_релиз(course=self.курс)
 
-			self.от_имени(self.куратор, authoring.unpublish_course, course=self.курс)
-			второй = self.от_имени(self.куратор, authoring.publish_course, course=self.курс)
-			self.assertEqual(второй["data"]["notified"], 0)
+		первый = self.от_имени(self.куратор, authoring.publish_course, course=self.курс)
+		self.assertEqual(первый["data"]["notified"], 1)
+		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "upcoming"))
+		self.assertEqual(self.письма.call_args.kwargs["recipients"], [self.ученик])
+
+		self.от_имени(self.куратор, authoring.unpublish_course, course=self.курс)
+		второй = self.от_имени(self.куратор, authoring.publish_course, course=self.курс)
+		self.assertEqual(второй["data"]["notified"], 0)
 		self.assertEqual(self.письма.call_count, 1)
 
 		ответ = self.от_имени(self.ученик, student.enroll, course=self.курс)
@@ -201,10 +245,7 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 	def test_курс_из_релиза_анонсируется_целями_глав(self):
 		"""Цели курса из релиза — цели глав, их названия по порядку: директивы у
 		такого курса нет, и анонс без неё не отказывает (learning-services#500)."""
-		ключ = f"an-{frappe.generate_hash(length=6)}"
-		курс = self.от_имени(self.куратор, authoring.publish_release, release=пример_релиза(ключ))["data"][
-			"course"
-		]
+		курс = self.опубликовать_релиз()["course"]
 
 		ответ = self.от_имени(self.куратор, authoring.announce_course, course=курс)
 
@@ -213,3 +254,103 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		каталог = self.от_имени(self.ученик, student.list_catalog)["data"]
 		анонс = next(к for к in каталог["courses"] if к["id"] == курс)
 		self.assertEqual(анонс["objectives"], ["Глава первая", "Глава вторая"])
+
+	def test_курсу_из_релиза_цели_не_передаются(self):
+		курс = self.опубликовать_релиз()["course"]
+
+		ответ = self.от_имени(
+			self.куратор, authoring.announce_course, course=курс, objectives="Своя цель"
+		)
+
+		self.assertEqual(self.код_отказа(ответ), authoring.КУРС_ИЗ_РЕЛИЗА)
+		сведения = frappe.db.get_value(
+			"LMS Course", курс, ["published", "announce_objectives"], as_dict=True
+		)
+		self.assertFalse(сведения.published)
+		self.assertFalse(сведения.announce_objectives)
+
+	def test_анонс_с_первым_релизом_берёт_цели_глав(self):
+		"""Цели анонса остаются в поле, но у курса с релизом наружу — главы релиза."""
+		self.анонсировать()
+
+		self.опубликовать_релиз(course=self.курс)
+
+		каталог = self.от_имени(self.ученик, student.list_catalog)["data"]
+		анонс = next(к for к in каталог["courses"] if к["id"] == self.курс)
+		self.assertEqual(анонс["objectives"], ["Глава первая", "Глава вторая"])
+		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
+		self.assertEqual(ответ["data"]["objectives"], ["Глава первая", "Глава вторая"])
+
+
+class IntegrationTestПереносЦелейАнонса(IntegrationTestCase):
+	"""Патч `announce_objectives`: цели директивы курса — в поле курса (learning-services#512)."""
+
+	ПОЛЕ = "LMS Course-announce_objectives"
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.анонс = создать_курс(f"Перенос {суффикс}")
+		self.заполненный = создать_курс(f"Заполненный {суффикс}")
+		frappe.db.set_value("LMS Course", self.заполненный, "announce_objectives", "Своя цель")
+		self.из_релиза = authoring.publish_release(release=пример_релиза(f"mv-{суффикс}"))["data"]["course"]
+		действующие = {}
+		for курс in (self.анонс, self.заполненный, self.из_релиза):
+			self.директива(курс, "Старая цель")
+			действующие[курс] = self.директива(курс, "Первая\n\nВторая ")
+		# Снятая с действия свежая версия не переносится.
+		frappe.db.set_value(
+			"Agent Course Directive", self.директива(self.анонс, "Снятая"), "is_active", 0
+		)
+		frappe.db.set_value("Agent Course Directive", действующие[self.анонс], "is_active", 1)
+
+	def директива(self, курс: str, цели: str) -> str:
+		return frappe.get_doc(
+			{"doctype": "Agent Course Directive", "course": курс, "objectives": цели, "is_active": 1}
+		).insert(ignore_permissions=True).name
+
+	def цели(self, курс: str) -> str | None:
+		return frappe.db.get_value("LMS Course", курс, "announce_objectives")
+
+	def test_переносит_анонсу_без_релиза_и_только_в_пустое_поле(self):
+		from lms_frappe_app.patches.v0_1.announce_objectives import execute
+
+		execute()
+		execute()  # повторный запуск ничего не меняет
+
+		self.assertEqual(self.цели(self.анонс), "Первая\nВторая")
+		self.assertEqual(self.цели(self.заполненный), "Своя цель")
+		self.assertFalse(self.цели(self.из_релиза))
+		self.assertEqual(announcements.цели_курса(self.анонс), ["Первая", "Вторая"])
+
+	def test_заводит_поле_как_в_фикстуре(self):
+		"""Патчи идут раньше синхронизации фикстур: поле патч заводит сам — тем же,
+		что в фикстуре. Вызов подменён: создание колонки фиксирует транзакцию теста."""
+		import json
+		from pathlib import Path
+
+		from lms_frappe_app.patches.v0_1 import announce_objectives
+
+		with patch.object(announce_objectives, "create_custom_field") as создать:
+			announce_objectives.execute()
+
+		создать.assert_called_once_with("LMS Course", announce_objectives.ПОЛЕ)
+		фикстуры = json.loads(
+			(Path(announce_objectives.__file__).parents[2] / "fixtures" / "custom_field.json").read_text(
+				encoding="utf-8"
+			)
+		)
+		фикстура = next(п for п in фикстуры if п["name"] == self.ПОЛЕ)
+		self.assertEqual(
+			{ключ: значение for ключ, значение in фикстура.items() if ключ not in ("doctype", "name", "dt")},
+			announce_objectives.ПОЛЕ,
+		)
+
+	def test_без_таблицы_директив_только_поле(self):
+		from lms_frappe_app.patches.v0_1.announce_objectives import execute
+
+		with patch.object(frappe.db, "table_exists", return_value=False):
+			execute()
+
+		self.assertFalse(self.цели(self.анонс))

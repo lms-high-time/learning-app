@@ -277,6 +277,16 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual(ответ["data"]["warnings"], [])
 		self.assertEqual(frappe.db.get_value("LMS Course", первый["course"], "published"), 1)
 
+	def test_открытие_отдаёт_предупреждения_действующего_релиза(self):
+		релиз = пример_релиза(self.ключ)
+		релиз["chapters"][1]["description"] = ""
+		первый = self.опубликовать(релиз)
+		self.assertTrue(первый["warnings"])
+
+		ответ = authoring.publish_course(course=первый["course"])
+
+		self.assertEqual(ответ["data"]["warnings"], первый["warnings"])
+
 	def test_новый_релиз_двигает_ревизию(self):
 		первый = self.опубликовать()
 		до = authoring.course_revision(course=первый["course"])["data"]["revision"]
