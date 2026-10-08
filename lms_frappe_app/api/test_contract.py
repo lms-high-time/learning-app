@@ -44,6 +44,7 @@ from lms_frappe_app.tests.sample_data import (
 	привязать_главу,
 	привязать_урок,
 	создать_домашку,
+	схема_документа,
 )
 
 #: Документ контракта лежит в корне репозитория, рядом с README и CONTRIBUTING.
@@ -359,41 +360,12 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		)
 		frappe.set_user(self.куратор)
 
-		# Документ курса из шаблона: урок блока — в правках курса.
-		шаблон = self.сверить(
-			"authoring.set_artifact_template",
-			authoring.set_artifact_template(
-				template=f"summary-{суффикс}",
-				title="Резюме проекта",
-				blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой"}],
-				note="Первая версия",
-				description="Резюме проекта: цель одной фразой",
-			),
-		)["template"]
-		self.сверить("authoring.list_artifact_templates", authoring.list_artifact_templates())
-		self.сверить("authoring.artifact_template", authoring.artifact_template(template=шаблон))
-		self.сверить(
-			"authoring.set_course_artifact_template",
-			authoring.set_course_artifact_template(
-				course=курс,
-				artifact="summary",
-				template=шаблон,
-				overlay={"blocks": {"goal": {"lesson": с_квизом}}},
-			),
-		)
-		authoring.set_artifact_template(
-			template=шаблон,
+		# Документ курса — тем же `записать_схему`, что пишет его из релиза.
+		схема_документа(
+			course=курс,
+			artifact="summary",
 			title="Резюме проекта",
-			blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой, с цифрой"}],
-			note="Цель — с цифрой",
-		)
-		self.сверить(
-			"authoring.upgrade_course_artifact",
-			authoring.upgrade_course_artifact(course=курс, artifact="summary", dry_run=True),
-		)
-		self.сверить(
-			"authoring.upgrade_course_artifact",
-			authoring.upgrade_course_artifact(course=курс, artifact="summary"),
+			blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой", "lesson": с_квизом}],
 		)
 
 		self.сверить("authoring.course_revision", authoring.course_revision(course=курс))

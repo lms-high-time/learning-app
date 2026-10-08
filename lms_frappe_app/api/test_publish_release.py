@@ -75,17 +75,13 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 		)
 
 	def test_курс_из_релиза_не_правится_мимо_релиза(self):
-		"""Курс из релиза правится новым релизом: правка карточки и документа мимо него — отказ."""
+		"""Курс из релиза правится новым релизом: правка карточки мимо него — отказ."""
 		frappe.set_user(self.куратор)
 		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
-		вызовы = {
-			"update_course": dict(course=курс, title="Другое"),
-			"set_course_artifact_template": dict(course=курс, artifact="notebook", template="any"),
-			"upgrade_course_artifact": dict(course=курс, artifact="notebook"),
-		}
-		for метод, параметры in вызовы.items():
-			ответ = getattr(authoring, метод)(**параметры)
-			self.assertEqual(ответ.get("error", {}).get("code"), "course_from_release", (метод, ответ))
+
+		ответ = authoring.update_course(course=курс, title="Другое")
+
+		self.assertEqual(ответ.get("error", {}).get("code"), "course_from_release", ответ)
 		self.assertNotEqual(frappe.db.get_value("LMS Course", курс, "title"), "Другое")
 
 	def test_руководителю_нельзя(self):

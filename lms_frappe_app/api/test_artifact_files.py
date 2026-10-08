@@ -7,7 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.artifacts import codes, write
-from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты
+from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
 from lms_frappe_app.agent_learning.spaces import пространство_курса
 from lms_frappe_app.api import manager, student
 from lms_frappe_app.tests.sample_data import (
@@ -357,9 +357,9 @@ class IntegrationTestArtifactKinds(IntegrationTestCase):
 	def test_вид_и_форматы_сохраняются(self):
 		self.схема([{"key": "money", "title": "Финплан", "kind": "file", "accept": ".XLSX, csv"}])
 
-		блок = _действующие_артефакты(self.курс)[0]["blocks"][0]
+		блок = _схемы_курса(self.курс)[0].blocks[0]
 
-		self.assertEqual((блок["kind"], блок["accept"]), ("file", ["xlsx", "csv"]))
+		self.assertEqual((блок.kind, блок.accept), ("file", "xlsx,csv"))
 
 	def test_неизвестный_вид_отказ(self):
 		ответ = self.схема([{"key": "money", "title": "Финплан", "kind": "pdf"}])

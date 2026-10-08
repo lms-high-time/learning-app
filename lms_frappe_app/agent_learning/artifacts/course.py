@@ -98,96 +98,10 @@ def _блок_схемы(course: str, artifact: str, key: str):
 	return схема, блок
 
 
-def _действующие_артефакты(course: str) -> list[dict]:
-	"""Схемы документов курса, которые сейчас получает ученик, с версиями."""
-	записи = frappe.get_all(
-		"Agent Course Artifact",
-		filters={"course": course, "is_active": 1},
-		fields=[
-			"name",
-			"slug",
-			"title",
-			"purpose",
-			"layout",
-			"version",
-			"template",
-			"template_version",
-			"overlay",
-		],
-		order_by="creation asc",
-	)
-	последние = последние_версии_шаблонов({з.template for з in записи if з.template})
-	собранное = []
-	for запись in записи:
-		собранное.append(
-			{
-				"id": запись.name,
-				"version": запись.version,
-				"artifact": запись.slug,
-				"title": запись.title,
-				"purpose": запись.purpose or None,
-				"layout": запись.layout,
-				# Шаблон и закреплённая версия; `template_latest` — чтобы автор
-				# видел, что шаблон ушёл вперёд (learning-services#370).
-				"template": запись.template or None,
-				"template_version": запись.template_version or None,
-				"template_latest": последние.get(запись.template),
-				# Правки курса к шаблону; у схемы целиком — `null`. `Why:`
-				# перепривязка заменяет правки целиком, и агент, не видя их,
-				# восстанавливал бы уроки всех блоков по памяти (learning-services#383).
-				"overlay": правки_привязки(запись),
-				"blocks": [
-					{
-						"key": блок.block_key,
-						"title": блок.title,
-						"hint": блок.hint or "",
-						"lesson": блок.lesson or None,
-						"span": блок.span or 1,
-						"kind": files.вид(блок),
-						"accept": files.допустимые(блок),
-					}
-					for блок in frappe.get_all(
-						"Agent Artifact Block",
-						filters={"parent": запись.name},
-						fields=["block_key", "title", "hint", "lesson", "span", "kind", "accept"],
-						order_by="idx asc",
-					)
-				],
-			}
-		)
-	return собранное
-
-
-def правки_привязки(запись) -> dict | None:
-	"""Правки курса к шаблону словарём; документ со схемой целиком — `None`."""
-	if not запись.template:
-		return None
-	try:
-		правки = json.loads(запись.overlay or "{}")
-	except ValueError:
-		return {}
-	return правки if isinstance(правки, dict) else {}
-
-
-def последние_версии_шаблонов(шаблоны: set[str]) -> dict[str, int]:
-	"""Последняя версия каждого названного шаблона — одним запросом."""
-	последние: dict[str, int] = {}
-	if not шаблоны:
-		return последние
-	for запись in frappe.get_all(
-		"Agent Artifact Template",
-		filters={"template": ("in", sorted(шаблоны))},
-		fields=["template", "version"],
-	):
-		последние[запись.template] = max(последние.get(запись.template, 0), запись.version)
-	return последние
-
-
 def строки_схемы(блоки: list) -> list[dict]:
 	"""Блоки от автора — строками схемы в каноническом виде; неверные — отказ.
 
-	Базу не трогает: так же проверяются блоки шаблона, у которого курса нет.
-	`блоки` — словари или JSON-строки.
+	Базу не трогает. `блоки` — словари или JSON-строки.
 	"""
 	строки = []
 	for блок in блоки:
@@ -206,7 +120,7 @@ def строки_схемы(блоки: list) -> list[dict]:
 			{
 				"block_key": блок.get("key"),
 				"title": блок.get("title"),
-				# Что сюда записывают — ученику; у шаблонов описания нет (learning-services#500).
+				# Что сюда записывают — ученику (learning-services#500).
 				"description": блок.get("description") or None,
 				"hint": блок.get("hint"),
 				"lesson": блок.get("lesson") or None,
@@ -223,8 +137,8 @@ def строки_схемы(блоки: list) -> list[dict]:
 def блок_наружу(строка) -> dict:
 	"""Строка схемы — блоком в той форме, в какой его принимает `проверить_схему`.
 
-	`Why:` шаблон отдаёт блоки автору и собирается с правками курса в схему,
-	которую пишет тот же `записать_схему`: форма у блока одна на все пути.
+	`Why:` проверка каталога сверяет записанную схему, прогоняя её блоки через
+	ту же проверку, что и запись: форма у блока одна на оба пути.
 	"""
 	return {
 		"key": schema.ключ_блока(строка),
@@ -242,9 +156,10 @@ def проверить_схему(блоки: list, canvas) -> tuple[list[dict],
 	"""Строки схемы документа и холст — такими, какими их запишет `записать_схему`;
 	неверные — отказ. Ничего не пишет.
 
-	`Why:` предпросмотр перехода на новую версию шаблона (learning-services#383)
-	проверяет схему тем же кодом, что и запись, и отказывает там же, где
-	отказала бы запись. Ключ блока и ширина — как их приводит контроллер.
+	`Why:` публикация релиза сверяет документ релиза с действующей схемой в
+	той форме, в какой его запишет `записать_схему`, — иначе пустая подсказка
+	или ширина по умолчанию плодили бы версии. Ключ блока и ширина — как их
+	приводит контроллер.
 	"""
 	блоки = [json.loads(блок) if isinstance(блок, str) else dict(блок or {}) for блок in блоки]
 	for блок in блоки:
@@ -266,23 +181,15 @@ def записать_схему(
 	блоки: list,
 	layout: str,
 	canvas,
-	привязка: dict | None = None,
 	purpose: str | None = None,
 ) -> dict:
 	"""Схема документа курса новой версией; неверная — отказ до записи.
 
-	`блоки` — словари или JSON-строки в форме `блок_наружу`. `привязка` —
-	шаблон, его версия и правки курса, из которых схема собрана
-	(`set_course_artifact_template`); схема из релиза — без неё, и новая
-	версия шаблона не наследует.
-
-	`purpose` не назван — остаётся у прежней версии: переход на новую версию
-	шаблона и перепривязка не должны молча стирать то, что автор написал
-	ученику (learning-services#462). Пустая строка его убирает.
+	`блоки` — словари или JSON-строки в форме `блок_наружу`. `purpose` не
+	назван — остаётся у прежней версии (learning-services#462). Пустая строка
+	его убирает.
 	"""
 	строки, холст = проверить_схему(блоки, canvas)
-	привязка = привязка or {}
-	правки = привязка.get("overlay")
 	ключ = нормализовать_ключ(artifact)
 	if purpose is None:
 		purpose = frappe.db.get_value(
@@ -297,8 +204,5 @@ def записать_схему(
 			"layout": layout,
 			"blocks": строки,
 			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
-			"template": привязка.get("template"),
-			"template_version": привязка.get("template_version"),
-			"overlay": json.dumps(правки, ensure_ascii=False) if правки is not None else None,
 		},
 	)
