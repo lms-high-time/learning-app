@@ -10,10 +10,12 @@
 """
 
 import json
+from unittest import mock
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -68,6 +70,44 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 		ответ = authoring.publish_release(release=пример_релиза(self.ключ), course="")
 
 		self.assertEqual(ответ["data"]["course"], первый["course"])
+
+	def test_знак_не_для_имени_в_названии_отказ_до_записи(self):
+		"""`<` и `>` в названии главы или урока — отказ по контракту до первой
+		записи, а не `NameError` Frappe посреди публикации."""
+		frappe.set_user(self.куратор)
+		релиз = пример_релиза(self.ключ)
+		релиз["chapters"][0]["title"] = "Глава <b>"
+		релиз["lessons"][0]["title"] = "Урок a > b"
+
+		with (
+			mock.patch.object(service, "_завести_курс") as завести,
+			mock.patch.object(service.projection, "спроецировать") as спроецировать,
+		):
+			ответ = authoring.publish_release(release=релиз)
+
+		self.assertEqual(ответ["error"]["code"], "release_inconsistent", ответ)
+		self.assertEqual(
+			[(п["code"], п["where"], п["chars"]) for п in ответ["error"]["problems"]],
+			[
+				("title_forbidden_chars", "chapters[ch-1].title", ["<", ">"]),
+				("title_forbidden_chars", "lessons[l-1].title", [">"]),
+			],
+		)
+		завести.assert_not_called()
+		спроецировать.assert_not_called()
+		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
+
+	def test_знак_не_для_имени_в_новом_релизе_курс_не_трогает(self):
+		frappe.set_user(self.куратор)
+		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок <новый>"
+
+		ответ = authoring.publish_release(release=релиз)
+
+		self.assertEqual(ответ["error"]["code"], "release_inconsistent", ответ)
+		self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
+		self.assertFalse(frappe.db.exists("Course Lesson", {"course": курс, "title": "Урок <новый>"}))
 
 	def test_только_post(self):
 		self.assertEqual(

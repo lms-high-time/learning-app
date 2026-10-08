@@ -89,6 +89,28 @@ class TestПроверкиРелиза(unittest.TestCase):
 			[(п["code"], п["where"]) for п in checks.проблемы(р)[0]],
 		)
 
+	def test_запрещённые_в_имени_знаки_в_названиях_глав_и_уроков(self):
+		"""Имя главы и урока Learning — номер и название: `<` и `>` Frappe в имени не принимает."""
+		р = пример_релиза()
+		р["chapters"][0]["title"] = "Глава <первая>"
+		р["lessons"][1]["title"] = "Урок a > b"
+		self.assertEqual(
+			[п for п in checks.проблемы(р)[0] if п["code"] == "title_forbidden_chars"],
+			[
+				{"code": "title_forbidden_chars", "where": "chapters[ch-1].title", "chars": ["<", ">"]},
+				{"code": "title_forbidden_chars", "where": "lessons[l-2].title", "chars": [">"]},
+			],
+		)
+
+	def test_знаки_в_названиях_не_имён_допустимы(self):
+		"""Курс называется слагом, домашка, документ и разделы — не по названию."""
+		р = пример_релиза()
+		р["course"]["title"] = "Курс a < b"
+		р["lessons"][2]["homework"]["title"] = "Задание <1>"
+		р["document"]["title"] = "Тетрадь <черновик>"
+		р["document"]["sections"][0]["title"] = "Раздел > 1"
+		self.assertEqual(checks.проблемы(р), ([], []))
+
 	def test_пустые_тексты_ученику_предупреждения(self):
 		р = пример_релиза()
 		р["course"]["summary"] = ""
