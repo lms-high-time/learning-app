@@ -306,8 +306,8 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		лишний = frappe.get_doc({"doctype": "Course Lesson", "title": "Вне релиза", "chapter": глава})
-		# Мимо охраны курса из релиза: урок вне релиза у такого курса бывает
-		# только из правки, сделанной до неё.
+		# Мимо охраны курса из релиза: урок вне релиза у курса из релиза —
+		# запись, сделанная мимо публикации.
 		лишний.flags[ИЗ_РЕЛИЗА] = True
 		лишний.insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)

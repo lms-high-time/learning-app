@@ -4,11 +4,16 @@
 """Курс из релиза правит только публикация (learning-services#500, #512).
 
 Поля релиза у `LMS Course`, порядок глав курса, хуки `validate` и `on_trash`
-у `Course Chapter` и `Course Lesson`.
+у `Course Chapter` и `Course Lesson`, удаление строк оглавления, переименование.
+Пути — те, которыми ходят Desk и Learning: `frappe.client`, `frappe.delete_doc`,
+`delete_documents`.
 """
 
 import frappe
+from frappe.client import rename_doc, set_value
+from frappe.client import save as сохранить_из_desk
 from frappe.tests import IntegrationTestCase
+from lms.lms.api import delete_documents
 
 from lms_frappe_app.agent_learning.doctype.agent_course_release.test_agent_course_release import (
 	вставить_релиз,
@@ -148,9 +153,18 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 
 	def test_порядок_и_набор_глав_курса_из_релиза_не_правятся(self):
 		курс = frappe.get_doc("LMS Course", self.курс)
+		было = [с.chapter for с in курс.chapters]
 		курс.chapters = курс.chapters[::-1]
+		for idx, строка in enumerate(курс.chapters, start=1):
+			строка.idx = idx
 		self.отказ(курс.save)
+		# Строки, переставленные в памяти без `idx`, порядка Learning не меняют:
+		# он читается по `idx`.
 		курс.reload()
+		курс.chapters = курс.chapters[::-1]
+		курс.save()
+		курс.reload()
+		self.assertEqual([с.chapter for с in курс.chapters], было)
 		курс.chapters = курс.chapters[:1]
 		self.отказ(курс.save)
 		курс.reload()
@@ -159,6 +173,91 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		).insert()
 		курс.append("chapters", {"chapter": лишняя.name})
 		self.отказ(курс.save)
+
+	def test_строку_оглавления_курса_из_релиза_не_удалить(self):
+		"""Строку удаляет `frappe.delete_doc` по праву `delete` на родителе:
+		Desk (`delete_items`) — куратором, `delete_documents` — модератором."""
+		куратор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com")
+		модератор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com", "Moderator")
+		глава = frappe.db.get_value("Chapter Reference", {"parent": self.курс, "chapter": self.глава}, "name")
+		урок = frappe.db.get_value("Lesson Reference", {"parent": self.глава, "lesson": self.урок}, "name")
+
+		frappe.set_user(куратор)
+		self.отказ(lambda: frappe.delete_doc("Chapter Reference", глава))
+		self.отказ(lambda: frappe.delete_doc("Lesson Reference", урок))
+		frappe.set_user(модератор)
+		self.отказ(lambda: delete_documents("Chapter Reference", [глава]))
+		self.отказ(lambda: delete_documents("Lesson Reference", [урок]))
+
+		frappe.set_user("Administrator")
+		self.assertTrue(frappe.db.exists("Chapter Reference", глава))
+		self.assertTrue(frappe.db.exists("Lesson Reference", урок))
+
+	def test_строку_оглавления_курса_без_релиза_удалить_можно(self):
+		модератор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com", "Moderator")
+		урок = frappe.db.get_value("Lesson Reference", {"parent": self.свободная_глава}, "name")
+		глава = frappe.db.get_value("Chapter Reference", {"parent": self.свободный_курс}, "name")
+		self.assertTrue(урок and глава)
+
+		frappe.set_user(модератор)
+		delete_documents("Lesson Reference", [урок])
+		frappe.delete_doc("Chapter Reference", глава)
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists("Lesson Reference", урок))
+		self.assertFalse(frappe.db.exists("Chapter Reference", глава))
+
+	def test_порядок_оглавления_через_idx_не_обойти(self):
+		"""`frappe.client.save` с переставленными `idx` и `frappe.client.set_value`
+		по строке: второй сохраняет родителя, и его `validate` видит перестановку."""
+
+		def порядок() -> list[str]:
+			return frappe.get_all(
+				"Chapter Reference", filters={"parent": self.курс}, pluck="chapter", order_by="idx asc"
+			)
+
+		было = порядок()
+		курс = frappe.get_doc("LMS Course", self.курс).as_dict()
+		for строка, idx in zip(курс["chapters"], range(len(курс["chapters"]), 0, -1), strict=True):
+			строка["idx"] = idx
+		self.отказ(lambda: сохранить_из_desk(frappe.as_json(курс)))
+		self.отказ(lambda: set_value("Chapter Reference", курс["chapters"][0]["name"], '{"idx": 5}'))
+		урок = frappe.db.get_value("Lesson Reference", {"parent": self.глава, "lesson": self.урок}, "name")
+		self.отказ(lambda: set_value("Lesson Reference", урок, '{"idx": 5}'))
+		self.assertEqual(порядок(), было)
+
+	def test_курс_главу_и_урок_курса_из_релиза_не_переименовать(self):
+		for doctype, имя, свободный in (
+			("Course Lesson", self.урок, self.свободный_урок),
+			("Course Chapter", self.глава, self.свободная_глава),
+			("LMS Course", self.курс, self.свободный_курс),
+		):
+			with self.subTest(doctype=doctype):
+				self.отказ(lambda doctype=doctype, имя=имя: rename_doc(doctype, имя, f"{имя}-renamed"))
+				self.отказ(
+					lambda doctype=doctype, имя=имя, свободный=свободный: rename_doc(
+						doctype, имя, свободный, merge=True
+					)
+				)
+				# Слияние записи курса без релиза с записью курса из релиза — тоже правка его.
+				self.отказ(
+					lambda doctype=doctype, имя=имя, свободный=свободный: rename_doc(
+						doctype, свободный, имя, merge=True
+					)
+				)
+				self.assertTrue(frappe.db.exists(doctype, имя))
+				self.assertTrue(frappe.db.exists(doctype, свободный))
+
+	def test_курс_без_релиза_переименовывается(self):
+		другой_урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
+
+		новое = rename_doc("Course Lesson", self.свободный_урок, f"{self.свободный_урок}-renamed")
+		rename_doc("Course Lesson", другой_урок, новое, merge=True)
+		курс = rename_doc("LMS Course", self.свободный_курс, f"{self.свободный_курс}-renamed")
+
+		self.assertTrue(frappe.db.exists("Course Lesson", новое))
+		self.assertFalse(frappe.db.exists("Course Lesson", другой_урок))
+		self.assertTrue(frappe.db.exists("LMS Course", курс))
 
 	def test_карточка_и_публикация_курса_из_релиза_правятся(self):
 		курс = frappe.get_doc("LMS Course", self.курс)
@@ -185,7 +284,9 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		ответ = service.опубликовать(релиз, None, "Administrator", [куратор])
 
 		self.assertEqual((ответ["version"], ответ["unchanged"]), (2, False))
-		self.assertEqual(frappe.db.get_value("Course Lesson", self.урок, "title"), "Урок первый, исправленный")
+		self.assertEqual(
+			frappe.db.get_value("Course Lesson", self.урок, "title"), "Урок первый, исправленный"
+		)
 		# Тот же релиз со сменой инструкторов — `unchanged` под флагом.
 		повтор = service.опубликовать(релиз, None, "Administrator", ["Administrator"])
 		self.assertEqual((повтор["unchanged"], повтор["instructors"]), (True, ["Administrator"]))

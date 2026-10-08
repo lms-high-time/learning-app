@@ -13,9 +13,11 @@
 курс, чужой релиз подменил бы программу.
 
 Структура курса из релиза — главы, уроки и их порядок — тоже за публикацией:
-хуки `validate` и `on_trash` у `Course Chapter` и `Course Lesson`, порядок глав
-в `проверить_курс`, методы редактора Learning — в `learning_editor`. Карточка
-курса (название, описание, публикация) правится как раньше.
+хуки `validate` и `on_trash` у `Course Chapter` и `Course Lesson`, `on_trash` у
+строк оглавления (`проверить_ссылку`), `before_rename` у курса, главы и урока
+(`проверить_переименование`), порядок глав в `проверить_курс`, методы
+редактора Learning — в `learning_editor`. Карточка курса (название, описание,
+публикация) правится как раньше.
 
 `Why:` правка по кусочку разошлась бы с действующим релизом: индекс релиза, по
 которому учат агент и квиз, её не увидел бы, а следующая публикация молча
@@ -57,11 +59,49 @@ def проверить_структуру(doc, method=None) -> None:
 
 	Глава или урок, сменившие курс, проверяются по обоим курсам: перенос из
 	курса из релиза — такая же правка его структуры, как перенос в него.
+
+	`on_trash` контроллера Learning у урока (`cleanup_lesson_backreferences`:
+	заметки ученика, ссылки квиза, записи, сдачи) выполняется раньше этого
+	хука. Отказ здесь откатывает и его: всё идёт в одной транзакции запроса.
 	"""
 	if doc.flags.get(ИЗ_РЕЛИЗА):
 		return
 	прежний = doc.get_doc_before_save()
 	запретить_правку(doc.get("course"), прежний.get("course") if прежний else None)
+
+
+def проверить_ссылку(doc, method=None) -> None:
+	"""Хук `on_trash` у `Chapter Reference` и `Lesson Reference`: строку
+	оглавления курса из релиза не удалить саму по себе.
+
+	`Why:` Desk (`delete_items`) и `delete_documents` Learning удаляют строку
+	`frappe.delete_doc` с проверкой права `delete` на родителе, а оно у Course
+	Creator есть: глава или урок выпали бы из оглавления мимо `validate` курса
+	и главы. Строки, которые снимает сохранение родителя (проекция релиза), и
+	`frappe.db.delete` (`delete_course` Learning) этот хук не вызывают: первые
+	проверяет `validate` родителя, вторые идут удалением курса целиком.
+	"""
+	if doc.parenttype == "LMS Course":
+		курс = doc.parent
+	else:
+		курс = frappe.db.get_value("Course Chapter", doc.parent, "course")
+	запретить_правку(курс)
+
+
+def проверить_переименование(doc, method=None, old=None, new=None, merge=False) -> None:
+	"""Хук `before_rename` у `LMS Course`, `Course Chapter` и `Course Lesson`.
+
+	`Why:` `rename_doc` идёт мимо `validate` и `on_trash`, а `merge` урока
+	курса из релиза с другим уроком перевёл бы на тот урок строку индекса
+	релиза, оглавление и прогресс учеников. При `merge` проверяется и курс
+	записи, с которой сливают. Проекция релиза и `удалить_курс` ничего не
+	переименовывают.
+	"""
+	if doc.doctype == "LMS Course":
+		курсы = [doc.name, new if merge else None]
+	else:
+		курсы = [doc.get("course"), frappe.db.get_value(doc.doctype, new, "course") if merge else None]
+	запретить_правку(*курсы)
 
 
 def запретить_правку(*курсы: str | None) -> None:
@@ -86,4 +126,10 @@ def _из_релиза(курс: str) -> bool:
 
 
 def _главы(курс) -> list[str]:
-	return [строка.chapter for строка in курс.get("chapters") or []]
+	"""Главы курса в порядке `idx`: по нему порядок читает Learning.
+
+	`Why:` порядок строк в памяти и `idx` расходятся у `frappe.client.save` с
+	переставленными `idx` и у `frappe.client.set_value` по строке: сравнение
+	строк в памяти таких перестановок не видит.
+	"""
+	return [строка.chapter for строка in sorted(курс.get("chapters") or [], key=lambda с: с.idx or 0)]

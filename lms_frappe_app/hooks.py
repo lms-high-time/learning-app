@@ -293,15 +293,25 @@ doc_events = {
 	# публикация релиза (learning-services#500, #512).
 	"LMS Course": {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
 	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512).
 	"Course Chapter": {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
 	"Course Lesson": {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	# Строки оглавления удаляются и сами по себе — Desk и `delete_documents` Learning.
+	"Chapter Reference": {
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
+	},
+	"Lesson Reference": {
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
 }
 
