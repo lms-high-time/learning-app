@@ -7,6 +7,10 @@ on:
     branches: [master]
   pull_request: {}
 
+env:
+  # Ревизия Frappe образа стенда, двигается вместе с ним.
+  FRAPPE_REV: c1f1e8ec3708750d7254f7f99d869ffb9886f19f
+
 jobs:
   tests:
     name: bench run-tests
@@ -56,11 +60,17 @@ jobs:
       # интерпретатор раннера по пути с версией, и после обновления раннера
       # до 3.14.8 архив отдавал окружение без Python — `uv` падал на
       # подключении приложений, а не на тестах.
+      #
+      # Frappe — ровно та ревизия `version-16`, что в образе стенда (полный
+      # sha, двигается вместе с ним). Why: вершина ветки уходит вперёд, и CI
+      # проверял бы код на другом Frappe, чем работает стенд: 8 октября 2026
+      # свежий кэш с вершины ветки уронил тесты навигации desk, которые на
+      # ревизии стенда проходят.
       - name: Кэш bench
         uses: actions/cache@v4
         with:
           path: ~/bench-cache
-          key: ${{ runner.os }}-bench-version-16-py${{ steps.python.outputs.python-version }}
+          key: ${{ runner.os }}-bench-${{ env.FRAPPE_REV }}-py${{ steps.python.outputs.python-version }}
 
       - name: Установить bench
         run: pip3 install frappe-bench
@@ -75,6 +85,9 @@ jobs:
               --skip-redis-config-generation \
               --skip-assets \
               --python "$(which python)"
+            git -C ~/frappe-bench/apps/frappe fetch --quiet --depth 1 upstream "$FRAPPE_REV"
+            git -C ~/frappe-bench/apps/frappe checkout --quiet "$FRAPPE_REV"
+            (cd ~/frappe-bench && bench setup requirements --python)
             mkdir -p ~/bench-cache
             (cd && tar czf ~/bench-cache/bench.tgz frappe-bench)
           fi
