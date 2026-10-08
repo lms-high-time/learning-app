@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 import frappe
 import jinja2
+import jinja2.nodes
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import notices
@@ -34,8 +35,6 @@ from lms_frappe_app.www import author
 	"templates/includes/author_notes_macros.html",
 	"templates/includes/author_testers.html",
 )
-#: Вывод без фильтра, в котором нечего экранировать: разделитель списка.
-ЛИТЕРАЛЫ = ('"" if loop.last else ", "',)
 
 
 def сведения_для(пользователь: str, **параметры) -> dict:
@@ -107,39 +106,53 @@ def отравленный_релиз(ключ: str) -> dict:
 
 
 def неэкранированные(исходник: str, макросы: set[str]) -> list[tuple[int, str]]:
-	"""Выводы `{{ … }}` шаблона, которые не экранируют: `(строка, выражение)`.
+	"""Выводы `{{ … }}` шаблона, которые не экранируют: `(номер строки, строка исходника)`.
 
-	Вывод годится, если кончается на `| e`, `| escape` или `| tojson`, если он
-	весь — вызов макроса из `макросы` (их вывод проверяется тем же правилом)
-	или литерал из `ЛИТЕРАЛЫ`. Содержимое `{% raw %}` — текст, а не вывод.
+	Правило — по дереву разбора, а не по токенам: фильтр связывает сильнее
+	операторов, и в `{{ a or b | e }}`, `{{ a ~ b | e }}`, `{{ a + b | e }}`,
+	`{{ a if c else b | e }}` экранируется только `b`. Каждое выражение вывода —
+	одно из:
+
+	- литерал;
+	- фильтр `e` или `escape` на вершине выражения;
+	- фильтр `tojson` на вершине — только внутри `<script>`: он готовит
+	  значение для JS, а в разметке, например в атрибуте, кавычки и
+	  разметку не экранирует;
+	- вызов макроса из `макросы` — их вывод проверяется тем же правилом;
+	- `… if … else …`, обе ветки которого проходят правило.
+
+	Содержимое `{% raw %}` — текст, а не вывод. Шаблон только разбирается, без
+	загрузчика: `extends` и `import` не открываются.
 	"""
+	строки = исходник.splitlines()
 	найдено = []
-	токены: list | None = None
-	for строка, вид, значение in jinja2.Environment().lex(исходник):
-		if вид == "variable_begin":
-			токены, начало = [], строка
-		elif вид == "variable_end" and токены is not None:
-			if not _экранирует(токены, макросы):
-				найдено.append((начало, "".join(з for _, з in токены).strip()))
-			токены = None
-		elif токены is not None:
-			токены.append((вид, значение))
+	в_скрипте = False
+	for вывод in jinja2.Environment().parse(исходник).find_all(jinja2.nodes.Output):
+		for узел in вывод.nodes:
+			if isinstance(узел, jinja2.nodes.TemplateData):
+				в_скрипте = _в_скрипте(узел.data, в_скрипте)
+			elif not _экранирует(узел, макросы, в_скрипте):
+				найдено.append((узел.lineno, строки[узел.lineno - 1].strip()))
 	return найдено
 
 
-def _экранирует(токены: list[tuple[str, str]], макросы: set[str]) -> bool:
-	if "".join(з for _, з in токены).strip() in ЛИТЕРАЛЫ:
+def _в_скрипте(разметка: str, было: bool) -> bool:
+	"""Внутри ли `<script>` конец этого куска разметки."""
+	теги = re.findall(r"<(/?)script\b", разметка, flags=re.IGNORECASE)
+	return теги[-1] != "/" if теги else было
+
+
+def _экранирует(узел, макросы: set[str], в_скрипте: bool) -> bool:
+	узлы = jinja2.nodes
+	if isinstance(узел, (узлы.TemplateData, узлы.Const)):
 		return True
-	значимые = [(в, з) for в, з in токены if в != "whitespace"]
-	if len(значимые) >= 2 and значимые[-2][1] == "|" and значимые[-1][1] in ("e", "escape", "tojson"):
-		return True
-	if len(значимые) >= 3 and значимые[0][1] in макросы and значимые[1][1] == "(":
-		глубина = 0
-		for н, (в, з) in enumerate(значимые[1:], start=1):
-			if в == "operator":
-				глубина += {"(": 1, ")": -1}.get(з, 0)
-			if глубина == 0:
-				return н == len(значимые) - 1
+	if isinstance(узел, узлы.Filter):
+		return узел.name in ("e", "escape") or (узел.name == "tojson" and в_скрипте)
+	if isinstance(узел, узлы.Call):
+		return isinstance(узел.node, узлы.Name) and узел.node.name in макросы
+	if isinstance(узел, узлы.CondExpr):
+		# Без `else` вторая ветка — пустой вывод.
+		return all(в is None or _экранирует(в, макросы, в_скрипте) for в in (узел.expr1, узел.expr2))
 	return False
 
 
@@ -545,13 +558,23 @@ class TestЭкранированиеШаблонов(unittest.TestCase):
 				self.assertEqual(неэкранированные(текст, self.макросы), [])
 
 	def test_правило_ловит_вывод_без_экранирования(self):
-		"""Проверка проверки: голый вывод, фильтр не последним и чужой вызов — нарушения."""
+		"""Проверка проверки: голый вывод, фильтр не последним, чужой вызов,
+		фильтр только у правой части выражения и `tojson` вне `<script>` — нарушения."""
 		исходник = (
-			"{{ title }}\n{{ x | e | upper }}\n{{ frappe.render(x) }}\n{{ место(a) ~ b }}\n"
-			'{{ место(a, b) }}{{ x | tojson }}{{ "" if loop.last else ", " }}'
+			"{{ title }}\n"
+			"{{ x | e | upper }}\n"
+			"{{ frappe.render(x) }}\n"
+			"{{ место(a) ~ b }}\n"
+			"{{ a or b | e }}\n"
+			"{{ a ~ b | e }}\n"
+			"{{ a if c else b | e }}\n"
+			"{{ a + b | e }}\n"
+			'<div data-x="{{ x | tojson }}"></div>\n'
+			'{{ место(a, b) }}{{ x | e }}{{ "" if loop.last else ", " }}{{ "агент" if c else (a or b) | e }}\n'
+			"<script>const x = {{ x | tojson }};</script>{{ y | e }}\n"
 			"{% raw %}{{ сырое }}{% endraw %}"
 		)
 		self.assertEqual(
-			неэкранированные(исходник, {"место"}),
-			[(1, "title"), (2, "x | e | upper"), (3, "frappe.render(x)"), (4, "место(a) ~ b")],
+			[строка for строка, _ in неэкранированные(исходник, {"место"})],
+			[1, 2, 3, 4, 5, 6, 7, 8, 9],
 		)

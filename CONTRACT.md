@@ -3207,8 +3207,8 @@ Learning: ученик всегда на действующем релизе, и
 (`problems` — до 20 `{code, where, …}`: `duplicate_key`, `broken_ref`,
 `chapter_order`, `quiz_correct`, `document_key`, `text_too_long`,
 `title_forbidden_chars` — `<` или `>` в названии главы или урока (`chars` —
-какие из них), `agent_leak` — ключ `answers` или `correct` в пакете агента, `where` — путь
-до него, например `agent.lessons.l-1.answers`; `total`);
+какие из них), `agent_leak` — ключ `answers` или `correct` в пакете агента,
+`where` — путь до него, например `agent.lessons.l-1.answers`; `total`);
 `course_not_found` (`id`); `course_key_mismatch` — у переданного курса другой
 ключ (`course`, `course_key`, `release_key`); `course_key_taken` — ключ
 релиза уже у другого курса или его курс сейчас заводит другая публикация,
