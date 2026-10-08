@@ -237,6 +237,31 @@ class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
 		)
 		self.assertEqual(self.инструкторы(курс), [self.первый])
 
+	def test_куратор_переопубликует_курс_администратора(self):
+		frappe.set_user("Administrator")
+		курс = self.опубликовать()["data"]["course"]
+		frappe.set_user(self.первый)
+
+		данные = self.опубликовать(self.другой_релиз())
+
+		self.assertTrue(данные["ok"], данные)
+		self.assertEqual((данные["data"]["version"], данные["data"]["lessons"]["updated"]), (2, ["l-1"]))
+		self.assertEqual(
+			frappe.db.get_value("Course Lesson", {"course": курс, "title": "Урок первый, второе издание"}, "owner"),
+			"Administrator",
+		)
+
+	def test_отключённый_пользователь_не_инструктор(self):
+		"""Отключённая учётная запись курс не ведёт — даже с авторской ролью."""
+		отключённый = создать_куратора(f"rel-off-{frappe.generate_hash(length=6)}@example.com")
+		frappe.db.set_value("User", отключённый, "enabled", 0)
+
+		ответ = self.опубликовать(instructors=[self.первый, отключённый])
+
+		self.assertEqual(ответ.get("error", {}).get("code"), "instructor_not_found", ответ)
+		self.assertEqual(ответ["error"]["users"], [отключённый])
+		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
+
 
 class IntegrationTestКурсыИОткрытие(IntegrationTestCase):
 	"""`list_courses` с релизом и `publish_course` курса из релиза."""

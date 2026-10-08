@@ -329,10 +329,12 @@ class IntegrationTestПереносЦелейАнонса(IntegrationTestCase):
 		return frappe.db.get_value("LMS Course", курс, "announce_objectives")
 
 	def test_переносит_анонсу_без_релиза_и_только_в_пустое_поле(self):
-		from lms_frappe_app.patches.v0_1.announce_objectives import execute
+		from lms_frappe_app.patches.v0_1 import announce_objectives
 
-		execute()
-		execute()  # повторный запуск ничего не меняет
+		# Поле уже есть на тестовом сайте; DDL заведения поля фиксировал бы транзакцию теста.
+		with patch.object(announce_objectives, "create_custom_field"):
+			announce_objectives.execute()
+			announce_objectives.execute()  # повторный запуск ничего не меняет
 
 		self.assertEqual(self.цели(self.анонс), "Первая\nВторая")
 		self.assertEqual(self.цели(self.заполненный), "Своя цель")
@@ -363,9 +365,13 @@ class IntegrationTestПереносЦелейАнонса(IntegrationTestCase):
 		)
 
 	def test_без_таблицы_директив_только_поле(self):
-		from lms_frappe_app.patches.v0_1.announce_objectives import execute
+		from lms_frappe_app.patches.v0_1 import announce_objectives
 
-		with patch.object(frappe.db, "table_exists", return_value=False):
-			execute()
+		with (
+			patch.object(announce_objectives, "create_custom_field") as создать,
+			patch.object(frappe.db, "table_exists", return_value=False),
+		):
+			announce_objectives.execute()
 
+		создать.assert_called_once_with("LMS Course", announce_objectives.ПОЛЕ)
 		self.assertFalse(self.цели(self.анонс))

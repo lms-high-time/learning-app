@@ -1412,7 +1412,8 @@ def _инструкторы(значение) -> list[str]:
 	if не_авторы := [имя for имя in имена if имя not in авторы]:
 		raise Отказ(
 			ИНСТРУКТОР_НЕ_АВТОР,
-			"Инструктор курса — пользователь с ролью Course Creator или Moderator",
+			"Инструктор курса — пользователь с авторской ролью: "
+			"Course Creator, Moderator, System Manager или Administrator",
 			users=не_авторы,
 		)
 	return имена
