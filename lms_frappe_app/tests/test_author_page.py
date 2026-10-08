@@ -93,7 +93,8 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 
 	def test_анонс_отмечен_на_экране_курса_и_в_списке(self):
 		"""Анонс — не «опубликован»: он в каталоге, но записи нет (learning-services#391)."""
-		authoring.announce_course(course=self.курс, objectives="Цель курса")
+		# Напрямую: курс с уроками без релиза анонс не принимает (`course_has_content`).
+		frappe.db.set_value("LMS Course", self.курс, {"published": 1, "upcoming": 1})
 		с = self.сведения_для(self.куратор, course=self.курс)
 		self.assertTrue(с["course"]["upcoming"])
 		с = self.сведения_для(self.куратор)

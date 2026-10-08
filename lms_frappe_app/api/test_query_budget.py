@@ -37,13 +37,14 @@ from lms_frappe_app.tests.sample_data import (
 	политика_по_умолчанию,
 	создать_домашку,
 	создать_занятие,
+	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
 )
 from lms_frappe_app.agent_learning.runs import service as прохождения
-from lms_frappe_app.api import manager, review, student, team
+from lms_frappe_app.api import authoring, manager, review, student, team
 from lms_frappe_app.testing import сколько_запросов
 
 #: Сколько обращений к базе делает метод на данных этого модуля. Меняется
@@ -95,6 +96,13 @@ from lms_frappe_app.testing import сколько_запросов
 	# на все курсы, сроки назначений — одной, названия неопубликованных курсов
 	# — одной, а не запросом на назначение.
 	"allocations": 13,
+	# Просмотр релиза автором (learning-services#512): курс, запись релиза,
+	# главы, уроки, цели, пункты, вопросы, разделы документа и схема документа
+	# — по одной выборке на релиз, а не на урок.
+	"course_release": 9,
+	# Урок релиза: курс, запись релиза, урок, его цели, пункты и вопросы, срез
+	# пакета агента и рамка.
+	"course_release_lesson": 8,
 }
 
 
@@ -209,6 +217,20 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		создать_занятие(self.ученик, урок)
 		frappe.set_user(self.менеджер)
 		self._ворота("student_detail", lambda: manager.student_detail(self.ученик))
+
+	def test_бюджет_course_release_не_растёт_с_курсом(self):
+		"""Релизы из трёх уроков в двух главах и из шести в трёх: бюджет один на оба."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbc-{frappe.generate_hash(length=6)}@example.com")
+		малый = frappe.db.get_value("Course Lesson", self._курс_релиза()[0], "course")
+		большой = frappe.db.get_value("Course Lesson", self._курс_релиза(глав_больше=True)[0], "course")
+		frappe.set_user(куратор)
+		for курс in (малый, большой):
+			with self.subTest(курс=курс):
+				self._ворота("course_release", lambda курс=курс: authoring.course_release(курс))
+				self._ворота(
+					"course_release_lesson", lambda курс=курс: authoring.course_release(курс, lesson="l-2")
+				)
 
 	# --- механика ворот ---
 

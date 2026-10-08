@@ -22,6 +22,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_курс,
 	создать_менеджера,
 	создать_организацию,
+	создать_урок,
 	создать_ученика,
 )
 
@@ -113,6 +114,20 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		self.assertEqual(ответ["data"]["objectives"], ["Одна цель"])
 		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
 		self.assertEqual(next(к for к in курсы if к["id"] == self.курс)["objectives"], ["Одна цель"])
+
+	def test_курс_без_релиза_с_уроками_не_анонсируется(self):
+		"""Программу курсу даёт релиз: курс без релиза анонсируется только без уроков."""
+		курс = frappe.db.get_value("Course Lesson", создать_урок(f"Урок {frappe.generate_hash(length=6)}"), "course")
+
+		ответ = self.от_имени(self.куратор, authoring.announce_course, course=курс, objectives=ЦЕЛИ)
+
+		self.assertEqual(self.код_отказа(ответ), "course_has_content")
+		self.assertEqual((ответ["error"]["course"], ответ["error"]["lessons"]), (курс, 1))
+		сведения = frappe.db.get_value(
+			"LMS Course", курс, ["published", "upcoming", "announce_objectives"], as_dict=True
+		)
+		self.assertEqual((сведения.published, сведения.upcoming), (0, 0))
+		self.assertFalse(сведения.announce_objectives)
 
 	def test_открытый_курс_анонсом_не_становится(self):
 		frappe.db.set_value("LMS Course", self.курс, "published", 1)

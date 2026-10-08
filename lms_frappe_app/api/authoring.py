@@ -14,7 +14,6 @@ import json
 from urllib.parse import quote
 
 import frappe
-from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import (
 	announcements,
@@ -33,6 +32,7 @@ from lms_frappe_app.agent_learning import (
 from lms_frappe_app.agent_learning.artifacts import templates
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import service as releases
+from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
@@ -42,9 +42,11 @@ from lms_frappe_app.agent_learning.constants import (
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
+	КУРС_НЕ_В_РЕЛИЗЕ,
 	КУРС_НЕ_НАЙДЕН,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
+	УРОК_НЕ_В_РЕЛИЗЕ,
 	УРОК_НЕ_НАЙДЕН,
 )
 from lms_frappe_app.api import контракт, список, текущий_пользователь
@@ -82,7 +84,7 @@ from lms_frappe_app.api import контракт, список, текущий_п
 ТЕСТЕР_НЕ_НАЙДЕН = "tester_not_found"
 КУРС_УЖЕ_ОТКРЫТ = "course_already_published"
 КУРС_ИЗ_РЕЛИЗА = "course_from_release"
-КУРС_БЕЗ_РЕЛИЗА = "course_not_released"
+КУРС_БЕЗ_РЕЛИЗА = КУРС_НЕ_В_РЕЛИЗЕ
 ИНСТРУКТОРОВ_НЕТ = "instructors_empty"
 ИНСТРУКТОР_НЕ_НАЙДЕН = "instructor_not_found"
 ИНСТРУКТОР_НЕ_АВТОР = "instructor_not_author"
@@ -930,11 +932,6 @@ def remove_homework(lesson: str) -> dict:
 		)
 	homework.снять_сроки_назначений(документ.name)
 	frappe.delete_doc(homework.ЗАДАНИЕ, документ.name)
-	# Why: удаление записи не двигает ничьего `modified`, и `ревизия` не заметила
-	# бы, что задания больше нет, — зеркало автора осталось бы старым. Отметка
-	# `modified`, а не `save()` урока: сохранение гоняло бы проверки и хуки
-	# Frappe Learning ради одной метки времени.
-	frappe.db.set_value("Course Lesson", lesson, "modified", now_datetime())
 	return {"lesson": lesson, "removed": True}
 
 
@@ -1462,10 +1459,10 @@ def course_draft(course: str) -> dict:
 @frappe.whitelist(methods=["GET"])
 @контракт
 def course_revision(course: str) -> dict:
-	"""Отметка последнего изменения курса.
+	"""Отметки курса и его заметок — для опроса кабинетом автора.
 
-	Для опроса зеркалом автора (#261): страница спрашивает её раз в
-	несколько секунд, и перечитывать ради этого курс целиком незачем.
+	Страница спрашивает их раз в несколько секунд, и перечитывать ради этого
+	курс целиком незачем.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
@@ -1473,48 +1470,66 @@ def course_revision(course: str) -> dict:
 
 
 def ревизия(course: str) -> str:
-	"""Самая свежая отметка изменения всего, из чего собран курс.
+	"""Самая свежая отметка карточки курса и его действующего релиза.
 
-	Удаление урока или вопроса тоже двигает её: убирая строку, сохраняется
-	глава или квиз, в которых она стояла.
+	`Why:` курс правится только новым релизом, а он пишет и карточку курса, и
+	новую запись релиза; правка анонса, открытие и снятие с публикации
+	двигают карточку. Главы, уроки, квизы и схемы документа — проекции
+	релиза, их отметки ничего к этому не добавляют.
 	"""
-	уроки = frappe.get_all("Course Lesson", filters={"course": course}, pluck="name")
-	квизы = set(frappe.get_all("LMS Quiz", filters={"lesson": ["in", уроки]}, pluck="name")) if уроки else set()
-	квизы |= set(
-		frappe.get_all(
-			"Course Lesson", filters={"course": course, "quiz_id": ["is", "set"]}, pluck="quiz_id"
-		)
-	)
-	вопросы = (
-		frappe.get_all("LMS Quiz Question", filters={"parent": ["in", list(квизы)]}, pluck="question")
-		if квизы
-		else []
-	)
-	источники = [
-		("LMS Course", {"name": course}),
-		("Course Chapter", {"course": course}),
-		("Course Lesson", {"course": course}),
-		("Agent Course Directive", {"course": course}),
-		("Agent Course Artifact", {"course": course}),
-		("Agent Course Map", {"course": course}),
-		# Новый релиз — новая запись: зеркало автора замечает его (learning-services#500).
-		("Agent Course Release", {"course": course}),
-	]
-	if квизы:
-		источники.append(("LMS Quiz", {"name": ["in", list(квизы)]}))
-	if вопросы:
-		источники.append(("LMS Question", {"name": ["in", вопросы]}))
-	if уроки:
-		источники.append(("Agent Lesson Directive", {"lesson": ["in", уроки]}))
-		источники.append((homework.ЗАДАНИЕ, {"lesson": ["in", уроки]}))
-	отметки = [
-		отметка
-		for doctype, фильтры in источники
-		for отметка in frappe.get_all(
-			doctype, filters=фильтры, pluck="modified", order_by="modified desc", limit=1
-		)
-	]
+	сведения = frappe.db.get_value("LMS Course", course, ["modified", "active_release"], as_dict=True)
+	отметки = [сведения.modified]
+	if сведения.active_release:
+		отметки.append(frappe.db.get_value(releases.РЕЛИЗ, сведения.active_release, "modified"))
 	return max(отметки).isoformat()
+
+
+# --- просмотр релиза (learning-services#512) ---
+
+
+@frappe.whitelist()
+@контракт
+def course_release(course: str, lesson: str | None = None) -> dict:
+	"""Действующий релиз курса — только чтение: главы, уроки с целями, пунктами и
+	квизом с ответами, домашки, документ.
+
+	`lesson` — ключ урока: только он, срез пакета агента этого урока и рамка
+	пакета. Без `lesson` пакета агента в ответе нет. Ответы квиза видит
+	только автор — метод закрыт авторскими ролями (`_автор`).
+	"""
+	_автор()
+	курс, релиз = _курс_с_релизом(course)
+	if lesson:
+		if урок := просмотр_релиза.урок_релиза(курс, релиз, lesson):
+			return урок
+		raise Отказ(
+			УРОК_НЕ_В_РЕЛИЗЕ, "Урока с этим ключом нет в действующем релизе", course=course, lesson=lesson
+		)
+	return просмотр_релиза.релиз_целиком(курс, релиз)
+
+
+@frappe.whitelist()
+@контракт
+def course_releases(course: str) -> dict:
+	"""История релизов курса, свежие вперёд; `active` — действующий."""
+	_автор()
+	сведения = frappe.db.get_value("LMS Course", course, ["active_release"], as_dict=True)
+	if not сведения:
+		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
+	return {"course": course, "releases": просмотр_релиза.история(course, сведения.active_release)}
+
+
+def _курс_с_релизом(course: str) -> tuple[dict, str]:
+	"""Карточка курса с действующим релизом и сам релиз — или отказ."""
+	сведения = frappe.db.get_value("LMS Course", course, ["title", "active_release"], as_dict=True)
+	if not сведения:
+		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
+	if not сведения.active_release:
+		raise Отказ(КУРС_БЕЗ_РЕЛИЗА, "У курса нет релиза: его публикует publish_release", course=course)
+	return (
+		просмотр_релиза.карточка(course, сведения.title, сведения.active_release),
+		сведения.active_release,
+	)
 
 
 @frappe.whitelist()
@@ -1591,7 +1606,9 @@ def announce_course(course: str, objectives=None) -> dict:
 	Готовности курса анонс не требует — уроков может ещё не быть. Требует
 	целей курса: у анонса наружу выходят только они (learning-services#389).
 	У курса из релиза цели — названия глав действующего релиза, `objectives`
-	к нему не передаются. У курса без релиза `objectives` (список или текст по
+	к нему не передаются. Курс без релиза анонсируется только без уроков
+	(`course_has_content`), как правится `update_course`: программу курсу
+	даёт релиз. У курса без релиза `objectives` (список или текст по
 	строке на цель) пишутся в поле курса; не переданы — действуют записанные
 	раньше (learning-services#512). Открытый курс анонсом не становится: на
 	него уже записаны ученики.
@@ -1609,6 +1626,13 @@ def announce_course(course: str, objectives=None) -> dict:
 			КУРС_ИЗ_РЕЛИЗА,
 			"Цели курса из релиза — названия его глав: правьте карту курса и публикуйте новый релиз",
 			course=course,
+		)
+	if not сведения.active_release and (уроки := structure.уроки_курса(course)):
+		raise Отказ(
+			releases.У_КУРСА_ЕСТЬ_УРОКИ,
+			"Анонсируется курс без уроков или курс из релиза: программу курсу даёт релиз",
+			course=course,
+			lessons=len(уроки),
 		)
 	if сведения.published and not сведения.upcoming:
 		raise Отказ(КУРС_УЖЕ_ОТКРЫТ, "Курс уже открыт ученикам", course=course)

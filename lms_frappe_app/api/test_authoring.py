@@ -14,6 +14,7 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning import structure
@@ -646,62 +647,75 @@ class IntegrationTestAuthorMirrorFields(IntegrationTestCase):
 
 
 class IntegrationTestCourseRevision(IntegrationTestCase):
-	"""Отметка изменения курса: по ней зеркало автора узнаёт, что агент что-то
-	поменял, не перечитывая курс целиком (#261)."""
+	"""Отметка изменения курса: по ней кабинет автора узнаёт, что курс поменялся,
+	не перечитывая его целиком (#261). Курс правится только новым релизом (#512)."""
 
 	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		# Удаление урока Frappe Learning разрешает только модератору.
-		self.куратор = создать_куратора(f"revision-{суффикс}@example.com", роль="Moderator")
+		self.куратор = создать_куратора(f"revision-{суффикс}@example.com")
+		self.ключ = f"revision-{суффикс}"
 		frappe.set_user(self.куратор)
-		self.курс = authoring.create_course(title=f"Ревизия {суффикс}", summary="к")["data"]["id"]
-		self.глава = authoring.add_chapter(course=self.курс, title="Глава")["data"]["id"]
-		self.урок = authoring.add_lesson(chapter=self.глава, title="Урок", body="# Текст")["data"]["id"]
-		self.лишний = authoring.add_lesson(chapter=self.глава, title="Лишний", body="# Лишний")["data"]["id"]
-		authoring.add_quiz(
-			lesson=self.урок,
-			questions=[{"text": "Первый?", "options": [{"text": "a", "correct": True}, {"text": "b"}]}],
-		)
-		self.вопрос = authoring.get_lesson(lesson=self.урок)["data"]["quiz"]["questions"][0]["id"]
+		self.курс = self.опубликовать()["course"]
 
-	def tearDown(self):
-		frappe.set_user("Administrator")
+	def опубликовать(self, релиз: dict | None = None) -> dict:
+		ответ = authoring.publish_release(release=релиз or пример_релиза(self.ключ))
+		self.assertTrue(ответ["ok"], ответ)
+		return ответ["data"]
+
+	def отметки(self) -> dict:
+		return authoring.course_revision(course=self.курс)["data"]
 
 	def ревизия(self) -> str:
-		return authoring.course_revision(course=self.курс)["data"]["revision"]
+		return self.отметки()["revision"]
 
-	def test_ревизия_растёт_от_каждой_правки_курса(self):
-		правки = {
-			"update_lesson": lambda: authoring.update_lesson(lesson=self.урок, body="# Новый текст"),
-			"set_directive": lambda: authoring.set_directive(lesson=self.урок, teaching_directive="Веди"),
-			"set_course_directive": lambda: authoring.set_course_directive(
-				course=self.курс, teaching_directive="Сквозная"
-			),
-			"update_question": lambda: authoring.update_question(question=self.вопрос, text="Второй?"),
-			"set_course_artifact": lambda: authoring.set_course_artifact(
-				course=self.курс, artifact="summary", title="Резюме", blocks=[{"key": "goal", "title": "Цель"}]
-			),
-			"add_chapter": lambda: authoring.add_chapter(course=self.курс, title="Ещё глава"),
-			"remove_lesson": lambda: authoring.remove_lesson(lesson=self.лишний),
-		}
-		for имя, правка in правки.items():
-			with self.subTest(правка=имя):
-				до = self.ревизия()
-				правка()
-				self.assertGreater(self.ревизия(), до)
+	def test_новый_релиз_двигает_ревизию_а_тот_же_нет(self):
+		до = self.ревизия()
+		self.опубликовать()
+		self.assertEqual(self.ревизия(), до)
+
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, переписанный"
+		self.опубликовать(релиз)
+
+		self.assertGreater(self.ревизия(), до)
+
+	def test_открытие_курса_двигает_ревизию(self):
+		до = self.ревизия()
+		authoring.publish_course(course=self.курс)
+		self.assertGreater(self.ревизия(), до)
+
+	def test_заметка_двигает_свою_метку_а_не_ревизию(self):
+		до = self.отметки()
+		self.assertIsNone(до["notes_revision"])
+
+		ид = authoring.add_note(course=self.курс, target="course", text="Проверь карточку")["data"]["id"]
+		после_записи = self.отметки()
+		authoring.reply_note(note=ид, text="Уточню: обещание")
+		после_ответа = self.отметки()
+
+		self.assertEqual(после_записи["revision"], до["revision"])
+		self.assertIsNotNone(после_записи["notes_revision"])
+		self.assertGreater(после_ответа["notes_revision"], после_записи["notes_revision"])
 
 	def test_чтение_ревизию_не_меняет(self):
 		до = self.ревизия()
-		authoring.course_draft(course=self.курс)
-		authoring.get_lesson(lesson=self.урок)
+		authoring.course_release(course=self.курс)
+		authoring.course_release(course=self.курс, lesson="l-1")
+		authoring.course_releases(course=self.курс)
 
 		self.assertEqual(self.ревизия(), до)
 
-	def test_черновик_отдаёт_ту_же_ревизию_и_ссылку_на_зеркало(self):
-		черновик = authoring.course_draft(course=self.курс)["data"]
+	def test_анонс_без_релиза_отмечается_карточкой(self):
+		анонс = authoring.create_course(title="Анонс", summary="было")["data"]["id"]
+		до = authoring.course_revision(course=анонс)["data"]["revision"]
+		authoring.update_course(course=анонс, summary="стало")
 
-		self.assertEqual(черновик["revision"], self.ревизия())
-		self.assertTrue(черновик["author_url"].endswith(f"/author?course={self.курс}"))
+		self.assertGreater(authoring.course_revision(course=анонс)["data"]["revision"], до)
+		self.assertEqual(
+			authoring.course_draft(course=анонс)["data"]["revision"],
+			authoring.course_revision(course=анонс)["data"]["revision"],
+		)
 
 	def test_ученику_ревизия_недоступна(self):
 		ученик = создать_ученика(f"revision-s-{frappe.generate_hash(length=6)}@example.com")
@@ -829,13 +843,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 
 		self.assertEqual(authoring.course_map_check(course=self.курс)["data"]["discrepancies"], [])
 		self.assertEqual(authoring.course_draft(course=self.курс)["data"]["map_discrepancies"], 0)
-
-	def test_правка_карты_двигает_ревизию(self):
-		до = authoring.course_revision(course=self.курс)["data"]["revision"]
-
-		self.записать()
-
-		self.assertGreater(authoring.course_revision(course=self.курс)["data"]["revision"], до)
 
 	def test_ученику_карта_недоступна(self):
 		self.записать()

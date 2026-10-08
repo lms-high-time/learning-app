@@ -30,9 +30,6 @@ class IntegrationTestHomeworkAuthoring(IntegrationTestCase):
 			**поля,
 		)
 
-	def ревизия(self) -> str:
-		return authoring.course_revision(course=self.курс)["data"]["revision"]
-
 	def test_задание_видно_в_уроке_и_черновике(self):
 		ответ = self.добавить(due_mode="relative", due_days=5)
 		self.assertTrue(ответ["ok"], ответ)
@@ -113,18 +110,6 @@ class IntegrationTestHomeworkAuthoring(IntegrationTestCase):
 		ответ = authoring.remove_lesson(lesson=self.урок)
 		self.assertEqual(ответ["error"]["code"], "lesson_in_use")
 		self.assertEqual(ответ["error"]["homework_submissions"], 1)
-
-	def test_ревизия_растёт_от_правок_задания(self):
-		правки = {
-			"add_homework": lambda: self.добавить(),
-			"update_homework": lambda: authoring.update_homework(lesson=self.урок, title="Другое"),
-			"remove_homework": lambda: authoring.remove_homework(lesson=self.урок),
-		}
-		for имя, правка in правки.items():
-			with self.subTest(правка=имя):
-				до = self.ревизия()
-				правка()
-				self.assertGreater(self.ревизия(), до)
 
 	def test_методист_добавляет_задание(self):
 		frappe.set_user(создать_куратора(f"hwau-c-{frappe.generate_hash(length=6)}@example.com"))

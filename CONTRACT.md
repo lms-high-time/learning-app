@@ -3681,10 +3681,8 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 
 ## `lms_frappe_app.api.authoring.course_revision`
 
-Отметка последнего изменения курса — для опроса кабинетом автора без чтения
-курса целиком. Растёт от правки курса, глав, уроков, квизов и вопросов,
-директив урока и курса, схем документа, домашних заданий, в том числе от удаления урока или
-вопроса; от чтения не меняется. В MCP не выставляется.
+Отметки курса и его заметок — для опроса кабинетом автора без чтения курса
+целиком. В MCP не выставляется.
 
 **Параметры:** `course`. Только `GET`.
 
@@ -3694,9 +3692,111 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
   "notes_revision": "2026-09-23T15:40:02.118305" } }
 ```
 
+`revision` — самая свежая отметка карточки курса и его действующего релиза:
+растёт от публикации нового релиза, правки анонса, анонса, открытия и снятия
+с публикации; тот же релиз ещё раз (`unchanged`) и чтение её не меняют. Курс
+правится только новым релизом — главы, уроки, квиз и схема документа его
+проекции, своих отметок в `revision` не несут.
+
 `notes_revision` — самая свежая отметка замечаний автора: растёт от нового
 замечания, ответа и смены статуса; `null`, если замечаний нет. `revision` от
 замечаний не меняется — замечание не правка курса.
+
+**Отказы:** `course_not_found`.
+
+## `lms_frappe_app.api.authoring.course_release`
+
+Действующий релиз курса — только чтение (learning-services#512): главы,
+уроки с целями, пунктами целей агента, квизом с ответами и домашкой, документ.
+Читается индекс релиза, снимок — нет.
+
+**Параметры:** `course`; `lesson` (необязательно) — ключ урока: только этот
+урок, срез пакета агента урока и рамка пакета.
+
+```json
+{ "ok": true, "data": {
+  "course": { "id": "primer-kursa", "key": "sample-course", "title": "Пример курса",
+              "release": "REL-00007", "version": 3,
+              "published_at": "2026-10-08T12:20:00.118204",
+              "published_by": "curator-a@example.com" },
+  "chapters": [ { "key": "ch-1", "title": "Глава первая",
+                  "description": "Что изменится после первой главы.",
+                  "lessons": [ "l-1", "l-2" ] } ],
+  "lessons": [ { "key": "l-1", "title": "Урок первый", "hook": "Зачин урока",
+    "chapter": "ch-1", "pass_percentage": 70.0, "sections": [ "log" ],
+    "homework": null,
+    "objectives": [ { "key": "l-1-D1", "text": "Цель урока",
+      "goals": [ { "key": "term:T1", "kind": "term", "required": true,
+                   "title": "Термин «пример»" } ] } ],
+    "questions": [ { "key": "S1/l-1-D1", "objective": "l-1-D1",
+      "text": "Ситуация и вопрос",
+      "options": [ { "key": "V1", "text": "Первый" }, { "key": "V2", "text": "Второй" } ],
+      "correct": "V1", "explanation": "Потому что так велит условие." } ] } ],
+  "document": { "key": "notebook", "title": "Тетрадь",
+    "purpose": "Зачем ученику тетрадь.",
+    "sections": [ { "key": "log", "title": "Журнал",
+      "description": "Что сюда записывают.", "rows": "many",
+      "columns": [ { "key": "topic", "title": "Тема", "required": true },
+                   { "key": "responsible", "title": "Кто отвечает",
+                     "required": { "if_column": "topic" } } ] } ] } } }
+```
+
+С `lesson`:
+
+```json
+{ "ok": true, "data": {
+  "course": { "id": "primer-kursa", "key": "sample-course", "title": "Пример курса",
+              "release": "REL-00007", "version": 3,
+              "published_at": "2026-10-08T12:20:00.118204",
+              "published_by": "curator-a@example.com" },
+  "lesson": { "key": "l-1", "title": "Урок первый", "…": "…" },
+  "agent": { "frame": "Рамка курса…",
+             "learn_about_student": [ { "key": "where_applies", "…": "…" } ],
+             "lesson": { "directive": "…", "material": "…", "items": { "…": "…" },
+                         "sections": { "log": "…" } } } } }
+```
+
+`course` — карточка курса и действующего релиза: ключ курса, название,
+релиз, его версия, когда и кто опубликовал. Главы, уроки, цели, пункты,
+вопросы и разделы — по порядку релиза, поля — как в релизе (раздел «Релиз
+курса»): `chapter` урока — ключ главы, `sections` — ключи разделов документа,
+`homework` — домашка урока из релиза или `null`, `objective` вопроса — ключ
+цели, `correct` — ключ верного варианта. Ответы квиза отдаются только здесь —
+метод закрыт авторскими ролями. `document` — `null`, если в релизе документа
+нет; название и назначение — из действующей схемы документа курса, которую
+пишет публикация релиза.
+
+`lesson` — урок в том же виде, что элемент `lessons`. `agent` — части пакета
+агента как в релизе: рамка курса (`frame`, `learn_about_student` — те, что
+есть) и срез урока (`lesson`, `{}` — среза нет); их форму задаёт компилятор
+курса. Без `lesson` пакета агента в ответе нет.
+
+**Отказы:** `course_not_found`; `course_not_released` — у курса нет
+действующего релиза (`course`); `lesson_not_in_release` — урока с таким
+ключом нет в действующем релизе (`course`, `lesson`).
+
+## `lms_frappe_app.api.authoring.course_releases`
+
+История релизов курса (learning-services#512).
+
+**Параметры:** `course`.
+
+```json
+{ "ok": true, "data": { "course": "primer-kursa", "releases": [
+  { "release": "REL-00007", "version": 3,
+    "published_at": "2026-10-08T12:20:00.118204",
+    "published_by": "curator-a@example.com",
+    "digest": "9f2c…64 hex", "document_key": "notebook", "active": true },
+  { "release": "REL-00005", "version": 2,
+    "published_at": "2026-10-01T09:00:00.000000",
+    "published_by": "curator-b@example.com",
+    "digest": "1ab4…", "document_key": "notebook", "active": false } ] } }
+```
+
+Свежие вперёд — по версии. `digest` — sha256 канонического JSON релиза: тот
+же файл — тот же дайджест. `document_key` — ключ документа релиза, `null` —
+документа нет. `active` — действующий релиз курса. У курса без релиза
+`releases` пуст.
 
 **Отказы:** `course_not_found`.
 
@@ -3984,7 +4084,7 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
                   "Найти стыки между отделами" ] } }
 ```
 
-Готовности анонс не требует: уроков может ещё не быть. Требует целей курса:
+Готовности анонс не требует: курс без релиза анонсируется без уроков. Требует целей курса:
 у анонса наружу выходят только они (`objectives` в каталоге и на
 `course_map`). У курса без релиза `objectives` пишутся в курс и заменяют
 прежние; не переданы — действуют записанные раньше. У курса из релиза цели —
@@ -3994,7 +4094,9 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 
 **Отказы:** `course_not_found`; `course_objectives_missing` — у курса нет
 целей; `course_from_release` — `objectives` переданы курсу из релиза;
-`course_already_published` — курс уже открыт ученикам.
+`course_has_content` — у курса без релиза есть уроки (`course`, `lessons`):
+программу курсу даёт релиз; `course_already_published` — курс уже открыт
+ученикам.
 
 ## `lms_frappe_app.api.authoring.unpublish_course`
 
