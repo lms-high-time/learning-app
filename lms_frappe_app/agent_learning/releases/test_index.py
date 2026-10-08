@@ -184,6 +184,9 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		frappe.db.set_value(index.РЕЛИЗ, self.релиз, "snapshot", json.dumps(снимок), update_modified=False)
 		for строка in frappe.get_all(index.УРОК, filters={"parent": self.релиз}, pluck="name"):
 			frappe.db.set_value(index.УРОК, строка, "agent", None, update_modified=False)
+		# Журнал ошибок переживает откат теста, а имя релиза (`REL-#####`)
+		# откат возвращает: записи прошлых прогонов с тем же релизом — не наши.
+		начало = now_datetime()
 
 		release_agent_slices.execute()
 
@@ -192,7 +195,11 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		self.assertEqual(index.рамка(self.релиз), {})
 		журнал = frappe.get_all(
 			"Error Log",
-			filters={"reference_doctype": index.РЕЛИЗ, "reference_name": self.релиз},
+			filters={
+				"reference_doctype": index.РЕЛИЗ,
+				"reference_name": self.релиз,
+				"creation": (">=", начало),
+			},
 			pluck="error",
 		)
 		self.assertEqual(len(журнал), 1)
