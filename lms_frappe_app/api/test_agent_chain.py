@@ -221,6 +221,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 				"objective": {"key": "l-1-D1", "status": "touched", "open": ["exec:E1"]},
 				"lesson": {"status": "in_progress"},
 				"next_step": {"kind": "goal", "objective": "l-1-D1", "goal": "exec:E1", "title": "Сделать пример"},
+				"signals": [],
 			},
 		)
 		self.assertNotIn(СВИДЕТЕЛЬСТВО, json.dumps(первая, ensure_ascii=False))
