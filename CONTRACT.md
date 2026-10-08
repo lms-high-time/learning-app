@@ -126,8 +126,8 @@ Frappe заворачивает результат whitelisted-метода в �
 - полей других учеников в методах ученика.
 
 Методы авторинга — единственное исключение, и оно обозначено ролью, а не
-адресом: `get_lesson` и `course_draft` отдают эталоны и директивы тому, кто
-собирает курс. Ученик до них не доходит — вызов без роли куратора
+адресом: `course_release` отдаёт ответы квиза и пакет агента тому, кто
+публикует курс. Ученик до них не доходит — вызов без роли куратора
 отклоняется 403.
 
 На это вешается регрессия `lms_frappe_app/api/test_no_leak.py`: прогон всех
@@ -2700,19 +2700,18 @@ Learning: ученик всегда на действующем релизе, и
 выходит наружу» остаётся дословным для всех методов ученика.
 
 **Объект, которого нет, — доменный отказ, а не 404.** Каждый метод сначала
-проверяет, что переданное существует, и отвечает кодом по виду объекта:
-`course_not_found`, `chapter_not_found`, `lesson_not_found`,
-`question_not_found` — с полем `id`. `Why:` агент куратора работает с
-идентификаторами, полученными из прошлых ответов, и опечатка в ссылке — его
-обычная ошибка, а не нарушение доступа: она должна приходить кодом, по
+проверяет, что переданное существует, и отвечает кодом по виду объекта —
+`course_not_found`, `lesson_not_found` — с полем `id`. `Why:` агент куратора
+работает с идентификаторами, полученными из прошлых ответов, и опечатка в
+ссылке — его обычная ошибка, а не нарушение доступа: она должна приходить кодом, по
 которому он переспросит, а не HTTP-ошибкой.
 
-**Курс из релиза правится только релизом** (learning-services#500). Методы
-сборки по кусочку — правка курса, глав, уроков, их порядка, директив, схемы
-документа, квиза, домашки и карты — на курсе с действующим релизом отказывают
-`course_from_release` (с `course`): правка разошлась бы с релизом и пропала
-бы на следующей публикации. Курс правят в карте и публикуют новый релиз
-(`publish_release`).
+**Курс правится только релизом** (learning-services#500). Курс компилируется
+вне платформы и публикуется целиком (`publish_release`): программу, директивы,
+квиз, домашки и документ курса даёт релиз. Правка мимо релиза — карточки
+анонса (`update_course`) и документа из шаблона — на курсе с действующим
+релизом отказывает `course_from_release` (с `course`): правка разошлась бы с
+релизом и пропала бы на следующей публикации.
 
 Главы, уроки и порядок глав курса из релиза не правятся и в Desk, и в
 редакторе Learning (learning-services#512): ни правкой, ни удалением, ни
@@ -2870,210 +2869,19 @@ Learning: ученик всегда на действующем релизе, и
 релиз (`course`); `course_has_content` — у курса есть уроки (`course`,
 `lessons`).
 
-## `lms_frappe_app.api.authoring.add_chapter`
-
-Глава в конец курса.
-
-**Параметры:** `course`, `title`.
-
-```json
-{ "ok": true, "data": { "id": "ch-1", "title": "Основы",
-                        "course": "course-basics" } }
-```
-
-**Отказы:** `course_not_found`.
-
-## `lms_frappe_app.api.authoring.update_chapter`
-
-Правит название главы.
-
-**Параметры:** `chapter`, `title`.
-
-```json
-{ "ok": true, "data": { "id": "ch-1", "title": "Введение" } }
-```
-
-**Отказы:** `chapter_not_found`.
-
-## `lms_frappe_app.api.authoring.add_lesson`
-
-Урок в конец главы. `body` — markdown.
-
-**Параметры:** `chapter`, `title`, `body`.
-
-```json
-{ "ok": true, "data": { "id": "lesson-1", "title": "Переменные",
-                        "chapter": "ch-1", "course": "course-basics" } }
-```
-
-Порядок записывается сразу: урок без строки порядка для платформы не
-существует, и курс получил бы случайную последовательность.
-
-**Отказы:** `chapter_not_found`.
-
-## `lms_frappe_app.api.authoring.update_lesson`
-
-Правит название, материал или зачин урока.
-
-**Параметры:** `lesson`, а также `title`, `body`, `lesson_hook` — любое из
-них; непереданное остаётся как было, пустая строка очищает. `lesson_hook` —
-зачем эта тема ученику сейчас, две-три фразы; звучит в начале непройденного
-урока.
-
-```json
-{ "ok": true, "data": { "id": "lesson-1", "title": "Переменные",
-                        "lesson_hook": "Без переменных программа помнит только одно число" } }
-```
-
-**Отказы:** `lesson_not_found`.
-
-## `lms_frappe_app.api.authoring.move_lesson`
-
-Переносит урок в другую главу или на другое место в своей.
-
-**Параметры:** `lesson`, `chapter` (необязательно), `position` (необязательно,
-считается с единицы; без него — в конец).
-
-```json
-{ "ok": true, "data": { "id": "lesson-3", "chapter": "ch-2",
-                        "lessons": [ "lesson-7", "lesson-3", "lesson-9" ] } }
-```
-
-`lessons` — порядок главы, в которую урок встал, после переноса.
-
-При переносе меняются и `chapter`, и `course` урока: иначе он числился бы в
-прежнем курсе, а показывался в новом.
-
-**Отказы:** `lesson_not_found`, `chapter_not_found`.
-
-## `lms_frappe_app.api.authoring.remove_lesson`
-
-Удаляет ошибочно созданный урок вместе с его квизом, директивами и домашним
-заданием.
-
-**Параметры:** `lesson`.
-
-```json
-{ "ok": true, "data": { "removed": "lesson-3", "chapter": "ch-2",
-                        "lessons": [ "lesson-7", "lesson-9" ] } }
-```
-
-`lessons` — порядок главы после удаления.
-
-Урок, по которому уже занимались, не удаляется: отказ `lesson_in_use` с
-числом записей прогресса (`progress`), занятий (`sessions`), попыток
-(`attempts`) и сдач домашки (`homework_submissions`) — приходят только
-ненулевые. `Why:` стирание испортило бы
-историю зачётов, а курс от лишнего урока не рушится.
-
-Требует роли `Moderator`: Frappe Learning не даёт `Course Creator` право
-удалять уроки, хотя главу, квиз и директиву — даёт. Асимметрия чужая, но
-обходить её своей проверкой нельзя: агент получил бы то, чего не может тот же
-человек в браузере. Отказ приходит **403**, как и любая нехватка роли.
-
-**Отказы:** `lesson_not_found`, `lesson_in_use`.
-
-## `lms_frappe_app.api.authoring.remove_chapter`
-
-Удаляет пустую главу.
-
-**Параметры:** `chapter`.
-
-```json
-{ "ok": true, "data": { "removed": "ch-2", "course": "course-basics" } }
-```
-
-Непустая глава отклоняется: уроки удаляются поштучно и с проверкой прогресса,
-и обходить её каскадом нельзя.
-
-**Отказы:** `chapter_not_found`; `chapter_not_empty` (со списком `lessons`) —
-в главе остались уроки.
-
-## `lms_frappe_app.api.authoring.reorder_lessons`
-
-Порядок уроков главы **полным списком**: операция идемпотентна, а состав
-сверяется с текущим.
-
-**Параметры:** `chapter`, `lessons`.
-
-```json
-{ "ok": true, "data": { "chapter": "ch-2",
-                        "lessons": [ "lesson-3", "lesson-7", "lesson-9" ] } }
-```
-
-Расхождение состава — отказ `order_mismatch` с полями `expected` и
-`received`; порядок остаётся прежним.
-
-**Отказы:** `chapter_not_found`, `order_mismatch`.
-
-## `lms_frappe_app.api.authoring.reorder_chapters`
-
-Порядок глав курса — тем же способом и с той же сверкой состава.
-
-**Параметры:** `course`, `chapters`.
-
-```json
-{ "ok": true, "data": { "course": "course-basics",
-                        "chapters": [ "ch-2", "ch-1" ] } }
-```
-
-**Отказы:** `course_not_found`, `order_mismatch`.
-
-## `lms_frappe_app.api.authoring.set_directive`
-
-Директива преподавателя новой версией. Прошлые снимаются с действия, но не
-удаляются: на них ссылаются репорты, поданные по прежней редакции.
-
-**Параметры:** `lesson`, `teaching_directive`, а также `objectives`,
-`probing_questions`, `common_misconceptions`, `success_criteria` —
-многострочным текстом, строка на пункт.
-
-```json
-{ "ok": true, "data": { "id": "AD-00007", "lesson": "lesson-1", "version": 2 } }
-```
-
-`objectives` — единственное поле директивы, видимое снаружи: его отдаёт
-`course_map`, в том числе гостю. Остальное остаётся на сервере.
-
-**Отказы:** `lesson_not_found`.
-
-## `lms_frappe_app.api.authoring.set_course_directive`
-
-Сквозная директива курса новой версией — то, что одинаково на каждом уроке:
-роль и тон преподавателя, формат занятия, кого учим, как называть вещи.
-Прошлые версии снимаются с действия тем же порядком, что у урочной.
-
-**Параметры:** `course`, `teaching_directive`, а также `objectives`,
-`student_profile`, `glossary`, `remember_about_student`; списочные — строка на
-пункт.
-
-`remember_about_student` — что в этом курсе стоит помнить об ученике между
-занятиями. Заметки агент ведёт сам (`remember`), здесь задаётся, чему в них
-место. Ученику поле не показывается.
-
-```json
-{ "ok": true, "data": { "id": "ACD-00001", "course": "course-basics", "version": 1 } }
-```
-
-Курс без директивы даёт предупреждение `course_without_directive` в
-`readiness` — публикацию оно не блокирует.
-
-**Отказы:** `course_not_found`.
-
-## `lms_frappe_app.api.authoring.set_course_artifact`
-
-Схема документа, который ученик собирает по ходу курса, — новой версией.
-Действующая схема одна на пару «курс + ключ»; прошлые версии снимаются с
-действия, как у директив. Содержимое ученика хранится по ключам блоков и
-правку схемы переживает: добавленный блок появится пустым, убранный
-исчезнет со страницы, не стирая написанного.
-
-**Параметры:** `course`, `artifact` — ключ документа (`project_summary`),
-`title`, `blocks`, `layout` — `sections` (столбцом, по умолчанию) или
-`canvas` (сеткой по `span`), `canvas` (необязательный) — холст документа,
-`purpose` (необязательный) — одна-две фразы ученику: зачем этот документ.
-Ученик видит их в «Моих документах» под названием. Не назван — остаётся у
-прежней версии; пустая строка убирает (learning-services#462).
+## Схема документа курса
+
+Документ, который ученик собирает по ходу курса, задаётся схемой: блоками,
+раскладкой и холстом. Схему курса из релиза строит релиз (раздел «Релиз
+курса»); блоки, раскладку и холст в этой форме принимают шаблоны документов
+(`set_artifact_template`) и правки курса к ним
+(`set_course_artifact_template`). Действующая схема одна на пару «курс +
+ключ документа»; новая версия снимает прежнюю с действия. Содержимое ученика
+хранится по ключам блоков и правку схемы переживает: добавленный блок
+появится пустым, убранный исчезнет со страницы, не стирая написанного.
+
+`layout` — `sections` (столбцом, по умолчанию) или `canvas` (сеткой по
+`span`).
 
 ```json
 { "blocks": [
@@ -3141,35 +2949,14 @@ Learning: ученик всегда на действующем релизе, и
 ячейки список полей документа и колонок таблицы её блока. Холст хранится
 версией схемы вместе с блоками; без `canvas` у новой версии холста нет.
 
-Порядок блоков задаётся здесь и нигде больше: ученик видит их в нём же.
+Порядок блоков — порядок схемы: ученик видит их в нём же.
 `hint` адресована агенту ученика; `lesson` — на каком уроке блок обычно
 собирают, подсказка, а не ограничение. Ключи нормализуются к нижнему
 регистру; повторяющийся ключ отклоняется ошибкой валидации. Ключи `table`,
 `report`, `canvas`, `compare` заняты видами страницы документа (они и блок
 делят один сегмент адреса `/documents/<курс>/<документ>/<вид или блок>`) —
-отказ `artifact_invalid_spec` с `key`; так же у шаблона и у схемы, собранной
-из шаблона с правками курса (learning-services#367).
-
-```json
-{ "ok": true, "data": { "id": "ACA-00001", "course": "course-p3",
-                        "artifact": "project_summary", "version": 1 } }
-```
-
-**Отказы:** `course_not_found`, `lesson_not_found` — блок ссылается на
-несуществующий урок; `invalid_block_kind` (с `key` и `kind`) — вид не из
-`text`, `file`, `link`; `artifact_invalid_spec` (с `key`, `table`, `column`,
-`field`) — схема полей и колонок не читается или холст не раскладывается (с
-`key` — ячейка или блок, где ошибка).
-
-Схема целиком отвязывает документ от шаблона: у новой версии нет ни
-шаблона, ни правок (`template` в `course_draft` — `null`). Документ из
-шаблона — `set_course_artifact_template`.
-
-Схема без блоков даёт предупреждение `artifact_without_blocks` в
-`readiness` — публикацию оно не блокирует: курс без документа — нормальный
-курс. Блок-файл без `accept` — предупреждение `artifact_file_without_accept`
-(с `key`): такой блок примет любой файл, и срез для агента может не
-построиться.
+отказ `artifact_invalid_spec` с `key` и у шаблона, и у схемы, собранной из
+шаблона с правками курса (learning-services#367).
 
 ## `lms_frappe_app.api.authoring.set_artifact_template`
 
@@ -3181,7 +2968,7 @@ Learning: ученик всегда на действующем релизе, и
 
 **Параметры:** `template` — ключ шаблона: латиница в нижнем регистре, цифры,
 `_` и `-`, до 60 знаков (`risk-register`); `title` — название документа по
-умолчанию; `blocks`, `layout`, `canvas` — как у `set_course_artifact`, но
+умолчанию; `blocks`, `layout`, `canvas` — как в «Схеме документа курса», но
 без `lesson` у блоков: урок принадлежит курсу и задаётся в правках привязки;
 `note` (необязательно) — что поменялось в версии; `extends`,
 `extends_version`, `overlay` (необязательно) — наследник, ниже; `renamed`
@@ -3194,7 +2981,7 @@ Learning: ученик всегда на действующем релизе, и
 описание базы сказало бы про другой документ. По нему агент выбирает шаблон
 в `list_artifact_templates`, когда названия похожи.
 
-Схема проверяется той же проверкой, что у `set_course_artifact`: вид блока,
+Схема проверяется той же проверкой, что схема документа курса: вид блока,
 поля и колонки, формулы, холст. Сверх того у шаблона есть блоки, у каждого —
 ключ, и ключи не повторяются.
 
@@ -3295,7 +3082,7 @@ MCP шлёт его всегда, и наследник шаблона-холс�
   "created": "2026-09-29T12:00:00.000000" } }
 ```
 
-Блоки — в той форме, в какой их принимает `set_course_artifact`, без `lesson`;
+Блоки — в форме «Схемы документа курса», без `lesson`;
 `spec` — `null` у блока без полей и колонок. У наследника схема — уже
 собранная, `extends` — `{"template", "version"}` родителя, `overlay` — правки
 к нему; у прочих оба `null`. `renamed` — переименования этой версии
@@ -3308,14 +3095,15 @@ MCP шлёт его всегда, и наследник шаблона-холс�
 
 Документ курса из шаблона с правками курса — новой версией схемы документа
 курса. Итоговая схема = шаблон ⊕ правки; собирается при записи, проверяется
-целиком, как у `set_course_artifact`, и хранится так же: ученик, страница и
+целиком, как схема документа курса, и хранится так же: ученик, страница и
 выгрузка видят обычную схему документа и о шаблоне не знают. Новая версия
 шаблона курс не меняет — он остаётся на закреплённой.
 
 **Параметры:** `course`, `artifact` — ключ документа в курсе, `template`,
 `version` (необязательно) — версия шаблона, без него последняя, `overlay`
-(необязательно) — правки курса, `purpose` (необязательно) — зачем документ
-ученику, как у `set_course_artifact`. Он у документа курса, а не у шаблона:
+(необязательно) — правки курса, `purpose` (необязательно) — одна-две фразы
+ученику: зачем этот документ; ученик видит их в «Моих документах» под
+названием (learning-services#462). Он у документа курса, а не у шаблона:
 не назван — остаётся прежний, в том числе при `upgrade_course_artifact`.
 
 ```json
@@ -3350,7 +3138,7 @@ MCP шлёт его всегда, и наследник шаблона-холс�
                         "template": "risk-register", "template_version": 3 } }
 ```
 
-`version` — версия схемы документа курса, как у `set_course_artifact`;
+`version` — версия схемы документа курса;
 `template_version` — закреплённая версия шаблона.
 
 **Отказы:** `course_not_found`; `artifact_template_not_found` (с `template` и
@@ -3360,7 +3148,7 @@ MCP шлёт его всегда, и наследник шаблона-холс�
 `after`), называет неизвестное свойство (с `name`) или не объект там, где
 нужен объект; `lesson_not_found` (с `id`) — урока нет в этом курсе;
 `artifact_invalid_spec`, `invalid_block_kind` — собранная схема не проходит
-проверку `set_course_artifact`: например, убран блок, который называет сетка
+проверку схемы документа курса: например, убран блок, который называет сетка
 холста.
 
 ## `lms_frappe_app.api.authoring.upgrade_course_artifact`
@@ -3434,268 +3222,6 @@ MCP шлёт его всегда, и наследник шаблона-холс�
 с новой версией; `lesson_not_found`, `artifact_invalid_spec`,
 `invalid_block_kind` — собранная схема не проходит проверку, как у
 `set_course_artifact_template`.
-
-## `lms_frappe_app.api.authoring.add_quiz`
-
-Квиз урока целиком. Заводится одним вызовом: квиз без вопросов — состояние, в
-котором ученик упирается в зачёт из ничего.
-
-**Параметры:** `lesson`, `questions`, `title` (необязательно),
-`passing_percentage` (по умолчанию 70).
-
-```json
-{ "questions": [
-  { "text": "Что делает цикл?", "type": "Choices", "marks": 1,
-    "options": [ { "text": "Повторяет", "correct": true, "explanation": "верно" },
-                 { "text": "Ветвит" } ] },
-  { "text": "Назовите оператор", "type": "User Input",
-    "answers": ["for", "while"] } ] }
-```
-
-```json
-{ "ok": true, "data": { "id": "quiz-1", "lesson": "lesson-1",
-                        "questions": [ "q-14", "q-15" ] } }
-```
-
-Тип по умолчанию `Choices`. `Open Ended` не принимается: такой вопрос сервер
-не проверяет, а зачёт, выставленный агентом, не зачёт.
-
-Состав вариантов проверяет сам Frappe Learning — дубли, минимум два варианта,
-хотя бы один верный. Нарушение возвращается отказом `invalid_question` с
-номером вопроса в `question_index`; вопросы этого квиза откатываются целиком.
-
-Второй квиз на уроке не заводится: урок отдаёт агенту ровно один, а остальные
-становятся невидимым мусором. Правится вопросами существующего —
-`add_question`, `update_question`, `remove_question`.
-
-**Отказы:** `lesson_not_found`; `empty_quiz` — список вопросов пуст;
-`quiz_exists` (с `quiz`) — у урока уже есть квиз; `unknown_question_type`
-(с `received`) — тип не `Choices` и не `User Input`; `too_many_options`
-(с `received`) — вариантов или образцов ответа больше, чем Frappe Learning
-хранит в вопросе; `invalid_question` (с `question_index`).
-
-## `lms_frappe_app.api.authoring.add_question`
-
-Добавляет вопрос в существующий квиз урока.
-
-**Параметры:** `lesson`, `question` — один элемент того же вида, что в
-`questions` у `add_quiz`.
-
-```json
-{ "ok": true, "data": { "quiz": "quiz-1", "question": "q-16",
-                        "questions_total": 6 } }
-```
-
-**Отказы:** `lesson_not_found`; `quiz_missing` — у урока нет квиза, его
-заводит `add_quiz` целиком; `unknown_question_type` (с `received`);
-`too_many_options` (с `received`); `invalid_question`.
-
-## `lms_frappe_app.api.authoring.update_question`
-
-Правит текст вопроса, варианты или образцы ответа.
-
-**Параметры:** `question`, а также `text`, `options`, `answers` — любое из
-трёх; непереданное остаётся как было.
-
-`options` и `answers` **замещают** прежние целиком: правка «трёх вариантов на
-два» иначе оставила бы третий на месте, и вопрос отвечал бы не тем, что видит
-куратор.
-
-```json
-{ "ok": true, "data": { "id": "q-16", "text": "Что выведет цикл…",
-                        "affects_attempts": 3 } }
-```
-
-`affects_attempts` — сколько ответов учеников уже дано на этот вопрос. Правка
-после ответов разрешена: блокировать исправление опечатки в опубликованном
-курсе хуже, чем оставить её, — но куратор должен знать, что меняет вопрос,
-который кто-то уже видел.
-
-Правка, ломающая состав вариантов, отменяется целиком: вопрос не остаётся
-наполовину переписанным.
-
-**Отказы:** `question_not_found`; `too_many_options` (с `received`);
-`invalid_question` (с `question`).
-
-## `lms_frappe_app.api.authoring.remove_question`
-
-Убирает вопрос из квиза урока.
-
-**Параметры:** `lesson`, `question`.
-
-```json
-{ "ok": true, "data": { "quiz": "quiz-1", "questions_total": 5 } }
-```
-
-Сама запись вопроса не удаляется: на неё ссылаются ответы прошлых попыток, и
-стирание испортило бы историю зачётов.
-
-**Отказы:** `lesson_not_found`; `quiz_missing`; `question_not_found`
-(с `quiz` и `question`) — в этом квизе такого вопроса нет.
-
-## `lms_frappe_app.api.authoring.add_homework`
-
-Домашнее задание урока (learning-services#439): одно на урок, как квиз,
-одинаковое для всех учеников. Выдаётся закрытием урока — сданным квизом или
-`complete_lesson`; в `start_lesson` следующего урока оно приходит как
-`previous_homework` вместе со сдачей ученика. Необязательное: `publish_course` его не проверяет, и
-домашка ничего не блокирует.
-
-**Параметры:** `lesson`, `title`, `description` — что сделать и что сдать,
-markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умолчанию);
-`due_mode` — `none` (по умолчанию), `relative` — `due_days` дней после
-закрытия урока, `absolute` — до конца дня `due_date` (`YYYY-MM-DD`) по
-времени платформы. Поле другого режима срока очищается.
-
-```json
-{ "ok": true, "data": { "id": "a1b2c3d4e5", "lesson": "lesson-1",
-  "title": "Встреча со спонсором", "description": "Проведите встречу…",
-  "answer_mode": "text_and_files", "due_mode": "relative", "due_days": 5,
-  "due_date": null } }
-```
-
-**Отказы:** `lesson_not_found`; `homework_exists` (с `homework`) — у урока
-уже есть задание, правьте его; `invalid_answer_mode`; `invalid_due` — у
-`relative` нет числа дней больше нуля, у `absolute` — даты, или режим
-неизвестен.
-
-## `lms_frappe_app.api.authoring.update_homework`
-
-Правит домашнее задание урока. Незаданное и пустое не затирается.
-
-**Параметры:** `lesson`; необязательные `title`, `description`, `answer_mode`,
-`due_mode`, `due_days`, `due_date` — как у `add_homework`.
-
-```json
-{ "ok": true, "data": { "id": "a1b2c3d4e5", "lesson": "lesson-1",
-  "title": "Встреча с заказчиком", "description": "Проведите встречу…",
-  "answer_mode": "text", "due_mode": "absolute", "due_days": null,
-  "due_date": "2026-10-15" } }
-```
-
-Сдачи ссылаются на задание, а не копируют его: исправленная формулировка видна
-всем сразу. Сроки, уже выставленные сдачам, не пересчитываются — ученик не
-получает просрочку задним числом.
-
-**Отказы:** `homework_missing` — у урока нет задания; `invalid_answer_mode`;
-`invalid_due`.
-
-## `lms_frappe_app.api.authoring.remove_homework`
-
-Удаляет домашнее задание урока, пока по нему никто не сдавал.
-
-**Параметры:** `lesson`.
-
-```json
-{ "ok": true, "data": { "lesson": "lesson-1", "removed": true } }
-```
-
-**Отказы:** `homework_missing`; `homework_in_use` (с `submissions`) — по
-заданию есть сдачи, в том числе архивные после сброса прогресса: его можно
-только переписать.
-
-## `lms_frappe_app.api.authoring.get_lesson`
-
-Урок целиком: материал, действующая директива и квиз с эталонами.
-
-**Параметры:** `lesson`.
-
-```json
-{ "ok": true, "data": {
-  "id": "lesson-1", "title": "Списки", "chapter": "ch-1", "course": "c-1",
-  "body": "## Списки\n\nСписок хранит значения по порядку.",
-  "directive": { "id": "AD-00007", "version": 2,
-                 "created_at": "2026-09-23T14:05:11.482913",
-                 "teaching_directive": "…", "objectives": "…" },
-  "course_directive": { "id": "ACD-00001", "version": 1,
-                        "created_at": "2026-09-20T09:12:40.118204",
-                        "teaching_directive": "…", "objectives": "…" },
-  "quiz": { "id": "quiz-1", "passing_percentage": 70, "questions": [
-    { "id": "q-14", "text": "Что выведет цикл…", "type": "Choices",
-      "options": [ { "text": "Десять", "correct": true,
-                     "explanation": "Цикл идёт от нуля до девяти" } ],
-      "answers": [] } ] },
-  "homework": { "id": "a1b2c3d4e5", "lesson": "lesson-1", "title": "Список дел",
-    "description": "Составьте список задач на неделю…", "answer_mode": "text_and_files",
-    "due_mode": "relative", "due_days": 5, "due_date": null } } }
-```
-
-У варианта `explanation` — пояснение из `add_quiz`, пустая строка, если его
-нет. Автору оно видно по роли, как и эталоны; ученику — только вместе с
-вердиктом (см. «Запрещённые поля»).
-
-Директивы приходят как есть, не разобранными на пункты: куратор сверяет тот
-самый текст, который уедет агенту ученика. `created_at` — когда поставлена
-действующая версия. Директивы нет — `null`; квиза нет —
-`quiz` тоже `null`; домашнего задания нет — `homework: null`. Задание — в том
-же виде, что отдаёт `add_homework`.
-
-Отдельный метод, а не поле `course_draft`: полные тексты всех уроков в одном
-ответе — десятки килобайт на каждый вызов, а сверяют поурочно.
-
-**Отказы:** `lesson_not_found`.
-
-## `lms_frappe_app.api.authoring.course_draft`
-
-Курс целиком, как его собрали, — с эталонами и списком проблем.
-
-**Параметры:** `course`.
-
-```json
-{ "ok": true, "data": {
-  "id": "course-basics", "title": "Основы", "summary": "Для начинающих",
-  "published": false, "upcoming": false,
-  "chapters": [ { "id": "ch-1", "title": "Глава", "lessons": [
-    { "id": "lesson-1", "title": "Циклы", "has_body": true,
-      "body_chars": 4210, "body_segments": 1,
-      "has_directive": false, "directive_version": null, "objectives": 0,
-      "quiz": null,
-      "homework": { "title": "Список дел", "answer_mode": "text_and_files",
-                    "due_mode": "relative" } } ] } ],
-  "directive": null,
-  "artifacts": [ { "id": "ACA-00001", "version": 1,
-    "artifact": "project_summary", "title": "Резюме проекта",
-    "purpose": "Проект на одной странице — чтобы все договорились об одном и том же.",
-    "layout": "sections", "template": "project-summary",
-    "template_version": 2, "template_latest": 3,
-    "overlay": { "blocks": { "goal_and_benefits": { "lesson": "lesson-1" } } },
-    "blocks": [ { "key": "goal_and_benefits",
-      "title": "…", "hint": "…", "lesson": "lesson-1", "span": 1,
-      "kind": "text", "accept": [] } ] } ],
-  "readiness": { "blocking": [], "warnings": [
-    { "code": "lesson_without_directive", "lesson": "lesson-1",
-      "message": "Урок без директивы" } ] },
-  "revision": "2026-09-23T14:05:11.482913",
-  "author_url": "https://lms.example.com/author?course=course-basics",
-  "map_discrepancies": null, "open_notes": 2 } }
-```
-
-`quiz` у урока — тот же состав с эталонами, что отдаёт `get_lesson`; полного
-текста уроков здесь нет. Наполненность — фактами: `body_chars` — длина
-материала, `body_segments` — на сколько частей урок режет разбор материала при
-текущем `lesson_segment_limit`, `directive_version` и `objectives` — версия
-действующей директивы и число её целей (`null` и `0` без директивы).
-`homework` — название, вид ответа и правило срока домашнего задания урока,
-`null` без задания; целиком оно — у `get_lesson`.
-`revision` — самая свежая отметка изменения курса, та же, что у
-`course_revision`; `author_url` — страница курса в кабинете автора.
-`map_discrepancies` — сколько расхождений с картой декомпозиции нашёл
-`course_map_check`; `null`, если карты нет. Публикацию не блокирует.
-`open_notes` — сколько замечаний автора ждёт агента (см. `list_notes`).
-
-У документа курса `template` и `template_version` — шаблон и закреплённая
-версия, `template_latest` — последняя версия шаблона: больше закреплённой —
-шаблон ушёл вперёд. `overlay` — правки курса к шаблону в том виде, в каком
-их принял `set_course_artifact_template` (`{}` — правок нет). Перепривязка
-заменяет правки целиком: чтобы поменять одну, берут эти и правят их, иначе
-уроки блоков и прочие правки курса пропадут. У документа со схемой целиком
-все четыре — `null`.
-
-Шаблон, ушедший вперёд, даёт предупреждение `artifact_template_outdated` в
-`readiness` — с `artifact`, `template` и сообщением «Документ «Реестр
-рисков»: шаблон risk-register вышел в v4, курс на v3.», дополненным `note`
-последней версии. Публикацию оно не блокирует: курс на закреплённой версии
-работает, как работал; переход — `upgrade_course_artifact`.
 
 ## `lms_frappe_app.api.authoring.course_revision`
 
@@ -3943,99 +3469,6 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 **Отказы:** `note_not_found` (с `id`); `invalid_transition` (с `status` —
 текущим) — переход недопустим, не тому, кто его делает, или без
 обязательного текста.
-
-## `lms_frappe_app.api.authoring.set_course_map`
-
-Новая версия карты декомпозиции курса — замысла, с которым сверяется
-собранное. Каждый вызов создаёт версию; действующая одна. С курсом карта при
-записи не сверяется: её согласуют до сборки.
-
-**Параметры:** `course`, `levels`, `nodes`, `lessons`, `blocks` — списки;
-приходят массивами или строками JSON. Только `POST`.
-
-- `levels` — `[{key, title, needs_children?, needs_lesson?}]`, слева
-  направо, первый — корень. `needs_children` — у узла уровня должен быть
-  узел справа; `needs_lesson` — узлу уровня нужен урок. Флаг у последнего
-  уровня `needs_children` — отказ.
-- `nodes` — `[{id, level, text, parents?, note?, tags?, lesson?, objective?}]`.
-  `parents` — узлы соседнего левого уровня; `lesson` — ключ пункта плана;
-  `objective` — узел является целью урока.
-- `lessons` — план: `[{key, title, chapter?, lesson?}]`; `lesson` — урок
-  этого курса, к которому привязан пункт.
-- `blocks` — план блоков документа: `[{artifact, key, title?, lesson?,
-  criteria?}]`; `lesson` — ключ пункта плана, `criteria` — критерии, которые
-  должны дойти до подсказки блока.
-
-Ключи и идентификаторы — строки; целые числа принимаются и приводятся к
-строке. Неизвестное поле — отказ, а не пропуск.
-
-```json
-{ "ok": true, "data": { "id": "ACM-00003", "course": "course-basics",
-  "version": 3, "counts": { "lessons": 0, "objectives": 1, "blocks": 0,
-  "integrity": 0, "total": 1 } } }
-```
-
-`counts` — счётчики `course_map_check` сразу после записи.
-
-**Отказы:** `course_not_found`; `invalid_map` с полем `where` — где ошибка:
-`nodes[T1].parents`, `lessons[u2].lesson`, `blocks[register/risks].criteria`.
-
-## `lms_frappe_app.api.authoring.course_map_check`
-
-Действующая карта против курса на платформе.
-
-**Параметры:** `course`.
-
-```json
-{ "ok": true, "data": {
-  "course": "course-basics",
-  "map": { "id": "ACM-00003", "version": 3,
-    "created_at": "2026-09-23T14:05:11.482913",
-    "levels": [ { "key": "result", "title": "Результат",
-      "needs_children": false, "needs_lesson": false } ],
-    "nodes": [ { "id": "R", "level": "result", "text": "Живой реестр",
-      "parents": [], "note": "", "tags": [], "lesson": null,
-      "objective": false } ],
-    "lessons": [ { "key": "u1", "title": "Риск как событие",
-      "chapter": "Рамка", "lesson": "lesson-1" } ],
-    "blocks": [ { "artifact": "register", "key": "risks", "title": "",
-      "lesson": "u1", "criteria": [ "пять записей" ] } ] },
-  "platform": {
-    "lessons": [ { "id": "lesson-1", "number": 1, "title": "Риск как событие",
-      "chapter": "Рамка", "objectives": [ "Риск это событие" ] } ],
-    "blocks": [ { "artifact": "register", "key": "risks", "title": "Риски",
-      "lesson": "lesson-1", "hint": "Пять записей…" } ] },
-  "matches": { "u1": "lesson-1" },
-  "discrepancies": [ { "group": "objectives", "code": "mismatch",
-    "plan_lesson": "u1", "lesson": "lesson-1", "missing": [],
-    "extra": [ "Лишняя цель" ], "nodes": [],
-    "message": "Цели урока «Риск как событие» расходятся с картой: нет 0, лишних 1" } ],
-  "counts": { "lessons": 0, "objectives": 1, "blocks": 0, "integrity": 0,
-    "total": 1 },
-  "tags": {} } }
-```
-
-`matches` — пункт плана → урок платформы: по привязке, у непривязанного —
-по названию; пары нет — `null`. Группы и коды расхождений:
-
-- `lessons`: `missing` (пункта нет на платформе), `extra` (урока нет в карте),
-  `title`, `chapter` (`expected` — в карте, `actual` — на платформе),
-  `order` — урок сдвинут относительно карты;
-- `objectives`: `mismatch` (`missing`, `extra`, `nodes` — узлы недостающих
-  целей), `order`;
-- `blocks`: `missing` (блока нет в схеме), `extra` (блока нет в карте),
-  `lesson` (`expected`, `actual` — уроки), `criteria` (`missing` — критерии,
-  которых нет в подсказке; сравнение без регистра и лишних пробелов);
-- `integrity`: `orphan` (нет пути к первому уровню), `unexpanded`
-  (флаг `needs_children`), `no_lesson` (флаг `needs_lesson`); ссылка —
-  `node`.
-
-`tags` — узлы по меткам. Карты нет — `map: null`, `counts: null`, пустые
-`matches` и `discrepancies`; `platform` приходит всегда.
-
-**Отказы:** `course_not_found`.
-
-**Отказы:** `course_not_found`.
 
 ## `lms_frappe_app.api.authoring.publish_release`
 

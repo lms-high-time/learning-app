@@ -8,7 +8,7 @@
 ученика та же, что у схемы целиком, закреплённая версия, отвязка схемой
 целиком и патч, переводящий готовые документы на шаблоны. Дальше —
 наследник (#375), переход на новую версию с переименованиями (#376), его
-предпросмотр и правки курса в черновике (#383), проверка каталога (#377),
+предпросмотр и правки курса в действующем документе (#383), проверка каталога (#377),
 описание версии (#387).
 """
 
@@ -18,10 +18,17 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.artifacts import catalog
+from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты
 from lms_frappe_app.api import authoring, student
 from lms_frappe_app.commands import commands
 from lms_frappe_app.patches.v0_1 import artifact_templates
-from lms_frappe_app.tests.sample_data import зачислить, создать_куратора, создать_урок, создать_ученика
+from lms_frappe_app.tests.sample_data import (
+	зачислить,
+	создать_куратора,
+	создать_урок,
+	создать_ученика,
+	схема_документа,
+)
 
 БЛОКИ = [
 	{"key": "intro", "title": "Вступление", "hint": "Одной фразой"},
@@ -170,7 +177,7 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 	def test_ключ_блока_не_занят_видом_страницы(self):
 		"""Вид страницы документа и блок делят сегмент адреса (#367): ключ вида
 		отклоняется и у схемы целиком, и у шаблона, и у собранной схемы."""
-		целиком = authoring.set_course_artifact(
+		целиком = схема_документа(
 			course=self.курс, artifact="journal", title="Журнал", blocks=[{"key": "Report", "title": "О"}]
 		)
 		self.assertEqual((self.код(целиком), целиком["error"]["key"]), ("artifact_invalid_spec", "report"))
@@ -384,7 +391,7 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 			{"key": "log", "title": "Журнал"},
 			БЛОКИ[2],
 		]
-		authoring.set_course_artifact(
+		схема_документа(
 			course=эталон,
 			artifact="journal",
 			title="Журнал площадки",
@@ -413,7 +420,7 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 
 		self.шаблон(blocks=БЛОКИ[:2], canvas=None, note="Без итога")
 
-		документ = authoring.course_draft(course=self.курс)["data"]["artifacts"][0]
+		документ = _действующие_артефакты(self.курс)[0]
 		self.assertEqual(
 			(документ["template"], документ["template_version"], документ["template_latest"]),
 			(self.ключ, 1, 2),
@@ -460,15 +467,15 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 			course=self.курс, artifact="journal", template=self.ключ, overlay=self.правки()
 		)
 
-		ответ = authoring.set_course_artifact(
+		ответ = схема_документа(
 			course=self.курс, artifact="journal", title="Журнал", blocks=БЛОКИ[:1]
 		)["data"]
 
 		документ = frappe.get_doc("Agent Course Artifact", ответ["id"])
 		self.assertEqual((документ.template, документ.template_version, документ.overlay), (None, 0, None))
-		черновик = authoring.course_draft(course=self.курс)["data"]["artifacts"][0]
+		действующий = _действующие_артефакты(self.курс)[0]
 		self.assertEqual(
-			(черновик["template"], черновик["template_version"], черновик["template_latest"]),
+			(действующий["template"], действующий["template_version"], действующий["template_latest"]),
 			(None, None, None),
 		)
 		self.assertNotIn(
@@ -614,19 +621,6 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 			renamed={"columns": {"log": {"kind": "sort"}}},
 			note="Вид — сортировка",
 		)
-		предупреждения = authoring.course_draft(course=self.курс)["data"]["readiness"]["warnings"]
-		устарел = [п for п in предупреждения if п["code"] == "artifact_template_outdated"]
-		self.assertEqual(
-			устарел,
-			[
-				{
-					"code": "artifact_template_outdated",
-					"artifact": "journal",
-					"template": self.ключ,
-					"message": f"Документ «Журнал»: шаблон {self.ключ} вышел в v3, курс на v1. Вид — сортировка",
-				}
-			],
-		)
 
 		ответ = authoring.upgrade_course_artifact(course=self.курс, artifact="journal")
 
@@ -682,16 +676,13 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		# Следующая строка — со следующим номером: счётчик переехал вместе с таблицей.
 		ответ = student.update_artifact(self.курс, "journal", "entries", rows=[{"what": "Потоп"}])
 		self.assertEqual(ответ["data"]["created"], ["I2"])
-		frappe.set_user(self.куратор)
-		предупреждения = authoring.course_draft(course=self.курс)["data"]["readiness"]["warnings"]
-		self.assertNotIn("artifact_template_outdated", [п["code"] for п in предупреждения])
 
-	def test_черновик_отдаёт_правки_курса(self):
-		"""Перепривязка заменяет правки целиком: агент читает их в черновике."""
+	def test_действующий_документ_отдаёт_правки_курса(self):
+		"""Перепривязка заменяет правки целиком: они видны в действующем документе курса."""
 		self.курс_с_данными()
-		authoring.set_course_artifact(course=self.курс, artifact="plain", title="П", blocks=БЛОКИ[:1])
+		схема_документа(course=self.курс, artifact="plain", title="П", blocks=БЛОКИ[:1])
 
-		документы = {д["artifact"]: д for д in authoring.course_draft(course=self.курс)["data"]["artifacts"]}
+		документы = {д["artifact"]: д for д in _действующие_артефакты(self.курс)}
 
 		self.assertEqual(
 			документы["journal"]["overlay"],
@@ -706,7 +697,7 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		self.assertEqual(документы["journal"]["overlay"]["blocks"]["intro"], {"lesson": self.урок})
 		self.assertIsNone(документы["plain"]["overlay"])
 		authoring.set_course_artifact_template(course=self.курс, artifact="plain", template=self.ключ)
-		документы = {д["artifact"]: д for д in authoring.course_draft(course=self.курс)["data"]["artifacts"]}
+		документы = {д["artifact"]: д for д in _действующие_артефакты(self.курс)}
 		self.assertEqual(документы["plain"]["overlay"], {})
 
 	def снимок_записей(self) -> dict:
@@ -844,7 +835,7 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 			course=self.курс, artifact="journal", template=self.ключ, version=2
 		)
 		self.assertEqual(self.код(перейти(version=1)), "artifact_invalid_template")
-		authoring.set_course_artifact(course=self.курс, artifact="plain", title="П", blocks=БЛОКИ[:1])
+		схема_документа(course=self.курс, artifact="plain", title="П", blocks=БЛОКИ[:1])
 		не_привязан = перейти(artifact="plain")
 		self.assertEqual(
 			(self.код(не_привязан), не_привязан["error"]["artifact"]), ("artifact_not_bound", "plain")
@@ -881,12 +872,12 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		ключ = f"log_{self.суффикс}"
 		блоки = [{**БЛОКИ[0], "lesson": self.урок}, *БЛОКИ[1:]]
-		записано = authoring.set_course_artifact(
+		записано = схема_документа(
 			course=self.курс, artifact=ключ, title="Журнал", blocks=блоки, canvas=ХОЛСТ
 		)["data"]
 		# Тот же ключ документа в другом курсе с другой схемой — свой шаблон.
 		соседний = зачислить(self.ученик, создать_урок(f"Сосед {self.суффикс}"))
-		authoring.set_course_artifact(course=соседний, artifact=ключ, title="Журнал", blocks=БЛОКИ[:1])
+		схема_документа(course=соседний, artifact=ключ, title="Журнал", blocks=БЛОКИ[:1])
 		frappe.set_user(self.ученик)
 		до = student.artifact(self.курс, ключ)["data"]
 		frappe.set_user("Administrator")
@@ -927,7 +918,7 @@ class IntegrationTestArtifactTemplates(IntegrationTestCase):
 		ключ = f"log_{self.суффикс}"
 		второй = зачислить(self.ученик, создать_урок(f"Второй {self.суффикс}"))
 		for курс in (self.курс, второй):
-			authoring.set_course_artifact(course=курс, artifact=ключ, title="Журнал", blocks=БЛОКИ[:2])
+			схема_документа(course=курс, artifact=ключ, title="Журнал", blocks=БЛОКИ[:2])
 
 		artifact_templates.привязать_документы({"course": ("in", [self.курс, второй])})
 
@@ -969,7 +960,7 @@ class IntegrationTestArtifactCatalog(IntegrationTestCase):
 				"add_blocks": [{"key": "log", "title": "Журнал"}],
 			},
 		)["data"]["id"]
-		self.целиком = authoring.set_course_artifact(
+		self.целиком = схема_документа(
 			course=self.курс, artifact="plain", title="Схема целиком", blocks=БЛОКИ[:2]
 		)["data"]["id"]
 

@@ -12,13 +12,12 @@ from frappe.utils import add_days, nowdate
 
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.api import authoring, team
+from lms_frappe_app.api import team
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	привязать_урок,
 	создать_домашку,
 	создать_курс,
-	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
@@ -344,25 +343,14 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 			self.assertEqual(self.код(ответ), "homework_not_in_course")
 
 	def test_после_переноса_урока_срок_назначения_правится(self):
+		"""Урок с заданием ушёл в другой курс — правкой в Learning: строка срока
+		молча выпадает, а не держит назначение."""
 		self.задать([{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1}])
 		другой = создать_урок(f"Другой {frappe.generate_hash(length=6)}")
-		куда = frappe.db.get_value("Course Lesson", другой, "chapter")
-		модератор = создать_куратора(f"hd-mod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator")
-		self.assertTrue(self.от_имени(authoring.move_lesson, кто=модератор, lesson=self.первый, chapter=куда)["ok"])
+		куда = frappe.db.get_value("Course Lesson", другой, ["chapter", "course"], as_dict=True)
+		frappe.db.set_value("Course Lesson", self.первый, {"chapter": куда.chapter, "course": куда.course})
 
 		ответ = self.от_имени(team.update_allocation, allocation=self.назначение, deadline="2030-12-31")
 
 		self.assertTrue(ответ["ok"], ответ)
-		self.assertFalse(frappe.db.exists("Course Allocation Homework Due", {"parent": self.назначение}))
-
-	def test_удаление_задания_и_урока_снимает_правила(self):
-		self.задать(
-			[
-				{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1},
-				{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1},
-			]
-		)
-		модератор = создать_куратора(f"hd-mod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator")
-		self.assertTrue(self.от_имени(authoring.remove_homework, кто=модератор, lesson=self.первый)["ok"])
-		self.assertTrue(self.от_имени(authoring.remove_lesson, кто=модератор, lesson=self.третий)["ok"])
 		self.assertFalse(frappe.db.exists("Course Allocation Homework Due", {"parent": self.назначение}))

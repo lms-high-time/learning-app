@@ -66,7 +66,7 @@
    "label": "Что нового"
   },
   {
-   "description": "Блоки документа, как их принимает set_course_artifact, но без уроков",
+   "description": "Блоки документа в форме схемы документа курса, но без уроков",
    "fieldname": "blocks",
    "fieldtype": "JSON",
    "label": "Блоки"
@@ -117,7 +117,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-29 20:00:00.000000",
+ "modified": "2026-10-09 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Artifact Template",

@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection
 from datetime import datetime
+from html import unescape
 from zoneinfo import ZoneInfo
 
 import frappe
@@ -22,6 +24,7 @@ from frappe.utils import add_to_date, get_system_timezone, now_datetime
 
 from lms_frappe_app.agent_learning.access import доступен_курс, политика_квиза_для_курса
 from lms_frappe_app.agent_learning.constants import (
+	ВАРИАНТОВ_МАКСИМУМ,
 	ВЫБОР,
 	ЗАНЯТИЕ_ЖДЁТ_КВИЗ,
 	ЗАНЯТИЕ_ЗАВЕРШЕНО,
@@ -37,9 +40,7 @@ from lms_frappe_app.agent_learning.constants import (
 	СОБЫТИЕ_ВЕРДИКТ,
 	СОБЫТИЕ_КВИЗ_НАЧАТ,
 )
-from lms_frappe_app.agent_learning.course_builder import заполненные, поля_вопроса
 from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.agent_learning.normalizer import _очистить
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
 
@@ -56,6 +57,52 @@ from lms_frappe_app.agent_learning.runs import service as прохождения
 #: ответа. Предел — про читателя журнала: две тысячи знаков хватает на
 #: развёрнутый ответ и не хватает на пересказ всего разговора.
 ДЛИНА_СЛОВ = 2000
+
+
+# --- плоские поля вопроса ---
+
+
+def поля_вопроса(*виды: str) -> list[str]:
+	"""Имена полей вопроса перечисленных видов: `option`, `is_correct`, …
+
+	`Why:` Frappe Learning хранит варианты, эталоны и пояснения десятью
+	плоскими полями на каждый вид; перебор `1..ВАРИАНТОВ_МАКСИМУМ` живёт здесь
+	один раз, а не в каждом цикле по полям.
+	"""
+	return [f"{вид}_{номер}" for вид in виды for номер in range(1, ВАРИАНТОВ_МАКСИМУМ + 1)]
+
+
+def заполненные(запись, вид: str) -> list[tuple[int, object]]:
+	"""Заполненные поля одного вида — парами «номер, значение», по порядку.
+
+	Незаполненным считается пустое значение, а у строк — ещё и строка из
+	одних пробелов: вариант из пробелов агенту показывать нечего и сверять с
+	ним нечего. Снятая галочка `is_correct` приезжает нулём и незаполненной
+	же и считается.
+
+	Принимает и документ, и строку выборки: у обоих есть `get`, а звать сюда
+	полный документ ради десяти полей незачем.
+	"""
+	собранное = []
+	for номер in range(1, ВАРИАНТОВ_МАКСИМУМ + 1):
+		значение = запись.get(f"{вид}_{номер}")
+		непусто = значение.strip() if isinstance(значение, str) else значение
+		if непусто:
+			собранное.append((номер, значение))
+	return собранное
+
+
+def _очистить(текст: object) -> str:
+	"""Текст без html-разметки и лишних пробелов.
+
+	Вопросы и варианты, заведённые в редакторе Learning, хранятся с тегами
+	(`<b>`, `<a href>`, `&nbsp;`). Агенту нужен читаемый текст: разметку он в
+	лучшем случае зачитает вслух.
+	"""
+	if not текст:
+		return ""
+	без_тегов = re.sub(r"<[^>]+>", "", str(текст))
+	return unescape(без_тегов).strip()
 
 
 # --- начало попытки ---

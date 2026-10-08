@@ -1,30 +1,25 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Методы сборки курса.
+"""Методы автора курса.
 
-Куратор собирает курс в диалоге со своим агентом. Методы отвечают за хранение
-и нормализацию; чем курс хорош — дело агента куратора, не этого файла.
+Курс компилируется вне платформы и публикуется целиком релизом
+(`publish_release`); здесь — публикация, открытие и снятие курса, анонс,
+просмотр релиза, заметки, тестеры и репорты. Чем курс хорош — дело автора и
+его агента, не этого файла.
 
-Удаления здесь нет намеренно: снятая с публикации ошибка обратима, удалённый
-урок с прогрессом учеников — нет.
+Удаления курса здесь нет намеренно: снятая с публикации ошибка обратима,
+удалённый курс с прогрессом учеников — нет.
 """
 
 import json
-from urllib.parse import quote
 
 import frappe
 
 from lms_frappe_app.agent_learning import (
 	announcements,
-	course_builder,
-	course_map,
-	directives,
-	homework,
-	normalizer,
 	notes,
 	notices,
-	quiz,
 	structure,
 	testers,
 )
@@ -35,7 +30,6 @@ from lms_frappe_app.agent_learning.releases import places
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
 from lms_frappe_app.agent_learning.runs import service as прохождения
-from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
 from lms_frappe_app.agent_learning.constants import (
 	ВИДЫ_РЕПОРТОВ,
 	ИМЯ_ВИДА_РЕПОРТА,
@@ -49,38 +43,13 @@ from lms_frappe_app.agent_learning.errors import (
 	КУРС_НЕ_НАЙДЕН,
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
-	УРОК_НЕ_НАЙДЕН,
 )
 from lms_frappe_app.api import контракт, список, текущий_пользователь
 
-#: Роли, которым разрешено собирать курсы. Совпадают с административными в
+#: Роли, которым разрешены методы автора. Совпадают с административными в
 #: `permissions`: там они уже дают полный доступ к учебным записям.
 АВТОРСКИЕ_РОЛИ = frozenset({"Course Creator", "Moderator", "System Manager", "Administrator"})
 
-#: Поля директивы, которые куратор видит в черновике и в уроке. Порядок тот
-#: же, в каком их принимают `set_directive` и `set_course_directive`.
-ПОЛЯ_ДИРЕКТИВЫ = (
-	"objectives",
-	"teaching_directive",
-	"probing_questions",
-	"common_misconceptions",
-	"success_criteria",
-)
-ПОЛЯ_ДИРЕКТИВЫ_КУРСА = (
-	"objectives",
-	"teaching_directive",
-	"student_profile",
-	"glossary",
-	"remember_about_student",
-)
-
-ГЛАВА_НЕ_НАЙДЕНА = "chapter_not_found"
-КВИЗ_УЖЕ_ЕСТЬ = "quiz_exists"
-КВИЗА_НЕТ = "quiz_missing"
-ВОПРОС_НЕ_НАЙДЕН = "question_not_found"
-УРОК_В_РАБОТЕ = "lesson_in_use"
-ГЛАВА_НЕ_ПУСТА = "chapter_not_empty"
-НЕВЕРНЫЙ_ВОПРОС = "invalid_question"
 НЕТ_ЦЕЛЕЙ_КУРСА = "course_objectives_missing"
 НЕТ_АДРЕСОВ = "users_required"
 ТЕСТЕР_НЕ_НАЙДЕН = "tester_not_found"
@@ -214,7 +183,7 @@ def update_course(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
+	_не_из_релиза(course)
 	if уроки := structure.уроки_курса(course):
 		raise Отказ(
 			releases.У_КУРСА_ЕСТЬ_УРОКИ,
@@ -242,313 +211,6 @@ def update_course(
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def update_chapter(chapter: str, title: str) -> dict:
-	"""Правит название главы."""
-	_автор()
-	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
-	_не_из_релиза("Course Chapter", chapter)
-	документ = frappe.get_doc("Course Chapter", chapter)
-	документ.title = title
-	документ.save()
-	return {"id": документ.name, "title": документ.title}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def add_chapter(course: str, title: str) -> dict:
-	"""Добавляет главу в конец курса."""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
-	глава = frappe.get_doc({"doctype": "Course Chapter", "course": course, "title": title}).insert()
-	structure.привязать(course, "LMS Course", глава.name)
-	return {"id": глава.name, "title": глава.title, "course": course}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def add_lesson(chapter: str, title: str, body: str) -> dict:
-	"""Добавляет урок в конец главы."""
-	_автор()
-	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
-	_не_из_релиза("Course Chapter", chapter)
-	курс = frappe.db.get_value("Course Chapter", chapter, "course")
-	урок = frappe.get_doc(
-		{"doctype": "Course Lesson", "title": title, "body": body, "chapter": chapter, "course": курс}
-	).insert()
-	structure.привязать(chapter, "Course Chapter", урок.name)
-	return {"id": урок.name, "title": урок.title, "chapter": chapter, "course": курс}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def update_lesson(
-	lesson: str, title: str | None = None, body: str | None = None, lesson_hook: str | None = None
-) -> dict:
-	"""Правит название, материал или зачин урока.
-
-	`lesson_hook` — зачем эта тема ученику сейчас, две-три фразы; звучит в
-	начале непройденного урока. Пустая строка очищает (#238).
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	_не_из_релиза("Course Lesson", lesson)
-	документ = frappe.get_doc("Course Lesson", lesson)
-	if title is not None:
-		документ.title = title
-	if body is not None:
-		документ.body = body
-	if lesson_hook is not None:
-		документ.set("lesson_hook", lesson_hook)
-	документ.save()
-	return {"id": документ.name, "title": документ.title, "lesson_hook": документ.get("lesson_hook") or None}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def move_lesson(lesson: str, chapter: str | None = None, position: int | None = None) -> dict:
-	"""Переносит урок в другую главу или на другое место в своей.
-
-	`position` считается с единицы; без него урок встаёт в конец. Без
-	`chapter` меняется только место внутри текущей главы.
-
-	`Why:` без этого метода перестановка одного урока требовала передать
-	порядок всей главы целиком, а перенос между главами был невозможен вовсе
-	— ошибка в структуре чинилась пересборкой курса.
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	_не_из_релиза("Course Lesson", lesson)
-	откуда = frappe.db.get_value("Course Lesson", lesson, "chapter")
-	куда = chapter or откуда
-	_должен_существовать("Course Chapter", куда, ГЛАВА_НЕ_НАЙДЕНА)
-	_не_из_релиза("Course Chapter", куда)
-
-	if куда != откуда:
-		structure.отвязать(откуда, "Course Chapter", lesson)
-		frappe.db.set_value("Course Lesson", lesson, "chapter", куда)
-		frappe.db.set_value(
-			"Course Lesson", lesson, "course", frappe.db.get_value("Course Chapter", куда, "course")
-		)
-		structure.привязать(куда, "Course Chapter", lesson)
-
-	порядок = [урок for урок in structure.уроки_главы(куда) if урок != lesson]
-	место = len(порядок) if position is None else max(0, min(int(position) - 1, len(порядок)))
-	порядок.insert(место, lesson)
-	structure.переставить(куда, "Course Chapter", порядок)
-
-	return {"id": lesson, "chapter": куда, "lessons": порядок}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def remove_lesson(lesson: str) -> dict:
-	"""Удаляет урок — пока по нему никто не занимался.
-
-	`Why:` собирая курс впервые, агент создаёт лишние уроки, и без удаления
-	они остаются в программе навсегда. Но урок, по которому есть прогресс или
-	попытки, не удаляется ни при каких условиях: стирание испортило бы
-	историю ученика, а курс от лишнего урока не рушится.
-
-	Отвязать вместо удаления нельзя: чтение структуры намеренно подбирает
-	уроки без строк-ссылок и показывает их в конце — иначе терялись бы курсы,
-	собранные импортом. Отвязанный урок вернулся бы в программу.
-
-	Требует роли `Moderator`: Frappe Learning не даёт `Course Creator` право
-	удалять уроки, хотя главу, квиз и директиву — даёт. Асимметрия чужая, но
-	обходить её через `ignore_permissions` нельзя: агент получил бы то, чего
-	не может тот же человек в браузере.
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	_не_из_релиза("Course Lesson", lesson)
-	if следы := _следы_учеников(lesson):
-		raise Отказ(
-			УРОК_В_РАБОТЕ,
-			"По этому уроку уже занимались: его можно только переписать",
-			lesson=lesson,
-			**следы,
-		)
-
-	глава = frappe.db.get_value("Course Lesson", lesson, "chapter")
-	structure.отвязать(глава, "Course Chapter", lesson)
-	if квиз := quiz._квиз_урока(lesson):
-		frappe.delete_doc("LMS Quiz", квиз, ignore_permissions=True)
-	for директива in frappe.get_all("Agent Lesson Directive", filters={"lesson": lesson}, pluck="name"):
-		frappe.delete_doc("Agent Lesson Directive", директива, ignore_permissions=True)
-	# Сдач по уроку нет — проверено следами выше, задание уходит вместе с уроком.
-	if задание := _имя_задания(lesson):
-		homework.снять_сроки_назначений(задание)
-		frappe.delete_doc(homework.ЗАДАНИЕ, задание, ignore_permissions=True)
-	frappe.delete_doc("Course Lesson", lesson)
-	return {"removed": lesson, "chapter": глава, "lessons": structure.уроки_главы(глава)}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def remove_chapter(chapter: str) -> dict:
-	"""Удаляет пустую главу.
-
-	Непустая отклоняется: уроки удаляются поштучно и с проверкой прогресса,
-	и обходить её каскадом нельзя.
-	"""
-	_автор()
-	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
-	_не_из_релиза("Course Chapter", chapter)
-	if уроки := structure.уроки_главы(chapter):
-		raise Отказ(
-			ГЛАВА_НЕ_ПУСТА,
-			"В главе есть уроки: удалите их по одному",
-			chapter=chapter,
-			lessons=уроки,
-		)
-
-	курс = frappe.db.get_value("Course Chapter", chapter, "course")
-	structure.отвязать(курс, "LMS Course", chapter)
-	frappe.delete_doc("Course Chapter", chapter)
-	return {"removed": chapter, "course": курс}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def reorder_lessons(chapter: str, lessons) -> dict:
-	"""Задаёт порядок уроков главы полным списком."""
-	_автор()
-	_должен_существовать("Course Chapter", chapter, ГЛАВА_НЕ_НАЙДЕНА)
-	_не_из_релиза("Course Chapter", chapter)
-	порядок = список(lessons)
-	structure.переставить(chapter, "Course Chapter", порядок)
-	return {"chapter": chapter, "lessons": порядок}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def reorder_chapters(course: str, chapters) -> dict:
-	"""Задаёт порядок глав курса полным списком."""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
-	порядок = список(chapters)
-	structure.переставить(course, "LMS Course", порядок)
-	return {"course": course, "chapters": порядок}
-
-
-# --- директива и квиз ---
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def set_directive(
-	lesson: str,
-	teaching_directive: str,
-	objectives: str | None = None,
-	probing_questions: str | None = None,
-	common_misconceptions: str | None = None,
-	success_criteria: str | None = None,
-) -> dict:
-	"""Задаёт директиву преподавателя новой версией.
-
-	Цели — единственное поле директивы, которое видно снаружи, в том числе гостю.
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	_не_из_релиза("Course Lesson", lesson)
-	return directives.записать(
-		"Agent Lesson Directive",
-		{"lesson": lesson},
-		{
-			"objectives": objectives,
-			"teaching_directive": teaching_directive,
-			"probing_questions": probing_questions,
-			"common_misconceptions": common_misconceptions,
-			"success_criteria": success_criteria,
-		},
-	)
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def set_course_directive(
-	course: str,
-	teaching_directive: str,
-	objectives: str | None = None,
-	student_profile: str | None = None,
-	glossary: str | None = None,
-	remember_about_student: str | None = None,
-) -> dict:
-	"""Задаёт сквозную директиву курса новой версией.
-
-	Сюда идёт то, что одинаково на каждом уроке: роль и тон преподавателя,
-	формат занятия, кого учим, как называть вещи. Агент ученика получает её
-	вместе с директивой урока, поэтому повторять её в каждом уроке не нужно.
-
-	`remember_about_student` — что в этом курсе стоит помнить об ученике
-	между занятиями, по пункту на строку. Заметки агент ведёт сам; здесь
-	задаётся, чему в них место.
-	"""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
-	return directives.записать(
-		"Agent Course Directive",
-		{"course": course},
-		{
-			"objectives": objectives,
-			"teaching_directive": teaching_directive,
-			"student_profile": student_profile,
-			"glossary": glossary,
-			"remember_about_student": remember_about_student,
-		},
-	)
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def set_course_artifact(
-	course: str,
-	artifact: str,
-	title: str,
-	blocks,
-	layout: str = "sections",
-	canvas=None,
-	purpose: str | None = None,
-) -> dict:
-	"""Задаёт схему документа курса новой версией.
-
-	`blocks` — список `{key, title, hint, lesson, span, kind, accept, spec}` в том
-	порядке, в каком документ читается. Порядок задаётся здесь и нигде больше: ученик
-	видит блоки в нём же. Подсказка `hint` адресована агенту: что должно
-	оказаться в блоке и когда считать его заполненным.
-
-	Версионируется как директива: содержимое ученика хранится по ключам
-	блоков, и правка схемы его не рушит.
-
-	`spec` — поля блока и его колонки в таблице документа (#330):
-	`{fields, table, columns, prefix, title, rows, views}`. Форма проверяется
-	здесь, до записи: схема, которую не прочесть, сломала бы документ каждого
-	ученика курса, а не одного.
-
-	`canvas` — холст документа (learning-services#351): `{grid, labels,
-	sketch, summary}`, сетка из ключей блоков. Проверяется так же до записи:
-	сетку, которую браузер не разложит, увидел бы каждый ученик.
-
-	Схема целиком отвязывает документ от шаблона: новая версия не хранит ни
-	шаблона, ни правок (learning-services#370).
-
-	`purpose` — одна-две фразы ученику: зачем этот документ. Ученик видит их
-	в «Моих документах» под названием (learning-services#462). Не назван —
-	остаётся прежний; пустая строка убирает.
-	"""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
-	версия = записать_схему(course, artifact, title, список(blocks), layout, canvas, purpose=purpose)
-	# Наружу ключ документа зовётся `artifact`, как в методах ученика.
-	return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
 def set_artifact_template(
 	template: str,
 	title: str,
@@ -565,8 +227,8 @@ def set_artifact_template(
 	"""Заводит новую версию шаблона документа (learning-services#370).
 
 	Шаблон — схема документа без уроков, общая для курсов: `blocks` и
-	`canvas` — как у `set_course_artifact`, но урока у блока нет — урок
-	принадлежит курсу и задаётся в правках привязки. Каждый вызов — новая
+	`canvas` — как в схеме документа курса (`artifacts.course`), но урока у
+	блока нет — урок принадлежит курсу и задаётся в правках привязки. Каждый вызов — новая
 	версия; прежние не меняются, и курсы, закрепившие их, их и сохраняют.
 	`note` — что поменялось в версии: по нему автор курса решает, переходить ли.
 
@@ -641,16 +303,15 @@ def set_course_artifact_template(
 	`version` не назван — последняя версия шаблона. `overlay` — чем документ
 	курса отличается от шаблона: уроки блоков, подсказки, варианты, лишний
 	блок, подписи холста; по ключам, а не по позициям. Собранная схема
-	проверяется целиком, как у `set_course_artifact`, и пишется тем же путём:
+	проверяется целиком и пишется тем же путём, что схема документа из релиза:
 	ученик видит обычную схему документа.
 
-	`purpose` — как у `set_course_artifact`: зачем документ ученику; не назван —
-	остаётся прежний. Он у курса, а не у шаблона: один и тот же реестр рисков
+	`purpose` — зачем документ ученику; не назван — остаётся прежний. Он у курса, а не у шаблона: один и тот же реестр рисков
 	нужен в разных курсах для разного.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
+	_не_из_релиза(course)
 	return templates.привязать(course, artifact, template, version, overlay, purpose)
 
 
@@ -673,384 +334,8 @@ def upgrade_course_artifact(
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
+	_не_из_релиза(course)
 	return templates.перейти(course, artifact, version, dry_run=dry_run in (True, 1, "1", "true"))
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def add_quiz(lesson: str, questions, title: str | None = None, passing_percentage: int = 70) -> dict:
-	"""Создаёт квиз урока со всеми вопросами.
-
-	Квиз заводится целиком одним вызовом: квиз без вопросов — состояние, в
-	котором ученик упирается в зачёт из ничего, и оставлять его достижимым
-	между двумя вызовами незачем.
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	_не_из_релиза("Course Lesson", lesson)
-	вопросы = список(questions)
-	if not вопросы:
-		raise Отказ(course_builder.КВИЗ_БЕЗ_ВОПРОСОВ, "Квизу нужен хотя бы один вопрос", lesson=lesson)
-
-	# Второй квиз на уроке — это не «ещё один квиз», а потерянный первый:
-	# урок отдаёт агенту ровно один, остальные становятся невидимым мусором.
-	# Правится вопросами существующего квиза, а не созданием нового.
-	if существующий := quiz._квиз_урока(lesson):
-		raise Отказ(
-			КВИЗ_УЖЕ_ЕСТЬ,
-			"У урока уже есть квиз: правьте его вопросы",
-			lesson=lesson,
-			quiz=существующий,
-		)
-
-	квиз = frappe.get_doc(
-		{
-			"doctype": "LMS Quiz",
-			"title": title or frappe.db.get_value("Course Lesson", lesson, "title"),
-			"lesson": lesson,
-			"course": frappe.db.get_value("Course Lesson", lesson, "course"),
-			"passing_percentage": passing_percentage,
-		}
-	)
-	созданы = []
-	# Точка сохранения, а не откат всей транзакции: сбойный вопрос обязан
-	# отменить только уже созданные вопросы этого квиза. `frappe.db.rollback()`
-	# без неё сносил и курс, и главы, созданные тем же процессом, — поймано
-	# на живом прогоне сборки.
-	frappe.db.savepoint("agent_quiz_build")
-	for номер, вопрос in enumerate(вопросы, start=1):
-		# Словарём, как в `add_question`: список вопросов приезжает строкой
-		# JSON, и его элементы разбираются вместе с ним не всегда — вложенная
-		# строка роняла бы вызов на `.get` мимо контракта.
-		вопрос = _как_словарь(вопрос)
-		try:
-			идентификатор, тип = course_builder.создать_вопрос(вопрос)
-		except Отказ:
-			raise
-		except frappe.ValidationError as причина:
-			# Проверку состава вариантов делает сам Frappe Learning, и её текст
-			# полезен — но агенту нужен машинный код, а не HTTP 500.
-			frappe.db.rollback(save_point="agent_quiz_build")
-			raise Отказ(НЕВЕРНЫЙ_ВОПРОС, str(причина), lesson=lesson, question_index=номер) from причина
-		квиз.append("questions", {"question": идентификатор, "type": тип, "marks": вопрос.get("marks") or 1})
-		созданы.append(идентификатор)
-	квиз.insert()
-
-	# Привязка с обеих сторон: Frappe Learning допускает обе, а урок,
-	# связанный только полем квиза, в интерфейсе выглядит без квиза.
-	frappe.db.set_value("Course Lesson", lesson, "quiz_id", квиз.name)
-	return {"id": квиз.name, "lesson": lesson, "questions": созданы}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def add_question(lesson: str, question: dict | str) -> dict:
-	"""Добавляет вопрос в существующий квиз урока."""
-	_автор()
-	_не_из_релиза("Course Lesson", lesson)
-	квиз = _квиз_урока_или_отказ(lesson)
-	вопрос = _как_словарь(question)
-	идентификатор, тип = _создать_вопрос_или_отказ(вопрос, lesson)
-	документ = frappe.get_doc("LMS Quiz", квиз)
-	документ.append(
-		"questions",
-		{"question": идентификатор, "type": тип, "marks": вопрос.get("marks") or 1},
-	)
-	документ.save()
-	return {"quiz": квиз, "question": идентификатор, "questions_total": len(документ.questions)}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def update_question(question: str, text: str | None = None, options=None, answers=None) -> dict:
-	"""Правит текст вопроса, варианты или образцы ответа.
-
-	Правка разрешена и после того, как по квизу отвечали: блокировать
-	исправление опечатки в опубликованном курсе хуже, чем оставить её. Но
-	число затронутых попыток возвращается — куратор должен знать, что меняет
-	вопрос, который кто-то уже видел.
-	"""
-	_автор()
-	_должен_существовать("LMS Question", question, ВОПРОС_НЕ_НАЙДЕН)
-	for квиз in frappe.get_all("LMS Quiz Question", filters={"question": question}, pluck="parent"):
-		if урок := frappe.db.get_value("LMS Quiz", квиз, "lesson"):
-			_не_из_релиза("Course Lesson", урок)
-	документ = frappe.get_doc("LMS Question", question)
-
-	if text is not None:
-		документ.question = text
-	if options is not None:
-		course_builder.заменить_варианты(документ, список(options))
-	if answers is not None:
-		course_builder.заменить_образцы(документ, список(answers))
-
-	frappe.db.savepoint("agent_question_edit")
-	try:
-		документ.save()
-	except Отказ:
-		raise
-	except frappe.ValidationError as причина:
-		# Правка, ломающая состав вариантов, отменяется целиком: иначе вопрос
-		# остался бы наполовину переписанным.
-		frappe.db.rollback(save_point="agent_question_edit")
-		raise Отказ(НЕВЕРНЫЙ_ВОПРОС, str(причина), question=question) from причина
-
-	return {
-		"id": question,
-		"text": документ.question,
-		"affects_attempts": frappe.db.count("Agent Quiz Answer", {"question": question}),
-	}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def remove_question(lesson: str, question: str) -> dict:
-	"""Убирает вопрос из квиза урока.
-
-	Сам вопрос не удаляется: на него ссылаются ответы прошлых попыток, и
-	стирание записи испортило бы историю зачётов.
-	"""
-	_автор()
-	_не_из_релиза("Course Lesson", lesson)
-	квиз = _квиз_урока_или_отказ(lesson)
-	документ = frappe.get_doc("LMS Quiz", квиз)
-	осталось = [строка for строка in документ.questions if строка.question != question]
-	if len(осталось) == len(документ.questions):
-		raise Отказ(ВОПРОС_НЕ_НАЙДЕН, "В этом квизе такого вопроса нет", quiz=квиз, question=question)
-
-	документ.questions = []
-	for строка in осталось:
-		документ.append("questions", {"question": строка.question, "type": строка.type, "marks": строка.marks})
-	документ.save()
-	return {"quiz": квиз, "questions_total": len(документ.questions)}
-
-
-# --- домашнее задание (learning-services#439) ---
-
-ЗАДАНИЕ_УЖЕ_ЕСТЬ = "homework_exists"
-ЗАДАНИЯ_У_УРОКА_НЕТ = "homework_missing"
-ЗАДАНИЕ_СДАЮТ = "homework_in_use"
-ПОЛЯ_ЗАДАНИЯ_АВТОРА = ("title", "description", "answer_mode", "due_mode", "due_days", "due_date")
-
-
-def _задание_автора(документ) -> dict:
-	return {"id": документ.name, "lesson": документ.lesson, **{п: документ.get(п) for п in ПОЛЯ_ЗАДАНИЯ_АВТОРА}}
-
-
-def _имя_задания(lesson: str) -> str | None:
-	return frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson})
-
-
-def _задание_урока(lesson: str):
-	if имя := _имя_задания(lesson):
-		return frappe.get_doc(homework.ЗАДАНИЕ, имя)
-	raise Отказ(ЗАДАНИЯ_У_УРОКА_НЕТ, "У урока нет домашнего задания", lesson=lesson)
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def add_homework(
-	lesson: str,
-	title: str,
-	description: str,
-	answer_mode: str = "text_and_files",
-	due_mode: str = "none",
-	due_days: int | None = None,
-	due_date: str | None = None,
-) -> dict:
-	"""Домашнее задание урока: одно на урок, как квиз.
-
-	Задание одинаковое у всех учеников, выдаётся закрытием урока. Необязательное:
-	`publish_course` его не проверяет.
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	_не_из_релиза("Course Lesson", lesson)
-	if имя := _имя_задания(lesson):
-		raise Отказ(ЗАДАНИЕ_УЖЕ_ЕСТЬ, "У урока уже есть домашнее задание: правьте его", lesson=lesson, homework=имя)
-	документ = frappe.get_doc(
-		{
-			"doctype": homework.ЗАДАНИЕ,
-			"lesson": lesson,
-			"title": title,
-			"description": description,
-			"answer_mode": answer_mode,
-			"due_mode": due_mode,
-			"due_days": due_days,
-			"due_date": due_date,
-		}
-	).insert()
-	return _задание_автора(документ)
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def update_homework(
-	lesson: str,
-	title: str | None = None,
-	description: str | None = None,
-	answer_mode: str | None = None,
-	due_mode: str | None = None,
-	due_days: int | None = None,
-	due_date: str | None = None,
-) -> dict:
-	"""Правка задания. Пустое не затирает.
-
-	Сроки, уже выставленные сдачам, не пересчитываются: ученик не получает
-	просрочку задним числом за правку правила.
-	"""
-	_автор()
-	_не_из_релиза("Course Lesson", lesson)
-	документ = _задание_урока(lesson)
-	for поле, значение in (
-		("title", title),
-		("description", description),
-		("answer_mode", answer_mode),
-		("due_mode", due_mode),
-		("due_days", due_days),
-		("due_date", due_date),
-	):
-		if значение not in (None, ""):
-			документ.set(поле, значение)
-	документ.save()
-	return _задание_автора(документ)
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def remove_homework(lesson: str) -> dict:
-	"""Удаляет задание, по которому ещё никто не сдавал.
-
-	Сдачи в счёт — и архивные после сброса прогресса: они ссылаются на задание.
-	"""
-	_автор()
-	_не_из_релиза("Course Lesson", lesson)
-	документ = _задание_урока(lesson)
-	if сдач := frappe.db.count("Agent Homework Submission", {"homework": документ.name}):
-		raise Отказ(
-			ЗАДАНИЕ_СДАЮТ, "По заданию уже есть сдачи: его можно только переписать", lesson=lesson, submissions=сдач
-		)
-	homework.снять_сроки_назначений(документ.name)
-	frappe.delete_doc(homework.ЗАДАНИЕ, документ.name)
-	return {"lesson": lesson, "removed": True}
-
-
-# --- карта декомпозиции ---
-
-#: Части карты: хранятся полями JSON и отдаются как есть.
-ЧАСТИ_КАРТЫ = ("levels", "nodes", "lessons", "blocks")
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def set_course_map(course: str, levels, nodes, lessons=None, blocks=None) -> dict:
-	"""Новая версия карты декомпозиции курса — замысла, с которым сверяется
-	собранное.
-
-	Уровни слева направо, узлы с родителями на соседнем левом уровне, план
-	уроков и план блоков документа; устройство — в `course_map`. С курсом
-	карта при записи не сверяется: её согласуют до сборки. Проверить её
-	против курса — `course_map_check`; в ответе — счётчики этой проверки.
-	"""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	_не_из_релиза("LMS Course", course)
-	карта = course_map.нормализовать(список(levels), список(nodes), список(lessons), список(blocks))
-	уроки_курса = set(frappe.get_all("Course Lesson", filters={"course": course}, pluck="name"))
-	for пункт in карта["lessons"]:
-		if пункт["lesson"] and пункт["lesson"] not in уроки_курса:
-			raise Отказ(
-				course_map.НЕВЕРНАЯ_КАРТА,
-				"Урок не из этого курса",
-				where=f"lessons[{пункт['key']}].lesson",
-			)
-	документ = frappe.get_doc(
-		{
-			"doctype": "Agent Course Map",
-			"course": course,
-			"is_active": 1,
-			**{часть: json.dumps(карта[часть], ensure_ascii=False) for часть in ЧАСТИ_КАРТЫ},
-		}
-	).insert()
-	return {
-		"id": документ.name,
-		"course": course,
-		"version": документ.version,
-		"counts": _сверка_карты(course)["counts"],
-	}
-
-
-@frappe.whitelist()
-@контракт
-def course_map_check(course: str) -> dict:
-	"""Действующая карта против курса на платформе.
-
-	Уроки и блоки — такими, какие они есть, сопоставление пунктов плана с
-	уроками и расхождения по группам: план уроков, цели уроков, блоки
-	документа, целостность карты. Карты нет — `map: null`, это не ошибка:
-	карта необязательна.
-	"""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	return _сверка_карты(course)
-
-
-def _сверка_карты(course: str) -> dict:
-	запись = directives.запись("Agent Course Map", {"course": course}, (*ЧАСТИ_КАРТЫ, "creation"))
-	уроки = _уроки_для_карты(course)
-	блоки = [
-		{
-			"artifact": документ["artifact"],
-			"key": блок["key"],
-			"title": блок["title"],
-			"lesson": блок["lesson"],
-			"hint": блок["hint"],
-		}
-		for документ in _действующие_артефакты(course)
-		for блок in документ["blocks"]
-	]
-	платформа = {"lessons": уроки, "blocks": блоки}
-	if not запись:
-		return {
-			"course": course,
-			"map": None,
-			"platform": платформа,
-			"matches": {},
-			"discrepancies": [],
-			"counts": None,
-			"tags": {},
-		}
-	карта = {часть: json.loads(запись.get(часть) or "[]") for часть in ЧАСТИ_КАРТЫ}
-	return {
-		"course": course,
-		"map": {
-			"id": запись.name,
-			"version": запись.version,
-			"created_at": запись.creation.isoformat(),
-			**карта,
-		},
-		"platform": платформа,
-		**course_map.сверить(карта, уроки, блоки),
-	}
-
-
-def _уроки_для_карты(course: str) -> list[dict]:
-	"""Уроки курса в порядке курса, с главой и целями действующей директивы."""
-	уроки = []
-	for глава in structure.главы_курса(course):
-		for урок in structure.уроки_главы(глава["name"]):
-			директива = directives.запись("Agent Lesson Directive", {"lesson": урок}, ("objectives",))
-			уроки.append(
-				{
-					"id": урок,
-					"number": len(уроки) + 1,
-					"title": frappe.db.get_value("Course Lesson", урок, "title"),
-					"chapter": глава["title"],
-					"objectives": directives.строки(директива.objectives) if директива else [],
-				}
-			)
-	return уроки
 
 
 # --- заметки автора ---
@@ -1306,24 +591,6 @@ def _адрес_или_нет(запись) -> dict | None:
 		return None
 
 
-def _ждут_агента(course: str) -> int:
-	"""Сколько открытых замечаний ждёт агента: последнее слово за автором."""
-	открытые = frappe.get_all(
-		"Agent Author Note", filters={"course": course, "status": "open"}, fields=["name", "via"]
-	)
-	if not открытые:
-		return 0
-	последние: dict[str, str] = {}
-	for ответ in frappe.get_all(
-		"Agent Note Reply",
-		filters={"parent": ["in", [з.name for з in открытые]], "parenttype": "Agent Author Note"},
-		fields=["parent", "via"],
-		order_by="idx asc",
-	):
-		последние[ответ.parent] = ответ.via
-	return sum(1 for з in открытые if последние.get(з.name, з.via) != "agent")
-
-
 def ревизия_замечаний(course: str) -> str | None:
 	"""Самая свежая отметка замечаний курса: ответ в нить и смена статуса
 	сохраняют замечание и двигают её."""
@@ -1407,41 +674,6 @@ def _инструкторы(значение) -> list[str]:
 # --- обзор и публикация ---
 
 
-@frappe.whitelist()
-@контракт
-def course_draft(course: str) -> dict:
-	"""Курс целиком, как его собрали, — с эталонами и проблемами.
-
-	Эталоны видит роль, а не эндпоинт: без них куратор не проверит
-	собственный квиз. Ученику они не достаются ни здесь, ни где-либо ещё —
-	`_автор` отклонит вызов до всякого чтения.
-	"""
-	_автор()
-	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	сведения = frappe.db.get_value(
-		"LMS Course", course, ["title", "short_introduction", "published", "upcoming"], as_dict=True
-	)
-	предел = normalizer.предел_сегмента()
-	return {
-		"id": course,
-		"title": сведения.title,
-		"summary": сведения.short_introduction,
-		"published": bool(сведения.published),
-		"upcoming": bool(сведения.published and сведения.upcoming),
-		"chapters": [
-			{"id": глава["name"], "title": глава["title"], "lessons": _уроки_главы(глава["name"], предел)}
-			for глава in structure.главы_курса(course)
-		],
-		"directive": _действующая_директива_курса(course),
-		"artifacts": _действующие_артефакты(course),
-		"readiness": course_builder.проверить_готовность(course),
-		"revision": ревизия(course),
-		"author_url": frappe.utils.get_url(f"/author?course={quote(course)}"),
-		"map_discrepancies": (_сверка_карты(course)["counts"] or {}).get("total"),
-		"open_notes": _ждут_агента(course),
-	}
-
-
 @frappe.whitelist(methods=["GET"])
 @контракт
 def course_revision(course: str) -> dict:
@@ -1514,40 +746,6 @@ def _курс_с_релизом(course: str) -> tuple[dict, str]:
 		просмотр_релиза.карточка(course, сведения.title, сведения.active_release),
 		сведения.active_release,
 	)
-
-
-@frappe.whitelist()
-@контракт
-def get_lesson(lesson: str) -> dict:
-	"""Урок целиком: материал, действующая директива и квиз с эталонами.
-
-	`Why:` материал попадает на платформу вызовом `add_lesson`, а `course_draft`
-	показывает лишь признак `has_body` — сверить, что на платформе лежит ровно
-	утверждённый текст, было нечем, кроме как открыть урок глазами на сайте.
-
-	Отдельный инструмент, а не поле черновика: полные тексты всех уроков в
-	одном ответе — десятки килобайт на каждый вызов, а сверяют поурочно.
-	"""
-	_автор()
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	сведения = frappe.db.get_value(
-		"Course Lesson", lesson, ["title", "body", "chapter", "course"], as_dict=True
-	)
-	квиз = quiz._квиз_урока(lesson)
-	return {
-		"id": lesson,
-		"title": сведения.title,
-		"chapter": сведения.chapter,
-		"course": сведения.course,
-		"body": сведения.body,
-		"directive": _действующая_директива(lesson),
-		"course_directive": _действующая_директива_курса(сведения.course),
-		"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
-		# Снятое из релиза задание (`retired`) у урока больше не действует.
-		"homework": _задание_автора(frappe.get_doc(homework.ЗАДАНИЕ, задание))
-		if (задание := frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson, "retired": 0}))
-		else None,
-	}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1697,163 +895,19 @@ def remove_tester(course: str, user: str) -> dict:
 # --- вспомогательное ---
 
 
-def _уроки_главы(глава: str, предел: int) -> list[dict]:
-	"""Уроки главы с наполненностью: факты, по которым сверяют собранное.
-
-	`body_segments` считает тот же разбор, что режет урок на части в кабинете
-	автора: число в черновике обязано совпадать с частями на странице урока.
-	"""
-	from lms_frappe_app.agent_learning import quiz
-
-	уроки = structure.уроки_главы(глава)
-	# Домашние задания главы — одним запросом, а не по уроку (learning-services#439).
-	задания = (
-		{
-			запись.lesson: {"title": запись.title, "answer_mode": запись.answer_mode, "due_mode": запись.due_mode}
-			for запись in frappe.get_all(
-				homework.ЗАДАНИЕ,
-				filters={"lesson": ("in", уроки), "retired": 0},
-				fields=["lesson", "title", "answer_mode", "due_mode"],
-			)
-		}
-		if уроки
-		else {}
-	)
-	собранное = []
-	for урок in уроки:
-		сведения = frappe.db.get_value(
-			"Course Lesson", урок, ["title", "body", "content"], as_dict=True
-		)
-		квиз = quiz._квиз_урока(урок)
-		директива = directives.запись("Agent Lesson Directive", {"lesson": урок}, ("objectives",))
-		материал = normalizer.нормализовать(
-			title=сведения.title, content=сведения.content, body=сведения.body, предел=предел
-		)
-		собранное.append(
-			{
-				"id": урок,
-				"title": сведения.title,
-				"has_body": bool((сведения.body or "").strip()),
-				"body_chars": len((сведения.body or "").strip()),
-				"body_segments": материал.total_segments,
-				"has_directive": директива is not None,
-				"directive_version": директива.version if директива else None,
-				"objectives": len(directives.строки(директива.objectives)) if директива else 0,
-				"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
-				"homework": задания.get(урок),
-			}
-		)
-	return собранное
-
-
-def _вопросы_с_эталонами(квиз: str) -> dict:
-	вопросы = []
-	for строка in frappe.get_all(
-		"LMS Quiz Question", filters={"parent": квиз}, fields=["question", "type"], order_by="idx asc"
-	):
-		документ = frappe.get_doc("LMS Question", строка.question)
-		вопросы.append(
-			{
-				"id": документ.name,
-				"text": документ.question,
-				"type": строка.type,
-				"options": [
-					{
-						"text": текст,
-						"correct": bool(документ.get(f"is_correct_{номер}")),
-						"explanation": документ.get(f"explanation_{номер}") or "",
-					}
-					for номер, текст in course_builder.заполненные(документ, "option")
-				],
-				"answers": [
-					эталон for _, эталон in course_builder.заполненные(документ, "possibility")
-				],
-			}
-		)
-	return {
-		"id": квиз,
-		"passing_percentage": frappe.db.get_value("LMS Quiz", квиз, "passing_percentage"),
-		"questions": вопросы,
-	}
-
-
-def _действующая_директива(lesson: str) -> dict | None:
-	"""Директива, которую сейчас получает агент ученика, со своей версией."""
-	return _директива_наружу("Agent Lesson Directive", {"lesson": lesson}, ПОЛЯ_ДИРЕКТИВЫ)
-
-
-def _действующая_директива_курса(course: str) -> dict | None:
-	"""Сквозная директива, которую агент получает на каждом занятии курса."""
-	return _директива_наружу("Agent Course Directive", {"course": course}, ПОЛЯ_ДИРЕКТИВЫ_КУРСА)
-
-
-def _директива_наружу(doctype: str, владелец: dict, поля: tuple[str, ...]) -> dict | None:
-	"""Действующая директива куратору: текст как есть, плюс версия.
-
-	Куратор смотрит ровно то, что уедет агенту ученика, поэтому строки не
-	разбираются на пункты — этим занят учебный поток, и разбор здесь означал
-	бы, что куратор сверяет не исходный текст.
-	"""
-	запись = directives.запись(doctype, владелец, (*поля, "creation"))
-	if not запись:
-		return None
-	return {
-		"id": запись.name,
-		"version": запись.version,
-		"created_at": запись.creation.isoformat(),
-		**{поле: запись.get(поле) for поле in поля},
-	}
-
-
-def _следы_учеников(lesson: str) -> dict:
-	"""Чем занимались по уроку. Пусто — значит урок никто не открывал."""
-	следы = {
-		"progress": frappe.db.count("LMS Course Progress", {"lesson": lesson}),
-		"sessions": frappe.db.count("Agent Learning Session", {"lesson": lesson}),
-		"attempts": frappe.db.count("Agent Quiz Attempt", {"lesson": lesson}),
-		"homework_submissions": frappe.db.count("Agent Homework Submission", {"lesson": lesson}),
-	}
-	return {ключ: значение for ключ, значение in следы.items() if значение}
-
-
-def _как_словарь(вопрос) -> dict:
-	return json.loads(вопрос) if isinstance(вопрос, str) else dict(вопрос or {})
-
-
-def _квиз_урока_или_отказ(lesson: str) -> str:
-	_должен_существовать("Course Lesson", lesson, УРОК_НЕ_НАЙДЕН)
-	квиз = quiz._квиз_урока(lesson)
-	if not квиз:
-		raise Отказ(КВИЗА_НЕТ, "У урока нет квиза: создайте его целиком", lesson=lesson)
-	return квиз
-
-
-def _создать_вопрос_или_отказ(вопрос: dict, lesson: str) -> tuple[str, str]:
-	frappe.db.savepoint("agent_question_build")
-	try:
-		return course_builder.создать_вопрос(вопрос)
-	except Отказ:
-		raise
-	except frappe.ValidationError as причина:
-		frappe.db.rollback(save_point="agent_question_build")
-		raise Отказ(НЕВЕРНЫЙ_ВОПРОС, str(причина), lesson=lesson) from причина
-
-
 def _должен_существовать(doctype: str, имя: str, код: str) -> None:
 	if not frappe.db.exists(doctype, имя):
 		raise Отказ(код, f"{doctype} не найден", id=имя)
 
 
-def _не_из_релиза(doctype: str, имя: str) -> None:
+def _не_из_релиза(курс: str) -> None:
 	"""Курс, собранный релизом, правится только новым релизом (learning-services#500).
 
-	`Why:` правка по кусочку разошлась бы с действующим релизом: следующая
-	публикация молча переписала бы её, а индекс релиза — то, по чему будут
-	учить агент и квиз, — правки не увидел бы вовсе. `doctype` — курс, глава
-	или урок; записи нет — отказ о ней даст `_должен_существовать`.
+	`Why:` правка мимо релиза разошлась бы с ним: следующая публикация молча
+	переписала бы её, а индекс релиза — то, по чему учат агент и квиз, —
+	правки не увидел бы вовсе.
 	"""
-	курс = имя if doctype == "LMS Course" else frappe.db.get_value(doctype, имя, "course")
-	if курс and frappe.db.get_value("LMS Course", курс, "active_release"):
+	if frappe.db.get_value("LMS Course", курс, "active_release"):
 		raise Отказ(
 			КУРС_ИЗ_РЕЛИЗА,
 			"Курс собран из релиза: правьте карту курса и публикуйте новый релиз",

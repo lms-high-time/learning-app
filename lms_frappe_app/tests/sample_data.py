@@ -305,6 +305,33 @@ def отметить_все_пункты(run: str, занятие: str | None = 
 	return ответ
 
 
+def схема_документа(
+	course: str,
+	artifact: str,
+	title: str,
+	blocks,
+	layout: str = "sections",
+	canvas=None,
+	purpose: str | None = None,
+) -> dict:
+	"""Схема документа курса новой версией — ответом в форме контракта:
+	`{ok, data: {id, course, artifact, version}}` или `{ok, error}`.
+
+	Схему документа курса пишет релиз, но его разделы — только текст; файлы,
+	ссылки, формулы и холст движка документов тестам нужны и без него. Пишется
+	тем же `записать_схему`, что и у релиза.
+	"""
+	from lms_frappe_app.agent_learning.artifacts.course import записать_схему
+	from lms_frappe_app.api import контракт, список
+
+	@контракт
+	def записать() -> dict:
+		версия = записать_схему(course, artifact, title, список(blocks), layout, canvas, purpose=purpose)
+		return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
+
+	return записать()
+
+
 def политика_по_умолчанию() -> None:
 	"""Возвращает общие настройки к значениям, на которые опираются тесты.
 
@@ -323,7 +350,6 @@ def политика_по_умолчанию() -> None:
 			"carry_over_depth": 3,
 			"bridge_after_hours": 24,
 			"student_notes_limit": 20,
-			"lesson_segment_limit": 6000,
 			"web_demo_lessons": 2,
 			"agent_service_url": get_url().rstrip("/"),
 		}
