@@ -105,54 +105,97 @@ def отравленный_релиз(ключ: str) -> dict:
 	return р
 
 
+#: Фильтры Jinja, которые возвращают `Markup`. `e` поверх `Markup` ничего не
+#: экранирует — значение уже считается безопасным, — и строковые фильтры над
+#: ним (`upper`, `replace`, …) тоже возвращают `Markup`.
+ФИЛЬТРЫ_MARKUP = frozenset({"safe", "tojson", "urlize", "xmlattr"})
+
+#: Границы, по которым правило следит, где вывод: в `<script>` или в разметке.
+ГРАНИЦЫ = re.compile(r"<!--|-->|<(/?)script\b", re.IGNORECASE)
+
+
 def неэкранированные(исходник: str, макросы: set[str]) -> list[tuple[int, str]]:
 	"""Выводы `{{ … }}` шаблона, которые не экранируют: `(номер строки, строка исходника)`.
 
 	Правило — по дереву разбора, а не по токенам: фильтр связывает сильнее
 	операторов, и в `{{ a or b | e }}`, `{{ a ~ b | e }}`, `{{ a + b | e }}`,
-	`{{ a if c else b | e }}` экранируется только `b`. Каждое выражение вывода —
-	одно из:
+	`{{ a if c else b | e }}` экранируется только `b`. Каждое выражение вывода
+	в разметке — одно из:
 
 	- литерал;
-	- фильтр `e` или `escape` на вершине выражения;
-	- фильтр `tojson` на вершине — только внутри `<script>`: он готовит
-	  значение для JS, а в разметке, например в атрибуте, кавычки и
-	  разметку не экранирует;
+	- фильтр `e` или `escape` на вершине выражения, и ни один фильтр под ним
+	  не возвращает `Markup` (`ФИЛЬТРЫ_MARKUP`): `{{ x | safe | e }}` не
+	  экранирует ничего;
 	- вызов макроса из `макросы` — их вывод проверяется тем же правилом;
 	- `… if … else …`, обе ветки которого проходят правило.
 
-	Содержимое `{% raw %}` — текст, а не вывод. Шаблон только разбирается, без
-	загрузчика: `extends` и `import` не открываются.
+	Внутри `<script>` — только литерал, `tojson` на вершине или `… if … else …`
+	из них: `e` готовит значение для HTML, а не для JS, а `tojson` в разметке,
+	например в атрибуте, кавычки и разметку не экранирует. `<script>` внутри
+	HTML-комментария скрипта не открывает.
+
+	Блок `{% filter %}` запрещён: его фильтр переписывает уже экранированный
+	вывод. Содержимое `{% raw %}` — текст, а не вывод. Шаблон только
+	разбирается, без загрузчика: `extends` и `import` не открываются.
+
+	Чего правило не делает: контекст URL — `href="{{ x | e }}"` пропустит
+	`javascript:`. Адреса кабинета строятся на сервере, из ключей, а не из
+	текста автора. Значение, ставшее `Markup` через `{% set %}`, правило тоже
+	не видит.
 	"""
 	строки = исходник.splitlines()
-	найдено = []
-	в_скрипте = False
-	for вывод in jinja2.Environment().parse(исходник).find_all(jinja2.nodes.Output):
+	дерево = jinja2.Environment().parse(исходник)
+	найдено = [
+		(блок.lineno, строки[блок.lineno - 1].strip()) for блок in дерево.find_all(jinja2.nodes.FilterBlock)
+	]
+	контекст = (False, False)
+	for вывод in дерево.find_all(jinja2.nodes.Output):
 		for узел in вывод.nodes:
 			if isinstance(узел, jinja2.nodes.TemplateData):
-				в_скрипте = _в_скрипте(узел.data, в_скрипте)
-			elif not _экранирует(узел, макросы, в_скрипте):
+				контекст = _контекст(узел.data, контекст)
+			elif not _экранирует(узел, макросы, в_скрипте=контекст[0]):
 				найдено.append((узел.lineno, строки[узел.lineno - 1].strip()))
-	return найдено
+	return sorted(найдено)
 
 
-def _в_скрипте(разметка: str, было: bool) -> bool:
-	"""Внутри ли `<script>` конец этого куска разметки."""
-	теги = re.findall(r"<(/?)script\b", разметка, flags=re.IGNORECASE)
-	return теги[-1] != "/" if теги else было
+def _контекст(разметка: str, было: tuple[bool, bool]) -> tuple[bool, bool]:
+	"""`(в <script>, в HTML-комментарии)` в конце этого куска разметки."""
+	в_скрипте, в_комментарии = было
+	for граница in ГРАНИЦЫ.finditer(разметка):
+		знак, косая = граница.group(0), граница.group(1)
+		if в_комментарии:
+			в_комментарии = знак != "-->"
+		elif в_скрипте:
+			в_скрипте = косая != "/"
+		elif знак == "<!--":
+			в_комментарии = True
+		elif косая == "":
+			в_скрипте = True
+	return в_скрипте, в_комментарии
+
+
+def _под_ним_markup(узел) -> bool:
+	"""Есть ли в цепочке фильтров под узлом фильтр, возвращающий `Markup`."""
+	while isinstance(узел, jinja2.nodes.Filter):
+		if узел.name in ФИЛЬТРЫ_MARKUP:
+			return True
+		узел = узел.node
+	return False
 
 
 def _экранирует(узел, макросы: set[str], в_скрипте: bool) -> bool:
 	узлы = jinja2.nodes
 	if isinstance(узел, (узлы.TemplateData, узлы.Const)):
 		return True
-	if isinstance(узел, узлы.Filter):
-		return узел.name in ("e", "escape") or (узел.name == "tojson" and в_скрипте)
-	if isinstance(узел, узлы.Call):
-		return isinstance(узел.node, узлы.Name) and узел.node.name in макросы
 	if isinstance(узел, узлы.CondExpr):
 		# Без `else` вторая ветка — пустой вывод.
 		return all(в is None or _экранирует(в, макросы, в_скрипте) for в in (узел.expr1, узел.expr2))
+	if в_скрипте:
+		return isinstance(узел, узлы.Filter) and узел.name == "tojson"
+	if isinstance(узел, узлы.Filter):
+		return узел.name in ("e", "escape") and not _под_ним_markup(узел.node)
+	if isinstance(узел, узлы.Call):
+		return isinstance(узел.node, узлы.Name) and узел.node.name in макросы
 	return False
 
 
@@ -559,7 +602,9 @@ class TestЭкранированиеШаблонов(unittest.TestCase):
 
 	def test_правило_ловит_вывод_без_экранирования(self):
 		"""Проверка проверки: голый вывод, фильтр не последним, чужой вызов,
-		фильтр только у правой части выражения и `tojson` вне `<script>` — нарушения."""
+		фильтр только у правой части выражения, `tojson` вне `<script>`, `e`
+		поверх `Markup`, блок `filter`, `e` в `<script>` и `<script>` в
+		комментарии — нарушения."""
 		исходник = (
 			"{{ title }}\n"
 			"{{ x | e | upper }}\n"
@@ -570,11 +615,17 @@ class TestЭкранированиеШаблонов(unittest.TestCase):
 			"{{ a if c else b | e }}\n"
 			"{{ a + b | e }}\n"
 			'<div data-x="{{ x | tojson }}"></div>\n'
+			"{{ x | safe | e }}\n"
+			'<div data-x="{{ x | tojson | e }}"></div>\n'
+			"{{ x | safe | upper | e }}\n"
+			"{% filter upper %}{{ x | e }}{% endfilter %}\n"
+			"<script>const x = {{ x | e }};</script>\n"
+			"<!-- <script> -->{{ x | tojson }}\n"
 			'{{ место(a, b) }}{{ x | e }}{{ "" if loop.last else ", " }}{{ "агент" if c else (a or b) | e }}\n'
-			"<script>const x = {{ x | tojson }};</script>{{ y | e }}\n"
+			"<script>const x = {{ x | tojson }};</script>{{ y | e }}<!-- {{ z | e }} -->\n"
 			"{% raw %}{{ сырое }}{% endraw %}"
 		)
 		self.assertEqual(
 			[строка for строка, _ in неэкранированные(исходник, {"место"})],
-			[1, 2, 3, 4, 5, 6, 7, 8, 9],
+			list(range(1, 16)),
 		)

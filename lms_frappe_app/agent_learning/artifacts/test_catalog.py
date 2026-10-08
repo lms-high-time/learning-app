@@ -157,6 +157,8 @@ class IntegrationTestArtifactCatalog(IntegrationTestCase):
 			for хук in хуки:
 				with self.subTest(хук):
 					frappe.get_attr(хук)()
+		# Проверка подмены: хуки дошли до своего DDL, и он не выполнился.
+		self.assertTrue(пропущенный_ddl)
 
 	def test_команда_bench_объявлена(self):
 		self.assertIn("check-artifact-catalog", [команда.name for команда in commands])

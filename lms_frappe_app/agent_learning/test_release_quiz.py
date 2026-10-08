@@ -119,7 +119,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			(попытка.session, попытка.student, попытка.attempt_number), (занятие, self.ученик, 1)
 		)
 
-	def test_первый_вопрос_в_форме_старого_квиза_с_ключами_вариантов(self):
+	def test_первый_вопрос_с_ключами_вариантов(self):
 		run, занятие = self.урок()
 
 		вопрос = release_quiz.начать(run, занятие)["question"]
@@ -287,6 +287,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			[1, 0],
 		)
 
+	def test_ключ_важнее_текста(self):
+		"""Текст варианта `V2` совпадает с ключом `V1`: ответ `V1` — это вариант `V1`."""
+		релиз = релиз_двух_целей(self.ключ)
+		[вопрос] = [в for в in релиз["lessons"][0]["quiz"]["questions"] if в["key"] == С1]
+		[второй] = [в for в in вопрос["options"] if в["key"] == "V2"]
+		второй["text"] = "V1"
+		self.assertEqual(релиз["lessons"][0]["quiz"]["answers"][С1]["correct"], "V1")
+		run, занятие = self.урок(релиз)
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+
+		self.assertTrue(self.ответить(попытка, С1, "V1")["verdict"]["correct"])
+
 	def test_ключ_варианта_без_учёта_регистра_и_списком_из_одного(self):
 		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=3))
 		попытка = release_quiz.начать(run, занятие)["attempt"]
@@ -349,6 +361,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		попытка = release_quiz.начать(run, занятие)["attempt"]
 
 		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, "S9/l-1-D1")
+
+	def test_ответ_в_попытку_без_релиза_отклоняется_без_записей(self):
+		"""Попытка без релиза — эталона нет: отказ, и ни ответа, ни события журнала."""
+		run, занятие = self.урок()
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, попытка, "release", None)
+		событий = frappe.db.count("Agent Quiz Event", {"attempt": попытка})
+
+		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1)
+
+		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
+		self.assertEqual(frappe.db.count("Agent Quiz Event", {"attempt": попытка}), событий)
 
 	def test_повторный_ответ_на_вопрос_отклоняется(self):
 		run, занятие = self.урок()
@@ -583,6 +607,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(итог["attempts_left"], 2)
 		закончена = frappe.db.get_value(ПОПЫТКА, ответ["attempt"], "finished_at")
 		момент = datetime.fromisoformat(итог["retry_after"])
+		self.assertIsNotNone(момент.tzinfo, "время пересдачи — с поясом сайта")
 		self.assertEqual(момент.replace(tzinfo=None), add_to_date(закончена, minutes=60))
 
 	def test_последняя_попытка_без_паузы_в_итоге(self):
