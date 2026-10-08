@@ -7,7 +7,7 @@
 `frappe.db.get_value` по строкам с фильтром `parent`, никогда не
 `frappe.get_doc` релиза: он потянул бы все строки разом (у большого курса —
 сотни). Ответы квиза — только с явным `с_ответами`: ими сервер сверяет
-ответ, наружу они не уходят (CLAUDE.md §10).
+ответ, к ученику они не уходят (CLAUDE.md §10).
 
 Пакет агента раскладывается при записи (learning-services#506): срез урока —
 в строку урока, рамка курса — в запись релиза. Внутри срезов приложение
@@ -210,6 +210,25 @@ def цели(релиз: str) -> dict[str, list[dict]]:
 	return итог
 
 
+def разделы_документа(релиз: str) -> list[dict]:
+	"""Разделы документа релиза по порядку — как в релизе: `{key, title, description, rows, columns}`."""
+	return [
+		{
+			"key": р.section_key,
+			"title": р.title,
+			"description": р.description,
+			"rows": р.rows,
+			"columns": json.loads(р.columns) if р.columns else [],
+		}
+		for р in frappe.get_all(
+			РАЗДЕЛ,
+			filters={"parenttype": РЕЛИЗ, "parent": релиз},
+			fields=["section_key", "title", "description", "rows", "columns"],
+			order_by="idx asc",
+		)
+	]
+
+
 def разделы(релиз: str) -> dict[str, dict]:
 	"""Разделы документа релиза: ключ → `{key, title, description}`."""
 	return {
@@ -258,24 +277,49 @@ def ключ_урока(релиз: str, lesson: str) -> str | None:
 	return frappe.db.get_value(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson": lesson}, "lesson_key")
 
 
+def ключи_уроков(релизы: list[str]) -> dict[tuple[str, str], str]:
+	"""Ключи уроков нескольких релизов: (релиз, запись `Course Lesson`) → ключ.
+	Одной выборкой на все релизы, а не на урок."""
+	if not релизы:
+		return {}
+	return {
+		(у.parent, у.lesson): у.lesson_key
+		for у in frappe.get_all(
+			УРОК,
+			filters={"parenttype": РЕЛИЗ, "parent": ("in", list(set(релизы)))},
+			fields=["parent", "lesson", "lesson_key"],
+		)
+	}
+
+
 def цели_урока(релиз: str, ключ: str) -> list[dict]:
 	"""Цели урока с пунктами целей агента — по порядку релиза."""
-	фильтр = {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}
-	цели = [
-		{"key": ц.objective_key, "text": ц.text, "goals": []}
-		for ц in frappe.get_all(ЦЕЛЬ, filters=фильтр, fields=["objective_key", "text"], order_by="idx asc")
-	]
-	по_ключу = {ц["key"]: ц for ц in цели}
+	return цели_с_пунктами(релиз, ключ).get(ключ, [])
+
+
+def цели_с_пунктами(релиз: str, ключ: str | None = None) -> dict[str, list[dict]]:
+	"""Цели уроков релиза с пунктами целей агента: ключ урока → `[{key, text, goals}]`
+	по порядку релиза; `ключ` — только этого урока. Цели и пункты — каждые одной
+	выборкой на релиз, не на урок."""
+	фильтр = {"parenttype": РЕЛИЗ, "parent": релиз, **({} if ключ is None else {"lesson_key": ключ})}
+	итог: dict[str, list[dict]] = {}
+	по_ключу: dict[tuple[str, str], dict] = {}
+	for ц in frappe.get_all(
+		ЦЕЛЬ, filters=фильтр, fields=["lesson_key", "objective_key", "text"], order_by="idx asc"
+	):
+		цель = {"key": ц.objective_key, "text": ц.text, "goals": []}
+		итог.setdefault(ц.lesson_key, []).append(цель)
+		по_ключу[(ц.lesson_key, ц.objective_key)] = цель
 	for п in frappe.get_all(
 		ПУНКТ,
 		filters=фильтр,
-		fields=["objective_key", "goal_key", "kind", "required", "title"],
+		fields=["lesson_key", "objective_key", "goal_key", "kind", "required", "title"],
 		order_by="idx asc",
 	):
-		по_ключу[п.objective_key]["goals"].append(
+		по_ключу[(п.lesson_key, п.objective_key)]["goals"].append(
 			{"key": п.goal_key, "kind": п.kind, "required": bool(п.required), "title": п.title}
 		)
-	return цели
+	return итог
 
 
 def тексты_целей(релиз: str, ключ: str) -> dict[str, str]:
@@ -297,13 +341,19 @@ def название_главы(релиз: str, ключ: str) -> str | None:
 
 def вопросы_урока(релиз: str, ключ: str, *, с_ответами: bool = False) -> list[dict]:
 	"""Квиз урока по порядку; верный вариант и пояснение — только с `с_ответами`."""
-	поля = ["question_key", "objective_key", "text", "option_list"] + (
+	return вопросы(релиз, ключ, с_ответами=с_ответами).get(ключ, [])
+
+
+def вопросы(релиз: str, ключ: str | None = None, *, с_ответами: bool = False) -> dict[str, list[dict]]:
+	"""Квизы уроков релиза: ключ урока → вопросы по порядку; `ключ` — только этого урока.
+	Верный вариант и пояснение — только с `с_ответами`. Одной выборкой на релиз, не на урок."""
+	поля = ["lesson_key", "question_key", "objective_key", "text", "option_list"] + (
 		["correct", "explanation"] if с_ответами else []
 	)
-	итог = []
+	итог: dict[str, list[dict]] = {}
 	for в in frappe.get_all(
 		ВОПРОС,
-		filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ},
+		filters={"parenttype": РЕЛИЗ, "parent": релиз, **({} if ключ is None else {"lesson_key": ключ})},
 		fields=поля,
 		order_by="idx asc",
 	):
@@ -315,7 +365,7 @@ def вопросы_урока(релиз: str, ключ: str, *, с_ответа
 		}
 		if с_ответами:
 			вопрос.update(correct=в.correct, explanation=в.explanation)
-		итог.append(вопрос)
+		итог.setdefault(в.lesson_key, []).append(вопрос)
 	return итог
 
 
@@ -359,6 +409,20 @@ def пакет_урока(релиз: str, ключ: str) -> dict:
 	)
 
 
+def пакеты_уроков(релиз: str, ключи: list[str]) -> dict[str, dict]:
+	"""Срезы пакета агента уроков `ключи` релиза — одной выборкой; нет урока — нет и ключа."""
+	if not ключи:
+		return {}
+	return {
+		у.lesson_key: _из_json(у.agent)
+		for у in frappe.get_all(
+			УРОК,
+			filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ("in", list(set(ключи)))},
+			fields=["lesson_key", "agent"],
+		)
+	}
+
+
 def рамка(релиз: str) -> dict:
 	"""Рамка пакета агента релиза: `frame`, `learn_about_student`, какие есть; нет — `{}`."""
 	return _из_json(frappe.db.get_value(РЕЛИЗ, релиз, "agent_frame"))
@@ -383,6 +447,20 @@ def ключи_рамки(рамка_курса: dict) -> list[str]:
 
 def _ключ(значение) -> bool:
 	return isinstance(значение, str) and bool(значение)
+
+
+#: Поля записи релиза, которые отдают `сведения` и `история`.
+ПОЛЯ_РЕЛИЗА = ["name", "course_key", "version", "published_at", "published_by", "digest", "document_key"]
+
+
+def сведения(релиз: str):
+	"""Запись релиза без индекса и снимка: версия, кто и когда опубликовал, дайджест, документ."""
+	return frappe.db.get_value(РЕЛИЗ, релиз, ПОЛЯ_РЕЛИЗА, as_dict=True)
+
+
+def история(курс: str) -> list:
+	"""Релизы курса — те же поля, что у `сведения`, — свежие вперёд, одной выборкой."""
+	return frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=ПОЛЯ_РЕЛИЗА, order_by="version desc")
 
 
 def снимок(релиз: str) -> dict:

@@ -1,11 +1,11 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Документ-таблица через методы ученика и автора (learning-services#330).
+"""Документ-таблица через методы ученика (learning-services#330).
 
 Логику таблиц проверяет `agent_learning/artifacts/test_tables.py` без базы;
 здесь — что она дошла до методов: запись строк и полей, чтение таблиц,
-заполненность в перечне, очистка, выгрузка и проверка схемы у автора.
+заполненность в перечне, очистка, выгрузка и проверка схемы до записи.
 """
 
 import json
@@ -15,8 +15,8 @@ from io import BytesIO
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.api import authoring, student
-from lms_frappe_app.tests.sample_data import зачислить, создать_урок, создать_ученика
+from lms_frappe_app.api import student
+from lms_frappe_app.tests.sample_data import зачислить, создать_урок, создать_ученика, схема_документа
 
 БЛОКИ = [
 	{"key": "worries", "title": "Первый список тревог"},
@@ -63,7 +63,7 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"table-{суффикс}@example.com")
 		self.курс = зачислить(self.ученик, создать_урок(f"Урок {суффикс}"))
-		ответ = authoring.set_course_artifact(
+		ответ = схема_документа(
 			course=self.курс, artifact="risk_register", title="Реестр рисков", blocks=БЛОКИ
 		)
 		self.assertTrue(ответ["ok"], ответ)
@@ -173,11 +173,11 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		лист = книга["Реестр"]
 		self.assertEqual(лист["E2"].value, "=C2*D2")
 
-	def test_автор_не_сохранит_схему_которую_не_прочесть(self):
+	def test_схему_которую_не_прочесть_не_записать(self):
 		frappe.set_user("Administrator")
 		блоки = json.loads(json.dumps(БЛОКИ))
 		блоки[2]["spec"]["columns"][2]["formula"] = "probability * weight"
-		ответ = authoring.set_course_artifact(
+		ответ = схема_документа(
 			course=self.курс, artifact="risk_register", title="Реестр рисков", blocks=блоки
 		)
 		self.assertFalse(ответ["ok"])
@@ -240,7 +240,7 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 			"sketch": "first_sketch",
 			"summary": {"problem": ["clients_needed"]},
 		}
-		ответ = authoring.set_course_artifact(
+		ответ = схема_документа(
 			course=self.курс, artifact="lean", title="Холст", blocks=блоки, layout="canvas", canvas=холст
 		)
 		self.assertTrue(ответ["ok"], ответ)
@@ -263,7 +263,7 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 
 	def test_холст_который_не_разложить_отказ(self):
 		frappe.set_user("Administrator")
-		ответ = authoring.set_course_artifact(
+		ответ = схема_документа(
 			course=self.курс,
 			artifact="risk_register",
 			title="Реестр рисков",

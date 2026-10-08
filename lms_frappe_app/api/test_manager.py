@@ -6,11 +6,11 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.tests.sample_data import (
+	зачислить_на_курс,
 	курс_из_релиза,
-	создать_вопрос,
-	создать_квиз,
 	добавить_в_организацию,
 	создать_занятие,
 	создать_менеджера,
@@ -74,7 +74,6 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 
 	def test_отчёт_показывает_с_какой_попытки_сдан_урок(self):
 		"""Зачёт — за 100% без лимита: «сдан» не отличает понявшего от перебравшего (#353)."""
-		квиз = создать_квиз(self.урок, [создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])])
 		занятие = создать_занятие(self.ученик_а, self.урок)
 		for номер, сдана in ((1, 0), (2, 1)):
 			frappe.get_doc(
@@ -82,7 +81,6 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 					"doctype": "Agent Quiz Attempt",
 					"session": занятие,
 					"student": self.ученик_а,
-					"quiz": квиз,
 					"lesson": self.урок,
 					"course": self.курс,
 					"attempt_number": номер,
@@ -190,6 +188,37 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		)
 		self.assertEqual(сессии[self.курс]["objectives"], [])
 		self.assertNotIn("Свидетельство агента", json.dumps(сессии, ensure_ascii=False, default=str))
+
+	def test_подробности_несут_итог_попытки_квиза_из_релиза(self):
+		"""Попытка — урок, номер, статус, доля, зачёт и время; ни вопросов, ни ответов."""
+		курс, _ = курс_из_релиза()
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.компания_а, "course": курс}
+		).insert(ignore_permissions=True)
+		зачислить_на_курс(self.ученик_а, курс)
+		run = прохождения.прохождение(self.ученик_а, курс, "l-1")
+		начало = release_quiz.начать(run, создать_занятие(self.ученик_а, run.lesson, run=run.name))
+		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "V1", "слова ученика")
+
+		frappe.set_user(self.менеджер)
+		данные = manager.student_detail(self.ученик_а)["data"]
+
+		[попытка] = данные["quiz_attempts"]
+		закончена = frappe.db.get_value("Agent Quiz Attempt", начало["attempt"], "finished_at")
+		self.assertEqual(
+			попытка,
+			{
+				"lesson": run.lesson,
+				"attempt": 1,
+				"status": "Passed",
+				"score": 1.0,
+				"passed": True,
+				"finished_at": закончена.isoformat(),
+			},
+		)
+		выдано = json.dumps(данные, ensure_ascii=False, default=str)
+		for закрытое in (начало["question"]["id"], "слова ученика", "V1"):
+			self.assertNotIn(закрытое, выдано)
 
 
 class IntegrationTestManagerRole(IntegrationTestCase):

@@ -5,8 +5,8 @@
 
 Порядок: разобрать → схема → проверки сервера → курс → без изменений? →
 записи под точкой сохранения: проекция глав и уроков, шаблоны домашек,
-документ, релиз с индексом, карточка курса и действующий релиз. Признак
-«опубликован» не трогается: новый курс выходит черновиком, новый релиз
+документ, релиз с индексом, карточка курса, инструкторы и действующий релиз.
+Признак «опубликован» не трогается: новый курс выходит черновиком, новый релиз
 опубликованного курса действует сразу (решение владельца, #497).
 
 `Why:` точка сохранения — потому что `@контракт` превращает `Отказ` в
@@ -25,7 +25,15 @@ from frappe.utils import now_datetime
 from lms_frappe_app.agent_learning import structure
 from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
-from lms_frappe_app.agent_learning.releases import checks, document, homework, index, projection, schema
+from lms_frappe_app.agent_learning.releases import (
+	checks,
+	document,
+	homework,
+	index,
+	places,
+	projection,
+	schema,
+)
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 РЕЛИЗ = index.РЕЛИЗ
@@ -40,8 +48,13 @@ from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗ�
 КУРС_С_ПРОХОЖДЕНИЯМИ = "course_has_lesson_runs"
 
 
-def опубликовать(релиз, course: str | None, автор: str) -> dict:
-	"""Релиз — новой версией курса; тот же релиз ещё раз — `unchanged`, без записей."""
+def опубликовать(релиз, course: str | None, автор: str, инструкторы: list[str] | None = None) -> dict:
+	"""Релиз — новой версией курса; тот же релиз ещё раз — `unchanged`, без записей релиза.
+
+	`инструкторы` — проверенные имена пользователей: заменяют инструкторов
+	курса, и на `unchanged` тоже — в дайджест они не входят. `None` — не
+	трогать; новый курс тогда получает инструктором `автор`.
+	"""
 	релиз = _разобрать(релиз)
 	предупреждения = _проверить(релиз)
 	ключ = релиз["course"]["key"]
@@ -52,13 +65,18 @@ def опубликовать(релиз, course: str | None, автор: str) ->
 		frappe.db.get_value("LMS Course", курс, "name", for_update=True)
 		действующий = frappe.db.get_value("LMS Course", курс, "active_release")
 		if действующий and frappe.db.get_value(РЕЛИЗ, действующий, "digest") == дайджест:
+			if инструкторы is not None:
+				документ = frappe.get_doc("LMS Course", курс)
+				if _назначить_инструкторов(документ, инструкторы):
+					документ.flags[ИЗ_РЕЛИЗА] = True
+					документ.save()
 			return _ответ(курс, действующий, None, None, предупреждения, создан=False, без_изменений=True)
 
 	frappe.db.savepoint(ТОЧКА)
 	try:
 		создан = курс is None
 		if создан:
-			курс = _завести_курс(релиз["course"], автор, ключ)
+			курс = _завести_курс(релиз["course"], инструкторы or [автор], ключ)
 		прежний = frappe.db.get_value("LMS Course", курс, "active_release")
 		прежний_документ = frappe.db.get_value(РЕЛИЗ, прежний, "document_key") if прежний else None
 		итог = projection.спроецировать(курс, релиз, index.известные(курс), index.ключи(прежний))
@@ -67,7 +85,7 @@ def опубликовать(релиз, course: str | None, автор: str) ->
 			курс, релиз["document"], релиз["lessons"], итог.уроки, прежний_документ
 		)
 		запись = _записать_релиз(курс, релиз, дайджест, итог, автор)
-		_карточка(курс, релиз["course"], запись.name)
+		_карточка(курс, релиз["course"], запись.name, инструкторы)
 	except Отказ:
 		frappe.db.rollback(save_point=ТОЧКА)
 		raise
@@ -215,7 +233,7 @@ def _дайджест(релиз: dict) -> str:
 	return hashlib.sha256(канон.encode("utf-8")).hexdigest()
 
 
-def _завести_курс(данные: dict, автор: str, ключ: str) -> str:
+def _завести_курс(данные: dict, инструкторы: list[str], ключ: str) -> str:
 	"""Новый курс-черновик под ключ релиза.
 
 	`Why:` две одновременные первые публикации одного ключа обе не находят
@@ -230,7 +248,7 @@ def _завести_курс(данные: dict, автор: str, ключ: str)
 			"description": данные["description"] or данные["summary"] or данные["title"],
 			"published": 0,
 			"course_key": данные["key"],
-			"instructors": [{"instructor": автор}],
+			"instructors": [{"instructor": имя} for имя in инструкторы],
 		}
 	)
 	курс.flags[ИЗ_РЕЛИЗА] = True
@@ -269,7 +287,7 @@ def _записать_релиз(курс: str, релиз: dict, дайджес
 	).insert(ignore_permissions=True)
 
 
-def _карточка(курс: str, данные: dict, релиз: str) -> None:
+def _карточка(курс: str, данные: dict, релиз: str, инструкторы: list[str] | None) -> None:
 	"""Карточка курса — из релиза; пустые тексты Learning не принимает (`reqd`) —
 	на их месте название, о чём сказано в предупреждениях проверки.
 	`description` пишется как есть, как у `update_course`: отрисовку решает этап 6.
@@ -290,8 +308,18 @@ def _карточка(курс: str, данные: dict, релиз: str) -> Non
 			"active_release": релиз,
 		}
 	)
+	if инструкторы is not None:
+		_назначить_инструкторов(документ, инструкторы)
 	документ.flags[ИЗ_РЕЛИЗА] = True
 	документ.save()
+
+
+def _назначить_инструкторов(документ, инструкторы: list[str]) -> bool:
+	"""Инструкторы курса — ровно этот список, по порядку. `True` — если набор поменялся."""
+	if [строка.instructor for строка in документ.instructors] == инструкторы:
+		return False
+	документ.set("instructors", [{"instructor": имя} for имя in инструкторы])
+	return True
 
 
 def _ответ(курс, релиз, итог, схема_документа, предупреждения, *, создан: bool, без_изменений: bool) -> dict:
@@ -327,17 +355,24 @@ def _ответ(курс, релиз, итог, схема_документа, �
 		"chapters": изменения("chapters"),
 		"lessons": изменения("lessons"),
 		"document": схема_документа,
+		"instructors": frappe.get_all(
+			"Course Instructor",
+			filters={"parenttype": "LMS Course", "parent": курс, "parentfield": "instructors"},
+			pluck="instructor",
+			order_by="idx asc",
+		),
 		"warnings": предупреждения,
 	}
 
 
 def удалить_курс(курс: str) -> None:
-	"""Курс из релиза целиком: релизы, схемы документа, домашки, главы, уроки и сам курс.
+	"""Курс из релиза целиком: релизы с кэшем узлов карты, заметки автора, схемы документа,
+	домашки, главы, уроки и сам курс.
 
 	Для курсов, по которым учиться больше не будут (решение владельца: старые
 	курсы удаляются вместе с историей). Релизы, схемы документа и шаблоны
-	домашек — проекции релиза, их удаление здесь; остальное удаляет Learning
-	(`delete_course`).
+	домашек — проекции релиза, а заметки написаны по его ключам: их удаление
+	здесь; остальное удаляет Learning (`delete_course`).
 	Записи учеников по курсу не трогает: курс с прохождениями уроков
 	(`Agent Lesson Run`) — отказ `course_has_lesson_runs` до первой записи,
 	с записями на курс Learning удаление остановит ссылками.
@@ -355,13 +390,18 @@ def удалить_курс(курс: str) -> None:
 		)
 	frappe.db.set_value("LMS Course", курс, "active_release", None)
 	frappe.clear_document_cache("LMS Course", курс)
+	# Флаг — до конца `delete_course`: релизы курса и его главы с уроками
+	# удаляются только вместе с курсом (`course_guard`).
 	frappe.flags[УДАЛЯЕТСЯ_КУРС] = курс
 	try:
-		for имя in frappe.get_all(РЕЛИЗ, filters={"course": курс}, pluck="name"):
-			frappe.delete_doc(РЕЛИЗ, имя, ignore_permissions=True)
+		for релиз in frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=["name", "digest"]):
+			frappe.delete_doc(РЕЛИЗ, релиз.name, ignore_permissions=True)
+			frappe.cache.delete_value(places.ключ_кэша(релиз.name, релиз.digest))
+		for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
+			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
+		for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
+			frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
+		homework.удалить_шаблоны(курс)
+		delete_course(курс)
 	finally:
 		frappe.flags[УДАЛЯЕТСЯ_КУРС] = None
-	for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
-		frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
-	homework.удалить_шаблоны(курс)
-	delete_course(курс)

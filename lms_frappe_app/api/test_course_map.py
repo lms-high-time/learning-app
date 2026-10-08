@@ -15,17 +15,13 @@ from lms_frappe_app.tests.sample_data import (
 	создать_урок,
 )
 
-#: Поля директивы, которым нельзя выходить наружу ни при каком вызывающем.
-ЗАКРЫТЫЕ_ПОЛЯ = (
-	"teaching_directive",
-	"probing_questions",
-	"common_misconceptions",
-	"success_criteria",
-)
-
 
 class IntegrationTestCourseMap(IntegrationTestCase):
-	"""Карта курса — то, что видят гость и зачисленный ученик."""
+	"""Карта курса без релиза — то, что видят гость и зачисленный ученик.
+
+	Цели уроков задаёт только релиз (`test_lesson_readers`): у курса без
+	релиза уроки приходят с пустым списком целей.
+	"""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -37,43 +33,23 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 		self.курс = frappe.db.get_value("Course Chapter", глава, "course")
 		frappe.db.set_value("LMS Course", self.курс, "published", 1)
 
-		self.директива = frappe.get_doc(
-			{
-				"doctype": "Agent Lesson Directive",
-				"lesson": self.урок,
-				"objectives": "Назвать спонсора проекта\nОтличить проект от операций",
-				"teaching_directive": "Начать с примера, не с определения",
-				"probing_questions": "Кто принимает решение о запуске?",
-				"common_misconceptions": "Проект — это любая работа",
-				"success_criteria": "Ученик называет спонсора своими словами",
-			}
-		).insert(ignore_permissions=True)
-
 	def карта(self) -> dict:
 		return public.course_map(course=self.курс)["data"]
 
-	def test_гость_видит_цели_без_покрытия(self):
+	def test_гость_видит_уроки_без_целей(self):
 		frappe.set_user("Guest")
 
-		уроки = self.карта()["chapters"][0]["lessons"]
-		цели = уроки[0]["objectives"]
+		[урок] = self.карта()["chapters"][0]["lessons"]
 
-		self.assertEqual([ц["text"] for ц in цели], ["Назвать спонсора проекта", "Отличить проект от операций"])
-		# Ключа нет вовсе: `null` был бы неотличим от «цель не разобрана».
-		for цель in цели:
-			self.assertNotIn("status", цель)
+		self.assertEqual((урок["id"], урок["objectives"]), (self.урок, []))
 
-	def test_зачисленный_на_курс_старой_модели_видит_цели_без_покрытия(self):
-		"""Покрытие целей — из прохождений уроков курса из релиза (`test_lesson_readers`);
-		у курса старой модели их нет, и цель приходит без `status` и зачисленному."""
+	def test_зачисленный_видит_уроки_без_целей(self):
 		зачислить(self.ученик, self.урок)
 		frappe.set_user(self.ученик)
 
-		цели = self.карта()["chapters"][0]["lessons"][0]["objectives"]
+		[урок] = self.карта()["chapters"][0]["lessons"]
 
-		self.assertEqual(
-			цели, [{"text": "Назвать спонсора проекта"}, {"text": "Отличить проект от операций"}]
-		)
+		self.assertEqual((урок["id"], урок["objectives"]), (self.урок, []))
 
 	# --- программа курса: зачин, пройденность, следующий урок (learning-services#322) ---
 
@@ -130,20 +106,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], КУРС_НЕ_НАЙДЕН)
 
-	def test_цели_берутся_из_действующей_версии_директивы(self):
-		from lms_frappe_app.agent_learning import directives
-
-		directives.записать(
-			"Agent Lesson Directive",
-			{"lesson": self.урок},
-			{"objectives": "Единственная новая цель", "teaching_directive": "Новая версия"},
-		)
-		frappe.set_user("Guest")
-
-		цели = self.карта()["chapters"][0]["lessons"][0]["objectives"]
-
-		self.assertEqual([ц["text"] for ц in цели], ["Единственная новая цель"])
-
 	def test_порядок_уроков_совпадает_с_программой_learning(self):
 		второй = создать_урок(f"Второй урок {frappe.generate_hash(length=4)}")
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
@@ -164,16 +126,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 		]
 
 		self.assertEqual(наш, их)
-
-	def test_тело_директивы_наружу_не_выходит(self):
-		frappe.set_user("Guest")
-
-		целиком = json.dumps(self.карта(), ensure_ascii=False)
-
-		for поле in ЗАКРЫТЫЕ_ПОЛЯ:
-			self.assertNotIn(поле, целиком)
-		self.assertNotIn("Начать с примера", целиком)
-		self.assertNotIn("Кто принимает решение", целиком)
 
 
 class IntegrationTestCourseMapDocuments(IntegrationTestCase):

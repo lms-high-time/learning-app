@@ -15,7 +15,7 @@
 import json
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.leak_guards import проверить_ответ
@@ -25,10 +25,8 @@ from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
-	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
-	создать_квиз,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
@@ -36,15 +34,108 @@ from lms_frappe_app.tests.sample_data import (
 )
 from lms_frappe_app.api import manager, public, review, student
 
-ПРАВИЛЬНЫЙ_ВАРИАНТ = "Москва"
-НЕВЕРНЫЙ_ВАРИАНТ = "Тула"
-ТЕКСТ_ПОЯСНЕНИЯ = "Столицей она стала в пятнадцатом веке"
-#: Пояснение неверного варианта — его отдавать можно: ответа оно не называет.
-ПОЯСНЕНИЕ_НЕВЕРНОГО = "Тула — оружейный город, но не столица"
+
+class TestLeakGuard(UnitTestCase):
+	"""Проверка проверки: поля эталона релиза ловятся ключами на любой глубине."""
+
+	def утечка(self, ответ, **параметры) -> bool:
+		try:
+			проверить_ответ(self, ответ, "проба", **параметры)
+		except AssertionError:
+			return True
+		return False
+
+	def test_эталон_ловится(self):
+		for ответ, параметры in (
+			({"data": {"question": {"correct": "V2"}}}, {}),
+			({"data": [{"answers": {}}]}, {}),
+			({"verdict": {"explanation": "Почему так"}}, {}),
+			('[{"key": "S1", "correct": "V1"}]', {}),
+			# Метка верного варианта булевым или числом — рядом с ключом, текстом, вариантами.
+			({"options": [{"key": "V2", "correct": True}]}, {}),
+			({"question": {"text": "Вопрос", "correct": 1, "total": 2}}, {}),
+			({"verdict": {"key": "V1", "correct": True}}, {}),
+			({"verdict": {"id": "V1", "correct": True}}, {}),
+			({"next_question": {"id": "S2", "index": 2, "total": 5, "correct": 1}}, {}),
+			# Число без `total` — не счёт, а номер варианта.
+			({"correct": 2}, {}),
+			({"verdict": {"correct": 2}}, {}),
+			# Булево вне вердикта.
+			({"next_question": {"correct": False}}, {}),
+			# JSON, закодированный дважды.
+			(json.dumps(json.dumps([{"key": "S1", "correct": "V1"}])), {}),
+			({"state": json.dumps(json.dumps({"answers": {"S1": "V1"}}))}, {}),
+			# Пояснение законно только у верного вердикта и в итоге сданной попытки.
+			({"verdict": {"correct": False, "explanation": "Почему так"}}, {"кроме": ("explanation",)}),
+			({"next_question": {"id": "S2", "explanation": "Почему так"}}, {"кроме": ("explanation",)}),
+			(
+				{"result": {"passed": False, "explanations": [{"id": "S1", "explanation": "Почему так"}]}},
+				{"кроме": ("explanation",)},
+			),
+			({"explanations": [{"id": "S1", "explanation": "Почему так"}]}, {"кроме": ("explanation",)}),
+		):
+			with self.subTest(ответ=ответ, **параметры):
+				self.assertTrue(self.утечка(ответ, **параметры))
+
+	def test_вердикт_и_счёт_не_эталон(self):
+		self.assertFalse(
+			self.утечка(
+				{
+					"verdict": {"correct": False},
+					"result": {
+						"correct": 3,
+						"total": 4,
+						"objective_results": {"l-1-D1": {"correct": 1, "total": 2}},
+					},
+				}
+			)
+		)
+
+	def test_законное_пояснение(self):
+		for ответ in (
+			{"verdict": {"correct": True, "explanation": "Почему так"}},
+			{
+				"result": {
+					"passed": True,
+					"explanations": [{"id": "S1", "text": "Вопрос", "explanation": "Почему так"}],
+				}
+			},
+		):
+			with self.subTest(ответ=ответ):
+				self.assertFalse(self.утечка(ответ, кроме=("explanation",)))
+				self.assertTrue(self.утечка(ответ), "без `кроме` пояснение — утечка")
 
 
-class IntegrationTestNoLeak(IntegrationTestCase):
-	"""Ни один метод не отдаёт эталон и не протекает структурами Frappe."""
+	def test_формы_квиза_из_контракта_не_утечка(self):
+		"""Примеры ответов `request_quiz` и `submit_answer` в CONTRACT.md — законные
+		формы `correct` и пояснений: сторож их пропускает."""
+		from lms_frappe_app.api.test_contract import КОНТРАКТ
+
+		примеры = []
+		метод = None
+		блок: list[str] | None = None
+		for строка in КОНТРАКТ.read_text(encoding="utf-8").splitlines():
+			if строка.startswith("## "):
+				квиз = ("request_quiz", "submit_answer")
+				метод = next((м for м in квиз if f"student.{м}`" in строка), None)
+			elif метод and строка.strip() == "```json":
+				блок = []
+			elif блок is not None and строка.strip() == "```":
+				if '"ok": true' in (текст := "\n".join(блок)):
+					примеры.append((метод, json.loads(текст)))
+				блок = None
+			elif блок is not None:
+				блок.append(строка)
+		self.assertEqual({м for м, _ in примеры}, {"request_quiz", "submit_answer"})
+		for метод, ответ in примеры:
+			with self.subTest(метод=метод, ответ=ответ):
+				self.assertFalse(self.утечка(ответ, кроме=("explanation",)))
+
+
+class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
+	"""Методы вне квиза — ученика, руководителя, куратора — на курсе без
+	релиза: ни структур Frappe, ни полей эталона. Квиз и закрытое из релиза —
+	`IntegrationTestNoLeakRelease`."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -55,12 +146,6 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.курс = frappe.db.get_value(
 			"Course Chapter", frappe.db.get_value("Course Lesson", self.урок, "chapter"), "course"
 		)
-		self.вопрос = создать_вопрос(
-			"Столица России?",
-			варианты=[(ПРАВИЛЬНЫЙ_ВАРИАНТ, True), (НЕВЕРНЫЙ_ВАРИАНТ, False, ПОЯСНЕНИЕ_НЕВЕРНОГО)],
-			пояснение=ТЕКСТ_ПОЯСНЕНИЯ,
-		)
-		создать_квиз(self.урок, [self.вопрос])
 
 		self.организация = создать_организацию(f"Компания {суффикс}")
 		добавить_в_организацию(self.ученик, self.организация)
@@ -84,14 +169,10 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 
 	def проверить(self, что: str, ответ) -> str:
-		"""Ответ без эталонов, внутренностей Frappe и текста пояснения.
+		"""Ответ без полей эталона и внутренностей Frappe."""
+		return проверить_ответ(self, ответ, что)
 
-		Текст проверяется отдельно от имён полей: утечка вида
-		`{"hint": <текст пояснения>}` мимо проверки имён проходит.
-		"""
-		return проверить_ответ(self, ответ, что, запрещённые_тексты=(ТЕКСТ_ПОЯСНЕНИЯ,))
-
-	def test_ни_один_метод_ученика_не_отдаёт_эталон(self):
+	def test_методы_ученика_не_протекают(self):
 		frappe.set_user(self.ученик)
 
 		self.проверить("list_my_courses", student.list_my_courses())
@@ -126,7 +207,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("count_scenario_turn", student.count_scenario_turn("profile"))
 		self.проверить("reset_scenario_state", student.reset_scenario_state("profile"))
 
-	def test_ни_один_метод_руководителя_не_отдаёт_эталон(self):
+	def test_методы_руководителя_не_протекают(self):
 		frappe.set_user(self.ученик)
 		создать_занятие(self.ученик, self.урок)
 
@@ -135,7 +216,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("org_report", manager.org_report())
 		self.проверить("student_detail", manager.student_detail(self.ученик))
 
-	def test_методы_куратора_не_отдают_эталон(self):
+	def test_методы_куратора_не_протекают(self):
 		"""Очередь и карточка домашки (learning-services#452): сдача, задание и
 		журнал — без эталонов и структур Frappe."""
 		создать_домашку(self.урок)
@@ -372,6 +453,25 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			верный,
 			"итог сданной попытки",
 			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные),
+			кроме=("explanation",),
+		)
+
+	def test_верный_ответ_посреди_попытки_без_чужих_пояснений(self):
+		"""Вердикт верного ответа несёт пояснение своего вопроса, а не других:
+		попытка не закончена, итога и `explanations` нет."""
+		попытка = self.попытка()["attempt"]
+
+		верный = self.ответить(попытка, ВОПРОС_1, "V1")
+
+		self.assertEqual(верный["verdict"], {"correct": True, "explanation": ПОЯСНЕНИЕ_РЕЛИЗА})
+		self.assertFalse(верный["attempt_finished"])
+		self.assertNotIn("result", верный)
+		проверить_ответ(
+			self,
+			верный,
+			"верный ответ посреди попытки",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПОЯСНЕНИЕ_РЕЛИЗА),
+			кроме=("explanation",),
 		)
 
 	def test_прохождение_не_читают_ученик_и_руководитель(self):

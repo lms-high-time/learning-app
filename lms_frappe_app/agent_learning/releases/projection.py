@@ -8,11 +8,21 @@
 главами. Снятое из релиза не удаляется — уходит из порядка (строк-ссылок
 Learning): на урок ссылаются следы учеников, а вернувшийся ключ получает ту же
 запись. Материала у урока нет: он только агенту (решение владельца, #497).
+
+Главы и уроки пишутся без проверки прав, как и сам релиз (`service._записать_релиз`).
+`Why:` Learning даёт Course Creator запись `Course Lesson` только своих
+(`if_owner`) — иначе куратор не переопубликовал бы курс, который опубликовал
+другой куратор или Administrator. Метод публикации закрыт авторскими ролями.
+
+Каждая запись глав, уроков и порядка глав курса помечена `ИЗ_РЕЛИЗА`: правку
+структуры курса из релиза мимо публикации отклоняет `course_guard`.
 """
 
 from dataclasses import dataclass, field
 
 import frappe
+
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 ГЛАВА = "Course Chapter"
 УРОК = "Course Lesson"
@@ -89,14 +99,17 @@ def _записать(doctype: str, курс: str, имя: str | None, поля:
 		документ = frappe.get_doc(doctype, имя)
 		if any((документ.get(поле) or None) != (значение or None) for поле, значение in поля.items()):
 			документ.update(поля)
-			документ.save()
+			документ.flags[ИЗ_РЕЛИЗА] = True
+			документ.save(ignore_permissions=True)
 			итог.обновлено[вид].append(ключ)
 		return имя
 	новое = {"doctype": doctype, **поля}
 	if doctype == УРОК:
 		новое["body"] = ""
 	итог.создано[вид].append(ключ)
-	return frappe.get_doc(новое).insert().name
+	документ = frappe.get_doc(новое)
+	документ.flags[ИЗ_РЕЛИЗА] = True
+	return документ.insert(ignore_permissions=True).name
 
 
 def _порядок(курс: str, главы: list[str], уроки_глав: dict[str, list[str]]) -> None:
@@ -109,10 +122,12 @@ def _порядок(курс: str, главы: list[str], уроки_глав: d
 	было = [строка.chapter for строка in курс_документ.chapters]
 	if было != главы:
 		курс_документ.set("chapters", [{"chapter": глава} for глава in главы])
+		курс_документ.flags[ИЗ_РЕЛИЗА] = True
 		курс_документ.save()
 	for глава in dict.fromkeys(было + главы):
 		нужно = уроки_глав.get(глава, [])
 		документ = frappe.get_doc(ГЛАВА, глава)
 		if [строка.lesson for строка in документ.lessons] != нужно:
 			документ.set("lessons", [{"lesson": урок} for урок in нужно])
-			документ.save()
+			документ.flags[ИЗ_РЕЛИЗА] = True
+			документ.save(ignore_permissions=True)

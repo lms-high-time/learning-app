@@ -11,7 +11,7 @@ from frappe.tests import IntegrationTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
 from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.agent_learning.releases import index, service
+from lms_frappe_app.agent_learning.releases import index, places, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_урок
@@ -277,6 +277,16 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual(ответ["data"]["warnings"], [])
 		self.assertEqual(frappe.db.get_value("LMS Course", первый["course"], "published"), 1)
 
+	def test_открытие_отдаёт_предупреждения_действующего_релиза(self):
+		релиз = пример_релиза(self.ключ)
+		релиз["chapters"][1]["description"] = ""
+		первый = self.опубликовать(релиз)
+		self.assertTrue(первый["warnings"])
+
+		ответ = authoring.publish_course(course=первый["course"])
+
+		self.assertEqual(ответ["data"]["warnings"], первый["warnings"])
+
 	def test_новый_релиз_двигает_ревизию(self):
 		первый = self.опубликовать()
 		до = authoring.course_revision(course=первый["course"])["data"]["revision"]
@@ -347,17 +357,26 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.опубликовать(релиз)
 		курс = первый["course"]
 		уроки = frappe.get_all("Course Lesson", filters={"course": курс}, pluck="name")
+		заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Пример")["data"]["id"]
+		authoring.reply_note(note=заметка, text="Ответ в нить")
 		frappe.set_user("Administrator")
 
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc(РЕЛИЗ, первый["release"])
+		дайджест = frappe.db.get_value(РЕЛИЗ, первый["release"], "digest")
+		places.узлы_карты(первый["release"], дайджест)
+		кэш = places.ключ_кэша(первый["release"], дайджест)
+		self.assertIsNotNone(frappe.cache.get_value(кэш))
 		service.удалить_курс(курс)
 
 		self.assertFalse(frappe.db.exists("LMS Course", курс))
 		self.assertFalse(frappe.db.exists(РЕЛИЗ, {"course": курс}))
 		self.assertFalse(frappe.db.exists("Agent Release Lesson", {"lesson": ("in", уроки)}))
 		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": курс}))
+		self.assertFalse(frappe.db.exists("Agent Author Note", заметка))
+		self.assertFalse(frappe.db.exists("Agent Note Reply", {"parent": заметка}))
 		self.assertFalse(frappe.db.exists("Course Lesson", {"name": ("in", уроки)}))
+		self.assertIsNone(frappe.cache.get_value(кэш))
 		# Флаг снят: релиз другого курса по-прежнему не удаляется.
 		другой = service.опубликовать(
 			пример_релиза(f"other-{frappe.generate_hash(length=6)}"), None, self.куратор

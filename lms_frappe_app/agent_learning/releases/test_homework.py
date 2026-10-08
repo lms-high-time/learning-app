@@ -210,11 +210,11 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 			ответ = student.homework(lesson=урок)
 			self.assertTrue(ответ["ok"], ответ)
 			self.assertEqual(ответ["data"]["homework"] is not None, видит, ученик)
-		# Куратору урок показывает только действующее задание.
+		# Куратору урок действующего релиза показывает задание релиза — его нет.
 		frappe.set_user(self.куратор)
-		урок_автора = authoring.get_lesson(lesson=урок)
+		урок_автора = authoring.course_release(course=курс, lesson="l-3")
 		self.assertTrue(урок_автора["ok"], урок_автора)
-		self.assertIsNone(урок_автора["data"]["homework"])
+		self.assertIsNone(урок_автора["data"]["lesson"]["homework"])
 
 	def test_снятое_параллельно_задание_новой_сдачи_не_получает(self):
 		"""Выдача и сохранение читали задание до того, как публикация его сняла:

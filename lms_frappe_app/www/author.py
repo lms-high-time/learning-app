@@ -1,40 +1,46 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""Кабинет автора: курс таким, каким его собрал агент куратора.
+"""Кабинет автора: действующий релиз курса, заметки по его ключам, тестеры.
 
-Зеркало, а не редактор: пишет только агент, через авторские методы, а человек
-здесь смотрит собранное — структуру и наполненность, урок целиком, документ
-курса — и говорит правки агенту. Данные берутся из тех же методов, что
-отвечают агенту (`course_draft`, `get_lesson`): второй путь к ним разошёлся
-бы с первым молча.
+Курс компилируется вне платформы и правится только новым релизом, поэтому
+кабинет — зеркало, а не редактор: человек смотрит релиз и ставит заметки на
+его места, агент куратора правит курс и публикует новый релиз. Данные — из
+тех же авторских методов, что отвечают агенту (`course_release`,
+`list_notes`, `course_releases`, `course_testers`): второй путь к ним
+разошёлся бы с первым молча.
 
-Здесь только раскладка для отрисовки. Норм методики — сколько знаков, сколько
-вопросов — страница не знает и не показывает: это закрытая часть (спека, §3).
+Исключение — счёт заметок в списке курсов (`_заметки_списка`): осознанный
+второй путь ради бюджета запросов. `list_notes` на каждый курс стоил бы
+выборок на строку; здесь — две выборки на весь список, а правило «чей ход» —
+то же `notes.ждёт`. Считаются заметки только у курсов с релизом: у курса без
+релиза вкладки «Заметки» нет, и архивные заметки в число не входят.
+
+Здесь только раскладка для отрисовки. Шаблон кабинета экранирует каждый
+вывод: ключи релиза и пакета агента — произвольные строки.
 """
 
-from datetime import timedelta
+import hashlib
+import json
+from collections import Counter
 from urllib.parse import quote
 
 import frappe
-from frappe.utils import get_datetime, md_to_html, now_datetime, sanitize_html
 
-from lms_frappe_app.agent_learning import diffs, directives, normalizer, notes, snapshots, testers
-from lms_frappe_app.agent_learning.artifacts import overlay
-from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
-from lms_frappe_app.api import authoring, контракт
+from lms_frappe_app.agent_learning import announcements, notes
+from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.releases.places import коротко
+from lms_frappe_app.api import authoring
 from lms_frappe_app.site_navigation import шапка_платформы
 
 no_cache = 1
 
 СТРАНИЦА = "/author"
 МЕТОД_РЕВИЗИИ = "lms_frappe_app.api.authoring.course_revision"
-МЕТОДЫ_ЗАМЕЧАНИЙ = {
+МЕТОДЫ_ЗАМЕТОК = {
 	"add": "lms_frappe_app.api.authoring.add_note",
 	"reply": "lms_frappe_app.api.authoring.reply_note",
 	"status": "lms_frappe_app.api.authoring.set_note_status",
 }
-
-#: Методы вкладки «Тестеры» (learning-services#393).
 МЕТОДЫ_ТЕСТЕРОВ = {
 	"add": "lms_frappe_app.api.authoring.add_testers",
 	"remove": "lms_frappe_app.api.authoring.remove_tester",
@@ -43,45 +49,28 @@ no_cache = 1
 #: Цветов глав в палитре страницы; дальше они идут по кругу.
 ЦВЕТОВ_ГЛАВ = 5
 
-#: Вкладки экрана курса: собранное, сверка с картой декомпозиции, замечания.
-СБОРКА, КАРТА, ЗАМЕЧАНИЯ, ТЕСТЕРЫ = "build", "map", "notes", "testers"
+#: Вкладки экрана курса: релиз, очередь заметок, история релизов, тестеры.
+РЕЛИЗ, ЗАМЕТКИ, ИСТОРИЯ, ТЕСТЕРЫ = "release", "notes", "history", "testers"
 
 #: Порядок групп очереди: сначала то, что ждёт человека.
 ГРУППЫ_ОЧЕРЕДИ = ("check", "question", "agent", "accepted")
 
-#: Сеанс чтения: заход в урок позже этого после прошлого — новый визит.
-#: Внутри сеанса отметки «изменено» считаются от визита до него, так что
-#: перезагрузка и возврат к уроку их не сбрасывают.
-СЕАНС = timedelta(minutes=30)
+#: Места заметок на экране курса — вне уроков.
+МЕСТА_КУРСА = frozenset({"course", "chapter", "section"})
+#: Места заметок на странице урока: урок, его цели, пункты, вопросы и пакет агента.
+МЕСТА_УРОКА = frozenset({"lesson", "objective", "goal", "question", "agent.lesson", "agent.item"})
 
-#: Поля директив по-человечески — в разделах урока и в разнице по местам.
-ПОДПИСИ_ПОЛЕЙ = {
-	"teaching_directive": "Как вести занятие",
-	"objectives": "Цели",
-	"probing_questions": "Вопросы к проекту",
-	"success_criteria": "Признаки успеха",
-	"common_misconceptions": "Частые заблуждения",
-	"student_profile": "Кто ученик",
-	"glossary": "Глоссарий",
-	"remember_about_student": "Что запоминать об ученике",
+#: Части пакета агента словами; часть, которой здесь нет, подписана своим ключом.
+ЧАСТИ_ПАКЕТА = {
+	"frame": "Рамка курса",
+	"learn_about_student": "Что выяснять об ученике",
+	"directive": "Директива урока",
+	"material": "Материал урока",
+	"items": "Пункты",
+	"sections": "Разделы документа",
 }
 
-#: Поля директивы урока в порядке, в каком их читает агент ученика; второе
-#: значение — список ли это по строке на пункт.
-ПОЛЯ_УРОКА = (
-	("teaching_directive", False),
-	("objectives", True),
-	("probing_questions", True),
-	("success_criteria", True),
-	("common_misconceptions", True),
-)
-ПОЛЯ_КУРСА = (
-	("teaching_directive", False),
-	("objectives", True),
-	("student_profile", False),
-	("glossary", True),
-	("remember_about_student", True),
-)
+РЕЖИМЫ_ОТВЕТА = {"text": "текстом", "files": "файлами", "text_and_files": "текстом и файлами"}
 
 
 def сведения(
@@ -89,11 +78,12 @@ def сведения(
 ) -> dict:
 	"""Что показать на странице этому пользователю.
 
-	Без `course` — все курсы: они общие, видимость по роли, а не по
-	авторству. С `course` — экран курса: вкладка сборки или, с `view=map`,
-	сверка с картой декомпозиции; с `lesson` — урок. Неизвестный курс или урок
-	не из этого курса дают пометку, а не ошибку: ссылку могли прислать до того,
-	как агент урок перенёс или удалил.
+	Без `course` — все курсы: они общие, видимость по роли, а не по авторству.
+	С `course` — экран курса: релиз, очередь заметок (`view=notes`), история
+	релизов (`view=history`) или тестеры (`view=testers`); с `lesson` — урок
+	релиза по ключу с пакетом агента. У курса без релиза — только карточка
+	анонса. Неизвестный курс или ключ урока не из релиза дают пометку, а не
+	ошибку: ссылку могли прислать до нового релиза.
 	"""
 	основа = {
 		"is_guest": пользователь == "Guest",
@@ -103,17 +93,17 @@ def сведения(
 		"allowed": True,
 		"courses": [],
 		"course": None,
+		"release": None,
 		"lesson": None,
-		"view": СБОРКА,
-		"map_check": None,
-		"map_notes": {},
+		"view": РЕЛИЗ,
 		"notes_queue": None,
+		"history": None,
 		"testers": None,
 		"tester_methods": МЕТОДЫ_ТЕСТЕРОВ,
-		"note_methods": МЕТОДЫ_ЗАМЕЧАНИЙ,
-		"field_labels": ПОДПИСИ_ПОЛЕЙ,
-		"seen_method": "lms_frappe_app.www.author.mark_lesson_seen",
+		"note_methods": МЕТОДЫ_ЗАМЕТОК,
 		"missing": False,
+		"course_anchor": якорь("course"),
+		"frame_anchor": якорь("agent.frame"),
 	}
 	if основа["is_guest"]:
 		return основа
@@ -124,78 +114,70 @@ def сведения(
 		основа["courses"] = _курсы(authoring.list_courses()["data"]["courses"])
 		return основа
 
-	черновик = authoring.course_draft(course=course)
-	if not черновик["ok"]:
+	карточка = frappe.db.get_value(
+		"LMS Course",
+		course,
+		["title", "short_introduction", "published", "upcoming", "active_release", announcements.ПОЛЕ_ЦЕЛЕЙ],
+		as_dict=True,
+	)
+	if not карточка:
 		основа["missing"] = True
 		return основа
-	основа["course"] = _курс(черновик["data"])
+	курс = основа["course"] = _карточка(course, карточка)
+	if not карточка.active_release:
+		return основа
+
+	релиз = основа["release"] = _релиз(course, authoring.course_release(course=course)["data"])
+	заметки = _заметки(course)
+	_заметки_релиза(релиз, заметки)
+	курс["notes_attention"] = sum(з["waiting_on"] == "author" for з in заметки)
 	# Число тестеров — на ярлыке вкладки, поэтому и на других вкладках.
-	основа["course"]["testers_count"] = frappe.db.count(
-		"LMS Enrollment", {"course": course, "agent_tester": 1}
-	)
-	замечания = _замечания(course)
-	_замечания_курса(основа["course"], замечания)
-	сверка = _сверка(course)
-	изменены = _изменены_после_визита(пользователь, course)
-	for глава in основа["course"]["chapters"]:
-		for урок in глава["lessons"]:
-			урок["map_issues"] = len(_расхождения_урока(сверка, урок["id"]))
-			урок["changed_since_visit"] = урок["id"] in изменены
+	курс["testers_count"] = frappe.db.count("LMS Enrollment", {"course": course, "agent_tester": 1})
 	if lesson:
-		основа["lesson"] = _урок(основа["course"], lesson)
+		основа["lesson"] = _урок_целиком(course, lesson, релиз, заметки)
 		основа["missing"] = основа["lesson"] is None
-		if основа["lesson"]:
-			_замечания_урока(основа["lesson"], замечания)
-			основа["lesson"]["changes"] = _изменения_урока(пользователь, course, lesson)
-			основа["lesson"]["map_issues"] = _расхождения_урока(сверка, lesson)
-			основа["lesson"]["map_url"] = (
-				f"{адрес(course)}&view={КАРТА}&node={quote('lesson:' + lesson, safe='')}" if сверка["map"] else None
-			)
-	elif view == КАРТА:
-		основа["view"] = КАРТА
-		основа["map_check"] = сверка
-		основа["map_notes"] = _по_местам(
-			(з for з in замечания if з["target"].startswith("map.") and з["status"] != "accepted"),
-			lambda з: з["target"].partition(".")[2],
-		)
-	elif view == ЗАМЕЧАНИЯ:
-		основа["view"] = ЗАМЕЧАНИЯ
-		основа["notes_queue"] = _очередь(замечания)
+	elif view == ЗАМЕТКИ:
+		основа["view"] = ЗАМЕТКИ
+		основа["notes_queue"] = _очередь(заметки)
+	elif view == ИСТОРИЯ:
+		основа["view"] = ИСТОРИЯ
+		основа["history"] = _история(authoring.course_releases(course=course)["data"]["releases"])
 	elif view == ТЕСТЕРЫ:
 		основа["view"] = ТЕСТЕРЫ
-		основа["testers"] = testers.тестеры(course)
+		основа["testers"] = authoring.course_testers(course=course)["data"]["testers"]
 	return основа
 
 
-def _курсы(курсы: list[dict]) -> list[dict]:
-	"""Список курсов со сводкой внимания: сколько замечаний ждёт человека,
-	сколько расхождений с картой, когда курс менялся. Два автора и много
-	курсов — список сразу говорит, куда идти.
+# --- список курсов ---
 
-	Сверка с картой — только у курсов, у которых карта есть: она дороже
-	остального, а без карты считать нечего.
+
+def _курсы(курсы: list[dict]) -> list[dict]:
+	"""Курсы со сводкой: версия действующего релиза, открытые заметки, тестеры.
+
+	`Why:` сводка — выборками на весь список, а не на курс: курсов на
+	платформе десятки, и запрос на строку рос бы вместе с ними.
 	"""
-	курсы_ид = [курс["id"] for курс in курсы]
-	ждут = _ждут_автора(курсы_ид)
-	с_картой = (
-		set(frappe.get_all("Agent Course Map", filters={"course": ["in", курсы_ид]}, pluck="course"))
-		if курсы_ид
-		else set()
+	ид = [курс["id"] for курс in курсы]
+	заметки = _заметки_списка([курс["id"] for курс in курсы if курс["release"]])
+	тестеров = (
+		Counter(
+			frappe.get_all(
+				"LMS Enrollment", filters={"course": ["in", ид], "agent_tester": 1}, pluck="course"
+			)
+		)
+		if ид
+		else Counter()
 	)
 	for курс in курсы:
-		курс["notes_attention"] = ждут.get(курс["id"], 0)
-		курс["map_discrepancies"] = (
-			authoring.course_map_check(course=курс["id"])["data"]["counts"]["total"]
-			if курс["id"] in с_картой
-			else None
-		)
-		курс["revision"] = authoring.ревизия(курс["id"])
+		курс["url"] = адрес(курс["id"])
+		курс["status"] = _статус(курс["published"], курс["upcoming"])
+		курс["open_notes"], курс["notes_attention"] = заметки.get(курс["id"], (0, 0))
+		курс["testers_count"] = тестеров[курс["id"]]
 	return курсы
 
 
-def _ждут_автора(курсы: list[str]) -> dict[str, int]:
-	"""Сколько замечаний каждого курса ждёт человека — двумя запросами на
-	весь список, а не парой на курс."""
+def _заметки_списка(курсы: list[str]) -> dict[str, tuple[int, int]]:
+	"""Курс → (открытых заметок, из них ждут человека) — двумя выборками на весь список."""
 	if not курсы:
 		return {}
 	открытые = frappe.get_all(
@@ -213,455 +195,277 @@ def _ждут_автора(курсы: list[str]) -> dict[str, int]:
 		order_by="idx asc",
 	):
 		последние[ответ.parent] = ответ.via
-	счёт: dict[str, int] = {}
+	счёт: dict[str, tuple[int, int]] = {}
 	for з in открытые:
 		ответы = [{"via": последние[з.name]}] if з.name in последние else []
-		if notes.ждёт(з.status, з.via, ответы) == "author":
-			счёт[з.course] = счёт.get(з.course, 0) + 1
+		всего, ждут = счёт.get(з.course, (0, 0))
+		счёт[з.course] = (всего + 1, ждут + (notes.ждёт(з.status, з.via, ответы) == "author"))
 	return счёт
 
 
-@frappe.whitelist(methods=["POST"])
-@контракт
-def mark_lesson_seen(lesson: str) -> dict:
-	"""Автор открыл урок: снимок его мест — база отметок «изменено» в
-	следующий визит (lms-high-time/learning-services#271).
-
-	Зовёт страница урока после загрузки: GET-страница в базу не пишет. Снимок
-	снимает сервер. Заход после перерыва больше `СЕАНС` сдвигает базу: прошлый
-	визит становится «визитом до сеанса».
-	"""
-	authoring._автор()
-	course = frappe.db.get_value("Course Lesson", lesson, "course")
-	if not course:
-		raise Отказ(УРОК_НЕ_НАЙДЕН, "Урока нет", lesson=lesson)
-	сейчас = now_datetime()
-	снимок = snapshots.в_json(snapshots.снимок(course, lesson, "lesson"))
-	имя = frappe.db.get_value("Agent Author Visit", {"author": frappe.session.user, "lesson": lesson})
-	if имя:
-		визит = frappe.get_doc("Agent Author Visit", имя)
-		if сейчас - get_datetime(визит.last_at) > СЕАНС:
-			визит.baseline, визит.baseline_at = визит.last, визит.last_at
-		визит.last, визит.last_at = снимок, сейчас
-		визит.save(ignore_permissions=True)
-	else:
-		frappe.get_doc(
-			{
-				"doctype": "Agent Author Visit",
-				"author": frappe.session.user,
-				"course": course,
-				"lesson": lesson,
-				"last": снимок,
-				"last_at": сейчас,
-			}
-		).insert(ignore_permissions=True)
-	return {"lesson": lesson, "seen_at": сейчас.isoformat()}
-
-
-def _изменения_урока(пользователь: str, course: str, lesson: str) -> dict | None:
-	"""Что изменилось в уроке с прошлого визита автора: разница по местам и
-	сводка по разделам. Первый визит — без отметок."""
-	визит = frappe.db.get_value(
-		"Agent Author Visit",
-		{"author": пользователь, "lesson": lesson},
-		["last", "last_at", "baseline", "baseline_at"],
-		as_dict=True,
-	)
-	if not визит or not визит.last_at:
-		return None
-	if now_datetime() - get_datetime(визит.last_at) > СЕАНС:
-		база, когда = визит.last, визит.last_at
-	else:
-		база, когда = визит.baseline, визит.baseline_at
-	if not база:
-		return None
-	стало = snapshots.снимок(course, lesson, "lesson")
-	итог = diffs.сравнить(snapshots.из_json(база), стало)
-	if итог["state"] != "changed":
-		return None
-	прежние = snapshots.из_json(база)["places"]
-	места = {
-		м["target"]: {
-			**м,
-			"label": _подпись_места(м["target"], стало["places"].get(м["target"]) or прежние.get(м["target"])),
-			# Места больше нет на странице — его разница показывается в сводке.
-			"gone": м["target"] not in стало["places"],
-		}
-		for м in итог["places"]
-	}
-	return {"since": когда, "places": места, "summary": _сводка_изменений(места)}
-
-
-def _сводка_изменений(места: dict) -> list[dict]:
-	"""«материал, директива — 2 поля, квиз — 1 вопрос» — со ссылками на разделы."""
-	сводка = []
-	for вид, раздел, подпись, формы in (
-		("material", "section-material", "материал", None),
-		("directive", "section-directive", "директива", ("поле", "поля", "полей")),
-		("question", "section-quiz", "квиз", ("вопрос", "вопроса", "вопросов")),
-		("block", "section-blocks", "блоки документа", ("блок", "блока", "блоков")),
-	):
-		сколько = sum(адрес.partition(".")[0] == вид for адрес in места)
-		if сколько:
-			текст = подпись if not формы else f"{подпись} — {сколько} {_множ(сколько, формы)}"
-			сводка.append({"anchor": раздел, "text": текст})
-	return сводка
-
-
-def _множ(n: int, формы: tuple[str, str, str]) -> str:
-	if n % 10 == 1 and n % 100 != 11:
-		return формы[0]
-	if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-		return формы[1]
-	return формы[2]
-
-
-def _изменены_после_визита(пользователь: str, course: str) -> set[str]:
-	"""Уроки, в которых что-то поменялось после последнего визита автора.
-	Сравниваются снимки, а не время правок: отметка в таблице совпадает с тем,
-	что покажет сам урок. Уроки, которые автор не открывал, не отмечаются —
-	иначе новый курс весь стал бы «изменён»."""
-	return {
-		визит.lesson
-		for визит in frappe.get_all(
-			"Agent Author Visit", filters={"author": пользователь, "course": course}, fields=["lesson", "last"]
-		)
-		if snapshots.снимок(course, визит.lesson, "lesson") != snapshots.из_json(визит.last)
-	}
-
-
-def _расхождения_урока(сверка: dict, урок: str) -> list[dict]:
-	"""Расхождения карты, которые касаются урока: про сам урок, про блок,
-	который он собирает по плану или на деле, про узел карты с этим уроком.
-	Блок, собираемый не тем уроком, касается обоих."""
-	if not сверка["map"]:
-		return []
-	пары = сверка["matches"]
-	урок_узла = {у["id"]: пары.get(у["lesson"]) for у in сверка["map"]["nodes"] if у["lesson"]}
-	на_деле = {(б["artifact"], б["key"]): б["lesson"] for б in сверка["platform"]["blocks"]}
-	по_плану = {(б["artifact"], б["key"]): пары.get(б["lesson"]) for б in сверка["map"]["blocks"] if б["lesson"]}
-
-	def касается(р: dict) -> bool:
-		if р.get("lesson") == урок:
-			return True
-		if р["group"] == "blocks":
-			блок = (р["artifact"], р["key"])
-			return урок in (р.get("expected"), р.get("actual"), на_деле.get(блок), по_плану.get(блок))
-		if р["group"] == "integrity":
-			return урок_узла.get(р.get("node")) == урок
-		return False
-
-	return [р for р in сверка["discrepancies"] if касается(р)]
-
-
-def _замечания(course: str) -> list[dict]:
-	"""Замечания курса — ровно то, что получает агент в `list_notes`, плюс
-	ссылка на место: по ней из очереди открывается урок на нужном разделе.
-
-	У сделанного — `changes`: разница места со снимком, который замечание
-	запомнило, когда его ставили или возвращали. По ней «сделано» проверяют,
-	не перечитывая раздел (lms-high-time/learning-services#271).
-	"""
-	замечания = authoring.list_notes(course=course)["data"]["notes"]
-	снимки = dict(
-		frappe.get_all(
-			"Agent Author Note", filters={"course": course, "status": "done"}, fields=["name", "baseline"], as_list=True
-		)
-	)
-	for з in замечания:
-		if з["status"] == "done" and snapshots.бывает_снимок(з["target"]):
-			з["changes"] = _правки(course, з, snapshots.из_json(снимки.get(з["id"])))
-		з["anchor"] = якорь(з["target"])
-		if з["target"].startswith("map."):
-			з["url"] = f"{адрес(course)}&view={КАРТА}&node={quote(з['target'].partition('.')[2])}"
-		elif з["lesson"] and not з["missing"]:
-			з["url"] = f"{адрес(course, з['lesson'])}#{з['anchor']}"
-		else:
-			з["url"] = f"{адрес(course)}#{з['anchor']}"
-	return замечания
-
-
-def _правки(course: str, замечание: dict, было: dict | None) -> dict:
-	стало = None if замечание["missing"] else snapshots.снимок(course, замечание["lesson"], замечание["target"])
-	итог = diffs.сравнить(было, стало)
-	for место in итог.get("places", []):
-		снимок_места = ((стало or {}).get("places") or {}).get(место["target"]) or (
-			((было or {}).get("places") or {}).get(место["target"])
-		)
-		место["label"] = _подпись_места(место["target"], снимок_места)
-	return итог
-
-
-def _подпись_места(target: str, снимок_места: dict | None) -> str:
-	"""Место урока словами — для разницы замечания ко всему уроку."""
-	вид, _, ключ = target.partition(".")
-	первая = ((снимок_места or {}).get("text") or "").strip().split("\n")[0]
-	if вид == "material":
-		return "Материал"
-	if вид == "directive":
-		return "Директива · " + ПОДПИСИ_ПОЛЕЙ.get(ключ, ключ)
-	if вид == "question":
-		return f"Вопрос «{первая[:60]}{'…' if len(первая) > 60 else ''}»"
-	if вид == "block":
-		return f"Блок «{первая}»"
-	return target
-
-
-def якорь(target: str) -> str:
-	"""Якорь места на странице: `directive.teaching_directive` →
-	`note-directive-teaching_directive`."""
-	return "note-" + target.replace(".", "-").replace("/", "-")
-
-
-def _по_местам(замечания, ключ) -> dict[str, list[dict]]:
-	собранное: dict[str, list[dict]] = {}
-	for з in замечания:
-		собранное.setdefault(ключ(з), []).append(з)
-	return собранное
-
-
-def _замечания_курса(курс: dict, замечания: list[dict]) -> None:
-	"""Счётчики для вкладки и таблицы, замечания мест курса вне уроков."""
-	курс["notes_attention"] = sum(з["waiting_on"] == "author" for з in замечания)
-	курс["notes_revision"] = authoring.ревизия_замечаний(курс["id"])
-	открытые = [з for з in замечания if з["status"] != "accepted"]
-	блоки = _блоки_уроков(курс)
-	for глава in курс["chapters"]:
-		for урок in глава["lessons"]:
-			урок["open_notes"] = sum(_на_уроке(з, урок["id"], блоки.get(урок["id"], set())) for з in открытые)
-	курс["notes"] = _по_местам(filter(_на_курсе, замечания), lambda з: з["target"])
-
-
-def _на_курсе(замечание: dict) -> bool:
-	"""Место замечания — на экране курса: курс, сквозная директива, блок.
-
-	Блок стоит у своего блока, даже если агент указал при нём урок: у блока
-	одно место, и на странице урока его рисует тот же макрос, что и в сборке.
-	"""
-	вид = замечание["target"].partition(".")[0]
-	return вид == "block" or (not замечание["lesson"] and вид != "map")
-
-
-def _блоки_уроков(курс: dict) -> dict[str, set[str]]:
-	"""Адреса блоков документа, которые собирает урок: `block.<документ>/<ключ>`."""
-	блоки: dict[str, set[str]] = {}
-	for документ in курс["artifacts"]:
-		for блок in документ["blocks"]:
-			if блок["lesson"]:
-				блоки.setdefault(блок["lesson"], set()).add(f"block.{документ['artifact']}/{блок['key']}")
-	return блоки
-
-
-def _на_уроке(замечание: dict, урок: str, блоки: set[str]) -> bool:
-	"""Замечание относится к странице урока: к его разделу или к блоку,
-	который урок собирает."""
-	вид = замечание["target"].partition(".")[0]
-	return замечание["target"] in блоки or (замечание["lesson"] == урок and вид in notes.С_УРОКОМ)
-
-
-def _замечания_урока(урок: dict, замечания: list[dict]) -> None:
-	"""Замечания урока по местам и указатель: всё, что относится к уроку,
-	сначала то, что ждёт человека.
-
-	`here` — место замечания есть на странице. Нет его, когда агент убрал
-	вопрос или поле директивы: такое замечание указатель ведёт в очередь.
-	"""
-	места = {"lesson", "material"}
-	if урок["directive"]:
-		места |= {f"directive.{поле['name']}" for поле in урок["directive"]["fields"]}
-	if урок["quiz"]:
-		места |= {f"question.{вопрос['id']}" for вопрос in урок["quiz"]["questions"]}
-	блоки = {f"block.{блок['artifact']}/{блок['key']}" for блок in урок["blocks"]}
-	места |= блоки
-
-	урок["notes"] = _по_местам((з for з in замечания if з["lesson"] == урок["id"]), lambda з: з["target"])
-	# Подпись места — без названия урока: на его странице оно в каждой
-	# строке лишнее.
-	название = f"Урок {урок['number']} «{урок['title']}»"
-
-	def место(подпись: str) -> str:
-		if подпись == название:
-			return "Урок целиком"
-		if подпись.startswith(название + " · "):
-			остаток = подпись[len(название) + 3 :]
-			return остаток[:1].upper() + остаток[1:]
-		return подпись
-
-	указатель = [
-		dict(з, here=з["target"] in места, place=место(з["label"]))
-		for з in замечания
-		if _на_уроке(з, урок["id"], блоки)
-	]
-	указатель.sort(key=lambda з: ГРУППЫ_ОЧЕРЕДИ.index(notes.группа(з["status"], з["waiting_on"])))
-	урок["notes_index"] = указатель
-	урок["open_notes"] = sum(з["status"] != "accepted" for з in указатель)
-
-
-def _очередь(замечания: list[dict]) -> dict[str, list[dict]]:
-	"""Очередь по тому, что ждёт человека: проверить сделанное, ответить
-	агенту, ждать агента, принятые."""
-	очередь: dict[str, list[dict]] = {группа: [] for группа in ГРУППЫ_ОЧЕРЕДИ}
-	for з in замечания:
-		очередь[notes.группа(з["status"], з["waiting_on"])].append(з)
-	return очередь
-
-
-def _сверка(course: str) -> dict:
-	"""Сверка с картой — ровно то, что отдаёт агенту `course_map_check`, плюс
-	ссылки на уроки кабинета: из карточки узла урок открывается целиком."""
-	сверка = authoring.course_map_check(course=course)["data"]
-	for урок in сверка["platform"]["lessons"]:
-		урок["url"] = адрес(course, урок["id"])
-	return сверка
+# --- курс и релиз ---
 
 
 def адрес(course: str, lesson: str | None = None) -> str:
+	"""Адрес экрана курса; с `lesson` — урока релиза по ключу."""
 	путь = f"{СТРАНИЦА}?course={quote(course)}"
-	return f"{путь}&lesson={quote(lesson)}" if lesson else путь
+	return f"{путь}&lesson={quote(lesson, safe='')}" if lesson else путь
 
 
-def _курс(курс: dict) -> dict:
-	"""Черновик, разложенный для отрисовки: номера, цвета глав, блоки уроков."""
-	блоки_урока: dict[str, list[str]] = {}
-	for документ in курс["artifacts"]:
-		for блок in документ["blocks"]:
-			if блок["lesson"]:
-				блоки_урока.setdefault(блок["lesson"], []).append(блок["key"])
+def якорь(target: str) -> str:
+	"""Якорь места заметки на странице: `n-` и начало sha1 адреса места.
 
+	`Why:` ключи релиза — произвольные строки. Якорь из них самих понёс бы в
+	`id` и во фрагмент ссылки любые символы, а замена точек и косых сводила бы
+	разные места в один `id` (`objective.a.b` и `objective.a-b`). Хеш
+	безопасен по символам и различает места.
+	"""
+	return "n-" + hashlib.sha1(target.encode()).hexdigest()[:16]
+
+
+def _статус(опубликован: bool, анонс: bool) -> str:
+	return "анонс" if анонс else ("опубликован" if опубликован else "черновик")
+
+
+def _карточка(course: str, карточка) -> dict:
+	"""Карточка курса: название, состояние, отметки для опроса; у курса без
+	релиза — цели анонса."""
+	анонс = bool(карточка.published and карточка.upcoming)
+	отметки = authoring.course_revision(course=course)["data"]
+	return {
+		"id": course,
+		"title": карточка.title,
+		"summary": карточка.short_introduction,
+		"published": bool(карточка.published),
+		"upcoming": анонс,
+		"status": _статус(bool(карточка.published), анонс),
+		"url": адрес(course),
+		"revision": отметки["revision"],
+		"notes_revision": отметки["notes_revision"],
+		"announce_objectives": None
+		if карточка.active_release
+		else announcements.строки(карточка.get(announcements.ПОЛЕ_ЦЕЛЕЙ)),
+		"notes_attention": 0,
+		"testers_count": 0,
+	}
+
+
+def _релиз(course: str, данные: dict) -> dict:
+	"""Релиз из `course_release`, разложенный для отрисовки: номера и цвета
+	глав, уроки внутри глав, место заметки и его подпись у каждой части."""
+	уроки = {у["key"]: у for у in данные["lessons"]}
+	документ = данные["document"]
+	разделы = {р["key"]: р for р in (документ or {}).get("sections", [])}
 	номер = 0
-	названия = {}
-	for индекс, глава in enumerate(курс["chapters"]):
+	for индекс, глава in enumerate(данные["chapters"]):
+		глава["number"] = индекс + 1
 		глава["color"] = индекс % ЦВЕТОВ_ГЛАВ + 1
+		_место(глава, f"chapter.{глава['key']}", f"Глава {глава['number']} «{глава['title']}»")
+		глава["lessons"] = [уроки[ключ] for ключ in глава["lessons"]]
 		for урок in глава["lessons"]:
 			номер += 1
-			урок["number"] = номер
-			урок["url"] = адрес(курс["id"], урок["id"])
-			урок["blocks"] = блоки_урока.get(урок["id"], [])
-			урок["chapter_title"] = глава["title"]
-			названия[урок["id"]] = урок["title"]
-
-	уроки = [урок for глава in курс["chapters"] for урок in глава["lessons"]]
-	курс["counts"] = {
-		"lessons": len(уроки),
-		"with_body": sum(у["has_body"] for у in уроки),
-		"with_directive": sum(у["has_directive"] for у in уроки),
-		"with_quiz": sum(у["quiz"] is not None for у in уроки),
-	}
-	for вид in ("blocking", "warnings"):
-		for пункт in курс["readiness"][вид]:
-			if пункт.get("lesson"):
-				пункт["lesson_title"] = названия.get(пункт["lesson"])
-				пункт["url"] = адрес(курс["id"], пункт["lesson"])
-	for документ in курс["artifacts"]:
-		for блок in документ["blocks"]:
-			блок["artifact"] = документ["artifact"]
-			блок["lesson_title"] = названия.get(блок["lesson"]) if блок["lesson"] else None
-			блок["lesson_url"] = адрес(курс["id"], блок["lesson"]) if блок["lesson"] else None
-	for документ in курс["artifacts"]:
-		документ["binding"] = _привязка(документ)
-	курс["directive_fields"] = _поля(курс["directive"], ПОЛЯ_КУРСА)
-	курс["url"] = адрес(курс["id"])
-	return курс
-
-
-def _привязка(документ: dict) -> dict | None:
-	"""Шаблон документа, его версия у курса и правки курса словами; схема целиком — `None`.
-
-	`Why:` у документа куратор видел только «ключ · v4»: ни шаблона, ни того,
-	что вышла его новая версия, ни того, чем курс от шаблона отличается
-	(learning-services#384). Шаблон берётся тем же методом, что у агента.
-	Описание — закреплённой версии (learning-services#387): куратор читает то
-	же, по чему агент шаблон выбрал.
-	"""
-	if not документ["template"]:
-		return None
-	шаблон = authoring.artifact_template(template=документ["template"], version=документ["template_version"])
-	шаблон = шаблон["data"] if шаблон["ok"] else None
-	последняя = документ["template_latest"]
+			_урок(course, урок, номер, глава, разделы)
+	for раздел in разделы.values():
+		_место(раздел, f"section.{раздел['key']}", f"Документ · раздел «{раздел['title']}»")
+		раздел["lessons"] = [
+			{"number": у["number"], "title": у["title"], "url": у["url"]}
+			for у in данные["lessons"]
+			if раздел["key"] in у["sections"]
+		]
+	карточка = данные["course"]
 	return {
-		"template": документ["template"],
-		"version": документ["template_version"],
-		"description": шаблон["description"] if шаблон else None,
-		"latest": последняя if последняя and последняя > документ["template_version"] else None,
-		"extends": шаблон["extends"] if шаблон else None,
-		"edits": overlay.описать_правки(шаблон, документ["overlay"]) if шаблон else [],
+		**карточка,
+		"published_by_name": _имя(карточка["published_by"]),
+		"chapters": данные["chapters"],
+		"lessons": данные["lessons"],
+		"document": документ,
+		"notes": {},
 	}
 
 
-def _урок(курс: dict, lesson: str) -> dict | None:
-	уроки = [урок for глава in курс["chapters"] for урок in глава["lessons"]]
-	место = next((индекс for индекс, урок in enumerate(уроки) if урок["id"] == lesson), None)
+def _урок(course: str, урок: dict, номер: int, глава: dict, разделы: dict) -> None:
+	"""Урок релиза для отрисовки: номер, адрес, места заметок целей, пунктов и вопросов."""
+	подпись = f"Урок {номер} «{урок['title']}»"
+	урок.update(
+		number=номер, url=адрес(course, урок["key"]), chapter_title=глава["title"], color=глава["color"]
+	)
+	_место(урок, f"lesson.{урок['key']}", подпись)
+	цели = {}
+	for цель in урок["objectives"]:
+		цели[цель["key"]] = цель["text"]
+		_место(цель, f"objective.{цель['key']}", f"{подпись} · цель «{коротко(цель['text'])}»")
+		for пункт in цель["goals"]:
+			_место(пункт, f"goal.{урок['key']}/{пункт['key']}", f"{подпись} · пункт «{пункт['title']}»")
+	for вопрос in урок["questions"]:
+		_место(вопрос, f"question.{вопрос['key']}", f"{подпись} · вопрос «{коротко(вопрос['text'])}»")
+		вопрос["objective_text"] = цели.get(вопрос["objective"])
+		вопрос["answer"] = next(
+			(вариант["text"] for вариант in вопрос["options"] if вариант["key"] == вопрос["correct"]), None
+		)
+	урок["section_titles"] = [
+		разделы[ключ]["title"] if ключ in разделы else ключ for ключ in урок["sections"]
+	]
+	if урок["homework"]:
+		урок["homework"]["answer_mode_text"] = РЕЖИМЫ_ОТВЕТА.get(
+			урок["homework"]["answer_mode"], урок["homework"]["answer_mode"]
+		)
+	урок["open_notes"] = 0
+
+
+def _место(часть: dict, target: str, подпись: str) -> None:
+	часть.update(target=target, label=подпись, anchor=якорь(target))
+
+
+def _урок_целиком(course: str, ключ: str, релиз: dict, заметки: list[dict]) -> dict | None:
+	"""Урок релиза с пакетом агента и соседями; ключа нет в релизе — `None`.
+
+	Пакет агента — только здесь: `course_release` отдаёт его лишь по уроку.
+	"""
+	уроки = релиз["lessons"]
+	место = next((индекс for индекс, у in enumerate(уроки) if у["key"] == ключ), None)
 	if место is None:
 		return None
-	сводка = уроки[место]
-	полный = authoring.get_lesson(lesson=lesson)["data"]
-	сегменты = normalizer.нормализовать_урок(lesson).segments
+	урок = уроки[место]
+	агент = authoring.course_release(course=course, lesson=ключ)["data"]["agent"]
+	пункты = {п["key"]: п["title"] for ц in урок["objectives"] for п in ц["goals"]}
+	разделы = {р["key"]: р["title"] for р in (релиз["document"] or {}).get("sections", [])}
+	рамка = {часть: значение for часть, значение in агент.items() if часть != "lesson"}
 	return {
-		"id": lesson,
-		"title": полный["title"],
-		"number": сводка["number"],
-		"chapter_title": сводка["chapter_title"],
-		"facts": сводка,
-		"segments_html": [sanitize_html(md_to_html(сегмент)) for сегмент in сегменты],
-		"directive": _директива(полный["directive"]),
-		"quiz": _квиз(полный["quiz"]),
-		"blocks": [
-			блок
-			for документ in курс["artifacts"]
-			for блок in документ["blocks"]
-			if блок["lesson"] == lesson
-		],
+		**урок,
+		"agent": _части(агент["lesson"], урок, пункты, разделы),
+		"agent_target": f"agent.lesson.{ключ}",
+		"agent_label": f"{урок['label']} · пакет агента",
+		"agent_anchor": якорь(f"agent.lesson.{ключ}"),
+		"frame": _части(рамка, None, {}, {}),
+		"notes_index": _указатель(заметки, ключ),
 		"prev": _сосед(уроки, место - 1),
 		"next": _сосед(уроки, место + 1),
 	}
 
 
-def _директива(директива: dict | None) -> dict | None:
-	if not директива:
-		return None
-	return {
-		"version": директива["version"],
-		"created_at": директива["created_at"],
-		"objectives": directives.строки(директива.get("objectives")),
-		"fields": _поля(директива, ПОЛЯ_УРОКА),
-	}
+def _части(пакет: dict, урок: dict | None, пункты: dict[str, str], разделы: dict[str, str]) -> list[dict]:
+	"""Части пакета агента для отрисовки — как есть, по порядку пакета.
 
-
-def _поля(директива: dict | None, поля: tuple) -> list[dict]:
-	"""Поля директивы для отрисовки: текст — разметкой, список — пунктами."""
-	if not директива:
-		return []
+	Форму пакета задаёт компилятор курса, и страница её не проверяет: строка
+	— текстом, словарь — записями «ключ — значение», список — записью на
+	элемент, прочее — JSON. У пунктов (`items`) — место заметки
+	`agent.item.<урок>/<пункт>` и название пункта цели, у разделов —
+	название раздела документа. `урок` — `None` у рамки курса: мест пунктов
+	у неё нет.
+	"""
 	собранное = []
-	for имя, списком in поля:
-		значение = директива.get(имя)
-		if not значение:
-			continue
-		собранное.append(
-			{
-				"name": имя,
-				"items": directives.строки(значение) if списком else None,
-				"html": None if списком else sanitize_html(md_to_html(значение)),
-			}
-		)
+	for имя, значение in пакет.items():
+		часть = {"name": имя, "title": ЧАСТИ_ПАКЕТА.get(имя, имя), "text": None, "entries": None}
+		if isinstance(значение, str):
+			часть["text"] = значение
+		elif isinstance(значение, dict):
+			названия = пункты if имя == "items" else разделы if имя == "sections" else {}
+			часть["entries"] = [
+				_запись(ключ, з, названия.get(ключ), урок if имя == "items" else None)
+				for ключ, з in значение.items()
+			]
+		elif isinstance(значение, list):
+			часть["entries"] = [_запись(None, з, None, None) for з in значение]
+		else:
+			часть["text"] = _json(значение)
+		собранное.append(часть)
 	return собранное
 
 
-def _квиз(квиз: dict | None) -> dict | None:
-	"""Квиз с эталонами. Вопрос без текста или без верного варианта помечен —
-	это те же беды, что блокируют публикацию."""
-	if not квиз:
-		return None
-	for вопрос in квиз["questions"]:
-		без_эталона = not any(вариант["correct"] for вариант in вопрос["options"]) and not вопрос["answers"]
-		вопрос["broken"] = not (вопрос["text"] or "").strip() or без_эталона
-	return квиз
+def _запись(ключ: str | None, значение, название: str | None, урок: dict | None) -> dict:
+	"""Запись части пакета; `урок` — у пункта пакета: место его заметки."""
+	запись = {
+		"key": ключ,
+		"title": название,
+		"text": значение if isinstance(значение, str) else _json(значение),
+		"target": None,
+	}
+	if урок is not None:
+		_место(
+			запись,
+			f"agent.item.{урок['key']}/{ключ}",
+			f"{урок['label']} · пакет агента · пункт «{название or ключ}»",
+		)
+	return запись
+
+
+def _json(значение) -> str:
+	return json.dumps(значение, ensure_ascii=False, indent=2)
 
 
 def _сосед(уроки: list[dict], индекс: int) -> dict | None:
 	if 0 <= индекс < len(уроки):
 		урок = уроки[индекс]
-		return {"id": урок["id"], "title": урок["title"], "number": урок["number"], "url": урок["url"]}
+		return {"key": урок["key"], "title": урок["title"], "number": урок["number"], "url": урок["url"]}
 	return None
+
+
+def _история(релизы: list[dict]) -> list[dict]:
+	"""История релизов из `course_releases` с именами публиковавших."""
+	for релиз in релизы:
+		релиз["published_by_name"] = _имя(релиз["published_by"])
+	return релизы
+
+
+def _имя(пользователь: str | None) -> str | None:
+	return frappe.utils.get_fullname(пользователь) if пользователь else None
+
+
+# --- заметки ---
+
+
+def _вид(target: str) -> str | None:
+	"""Вид места заметки; адрес не разбирается — `None`."""
+	try:
+		return notes.разобрать_адрес(target)["kind"]
+	except Отказ:
+		return None
+
+
+def _заметки(course: str) -> list[dict]:
+	"""Заметки курса — ровно то, что получает агент в `list_notes`, плюс
+	ссылка на место: экран курса, страница урока или карточка в очереди."""
+	заметки = authoring.list_notes(course=course)["data"]["notes"]
+	for з in заметки:
+		з["anchor"] = якорь(з["target"])
+		вид = None if з["missing"] else _вид(з["target"])
+		if вид in МЕСТА_КУРСА:
+			з["url"] = f"{адрес(course)}#{з['anchor']}"
+		elif вид in МЕСТА_УРОКА and з["lesson_key"]:
+			з["url"] = f"{адрес(course, з['lesson_key'])}#{з['anchor']}"
+		else:
+			# Места нет в релизе, или его нет ни на одной странице кабинета:
+			# рамка пакета и узел карты.
+			з["url"] = f"{адрес(course)}&view={ЗАМЕТКИ}#note-card-{з['id']}"
+	return заметки
+
+
+def _заметки_релиза(релиз: dict, заметки: list[dict]) -> None:
+	"""Заметки по местам и открытые у каждого урока."""
+	по_местам: dict[str, list[dict]] = {}
+	for з in заметки:
+		if not з["missing"]:
+			по_местам.setdefault(з["target"], []).append(з)
+	релиз["notes"] = по_местам
+	открытые = Counter(з["lesson_key"] for з in заметки if з["status"] != "accepted" and з["lesson_key"])
+	for урок in релиз["lessons"]:
+		урок["open_notes"] = открытые[урок["key"]]
+
+
+def _указатель(заметки: list[dict], ключ: str) -> list[dict]:
+	"""Заметки мест урока, сначала то, что ждёт человека."""
+	указатель = [з for з in заметки if з["lesson_key"] == ключ]
+	указатель.sort(key=lambda з: ГРУППЫ_ОЧЕРЕДИ.index(notes.группа(з["status"], з["waiting_on"])))
+	return указатель
+
+
+def _очередь(заметки: list[dict]) -> dict[str, list[dict]]:
+	"""Очередь по тому, что ждёт человека: проверить сделанное, ответить
+	агенту, ждать агента, принятые."""
+	очередь: dict[str, list[dict]] = {группа: [] for группа in ГРУППЫ_ОЧЕРЕДИ}
+	for з in заметки:
+		очередь[notes.группа(з["status"], з["waiting_on"])].append(з)
+	return очередь
 
 
 def get_context(context):
@@ -675,20 +479,17 @@ def get_context(context):
 			frappe.form_dict.get("view"),
 		)
 	)
+	подписи = {ЗАМЕТКИ: "заметки", ИСТОРИЯ: "история релизов", ТЕСТЕРЫ: "тестеры"}
 	if context.lesson:
 		context.title = f"{context.lesson['title']} — кабинет автора"
-	elif context.course and context.view == КАРТА:
-		context.title = f"{context.course['title']} — карта — кабинет автора"
-	elif context.course and context.view == ЗАМЕЧАНИЯ:
-		context.title = f"{context.course['title']} — замечания — кабинет автора"
-	elif context.course and context.view == ТЕСТЕРЫ:
-		context.title = f"{context.course['title']} — тестеры — кабинет автора"
+	elif context.course and context.view in подписи:
+		context.title = f"{context.course['title']} — {подписи[context.view]} — кабинет автора"
 	elif context.course:
 		context.title = f"{context.course['title']} — кабинет автора"
 	else:
 		context.title = "Кабинет автора"
-	if context.course:
-		# Замечания пишутся с этой страницы whitelisted-методами, а POST без
-		# токена Frappe отклоняет.
+	if context.release:
+		# Заметки и тестеры пишутся с этой страницы whitelisted-методами, а
+		# POST без токена Frappe отклоняет.
 		context.csrf_token = frappe.sessions.get_csrf_token()
 	return context

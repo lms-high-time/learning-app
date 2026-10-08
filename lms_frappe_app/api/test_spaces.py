@@ -19,8 +19,6 @@ from lms_frappe_app.patches.v0_1 import document_spaces
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
-	создать_вопрос,
-	создать_квиз,
 	создать_курс,
 	создать_менеджера,
 	создать_организацию,
@@ -313,7 +311,6 @@ class IntegrationTestSessionAccess(IntegrationTestCase):
 		self.руководитель = создать_менеджера(f"ses-m-{суффикс}@example.com", self.икс)
 		урок = создать_урок(f"Урок {суффикс}")
 		зачислить(self.сотрудник, урок)
-		квиз = создать_квиз(урок, [создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])])
 
 		self.занятия, self.попытки, self.события = {}, {}, {}
 		for пространство, организация in (("икс", self.икс), ("игрек", self.игрек), ("личное", None)):
@@ -333,7 +330,6 @@ class IntegrationTestSessionAccess(IntegrationTestCase):
 						"session": занятие.name,
 						"student": self.сотрудник,
 						"lesson": урок,
-						"quiz": квиз,
 						"attempt_number": 1,
 					}
 				)

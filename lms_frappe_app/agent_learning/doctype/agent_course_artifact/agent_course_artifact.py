@@ -2,8 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
-
-from lms_frappe_app.agent_learning.directives import ВерсионированнаяДиректива
+from frappe.model.document import Document
 
 РАСКЛАДКИ = ("sections", "canvas")
 
@@ -13,22 +12,29 @@ def нормализовать_ключ(значение: str | None) -> str:
 	return (значение or "").strip().lower()
 
 
-class AgentCourseArtifact(ВерсионированнаяДиректива):
+class AgentCourseArtifact(Document):
 	"""Схема артефакта: из каких блоков он состоит и как рисуется.
 
-	Версионируется как директива: правка схемы не должна менять смысл того,
-	что ученик уже заполнил. Содержимое хранится по ключу блока, поэтому
+	Схема версионируется: правка схемы не должна менять смысл того, что
+	ученик уже заполнил. Содержимое хранится по ключу блока, поэтому
 	добавленный блок появится пустым, а убранный — исчезнет со страницы, не
-	стирая написанного.
+	стирая написанного. Версии считаются по паре «курс + ключ документа»: в
+	одном курсе несколько документов, и версии у каждого свои. Действующая
+	версия у документа одна; прежние остаются в базе.
 
 	Схема адресована автору: роль `LMS Student` прав на неё не имеет, ученик
 	получает блоки вместе с содержимым через whitelisted-метод.
 	"""
 
-	ПОЛЯ_ВЛАДЕЛЬЦА = ("course", "slug")
+	def before_insert(self):
+		# Версию всегда считает система: поле read_only, и переданное значение
+		# намеренно затирается. Иначе импорт схемы с проставленной версией
+		# тихо создаст вторую «версию 1» того же документа.
+		self.version = self._следующая_версия()
 
 	def validate(self):
-		super().validate()
+		if self.version < 1:
+			frappe.throw(frappe._("Версия схемы начинается с единицы"))
 		self.slug = нормализовать_ключ(self.slug)
 		if not self.slug:
 			frappe.throw(frappe._("Ключ артефакта обязателен"))
@@ -44,3 +50,33 @@ class AgentCourseArtifact(ВерсионированнаяДиректива):
 			блок.block_key = ключ
 			# Ширина меньше единицы — блок, которого на канвасе не видно.
 			блок.span = max(1, int(блок.span or 1))
+
+	def on_update(self):
+		if self.is_active:
+			self._снять_с_действия_прочие()
+
+	@property
+	def _документ(self) -> dict:
+		"""Поля, по которым версии считаются версиями одного документа."""
+		return {"course": self.course, "slug": нормализовать_ключ(self.slug)}
+
+	def _следующая_версия(self) -> int:
+		прошлые = frappe.get_all(
+			self.doctype,
+			filters=self._документ,
+			pluck="version",
+			order_by="version desc",
+			limit=1,
+		)
+		return (прошлые[0] if прошлые else 0) + 1
+
+	def _снять_с_действия_прочие(self) -> None:
+		прочие = frappe.get_all(
+			self.doctype,
+			filters={**self._документ, "is_active": 1, "name": ("!=", self.name)},
+			pluck="name",
+		)
+		for имя in прочие:
+			# set_value, а не сохранение документа: чужие версии трогаем точечно
+			# и без повторного запуска хуков, иначе получим рекурсию.
+			frappe.db.set_value(self.doctype, имя, "is_active", 0, update_modified=False)

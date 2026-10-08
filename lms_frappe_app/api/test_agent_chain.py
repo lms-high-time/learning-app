@@ -9,7 +9,6 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
-from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
@@ -19,9 +18,7 @@ from lms_frappe_app.tests.sample_data import (
 	курс_из_релиза,
 	настроить_квиз,
 	политика_по_умолчанию,
-	создать_вопрос,
 	создать_занятие,
-	создать_квиз,
 	создать_урок,
 	создать_ученика,
 	урок_релиза,
@@ -96,9 +93,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 					ответ = self.данные(self.отметить(занятие, пункт["key"]))
 		return ответ
 
-	def курс_старой_модели(self) -> str:
+	def курс_без_релиза(self) -> str:
 		frappe.set_user("Administrator")
-		урок = создать_урок(f"Старый {frappe.generate_hash(length=6)}")
+		урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
 		зачислить(self.ученик, урок)
 		frappe.set_user(self.ученик)
 		return урок
@@ -147,7 +144,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.отказ(student.lesson_item(чужое, "term:T1"), "not_your_session")
 		неизвестный = self.отказ(student.lesson_item(занятие, "term:T9"), "goal_unknown")
 		self.assertEqual(неизвестный["goals"], ["term:T1", "l-1-D1/V1", "refute:M1"])
-		старое = создать_занятие(self.ученик, self.курс_старой_модели())
+		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 		self.отказ(student.lesson_item(старое, "term:T1"), "course_not_released")
 
 	def test_подробности_после_отзыва_доступа_отказ(self):
@@ -263,7 +260,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 	def test_отметка_отказы_до_записи(self):
 		занятие = создать_занятие(self.ученик, self.урок)
-		старое = создать_занятие(self.ученик, self.курс_старой_модели())
+		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 
 		self.отказ(self.отметить(старое, "term:T1"), "course_not_released")
 		self.отказ(self.отметить(занятие, "term:T1", evidence=""), "evidence_required")
@@ -414,19 +411,13 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 		self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
 
-	def test_курс_старой_модели_квиз_и_закрытие_отказывают(self):
-		урок = self.курс_старой_модели()
-		frappe.set_user("Administrator")
-		вопрос = создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])
-		создать_квиз(урок, [вопрос])
-		frappe.set_user(self.ученик)
+	def test_курс_без_релиза_квиз_и_закрытие_отказывают(self):
+		урок = self.курс_без_релиза()
 		занятие = создать_занятие(self.ученик, урок)
-		попытка = quiz.начать_попытку(занятие)["attempt"]
 
 		self.отказ(student.request_quiz(занятие), "course_not_released")
 		self.отказ(student.complete_lesson(занятие), "course_not_released")
-		self.отказ(student.submit_answer(попытка, вопрос, "1", "Четыре"), "course_not_released")
-		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": попытка}))
+		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": занятие}))
 
 	def test_квиз_при_гонке_за_прохождение_busy(self):
 		занятие = создать_занятие(self.ученик, self.урок)

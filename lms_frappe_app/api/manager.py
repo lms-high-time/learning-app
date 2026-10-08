@@ -327,7 +327,6 @@ def _попытки_в_пространствах(user: str, организац�
 	запрос = (
 		frappe.qb.from_(попытка)
 		.select(
-			попытка.quiz,
 			попытка.lesson,
 			попытка.attempt_number,
 			попытка.status,

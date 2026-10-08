@@ -1,10 +1,10 @@
 {#
-	Замечания автора: стили, форма и скрипт. Подключается один раз на
-	страницах курса и урока (lms-high-time/learning-services#266).
+	Заметки автора: стили, форма и скрипт. Подключается один раз на экране
+	курса и странице урока (lms-high-time/learning-services#266).
 
-	Замечание пишет человек, курс правит агент: страница только ставит
-	замечания, отвечает в нить, принимает и возвращает — теми же методами,
-	что и агент через MCP, с признаком `via=author`.
+	Заметку пишет человек, курс правит агент новым релизом: страница только
+	ставит заметки, отвечает в нить, принимает и возвращает — теми же
+	методами, что и агент через MCP, с признаком `via=author`.
 #}
 <style>
 	.author-page .note-place { margin: 6px 0 2px; }
@@ -43,20 +43,6 @@
 	.author-page .note-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
 	.author-page .note-btn:disabled { opacity: .6; cursor: default; }
 	.author-page .note-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.author-page .note-diff { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
-	.author-page .note-diff-head { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-	.author-page .note-diff-label { font-size: 13px; font-weight: 500; margin: 8px 0 2px; }
-	.author-page .note-diff-state { margin: 0; font-size: 13px; color: var(--muted); }
-	.author-page .note-diff :is(.d-same, .d-changed, .d-added, .d-removed, .d-new) {
-		margin: 4px 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere;
-	}
-	.author-page .note-diff .d-same { color: var(--muted); }
-	.author-page .note-diff del { background: var(--gap-soft); color: var(--ink); text-decoration: line-through; text-decoration-color: var(--gap); }
-	.author-page .note-diff ins {
-		background: var(--accent-soft); color: var(--ink); text-decoration: underline;
-		text-decoration-color: var(--accent); text-underline-offset: 2px;
-	}
-	.author-page .note-diff .d-gap > summary { font-size: 12px; }
 	.author-page .queue-group h2 { margin-bottom: 2px; }
 	.author-page .queue-group > p { margin: 0 0 10px; font-size: 13px; }
 	.author-page .queue-group .note-card { max-width: none; }
@@ -106,11 +92,11 @@
 	}
 </style>
 
-<button type="button" class="note-selection" id="note-from-selection" hidden>Замечание к выделенному</button>
+<button type="button" class="note-selection" id="note-from-selection" hidden>Заметка к выделенному</button>
 <div class="note-toast" id="note-toast" role="status" hidden></div>
 <dialog class="note-dialog" id="note-dialog" aria-labelledby="note-dialog-title">
 	<form>
-		<h3 id="note-dialog-title" data-title>Замечание</h3>
+		<h3 id="note-dialog-title" data-title>Заметка</h3>
 		<p data-where></p>
 		<p data-context></p>
 		<label data-quote-field>Цитата <textarea name="quote" rows="2" placeholder="Необязательно: к какому тексту"></textarea></label>
@@ -131,7 +117,7 @@
 	const form = dialog.querySelector('form');
 	const floatBtn = document.getElementById('note-from-selection');
 	const toastEl = document.getElementById('note-toast');
-	const TITLES = { add: 'Замечание', reply: 'Ответ в нить', return: 'Вернуть агенту' };
+	const TITLES = { add: 'Заметка', reply: 'Ответ в нить', return: 'Вернуть агенту' };
 	let mode = null, current = {};
 
 	async function call(method, params) {
@@ -165,22 +151,20 @@
 		dialog.showModal();
 		form.elements.text.focus();
 	}
-	// Карта и список расхождений открывают форму отсюда же.
-	window.открытьЗамечание = params => open('add', params);
 
 	dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
 	form.addEventListener('submit', async e => {
 		e.preventDefault();
 		const text = form.elements.text.value.trim();
 		const errorEl = dialog.querySelector('[data-error]');
-		if (!text) { errorEl.textContent = mode === 'return' ? 'Напишите, что не так.' : 'Напишите замечание.'; return; }
+		if (!text) { errorEl.textContent = mode === 'return' ? 'Напишите, что не так.' : 'Напишите заметку.'; return; }
 		const send = form.querySelector('[value="send"]');
 		send.disabled = true;
 		try {
 			let note = current.note;
 			if (mode === 'add') {
 				const quote = form.elements.quote.value.trim();
-				note = (await call(cfg.methods.add, { course: cfg.course, target: current.target, lesson: current.lesson || '', text, quote, via: 'author' })).id;
+				note = (await call(cfg.methods.add, { course: cfg.course, target: current.target, text, quote, via: 'author' })).id;
 			} else if (mode === 'reply') {
 				await call(cfg.methods.reply, { note, text, via: 'author' });
 			} else {
@@ -188,8 +172,8 @@
 			}
 			dialog.close();
 			const here = await refresh(note);
-			toast(mode === 'reply' ? 'Ответ отправлен.' : mode === 'return' ? 'Замечание вернулось агенту.'
-				: here ? 'Замечание записано. Агент увидит его в очереди.' : 'Замечание записано — оно в очереди на вкладке «Замечания».');
+			toast(mode === 'reply' ? 'Ответ отправлен.' : mode === 'return' ? 'Заметка вернулась агенту.'
+				: here ? 'Заметка записана. Агент увидит её в очереди.' : 'Заметка записана — она в очереди на вкладке «Заметки».');
 		} catch (err) {
 			errorEl.textContent = err.message;
 		} finally {
@@ -197,9 +181,9 @@
 		}
 	});
 
-	// После замечания, ответа или смены статуса страница не перезагружается:
+	// После заметки, ответа или смены статуса страница не перезагружается:
 	// она берёт себя заново с сервера и меняет только живые области — места
-	// замечаний, очередь, счётчики, указатель. Читатель не теряет, где
+	// заметок, очередь, счётчики, указатель. Читатель не теряет, где
 	// остановился, а карточка и счётчики — те же, что отрисовал бы сервер.
 	async function refresh(note) {
 		try {
@@ -223,7 +207,7 @@
 	document.addEventListener('click', async e => {
 		const add = e.target.closest('.note-add');
 		if (add) {
-			open('add', { target: add.dataset.noteTarget, lesson: add.dataset.noteLesson, label: add.dataset.noteLabel, quote: add.dataset.noteQuote || '' });
+			open('add', { target: add.dataset.noteTarget, label: add.dataset.noteLabel, quote: add.dataset.noteQuote || '' });
 			return;
 		}
 		const action = e.target.closest('[data-note-action]');
@@ -235,10 +219,10 @@
 			catch (err) { toast(err.message); action.disabled = false; }
 			return;
 		}
-		open(kind, { note, label: kind === 'reply' ? 'Ответ уйдёт в нить замечания' : 'Замечание вернётся агенту с вашим ответом', context: action.dataset.noteText || '' });
+		open(kind, { note, label: kind === 'reply' ? 'Ответ уйдёт в нить заметки' : 'Заметка вернётся агенту с вашим ответом', context: action.dataset.noteText || '' });
 	});
 
-	// Выделили текст в разделе — рядом кнопка «Замечание к выделенному»,
+	// Выделили текст в разделе — рядом кнопка «Заметка к выделенному»,
 	// выделение уходит цитатой, место — раздел, в котором выделяли.
 	let selectionPlace = null, selectionText = '';
 	function onSelection() {
@@ -261,7 +245,7 @@
 	floatBtn.addEventListener('mousedown', e => e.preventDefault());
 	floatBtn.addEventListener('click', () => {
 		floatBtn.hidden = true;
-		open('add', { target: selectionPlace.dataset.noteTarget, lesson: selectionPlace.dataset.noteLesson, label: selectionPlace.dataset.noteLabel, quote: selectionText });
+		open('add', { target: selectionPlace.dataset.noteTarget, label: selectionPlace.dataset.noteLabel, quote: selectionText });
 	});
 })();
 {% endraw %}

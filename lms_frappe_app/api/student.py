@@ -1404,7 +1404,7 @@ def submit_answer(
 	`next_lesson` и `empty_blocks`.
 	"""
 	попытка = frappe.db.get_value(
-		"Agent Quiz Attempt", attempt, ["student", "course", "release", "lesson", "session"], as_dict=True
+		"Agent Quiz Attempt", attempt, ["student", "course", "lesson", "session"], as_dict=True
 	)
 	if not попытка:
 		raise frappe.DoesNotExistError(f"Agent Quiz Attempt {attempt} not found")
@@ -1413,8 +1413,6 @@ def submit_answer(
 		# руководитель, а отвечать за ученика он не должен — иначе сожжёт
 		# ему попытку или провалит квиз за него.
 		raise Отказ(ЧУЖОЕ_ЗАНЯТИЕ, "Это чужая попытка", attempt=attempt)
-	if not попытка.release:
-		raise Отказ(КУРС_НЕ_В_РЕЛИЗЕ, "Попытка не по уроку из релиза", course=попытка.course, attempt=attempt)
 	try:
 		# Доступ к курсу перепроверяет `ответить` — на каждом ответе.
 		ответ = release_quiz.ответить(attempt, question, answer, student_words)

@@ -20,6 +20,7 @@
 """
 
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -32,18 +33,20 @@ from lms_frappe_app.tests.sample_data import (
 	отметить_все_пункты,
 	урок_релиза,
 	зачислить,
+	зачислить_на_курс,
 	привязать_главу,
 	привязать_урок,
 	политика_по_умолчанию,
 	создать_домашку,
 	создать_занятие,
+	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
 )
 from lms_frappe_app.agent_learning.runs import service as прохождения
-from lms_frappe_app.api import manager, review, student, team
+from lms_frappe_app.api import authoring, manager, review, student, team
 from lms_frappe_app.testing import сколько_запросов
 
 #: Сколько обращений к базе делает метод на данных этого модуля. Меняется
@@ -91,10 +94,38 @@ from lms_frappe_app.testing import сколько_запросов
 	# выборке; адресов уроков в очереди нет — порядка глав не читает.
 	"review_queue": 10,
 	# Назначения руководителя (learning-services#452), два курса с заданиями:
-	# задания с названиями уроков — одной выборкой, порядок уроков — четырьмя
-	# на все курсы, сроки назначений — одной, названия неопубликованных курсов
-	# — одной, а не запросом на назначение.
-	"allocations": 13,
+	# задания с названиями уроков — одной выборкой, порядок уроков — пятью
+	# на все курсы (какие из них по релизу — тоже выборкой, не кэшем курса),
+	# сроки назначений — одной, названия неопубликованных курсов — одной, а не
+	# запросом на назначение.
+	"allocations": 14,
+	# Просмотр релиза автором (learning-services#512): курс, запись релиза,
+	# главы, уроки, цели, пункты, вопросы, разделы документа и схема документа
+	# — по одной выборке на релиз, а не на урок.
+	"course_release": 9,
+	# Урок релиза: курс, запись релиза, урок, его цели, пункты и вопросы, срез
+	# пакета агента и рамка.
+	"course_release_lesson": 8,
+	# Заметки по ключам релиза (learning-services#512): курс, заметки, ответы,
+	# версии релизов курса, ключи уроков по истории релизов (три),
+	# действующий релиз; уроки, срезы пакета нужных уроков, главы, разделы,
+	# рамка, цели, пункты и вопросы — по выборке на релиз, а не на заметку.
+	# Узлы карты — из кэша по дайджесту релиза: дайджест — выборка на релиз.
+	"list_notes": 17,
+	# Репорты (learning-services#512): курс, репорты и ключи уроков всех
+	# релизов страницы — одной выборкой, а не на релиз и не на строку.
+	# Редакций директив у репортов курса из релиза нет — их выборки тоже.
+	"course_reports": 3,
+	# Список курсов кабинета автора (learning-services#512): `list_courses`
+	# (курсы, число уроков и какие курсы по релизу, действующие релизы),
+	# открытые заметки и ответы в их нитях, тестеры — по выборке на весь
+	# список, а не на курс; кэш документов курсов на замере холодный.
+	"author_courses": 10,
+	# Прохождения курса автору (learning-services#512): курс, инструктор ли
+	# вызвавший, прохождения страницы с именами учеников и названиями уроков
+	# из индекса их релизов — одной выборкой, цели и пункты страницы — по
+	# одной, а не на прохождение и не на релиз.
+	"goal_runs": 5,
 }
 
 
@@ -210,6 +241,125 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		frappe.set_user(self.менеджер)
 		self._ворота("student_detail", lambda: manager.student_detail(self.ученик))
 
+	def test_бюджет_course_release_не_растёт_с_курсом(self):
+		"""Релизы из трёх уроков в двух главах и из шести в трёх: бюджет один на оба."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbc-{frappe.generate_hash(length=6)}@example.com")
+		малый = frappe.db.get_value("Course Lesson", self._курс_релиза()[0], "course")
+		большой = frappe.db.get_value("Course Lesson", self._курс_релиза(глав_больше=True)[0], "course")
+		frappe.set_user(куратор)
+		for курс in (малый, большой):
+			with self.subTest(курс=курс):
+				self._ворота("course_release", lambda курс=курс: authoring.course_release(курс))
+				self._ворота(
+					"course_release_lesson", lambda курс=курс: authoring.course_release(курс, lesson="l-2")
+				)
+
+	def test_бюджет_list_notes_не_растёт_с_заметками(self):
+		"""Заметки на всех видах мест: по одной на вид — и вдвое больше, на двух уроках."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbn-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(куратор)
+		for уроков in (("l-1",), ("l-1", "l-2")):
+			релиз = пример_релиза(f"qbn-{frappe.generate_hash(length=8)}")
+			релиз["map"] = {"goals": {"G1": {"text": "Цель"}, "G2": {"text": "Вторая"}}}
+			курс = authoring.publish_release(release=релиз)["data"]["course"]
+			места = ["course", "chapter.ch-1", "section.log", "agent.frame", "map.G1", "map.G2"]
+			for урок in уроков:
+				места += [
+					f"lesson.{урок}",
+					f"objective.{урок}-D1",
+					f"goal.{урок}/term:T1",
+					f"question.S1/{урок}-D1",
+					f"agent.lesson.{урок}",
+					f"agent.item.{урок}/term:T1",
+				]
+			for место in места:
+				заметка = authoring.add_note(course=курс, target=место, text="Заметка")["data"]["id"]
+				authoring.reply_note(note=заметка, text="Ответ", via="agent")
+			with self.subTest(уроков=len(уроков)):
+				self._ворота("list_notes", lambda курс=курс: authoring.list_notes(course=курс))
+				self.assertEqual(len(authoring.list_notes(course=курс)["data"]["notes"]), len(места))
+
+	def test_бюджет_course_reports_не_растёт_с_релизами(self):
+		"""Страница репортов одного релиза и трёх: ключи уроков — одной выборкой на страницу."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbr-{frappe.generate_hash(length=6)}@example.com")
+		for релизов in (1, 3):
+			ключ = f"qbr-{frappe.generate_hash(length=8)}"
+			for номер in range(релизов):
+				релиз = пример_релиза(ключ)
+				релиз["course"]["summary"] = f"Версия {номер + 1}"
+				курс, _ = курс_из_релиза(релиз=релиз)
+				for урок in ("l-1", "l-2"):
+					self._репорт(курс, урок)
+			frappe.set_user(куратор)
+			with self.subTest(релизов=релизов):
+				self._ворота("course_reports", lambda курс=курс: authoring.course_reports(course=курс))
+				self.assertEqual(len(authoring.course_reports(course=курс)["data"]["reports"]), релизов * 2)
+			frappe.set_user("Administrator")
+
+	def test_бюджет_списка_курсов_кабинета_не_растёт_с_курсами(self):
+		"""Страница списка кабинета до и после ещё трёх курсов из релиза с
+		заметками и тестерами: бюджет один на оба. Замер — на холодном кэше
+		документов курсов: прогрев не должен прятать запрос на курс."""
+		from lms_frappe_app.www.author import сведения
+
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qba-{frappe.generate_hash(length=6)}@example.com")
+		for курсов in (1, 3):
+			for _ in range(курсов):
+				курс, _ = курс_из_релиза()
+				frappe.set_user(куратор)
+				заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Заметка")["data"]["id"]
+				authoring.reply_note(note=заметка, text="Ответ", via="agent")
+				frappe.set_user("Administrator")
+				ученик = создать_ученика(f"qba-{frappe.generate_hash(length=6)}@example.com")
+				зачислить_на_курс(ученик, курс)
+				frappe.db.set_value("LMS Enrollment", {"course": курс, "member": ученик}, "agent_tester", 1)
+			frappe.set_user(куратор)
+			with self.subTest(курсов=курсов):
+				self._ворота(
+					"author_courses",
+					lambda: сведения(куратор),
+					остудить=lambda: frappe.clear_document_cache("LMS Course"),
+				)
+				курсы = {к["id"]: к for к in сведения(куратор)["courses"]}
+				self.assertEqual((курсы[курс]["testers_count"], курсы[курс]["open_notes"]), (1, 1))
+			frappe.set_user("Administrator")
+
+	def test_бюджет_goal_runs_не_растёт_со_страницей_и_релизами(self):
+		"""Страница из одного прохождения одного релиза и из четырёх прохождений
+		двух релизов: бюджет один на обе."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbg-{frappe.generate_hash(length=6)}@example.com")
+		ключ = f"qbg-{frappe.generate_hash(length=8)}"
+		курс, _ = курс_из_релиза(куратор, релиз=пример_релиза(ключ))
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
+		frappe.set_user(куратор)
+		with self.subTest(прохождений=1, релизов=1):
+			self._ворота("goal_runs", lambda: authoring.goal_runs(course=курс, limit=1))
+
+		релиз = пример_релиза(ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, второе издание"
+		# Без фоновой сверки: прошлое прохождение остаётся на первом релизе.
+		with patch.object(frappe, "enqueue"):
+			курс_из_релиза(куратор, релиз=релиз)
+		frappe.set_user("Administrator")
+		for номер, ключ_урока in enumerate(("l-1", "l-2", "l-3")):
+			ученик = создать_ученика(f"qbg-{номер}-{frappe.generate_hash(length=6)}@example.com")
+			run = прохождения.прохождение(ученик, курс, ключ_урока)
+			прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
+		frappe.set_user(куратор)
+		страница = authoring.goal_runs(course=курс)["data"]["runs"]
+		self.assertEqual(
+			sorted(r["lesson"]["title"] for r in страница),
+			["Урок второй", "Урок первый", "Урок первый, второе издание", "Урок третий"],
+		)
+		with self.subTest(прохождений=4, релизов=2):
+			self._ворота("goal_runs", lambda: authoring.goal_runs(course=курс))
+
 	# --- механика ворот ---
 
 	def _старт_с_прогревом(self, метод: str, урок: str) -> None:
@@ -218,9 +368,13 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		frappe.db.set_value("Agent Learning Session", прогрев["data"]["session"], "status", "Abandoned")
 		self._ворота(метод, lambda: student.start_lesson(lesson=урок), прогреть=False)
 
-	def _ворота(self, метод: str, вызов, *, прогреть: bool = True) -> None:
+	def _ворота(self, метод: str, вызов, *, прогреть: bool = True, остудить=None) -> None:
+		"""`остудить` — что сбросить после прогрева: кэш, который метод не
+		должен считать прогретым."""
 		if прогреть:
 			вызов()
+		if остудить:
+			остудить()
 		запросов, запросы = сколько_запросов(вызов)
 		self.assertEqual(
 			запросов,
@@ -315,6 +469,21 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		student.update_artifact(курс, "notebook", "log", rows=[{"topic": "Первая встреча"}])
 		return урок_релиза(курс, "l-1"), урок_релиза(курс, "l-2")
+
+	def _репорт(self, курс: str, ключ: str) -> None:
+		"""Репорт по уроку действующего релиза курса — с этим релизом."""
+		урок = урок_релиза(курс, ключ)
+		frappe.get_doc(
+			{
+				"doctype": "Agent Course Report",
+				"session": создать_занятие(self.ученик, урок),
+				"course": курс,
+				"lesson": урок,
+				"release": frappe.db.get_value("LMS Course", курс, "active_release"),
+				"kind": "Stuck",
+				"text": "Встал",
+			}
+		).insert(ignore_permissions=True)
 
 	def _попытка(self) -> str:
 		"""Попытка квиза урока из релиза с четырьмя вопросами; ответ меряется посреди попытки."""

@@ -75,6 +75,18 @@
  },
  {
   "doctype": "Custom Field",
+  "name": "LMS Course-announce_objectives",
+  "dt": "LMS Course",
+  "fieldname": "announce_objectives",
+  "fieldtype": "Small Text",
+  "label": "Цели анонса",
+  "no_copy": 1,
+  "description": "Цели курса-анонса, по строке на цель. Задаёт announce_course; у курса из релиза цели — названия глав релиза.",
+  "insert_after": "course_attribution",
+  "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
   "name": "Course Chapter-chapter_description",
   "dt": "Course Chapter",
   "fieldname": "chapter_description",

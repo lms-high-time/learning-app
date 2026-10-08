@@ -37,10 +37,10 @@
 
 <p class="intro">
 	Тестеры проходят курс до публикации: в каталоге его нет, а у них он открыт. Занятие идёт с наставником, как у учеников.
-	Что покажется неверным или неудобным, тестер говорит наставнику, и замечание приходит в репорты курса.
+	Что покажется неверным или неудобным, тестер говорит наставнику, и это приходит в репорты курса.
 </p>
 {% if course.published %}
-<p class="muted">Курс уже {{ "в каталоге как анонс" if course.upcoming else "опубликован" }}. Тестеры остаются записанными, пока вы не закроете им доступ.</p>
+<p class="muted">Курс уже {{ ("в каталоге как анонс" if course.upcoming else "опубликован") | e }}. Тестеры остаются записанными, пока вы не закроете им доступ.</p>
 {% endif %}
 
 <section class="panel">
@@ -57,14 +57,14 @@
 </section>
 
 <section class="panel">
-	<h2>Тестеры <span class="muted num">{{ testers | length }}</span></h2>
+	<h2>Тестеры <span class="muted num">{{ testers | length | e }}</span></h2>
 	{% if testers %}
 	<ul class="testers-list">
 		{% for т in testers %}
 		<li>
 			<div class="who">
 				<strong>{{ т.name | e }}</strong>
-				<span>{{ т.user | e }}{% if т.since %} · с {{ frappe.utils.formatdate(т.since, "dd.MM.yyyy") }}{% endif %} · пройдено {{ т.progress }}%</span>
+				<span>{{ т.user | e }}{% if т.since %} · с {{ frappe.utils.formatdate(т.since, "dd.MM.yyyy") | e }}{% endif %} · пройдено {{ т.progress | e }}%</span>
 			</div>
 			<button type="button" class="testers-remove" data-remove="{{ т.user | e }}" data-name="{{ т.name | e }}">Закрыть доступ</button>
 		</li>

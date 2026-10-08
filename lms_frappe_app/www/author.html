@@ -1,74 +1,98 @@
 {% extends "templates/web.html" %}
-{% from "lms_frappe_app/templates/includes/author_notes_macros.html" import место, карточка, атрибуты, статус, кнопка_замечания, текст_разницы %}
-
-{% block title %}{{ title }}{% endblock %}
-
-{% macro число(n) %}{{ "{:,}".format(n or 0).replace(",", " ") }}{% endmacro %}
-
-
-{% macro якорь(target) %}{{ ("note-" ~ target) | replace(".", "-") | replace("/", "-") }}{% endmacro %}
+{% from "lms_frappe_app/templates/includes/author_notes_macros.html" import место, карточка, атрибуты, статус %}
 
 {#
-	Правки места с прошлого визита автора (lms-high-time/learning-services#271):
-	метка «изменено» и разница по нажатию — над текстом раздела.
+	Базовый шаблон Frappe выводит `{{ title | striptags }}`, а `striptags`
+	раскодирует сущности и не экранирует: название `&lt;/title&gt;&lt;img …&gt;`
+	проходит очистку Frappe (в нём нет `<` и `>`) и становится живым тегом.
 #}
-{% macro правки_места(изменения, адрес) %}
-	{% set р = изменения.places.get(адрес) if изменения else none %}
-	{% if р %}
-	<details class="place-diff"><summary><span class="changed-mark">изменено</span> с вашего прошлого визита — показать правки</summary>
-		<div class="note-diff">{{ текст_разницы(р) }}</div>
-	</details>
-	{% endif %}
+{% block title %}{{ title | e }}{% endblock %}
+
+{% macro дата(значение) %}{{ (frappe.utils.format_datetime(значение, "dd.MM.yyyy HH:mm") if значение else "—") | e }}{% endmacro %}
+
+{#
+	Урок релиза: зачин, цели с пунктами, квиз с ответами, домашка. Один и тот
+	же на экране курса (в свёрнутой строке урока) и на странице урока: у
+	каждой части — своё место заметки по ключу релиза.
+#}
+{% macro тело_урока(у, заметки) %}
+	{% if у.hook %}<p class="hook" {{ атрибуты(у.target, у.label) }}>{{ у.hook | e }}</p>{% endif %}
+	<div class="facts">
+		<span class="tile">порог квиза {{ у.pass_percentage | round | int | e }}%</span>
+		<span class="tile">{% if у.section_titles %}разделы документа: {{ у.section_titles | join(", ") | e }}{% else %}разделов документа нет{% endif %}</span>
+	</div>
+
+	<h3>Цели</h3>
+	{% for ц in у.objectives %}
+	<div class="objective" {{ атрибуты(ц.target, ц.label) }}>
+		<div class="part-head"><span>{{ ц.text | e }}</span> <code>{{ ц.key | e }}</code></div>
+		{{ место(ц.target, ц.label, заметки.get(ц.target, []), ц.anchor, "Заметка к цели") }}
+		<ul class="goals">
+			{% for п in ц.goals %}
+			<li {{ атрибуты(п.target, п.label) }}>
+				<div class="part-head"><span>{{ п.title | e }} <span class="kind{% if not п.required %} optional{% endif %}">{{ п.kind | e }}{% if not п.required %} · необязательный{% endif %}</span></span> <code>{{ п.key | e }}</code></div>
+				{{ место(п.target, п.label, заметки.get(п.target, []), п.anchor, "Заметка к пункту") }}
+			</li>
+			{% endfor %}
+		</ul>
+	</div>
+	{% else %}<p class="muted">Целей нет.</p>{% endfor %}
+
+	<h3>Квиз</h3>
+	{% for в in у.questions %}
+	<div class="question" {{ атрибуты(в.target, в.label) }}>
+		<div class="part-head"><span><span class="num muted">{{ loop.index | e }}.</span> {{ в.text | e }}</span> <code>{{ в.key | e }}</code></div>
+		{% if в.objective_text %}<p class="why">Цель: {{ в.objective_text | e }}</p>{% endif %}
+		<ol type="a">
+			{% for о in в.options %}
+			<li{% if о.key == в.correct %} class="correct"{% endif %}>{% if о.key == в.correct %}✓ {% endif %}{{ о.text | e }}</li>
+			{% endfor %}
+		</ol>
+		<p class="why">Верный ответ: {{ (в.answer or в.correct) | e }}.{% if в.explanation %} {{ в.explanation | e }}{% endif %}</p>
+		{{ место(в.target, в.label, заметки.get(в.target, []), в.anchor, "Заметка к вопросу") }}
+	</div>
+	{% else %}<p class="muted">Вопросов нет.</p>{% endfor %}
+
+	<h3>Домашка</h3>
+	{% set д = у.homework %}
+	{% if д %}
+	<div class="homework" {{ атрибуты(у.target, у.label) }}>
+		<strong>{{ д.title | e }}</strong>
+		<p class="pre">{{ д.description | e }}</p>
+		<p class="why">Ответ {{ д.answer_mode_text | e }}{% if д.due_days is not none %} · срок {{ д.due_days | e }} дн.{% else %} · без срока{% endif %}</p>
+	</div>
+	{% else %}<p class="muted">Домашки нет.</p>{% endif %}
 {% endmacro %}
 
-{% macro поля_директивы(поля, префикс=None, lesson=None, замечания={}, подпись="", изменения=none) %}
-	{% set ПОДПИСИ = field_labels %}
-	{% for п in поля %}
-	{% set target = префикс ~ "." ~ п.name if префикс else None %}
-	{% set метка = подпись ~ " · " ~ ПОДПИСИ.get(п.name, п.name) %}
-	<div class="field"{% if target %} {{ атрибуты(target, lesson, метка) }}{% endif %}>
-		<div class="field-head"><h4>{{ ПОДПИСИ.get(п.name, п.name) }} <code>{{ п.name }}</code></h4>
-			{% if target %}{{ кнопка_замечания(target, lesson, метка) }}{% endif %}</div>
-		{% if target %}{{ правки_места(изменения, target) }}{% endif %}
-		{% if п["items"] is not none %}
-		<ul>{% for пункт in п["items"] %}<li>{{ пункт | e }}</li>{% endfor %}</ul>
-		{% else %}
-		<div class="prose">{{ п.html }}</div>
+{#
+	Части пакета агента — как в релизе: строка текстом, записи «ключ —
+	значение». У пункта пакета — место заметки `agent.item`.
+#}
+{% macro части_пакета(части, заметки) %}
+	{% for ч in части %}
+	<div class="pack-part">
+		<h4>{{ ч.title | e }} <code>{{ ч.name | e }}</code></h4>
+		{% if ч.text is not none %}<div class="pre">{{ ч.text | e }}</div>{% endif %}
+		{% if ч.entries is not none %}
+		<ul class="pack-entries">
+			{% for э in ч.entries %}
+			<li{% if э.target %} {{ атрибуты(э.target, э.label) }}{% endif %}>
+				{% if э.key is not none or э.title %}<div class="part-head"><span>{{ (э.title or "") | e }}</span>{% if э.key is not none %} <code>{{ э.key | e }}</code>{% endif %}</div>{% endif %}
+				<div class="pre">{{ э.text | e }}</div>
+				{% if э.target %}{{ место(э.target, э.label, заметки.get(э.target, []), э.anchor, "Заметка к пункту пакета") }}{% endif %}
+			</li>
+			{% endfor %}
+		</ul>
 		{% endif %}
-		{% if target %}{{ место(target, lesson, метка, замечания.get(target, []), якорь(target), с_кнопкой=False) }}{% endif %}
 	</div>
 	{% endfor %}
 {% endmacro %}
 
-{#
-	Блоки документа — строкой на блок: ключ, заголовок, урок, открытые
-	замечания; подсказка агенту и замечания — по нажатию. Десять карточек во
-	всю ширину занимали экран, а сверяют блоки чаще всего по строке.
-#}
-{% macro блоки_документа(блоки, со_ссылкой, замечания={}, изменения=none) %}
-	{% for б in блоки %}
-	{% set target = "block." ~ б.artifact ~ "/" ~ б.key %}
-	{% set метка = "Документ · блок «" ~ б.title ~ "»" %}
-	{% set открытые = замечания.get(target, []) | rejectattr("status", "equalto", "accepted") | list %}
-	<details class="block-row" style="--span: {{ [б.span or 1, 4] | min }};" {{ атрибуты(target, None, метка) }}>
-		<summary>
-			<span class="mono muted">{{ б.key }}</span>
-			<span class="block-title">{{ б.title | e }}</span>
-			{% if со_ссылкой %}
-				{% if б.lesson_url %}<a class="block-lesson" href="{{ б.lesson_url }}">{{ б.lesson_title | e }}</a>
-				{% else %}<span class="block-lesson gap-text">урок не назначен</span>{% endif %}
-			{% endif %}
-			<span data-live="{{ якорь(target) }}-count">{% if открытые %}<span class="note-count" title="Открытых замечаний к блоку">✎ {{ открытые | length }}</span>{% endif %}</span>
-			{% if изменения and изменения.places.get(target) %}<span class="changed-mark">изменено</span>{% endif %}
-		</summary>
-		<div class="block-body">
-			{{ правки_места(изменения, target) }}
-			{% if б.hint %}<p class="block-hint">{{ б.hint | e }}</p>{% else %}<p class="muted">Подсказки агенту нет.</p>{% endif %}
-			{{ место(target, None, метка, замечания.get(target, []), якорь(target)) }}
-		</div>
-	</details>
-	{% endfor %}
-{% endmacro %}
+{% macro обязательность(значение) -%}
+	{%- if значение is mapping -%}обязательна, если заполнено «{{ значение.if_column | e }}»
+	{%- elif значение -%}обязательна
+	{%- else -%}необязательна{%- endif -%}
+{%- endmacro %}
 
 {% block page_content %}
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -133,25 +157,16 @@
 		--ch: var(--accent); --chs: var(--accent-soft);
 	}
 	/* Тема сайта красит заголовки и ячейки таблиц своим тёмным цветом, и в
-	   тёмной теме они выходили чёрными на тёмном — заголовки из markdown
-	   материала, таблицы в нём, группы расхождений. В кабинете цвет всего
+	   тёмной теме они выходили чёрными на тёмном. В кабинете цвет всего
 	   текста — от наших токенов; точечные правила ниже сильнее этого. */
 	.author-page :is(h1, h2, h3, h4, h5, h6, th, td, strong, b, summary, label, blockquote, dt, dd) { color: inherit; }
-	/* `prose` — ещё и класс типографики Tailwind на сайте: он красит блок
-	   серым под светлую тему, и ячейки таблиц материала тонули в тёмной. */
-	.author-page .prose { color: var(--ink); }
-	/* md_to_html вешает на таблицы классы Bootstrap `table table-bordered`,
-	   а `.table` задаёт свой серый цвет и фон. */
-	.author-page .prose table { color: inherit; --bs-table-color: inherit; --bs-table-bg: transparent; }
 	/* Тема сайта задаёт тексту вес 420, а у шрифта есть 400 и 500 — браузер
-	   берёт 500, и весь кабинет, от вопросов квиза до крошек, выходил
-	   полужирным. Вес — от страницы, заголовки задают свой. */
-	.author-page, .author-page p, .author-page li, .author-page td, .author-page .prose { font-weight: 400; }
+	   берёт 500, и весь кабинет выходил полужирным. Вес — от страницы,
+	   заголовки задают свой. */
+	.author-page, .author-page p, .author-page li, .author-page td { font-weight: 400; }
 	/* Колонка — flex, а не сетка: липкий элемент сетки не выходит за свою
 	   строку, и панель урока с плашкой «обновить» не прилипали бы. */
 	.author-page .wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-	.author-page .wrap.wide { max-width: 1320px; }
-	/* Широкая таблица структуры не должна растягивать страницу за экран телефона. */
 	.author-page .wrap > * { min-width: 0; }
 	.author-page h1 { overflow-wrap: anywhere; }
 	.author-page a { color: var(--accent); }
@@ -160,18 +175,20 @@
 	}
 	.author-page h1 { font-size: 26px; font-weight: 600; margin: 4px 0 6px; letter-spacing: -0.01em; color: var(--ink); }
 	.author-page h2 { font-size: 17px; font-weight: 600; margin: 0 0 12px; color: var(--ink); }
+	.author-page h3 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; color: var(--ink); }
 	.author-page h4 { font-size: 14px; font-weight: 600; margin: 0 0 6px; color: var(--ink); }
-	.author-page h2 .muted.num { font-size: 14px; font-weight: 400; }
-	.author-page .mono, .author-page code, .author-page .num {
+	.author-page code, .author-page .num {
 		font-family: "IBM Plex Mono", Consolas, monospace; font-variant-numeric: tabular-nums;
 	}
-	.author-page code { font-size: 12px; color: var(--muted); background: none; padding: 0; }
+	.author-page code { font-size: 12px; color: var(--muted); background: none; padding: 0; overflow-wrap: anywhere; }
 	.author-page .muted { color: var(--muted); }
 	.author-page .crumbs { font-size: 13px; color: var(--muted); }
 	.author-page .crumbs a { color: var(--muted); }
 	/* Не `.lead`: так называется класс Bootstrap сайта, и он раздувал шрифт. */
 	.author-page .intro { color: var(--muted); max-width: 68ch; margin: 0; font-size: 15px; }
 	.author-page .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+	.author-page .pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 72ch; margin: 0; }
+	.author-page .meta { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
 
 	.author-page .status { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--ch1s); color: var(--ch1); }
 	.author-page .status.live { background: var(--accent-soft); color: var(--accent); }
@@ -186,95 +203,78 @@
 	.author-page .notice button { font: inherit; background: var(--paper); color: var(--accent); border: 0; border-radius: 6px; padding: 4px 12px; cursor: pointer; }
 	.author-page .quiet { font-size: 13px; color: var(--muted); min-height: 1em; }
 
-	.author-page .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-	.author-page .chip {
-		display: inline-flex; align-items: center; gap: 8px; background: var(--paper);
-		border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px 6px 8px; font-size: 14px;
-	}
-	.author-page .chip .n {
-		min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center;
-		font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; background: var(--accent-soft); color: var(--accent);
-	}
-	.author-page .chip.short .n { background: var(--gap-soft); color: var(--gap); }
-	.author-page a.chip.link { color: var(--ink); text-decoration: none; }
-	.author-page a.chip.link:hover { border-color: var(--accent); }
-
-	.author-page .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+	.author-page .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 	.author-page .tab {
-		display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; margin-bottom: -1px;
+		flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; margin-bottom: -1px;
 		color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent;
 	}
 	.author-page .tab:hover { color: var(--ink); }
 	.author-page .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
-	.author-page .tab .n.warn { background: var(--warn-soft); color: var(--warn); }
-	/* Счётчик без тревоги: тестеры — не проблема курса (learning-services#393). */
-	.author-page .tab .n.calm { background: var(--ch1s); color: var(--ch1); }
 	.author-page .tab .n {
 		min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center;
-		font-family: "IBM Plex Mono", monospace; font-size: 12px; background: var(--gap-soft); color: var(--gap);
+		font-family: "IBM Plex Mono", monospace; font-size: 12px; background: var(--warn-soft); color: var(--warn);
 	}
+	/* Счётчик без тревоги: тестеры — не проблема курса (learning-services#393). */
+	.author-page .tab .n.calm { background: var(--ch1s); color: var(--ch1); }
 
-	.author-page .issues { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
-	.author-page .issues li { padding: 8px 12px; border-radius: 8px; border-left: 3px solid; }
-	.author-page .issues .blocking { background: var(--gap-soft); border-color: var(--gap); }
-	.author-page .issues .warning { background: var(--warn-soft); border-color: var(--warn); }
-	.author-page .issues code { margin-left: 6px; }
-
-	/* Структура: карта наполненности. Плитка урока окрашена цветом главы,
-	   пустое место — пунктиром: что недособрано, видно без чтения. */
-	.author-page .structure { width: 100%; border-collapse: separate; border-spacing: 0 4px; }
-	.author-page .structure th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 0 10px 4px; }
-	.author-page .structure .chapter td {
-		padding: 14px 10px 4px; font-weight: 600; color: var(--ch); border-bottom: 2px solid var(--ch);
-	}
-	.author-page .structure .lesson td { background: var(--paper); padding: 8px 10px; vertical-align: top; }
-	.author-page .structure .lesson td:first-child { border-radius: 8px 0 0 8px; border-left: 4px solid var(--ch); }
-	.author-page .structure .lesson td:last-child { border-radius: 0 8px 8px 0; }
-	.author-page .structure .lesson:hover td { background: var(--chs); }
-	.author-page .structure .title a { color: var(--ink); font-weight: 500; text-decoration: none; }
-	.author-page .structure .title a:hover { text-decoration: underline; }
-	.author-page .tile { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 6px; background: var(--chs); color: var(--ink); white-space: nowrap; }
-	.author-page .tile.empty { background: none; border: 1px dashed var(--gap); color: var(--gap); }
-	.author-page .tile.split { box-shadow: inset 0 -2px 0 var(--warn); }
+	.author-page details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 	.author-page .ch1 { --ch: var(--ch1); --chs: var(--ch1s); } .author-page .ch2 { --ch: var(--ch2); --chs: var(--ch2s); }
 	.author-page .ch3 { --ch: var(--ch3); --chs: var(--ch3s); } .author-page .ch4 { --ch: var(--ch4); --chs: var(--ch4s); }
 	.author-page .ch5 { --ch: var(--ch5); --chs: var(--ch5s); }
-	.author-page .scroll { overflow-x: auto; }
-	.author-page .structure .blocks-cell { font-size: 13px; }
+	.author-page .tile { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 6px; background: var(--chs); color: var(--ink); }
+	.author-page .facts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
 
-	.author-page details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
-	.author-page .field { margin-top: 14px; }
-	.author-page .field ul { margin: 0; padding-left: 20px; }
-	.author-page :is(.field-head, .question-head) { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-	.author-page .note-add.quiet {
-		flex: none; border: 0; padding: 0 2px; border-radius: 4px; font-size: 13px; color: var(--muted); background: none; white-space: nowrap;
-	}
-	.author-page .note-add.quiet:hover, .author-page .note-add.quiet:focus-visible { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-	.author-page .queue { display: flex; flex-direction: column; gap: 20px; }
-	.author-page .prose { max-width: 72ch; }
-	/* Широкая таблица материала прокручивается сама, а не распирает страницу
-	   урока на телефоне. */
-	.author-page .prose table { border-collapse: collapse; margin: 12px 0; font-size: 14px; display: block; max-width: 100%; overflow-x: auto; }
-	.author-page .prose th, .author-page .prose td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
-	.author-page .prose h2, .author-page .prose h3 { font-size: 17px; margin: 22px 0 8px; }
-
-	.author-page .blocks { display: grid; gap: 6px; }
-	.author-page .blocks.canvas { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-	.author-page .blocks.canvas .block-row { grid-column: span var(--span); }
-	.author-page .block-row { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
-	.author-page .block-row > summary {
+	/* Глава — заголовок цветом главы, уроки — свёрнутыми строками: курс
+	   целиком читается по названиям, урок раскрывается по нажатию. */
+	.author-page .chapter { display: grid; gap: 6px; }
+	.author-page .chapter-head { border-bottom: 2px solid var(--ch); padding-bottom: 4px; }
+	.author-page .chapter-head h2 { color: var(--ch); margin: 0; }
+	.author-page .chapter-head p { margin: 2px 0 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
+	.author-page .row { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
+	.author-page .row.lesson-row { border-left: 4px solid var(--ch); }
+	.author-page .row > summary {
 		display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 12px 8px 28px; cursor: pointer; font-size: 14px;
 		color: var(--ink); list-style: none; position: relative;
 	}
 	/* У flex-строки родного треугольника нет — рисуем свой. */
-	.author-page .block-row > summary::-webkit-details-marker { display: none; }
-	.author-page .block-row > summary::before { content: "▸"; position: absolute; left: 12px; color: var(--muted); }
-	.author-page .block-row[open] > summary::before { content: "▾"; }
-	.author-page .block-row > summary .block-title { font-weight: 500; }
-	.author-page .block-row > summary .block-lesson { margin-left: auto; font-size: 13px; }
-	.author-page .block-row[open] > summary { border-bottom: 1px solid var(--line); }
-	.author-page .block-body { padding: 8px 12px 10px; }
-	.author-page .block-hint { margin: 0 0 4px; font-size: 14px; max-width: 72ch; }
+	.author-page .row > summary::-webkit-details-marker { display: none; }
+	.author-page .row > summary::before { content: "▸"; position: absolute; left: 12px; color: var(--muted); }
+	.author-page .row[open] > summary::before { content: "▾"; }
+	.author-page .row[open] > summary { border-bottom: 1px solid var(--line); }
+	.author-page .row > summary .row-title { font-weight: 500; }
+	.author-page .row > summary .row-side { margin-left: auto; font-size: 13px; color: var(--muted); }
+	.author-page .row-body { padding: 8px 12px 12px; }
+	.author-page .note-count {
+		display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 12px;
+		font-family: "IBM Plex Mono", monospace; background: var(--warn-soft); color: var(--warn); text-decoration: none;
+	}
+
+	.author-page .part-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+	.author-page .hook { margin: 0 0 6px; font-style: italic; max-width: 72ch; }
+	.author-page .objective { border-left: 3px solid var(--line); padding: 4px 0 4px 12px; margin-top: 10px; }
+	.author-page .goals { list-style: none; margin: 6px 0 0; padding: 0 0 0 12px; display: grid; gap: 6px; }
+	.author-page .goals li { font-size: 14px; }
+	.author-page .kind { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent); margin-left: 4px; }
+	.author-page .kind.optional { color: var(--muted); }
+	.author-page .question { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 10px; }
+	.author-page .question ol { margin: 8px 0 0; padding-left: 22px; }
+	.author-page .question li { margin: 4px 0; }
+	.author-page .question .correct { color: var(--accent); font-weight: 500; }
+	.author-page .why { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+	.author-page .homework .pre { margin: 4px 0 0; }
+
+	.author-page .columns { border-collapse: collapse; margin: 8px 0; font-size: 14px; display: block; max-width: 100%; overflow-x: auto; }
+	.author-page .columns th, .author-page .columns td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+
+	.author-page .pack-part { margin-top: 14px; }
+	.author-page .pack-entries { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+	.author-page .pack-entries li { border-left: 3px solid var(--line); padding-left: 10px; font-size: 14px; }
+	.author-page .pack > summary { font-size: 15px; color: var(--accent); }
+
+	.author-page .history { width: 100%; border-collapse: collapse; font-size: 14px; }
+	.author-page .history th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 0 10px 6px 0; }
+	.author-page .history td { padding: 8px 10px 8px 0; border-top: 1px solid var(--line); vertical-align: top; }
+	.author-page .scroll { overflow-x: auto; }
 
 	.author-page .lesson-bar {
 		position: sticky; top: 0; z-index: 6; display: grid; gap: 8px;
@@ -282,62 +282,17 @@
 	}
 	.author-page .lesson-bar .notice { position: static; }
 	.author-page .lesson-nav { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-	.author-page [data-scroll-row]::-webkit-scrollbar { display: none; }
-	/* Строка шире экрана гаснет к краю, за которым ещё есть что листать:
-	   иначе не видно, что она прокручивается. Классы ставит скрипт. */
-	.author-page [data-scroll-row].more-right {
-		-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
-		mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
-	}
-	.author-page [data-scroll-row].more-left {
-		-webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
-		mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
-	}
-	.author-page [data-scroll-row].more-left.more-right {
-		-webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
-		mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
-	}
+	.author-page .lesson-nav::-webkit-scrollbar { display: none; }
 	.author-page .lesson-nav a {
 		flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px;
 		font-size: 14px; color: var(--ink); text-decoration: none; background: var(--paper); border: 1px solid var(--line);
 	}
 	.author-page .lesson-nav a:hover { border-color: var(--accent); }
-	.author-page .lesson-nav a[aria-current] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-	.author-page .lesson-nav .n, .author-page .map-count {
-		min-width: 18px; padding: 0 6px; border-radius: 999px; font-family: "IBM Plex Mono", monospace; font-size: 12px; text-align: center;
-	}
-	.author-page .lesson-nav .n.warn { background: var(--warn-soft); color: var(--warn); }
-	.author-page .lesson-nav .n.gap, .author-page .map-count { background: var(--gap-soft); color: var(--gap); }
-	.author-page .map-count { display: inline-block; margin-left: 6px; text-decoration: none; }
-	/* Метка замечаний — в таблице структуры, у блока и в списке курсов, где
-	   стили замечаний не подключены. */
-	.author-page .note-count {
-		display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 12px;
-		font-family: "IBM Plex Mono", monospace; background: var(--warn-soft); color: var(--warn); text-decoration: none;
-	}
 	/* Якорь не должен уходить под липкую панель; её высоту скрипт кладёт в --bar. */
-	.author-page [id^="section-"], .author-page .note-place, .author-page .note-card, .author-page #map-issues {
+	.author-page [id^="section-"], .author-page .note-place, .author-page .note-card {
 		scroll-margin-top: calc(var(--bar, 56px) + 12px);
 	}
-	.author-page .panel-foot { margin: 10px 0 0; font-size: 14px; }
-	.author-page .changes-panel { border-color: var(--accent); }
-	.author-page .changes-panel p { margin: 0; }
-	.author-page .changed-mark {
-		display: inline-block; padding: 0 6px; margin-left: 6px; border-radius: 999px; font-size: 12px; text-decoration: none;
-		font-family: "IBM Plex Mono", monospace; background: var(--accent-soft); color: var(--accent);
-	}
-	.author-page summary .changed-mark { margin-left: 0; margin-right: 4px; }
-	.author-page .place-diff { margin: 2px 0 8px; }
-	.author-page .place-diff > summary { font-size: 13px; }
-	.author-page .changes-panel .place-diff { margin: 8px 0 0; }
-	.author-page .issues .k { display: block; font-size: 13px; color: var(--muted); }
-	.author-page a.tile.link { background: none; border: 1px solid var(--line); color: var(--accent); text-decoration: none; }
-	.author-page a.tile.link:hover { border-color: var(--accent); }
-	.author-page .more-link { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 0; padding: 0; margin-top: 2px; cursor: pointer; }
-	.author-page .gap-text { color: var(--gap); }
-	.author-page .doc-binding { margin: -6px 0 8px; font-size: 14px; }
-	.author-page .doc-description { margin: -4px 0 8px; font-size: 14px; max-width: 72ch; }
-	.author-page .doc-edits { margin: 0 0 12px; padding-left: 20px; font-size: 14px; color: var(--muted); }
+	.author-page .pager { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 
 	.author-page .note-index { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 	.author-page .note-index li { padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--bg); }
@@ -345,65 +300,26 @@
 	.author-page .note-index li.is-accepted { border-left-color: var(--line); }
 	.author-page .note-index a { display: flex; flex-wrap: wrap; gap: 2px 10px; text-decoration: none; font-size: 14px; }
 	.author-page .note-index .note-status { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink); }
-	.author-page .note-index .note-index-place { text-decoration: underline; text-underline-offset: 2px; }
 	.author-page .note-index .note-index-text { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
 
 	.author-page .courses { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 	.author-page .courses a { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; color: var(--ink); text-decoration: none; }
 	.author-page .courses a:hover { border-color: var(--accent); }
-	.author-page .course-attention { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
-	.author-page .course-attention :is(.note-count, .map-count) { margin-left: 0; }
-
-	.author-page .pager { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
-	.author-page .facts { display: flex; flex-wrap: wrap; gap: 6px; }
-	.author-page .segment + .segment { border-top: 1px dashed var(--line); margin-top: 18px; padding-top: 6px; }
-	.author-page .segment-mark { font-size: 12px; color: var(--warn); margin-bottom: 8px; }
-	.author-page .question { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 10px; }
-	.author-page .question.broken { border-color: var(--gap); background: var(--gap-soft); }
-	.author-page .question ol { margin: 8px 0 0; padding-left: 22px; }
-	.author-page .question li { margin: 4px 0; }
-	.author-page .question .correct { color: var(--accent); font-weight: 500; }
-	.author-page .question .why { color: var(--muted); font-size: 14px; font-weight: 400; }
-
-	.author-page #course-summary-more { display: none; }
+	.author-page .course-facts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 13px; color: var(--muted); }
+	.author-page .queue { display: flex; flex-direction: column; gap: 20px; }
 	@media (max-width: 720px) {
-		.author-page .blocks.canvas { grid-template-columns: 1fr; }
-		.author-page .blocks.canvas .block-row { grid-column: auto; }
-		/* Описание курса на телефоне — одной строкой: иначе оно сдвигает
-		   вкладки и таблицу на полэкрана вниз. */
-		.author-page .course-summary:not(.open) { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-		.author-page #course-summary-more:not([hidden]) { display: inline; }
-
-		.author-page .chips[data-scroll-row] { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-		.author-page .chips[data-scroll-row] > * { flex: none; white-space: nowrap; }
-
-		/* Таблица структуры на телефоне — урок карточкой: название, под ним
-		   плитки с подписями; пять колонок в 390 px не помещались. */
-		.author-page .structure, .author-page .structure tbody, .author-page .structure tr.chapter,
-		.author-page .structure tr.chapter td { display: block; }
-		.author-page .structure thead { display: none; }
-		.author-page .structure tr.lesson {
-			display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 4px 0; padding: 8px 10px;
-			background: var(--paper); border-left: 4px solid var(--ch); border-radius: 8px;
-		}
-		.author-page .structure tr.lesson td,
-		.author-page .structure .lesson td:first-child, .author-page .structure .lesson td:last-child,
-		.author-page .structure .lesson:hover td {
-			display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: 0; border-radius: 0;
-		}
-		.author-page .structure tr.lesson td.title { display: block; flex: 1 0 100%; }
-		.author-page .structure tr.lesson td[data-label]::before { content: attr(data-label); font-size: 12px; color: var(--muted); }
 		.author-page h1 { font-size: 22px; }
+		.author-page .part-head { flex-wrap: wrap; }
 	}
 </style>
 
 <div class="author-page">
-<div class="wrap{% if view == 'map' and course and not lesson %} wide{% endif %}">
+<div class="wrap">
 
 {% if is_guest %}
 	<div class="panel">
 		<h1>Кабинет автора</h1>
-		<p class="intro">Здесь видно, как агент собрал курс. <a href="{{ login_url }}">Войдите</a>, чтобы открыть его.</p>
+		<p class="intro">Здесь виден действующий релиз курса. <a href="{{ login_url | e }}">Войдите</a>, чтобы открыть кабинет.</p>
 	</div>
 
 {% elif not allowed %}
@@ -415,183 +331,143 @@
 {% elif missing %}
 	<div class="panel">
 		<h1>Такого нет</h1>
-		<p class="intro">Курса с таким адресом нет, или урок уже не в этом курсе: агент мог его перенести или удалить.
-		{% if course %}<a href="{{ course.url }}">Открыть курс</a>{% else %}<a href="{{ page_url }}">Все курсы</a>{% endif %}</p>
+		<p class="intro">Курса с таким адресом нет, или урока с таким ключом нет в действующем релизе: новый релиз мог его убрать.
+		{% if course %}<a href="{{ course.url | e }}">Открыть курс</a>{% else %}<a href="{{ page_url | e }}">Все курсы</a>{% endif %}</p>
 	</div>
 
 {% elif lesson %}
-	{% set f = lesson.facts %}
-	{% set метка_урока = "Урок " ~ lesson.number ~ " «" ~ lesson.title ~ "»" %}
-	<div class="crumbs"><a href="{{ page_url }}">Все курсы</a> / <a href="{{ course.url }}">{{ course.title | e }}</a> / {{ lesson.chapter_title | e }}</div>
+	{% set заметки = release.notes %}
+	<div class="crumbs"><a href="{{ page_url | e }}">Все курсы</a> / <a href="{{ course.url | e }}">{{ course.title | e }}</a> / {{ lesson.chapter_title | e }}</div>
 	<div>
-		<h1><span class="num muted">{{ lesson.number }}.</span> {{ lesson.title | e }}</h1>
-		<div class="facts">
-			<span class="tile{% if not f.has_body %} empty{% elif f.body_segments > 1 %} split{% endif %}">
-				{% if f.has_body %}{{ число(f.body_chars) }} зн., {{ f.body_segments }} {{ "сегмент" if f.body_segments == 1 else "сегмента" if f.body_segments < 5 else "сегментов" }}{% else %}нет материала{% endif %}</span>
-			<span class="tile{% if not f.has_directive %} empty{% endif %}">
-				{% if f.has_directive %}директива v{{ f.directive_version }}, целей {{ f.objectives }}{% else %}нет директивы{% endif %}</span>
-			<span class="tile{% if not f.quiz %} empty{% endif %}">
-				{% if f.quiz %}квиз: {{ f.quiz.questions | length }} вопр., порог {{ f.quiz.passing_percentage }}{% else %}нет квиза{% endif %}</span>
-			{% if lesson.map_url %}<a class="tile link" href="{{ lesson.map_url }}">урок на карте</a>{% endif %}
-		</div>
+		<h1><span class="num muted">{{ lesson.number | e }}.</span> {{ lesson.title | e }}</h1>
+		<p class="meta"><code>{{ lesson.key | e }}</code> · релиз v{{ release.version | e }}</p>
 	</div>
 	<div class="pager">
-		<span>{% if lesson.prev %}<a href="{{ lesson.prev.url }}">← {{ lesson.prev.number }}. {{ lesson.prev.title | e }}</a>{% endif %}</span>
-		<span>{% if lesson.next %}<a href="{{ lesson.next.url }}">{{ lesson.next.number }}. {{ lesson.next.title | e }} →</a>{% endif %}</span>
+		<span>{% if lesson.prev %}<a href="{{ lesson.prev.url | e }}">← {{ lesson.prev.number | e }}. {{ lesson.prev.title | e }}</a>{% endif %}</span>
+		<span>{% if lesson.next %}<a href="{{ lesson.next.url | e }}">{{ lesson.next.number | e }}. {{ lesson.next.title | e }} →</a>{% endif %}</span>
 	</div>
-	{#
-		Панель прилипает к верху экрана: урок длинный, и к директиве или квизу
-		иначе листают через весь материал. Плашка «Агент изменил курс» живёт в
-		той же панели — две липкие полосы налезали бы друг на друга.
-	#}
+	{# Плашка «обновить» живёт в липкой панели: две липкие полосы налезали бы друг на друга. #}
 	<div class="lesson-bar" id="lesson-bar">
-		<div class="notice" id="author-notice" role="status"><span data-notice-text>Агент изменил курс.</span><button type="button" onclick="location.reload()">Обновить</button></div>
-		<nav class="lesson-nav" aria-label="Разделы урока" data-scroll-row>
-			{% if lesson.map_issues %}<a href="#map-issues">Карта <span class="n gap">{{ lesson.map_issues | length }}</span></a>{% endif %}
-			<a href="#section-material">Материал</a>
-			<a href="#section-directive">Директива</a>
-			<a href="#section-quiz">Квиз</a>
-			<a href="#section-blocks">Блоки</a>
-			<a href="#section-notes">Замечания<span data-live="nav-notes">{% if lesson.open_notes %} <span class="n warn">{{ lesson.open_notes }}</span>{% endif %}</span></a>
+		<div class="notice" id="author-notice" role="status"><span data-notice-text>Курс изменился.</span><button type="button" onclick="location.reload()">Обновить</button></div>
+		<nav class="lesson-nav" aria-label="Разделы урока">
+			<a href="#section-lesson">Урок</a>
+			<a href="#section-agent">Пакет агента</a>
+			<a href="#section-notes">Заметки<span data-live="nav-notes">{% if lesson.open_notes %} <span class="note-count">{{ lesson.open_notes | e }}</span>{% endif %}</span></a>
 		</nav>
 	</div>
-	{% if lesson.map_issues %}
-	<section class="panel" id="map-issues">
-		<h2>Расхождения с картой <span class="muted num">{{ lesson.map_issues | length }}</span></h2>
-		<ul class="issues">
-			{% for р in lesson.map_issues %}
-			<li class="blocking">{{ р.message | e }}
-				{% if р.missing %}<span class="k">Нет: {{ р.missing | join("; ") | e }}</span>{% endif %}
-				{% if р.extra %}<span class="k">Лишнее: {{ р.extra | join("; ") | e }}</span>{% endif %}</li>
-			{% endfor %}
-		</ul>
-		<p class="panel-foot"><a href="{{ lesson.map_url }}">Открыть урок на карте</a></p>
-	</section>
-	{% endif %}
-	{% if lesson.changes %}
-	<section class="panel changes-panel" id="changes">
-		<p>С вашего прошлого визита ({{ frappe.utils.format_datetime(lesson.changes.since, "dd.MM, HH:mm") }}) изменились:
-			{% for п in lesson.changes.summary %}<a href="#{{ п.anchor }}">{{ п.text }}</a>{{ "." if loop.last else ", " }}{% endfor %}</p>
-		{% for адрес, р in lesson.changes.places.items() if р.gone %}
-		<details class="place-diff"><summary><span class="changed-mark">убрано</span> {{ р.label | e }}</summary>
-			<div class="note-diff">{{ текст_разницы(р) }}</div>
-		</details>
-		{% endfor %}
-	</section>
-	{% endif %}
-	{{ место("lesson", lesson.id, метка_урока, lesson.notes.get("lesson", []), "note-lesson", "Замечание к уроку") }}
+	{{ место(lesson.target, lesson.label, заметки.get(lesson.target, []), lesson.anchor, "Заметка к уроку") }}
 
-	<section class="panel" id="section-material" {{ атрибуты("material", lesson.id, метка_урока ~ " · материал") }}>
-		<h2>Материал</h2>
-		{{ правки_места(lesson.changes, "material") }}
-		{{ место("material", lesson.id, метка_урока ~ " · материал", lesson.notes.get("material", []), "note-material") }}
-		{% if lesson.segments_html %}
-			{% for сегмент in lesson.segments_html %}
-			<div class="segment">
-				{% if lesson.segments_html | length > 1 %}<div class="segment-mark mono">сегмент {{ loop.index }} из {{ lesson.segments_html | length }} — агент получает его отдельным запросом</div>{% endif %}
-				<div class="prose">{{ сегмент }}</div>
-			</div>
-			{% endfor %}
-		{% else %}
-			<p class="gap-text">Материала нет — урок не пройдёт проверку готовности.</p>
+	<section class="panel" id="section-lesson">
+		{{ тело_урока(lesson, заметки) }}
+	</section>
+
+	{#
+		Пакет агента — то, по чему агент ученика ведёт урок. Он длинный и
+		служебный, поэтому свёрнут; заметка ко всему пакету — без раскрытия.
+	#}
+	<section class="panel" id="section-agent">
+		<h2>Пакет агента</h2>
+		{{ место(lesson.agent_target, lesson.agent_label, заметки.get(lesson.agent_target, []), lesson.agent_anchor, "Заметка к пакету урока") }}
+		{% if lesson.agent %}
+		<details class="pack" {{ атрибуты(lesson.agent_target, lesson.agent_label) }}>
+			<summary>Пакет агента урока</summary>
+			{{ части_пакета(lesson.agent, заметки) }}
+		</details>
+		{% else %}<p class="muted">В пакете агента нет части для этого урока.</p>{% endif %}
+		{% if lesson.frame %}
+		<details class="pack" {{ атрибуты("agent.frame", "Пакет агента · рамка курса") }}>
+			<summary>Рамка курса — общая для всех уроков</summary>
+			{{ части_пакета(lesson.frame, заметки) }}
+		</details>
+		{{ место("agent.frame", "Пакет агента · рамка курса", заметки.get("agent.frame", []), frame_anchor, "Заметка к рамке") }}
 		{% endif %}
 	</section>
 
-	<section class="panel" id="section-directive">
-		<h2>Директива{% if lesson.directive %} <span class="muted num">v{{ lesson.directive.version }} от {{ frappe.utils.format_datetime(lesson.directive.created_at, "dd.MM.yyyy HH:mm") }}</span>{% endif %}</h2>
-		{% if lesson.directive %}{{ поля_директивы(lesson.directive.fields, "directive", lesson.id, lesson.notes, метка_урока ~ " · директива", lesson.changes) }}
-		{% else %}<p class="gap-text">Директивы нет — агент ученика поведёт урок только по материалу.</p>{% endif %}
-	</section>
-
-	<section class="panel" id="section-quiz">
-		<h2>Квиз{% if lesson.quiz %} <span class="muted num">порог {{ lesson.quiz.passing_percentage }}</span>{% endif %}</h2>
-		{% if lesson.quiz %}
-			{% for в in lesson.quiz.questions %}
-			{% set target = "question." ~ в.id %}
-			<div class="question{% if в.broken %} broken{% endif %}" {{ атрибуты(target, lesson.id, метка_урока ~ " · вопрос " ~ loop.index) }}>
-				<div class="question-head"><div><span class="num muted">{{ loop.index }}.</span> {{ (в.text or "Вопрос без текста") | e }}</div>
-					{{ кнопка_замечания(target, lesson.id, метка_урока ~ " · вопрос " ~ loop.index) }}</div>
-				{{ правки_места(lesson.changes, target) }}
-				{% if в.options %}
-				<ol type="a">
-					{% for о in в.options %}
-					<li{% if о.correct %} class="correct"{% endif %}>{% if о.correct %}✓ {% endif %}{{ о.text | e }}
-						{% if о.explanation %}<div class="why">{{ о.explanation | e }}</div>{% endif %}</li>
-					{% endfor %}
-				</ol>
-				{% endif %}
-				{% if в.answers %}<p class="why">Верные ответы: {{ в.answers | join("; ") | e }}</p>{% endif %}
-				{{ место(target, lesson.id, метка_урока ~ " · вопрос " ~ loop.index, lesson.notes.get(target, []), якорь(target), с_кнопкой=False) }}
-			</div>
-			{% endfor %}
-		{% else %}<p class="muted">Квиза нет.</p>{% endif %}
-	</section>
-
-	<section id="section-blocks">
-		<h2>Блоки документа</h2>
-		{% if lesson.blocks %}<div class="blocks">{{ блоки_документа(lesson.blocks, False, course.notes, lesson.changes) }}</div>
-		{% else %}<p class="muted">Урок не собирает ни одного блока документа.</p>{% endif %}
-	</section>
-
-	{#
-		Указатель замечаний урока: карточки стоят по разделам, а в длинном
-		уроке их не найти глазами. Сначала то, что ждёт вас; замечание, чьего
-		места на странице больше нет, ведёт в очередь.
-	#}
 	<section class="panel" id="section-notes" data-live="notes-index">
-		<h2>Замечания к уроку <span class="muted num">{{ lesson.open_notes }}</span></h2>
+		<h2>Заметки к уроку <span class="muted num">{{ lesson.open_notes | e }}</span></h2>
 		{% if lesson.notes_index %}
 		<ul class="note-index">
 			{% for з in lesson.notes_index %}
-			<li class="is-{{ з.status }}{% if з.waiting_on == 'author' %} is-yours{% endif %}">
-				<a href="{% if з.here %}#note-card-{{ з.id }}{% else %}{{ course.url }}&view=notes#note-card-{{ з.id }}{% endif %}">
+			<li class="is-{{ з.status | e }}{% if з.waiting_on == 'author' %} is-yours{% endif %}">
+				<a href="{% if з.missing %}{{ з.url | e }}{% else %}#note-card-{{ з.id | e }}{% endif %}">
 					<span class="note-status">{{ статус(з) }}</span>
-					<span class="note-index-place">{{ з.place | e }}{% if not з.here %} — места на странице нет{% endif %}</span>
+					<span>{{ з.label | e }}{% if з.missing %} — места нет в действующем релизе{% endif %}</span>
 				</a>
 				<span class="note-index-text">{{ з.text | truncate(140) | e }}</span>
 			</li>
 			{% endfor %}
 		</ul>
 		{% else %}
-		<p class="muted">Замечаний к уроку нет. Нажмите «Замечание» у раздела или выделите текст — агент увидит замечание в очереди.</p>
+		<p class="muted">Заметок к уроку нет. Нажмите «Заметка» у нужного места или выделите текст — агент увидит заметку в очереди.</p>
 		{% endif %}
 	</section>
 	<div class="quiet" id="author-quiet"></div>
-	<script type="application/json" id="lesson-config">{{ {"lesson": lesson.id, "seen": seen_method} | tojson }}</script>
 
 {% elif course %}
-	<div class="crumbs"><a href="{{ page_url }}">Все курсы</a></div>
-	<div class="notice" id="author-notice" role="status"><span data-notice-text>Агент изменил курс.</span><button type="button" onclick="location.reload()">Обновить</button></div>
+	<div class="crumbs"><a href="{{ page_url | e }}">Все курсы</a></div>
+	<div class="notice" id="author-notice" role="status"><span data-notice-text>Курс изменился.</span><button type="button" onclick="location.reload()">Обновить</button></div>
 	<div>
 		<h1>{{ course.title | e }}</h1>
-		{% if course.summary %}
-		<p class="intro course-summary" id="course-summary">{{ course.summary | e }}</p>
-		<button type="button" class="more-link" id="course-summary-more" aria-controls="course-summary" aria-expanded="false" hidden>Описание целиком</button>
-		{% endif %}
-		<p class="muted" style="margin: 6px 0 0; font-size: 13px;">
-			<span class="status{% if course.upcoming %} soon{% elif course.published %} live{% endif %}">{{ "анонс" if course.upcoming else ("опубликован" if course.published else "черновик") }}</span>
-			изменён {{ frappe.utils.pretty_date(course.revision) }}
+		{% if course.summary %}<p class="intro">{{ course.summary | e }}</p>{% endif %}
+		<p class="meta">
+			<span class="status{% if course.upcoming %} soon{% elif course.published %} live{% endif %}">{{ course.status | e }}</span>
+			{% if release %}
+			<code>{{ release.key | e }}</code> · релиз v{{ release.version | e }} от {{ дата(release.published_at) }}{% if release.published_by_name %}, {{ release.published_by_name | e }}{% endif %}
+			{% else %}
+			релиза нет
+			{% endif %}
 		</p>
 	</div>
 
+	{% if not release %}
+	{# Анонс без релиза: программы ещё нет, наружу выходят только цели. #}
+	<section class="panel">
+		<h2>Цели анонса</h2>
+		{% if course.announce_objectives %}
+		<ul>{% for цель in course.announce_objectives %}<li>{{ цель | e }}</li>{% endfor %}</ul>
+		{% else %}<p class="muted">Целей анонса нет.</p>{% endif %}
+		<p class="muted">Программу курсу даёт первый релиз: тогда здесь появятся его главы и уроки, заметки и тестеры.</p>
+	</section>
+	{% else %}
+
 	<nav class="tabs" aria-label="Вкладки курса" data-live="tabs">
-		<a class="tab{% if view == 'build' %} active{% endif %}" href="{{ course.url }}"{% if view == 'build' %} aria-current="page"{% endif %}>Сборка</a>
-		<a class="tab{% if view == 'map' %} active{% endif %}" href="{{ course.url }}&view=map"{% if view == 'map' %} aria-current="page"{% endif %}>Карта
-			{% if course.map_discrepancies %}<span class="n">{{ course.map_discrepancies }}</span>{% endif %}</a>
-		<a class="tab{% if view == 'notes' %} active{% endif %}" href="{{ course.url }}&view=notes"{% if view == 'notes' %} aria-current="page"{% endif %}>Замечания
-			{% if course.notes_attention %}<span class="n warn">{{ course.notes_attention }}</span>{% endif %}</a>
-		<a class="tab{% if view == 'testers' %} active{% endif %}" href="{{ course.url }}&view=testers"{% if view == 'testers' %} aria-current="page"{% endif %}>Тестеры
-			{% if course.testers_count %}<span class="n calm">{{ course.testers_count }}</span>{% endif %}</a>
+		<a class="tab{% if view == 'release' %} active{% endif %}" href="{{ course.url | e }}"{% if view == 'release' %} aria-current="page"{% endif %}>Релиз</a>
+		<a class="tab{% if view == 'notes' %} active{% endif %}" href="{{ course.url | e }}&view=notes"{% if view == 'notes' %} aria-current="page"{% endif %}>Заметки
+			{% if course.notes_attention %}<span class="n" title="Ждут вас">{{ course.notes_attention | e }}</span>{% endif %}</a>
+		<a class="tab{% if view == 'history' %} active{% endif %}" href="{{ course.url | e }}&view=history"{% if view == 'history' %} aria-current="page"{% endif %}>История</a>
+		<a class="tab{% if view == 'testers' %} active{% endif %}" href="{{ course.url | e }}&view=testers"{% if view == 'testers' %} aria-current="page"{% endif %}>Тестеры
+			{% if course.testers_count %}<span class="n calm">{{ course.testers_count | e }}</span>{% endif %}</a>
 	</nav>
 
-	{% if view == "map" %}
-	{% include "lms_frappe_app/templates/includes/author_map.html" %}
-	{% elif view == "testers" %}
+	{% if view == "testers" %}
 	{% include "lms_frappe_app/templates/includes/author_testers.html" %}
+
+	{% elif view == "history" %}
+	<section class="panel">
+		<h2>История релизов</h2>
+		<p class="intro">Курс правится только новым релизом. Действующий — тот, что видят ученики и по ключам которого пишутся заметки.</p>
+		<div class="scroll">
+		<table class="history">
+			<thead><tr><th>Версия</th><th>Опубликован</th><th>Кем</th><th>Документ</th><th>Дайджест</th></tr></thead>
+			<tbody>
+			{% for р in history %}
+			<tr>
+				<td class="num">v{{ р.version | e }}{% if р.active %} <span class="status live">действующий</span>{% endif %}</td>
+				<td>{{ дата(р.published_at) }}</td>
+				<td>{{ (р.published_by_name or р.published_by or "—") | e }}</td>
+				<td>{% if р.document_key %}<code>{{ р.document_key | e }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
+				<td><code title="{{ р.digest | e }}">{{ (р.digest or "")[:12] | e }}</code></td>
+			</tr>
+			{% endfor %}
+			</tbody>
+		</table>
+		</div>
+	</section>
+
 	{% elif view == "notes" %}
 	{% set q = notes_queue %}
-	<p class="intro">Замечания к курсу. Агент берёт те, что ждут его, правит курс и отмечает «сделано»; вы принимаете или возвращаете с ответом.</p>
-	{{ место("course", None, "Курс", [], "note-course", "Замечание к курсу") }}
+	<p class="intro">Заметки к курсу. Агент берёт те, что ждут его, правит курс новым релизом и отмечает «сделано»; вы принимаете или возвращаете с ответом.</p>
+	{{ место("course", "Курс", [], course_anchor, "Заметка к курсу") }}
 	<div class="queue" data-live="queue">
 	{% for ключ, заголовок, пояснение in [
 		("check", "Проверьте", "Агент отметил «сделано»: примите или верните с ответом."),
@@ -599,165 +475,147 @@
 		("agent", "Ждут агента", "Агент возьмёт их, когда начнёт работу над курсом."),
 	] %}
 	<section class="queue-group">
-		<h2>{{ заголовок }} <span class="muted num">{{ q[ключ] | length }}</span></h2>
-		<p class="muted">{{ пояснение }}</p>
+		<h2>{{ заголовок | e }} <span class="muted num">{{ q[ключ] | length | e }}</span></h2>
+		<p class="muted">{{ пояснение | e }}</p>
 		<div class="notes-list">{% for з in q[ключ] %}{{ карточка(з, True) }}{% else %}<p class="muted">Нет.</p>{% endfor %}</div>
 	</section>
 	{% endfor %}
 	{% if q.accepted %}
-	<details class="queue-group"><summary>Принятые · {{ q.accepted | length }}</summary>
+	<details class="queue-group"><summary>Принятые · {{ q.accepted | length | e }}</summary>
 		<div class="notes-list">{% for з in q.accepted %}{{ карточка(з, True) }}{% endfor %}</div>
 	</details>
 	{% endif %}
 	</div>
+
 	{% else %}
-	{# Сначала то, что ждёт действия, потом наполненность: на телефоне сводка
-	   идёт одной строкой, и начало строки видно без прокрутки. #}
-	<div class="chips" data-scroll-row data-live="chips">
-		{% set c = course.counts %}
-		<a class="chip link{% if course.notes_attention %} short{% endif %}" href="{{ course.url }}&view=notes"><span class="n">{{ course.notes_attention }}</span>замечаний ждут вас</a>
-		{% if course.map_discrepancies is none %}
-		<a class="chip link" href="{{ course.url }}&view=map">карты нет</a>
-		{% else %}
-		<a class="chip link{% if course.map_discrepancies %} short{% endif %}" href="{{ course.url }}&view=map"><span class="n">{{ course.map_discrepancies }}</span>расхождений с картой</a>
-		{% endif %}
-		<span class="chip{% if c.with_body < c.lessons %} short{% endif %}"><span class="n">{{ c.with_body }}/{{ c.lessons }}</span>с материалом</span>
-		<span class="chip{% if c.with_directive < c.lessons %} short{% endif %}"><span class="n">{{ c.with_directive }}/{{ c.lessons }}</span>с директивой</span>
-		<span class="chip{% if c.with_quiz < c.lessons %} short{% endif %}"><span class="n">{{ c.with_quiz }}/{{ c.lessons }}</span>с квизом</span>
-	</div>
-	{{ место("course", None, "Курс", course.notes.get("course", []), "note-course", "Замечание к курсу") }}
+	{% set заметки = release.notes %}
+	{{ место("course", "Курс", заметки.get("course", []), course_anchor, "Заметка к курсу") }}
 
-	<section class="panel">
-		<h2>Готовность к публикации</h2>
-		{% set r = course.readiness %}
-		{% if not r.blocking and not r.warnings %}<p class="muted">Платформа не видит ни помех, ни предупреждений.</p>{% endif %}
-		<ul class="issues">
-			{% for п in r.blocking %}<li class="blocking">{{ п.message | e }}{% if п.url %} — <a href="{{ п.url }}">{{ п.lesson_title | e }}</a>{% endif %}<code>{{ п.code }}</code></li>{% endfor %}
-			{% for п in r.warnings %}<li class="warning">{{ п.message | e }}{% if п.url %} — <a href="{{ п.url }}">{{ п.lesson_title | e }}</a>{% endif %}<code>{{ п.code }}</code></li>{% endfor %}
-		</ul>
-	</section>
-
-	<section>
-		<h2>Структура</h2>
-		<div class="scroll">
-		<table class="structure">
-			<thead><tr><th>Урок</th><th>Материал</th><th>Директива</th><th>Квиз</th><th>Блоки документа</th></tr></thead>
-			<tbody data-live="structure">
-			{% for г in course.chapters %}
-				<tr class="chapter ch{{ г.color }}"><td colspan="5">{{ г.title | e }}</td></tr>
-				{% for у in г.lessons %}
-				<tr class="lesson ch{{ г.color }}">
-					<td class="title"><span class="num muted">{{ у.number }}.</span> <a href="{{ у.url }}">{{ у.title | e }}</a>
-						{% if у.open_notes %}<a class="note-count" href="{{ у.url }}#section-notes" title="Открытых замечаний к уроку">✎ {{ у.open_notes }}</a>{% endif %}
-						{% if у.map_issues %}<a class="map-count" href="{{ у.url }}#map-issues" title="Расхождений с картой">карта {{ у.map_issues }}</a>{% endif %}
-						{% if у.changed_since_visit %}<a class="changed-mark" href="{{ у.url }}#changes" title="Изменён после вашего последнего визита">изменён</a>{% endif %}</td>
-					<td data-label="Материал"><span class="tile num{% if not у.has_body %} empty{% elif у.body_segments > 1 %} split{% endif %}"
-						{% if у.body_segments > 1 %}title="Платформа режет урок на {{ у.body_segments }} части"{% endif %}>
-						{% if у.has_body %}{{ число(у.body_chars) }}{% if у.body_segments > 1 %} · {{ у.body_segments }} сегм.{% endif %}{% else %}нет{% endif %}</span></td>
-					<td data-label="Директива"><span class="tile num{% if not у.has_directive %} empty{% endif %}">{% if у.has_directive %}v{{ у.directive_version }} · {{ у.objectives }} цел.{% else %}нет{% endif %}</span></td>
-					<td data-label="Квиз"><span class="tile num{% if not у.quiz %} empty{% endif %}">{% if у.quiz %}{{ у.quiz.questions | length }} вопр. · {{ у.quiz.passing_percentage }}{% else %}нет{% endif %}</span></td>
-					<td class="mono blocks-cell" data-label="Блоки">{{ у.blocks | join(", ") if у.blocks else "—" }}</td>
-				</tr>
-				{% endfor %}
-			{% endfor %}
-			</tbody>
-		</table>
+	{% for г in release.chapters %}
+	<section class="chapter ch{{ г.color | e }}" {{ атрибуты(г.target, г.label) }}>
+		<div class="chapter-head">
+			<h2><span class="num">{{ г.number | e }}.</span> {{ г.title | e }} <code>{{ г.key | e }}</code></h2>
+			{% if г.description %}<p>{{ г.description | e }}</p>{% endif %}
 		</div>
+		{{ место(г.target, г.label, заметки.get(г.target, []), г.anchor, "Заметка к главе") }}
+		{% for у in г.lessons %}
+		<details class="row lesson-row" {{ атрибуты(у.target, у.label) }}>
+			<summary>
+				<span class="num muted">{{ у.number | e }}.</span>
+				<span class="row-title">{{ у.title | e }}</span>
+				<code>{{ у.key | e }}</code>
+				<span data-live="{{ у.anchor | e }}-count">{% if у.open_notes %}<span class="note-count" title="Открытых заметок к уроку">✎ {{ у.open_notes | e }}</span>{% endif %}</span>
+				<span class="row-side">целей {{ у.objectives | length | e }} · вопросов {{ у.questions | length | e }}{% if у.homework %} · домашка{% endif %}</span>
+			</summary>
+			<div class="row-body">
+				<p class="meta"><a href="{{ у.url | e }}">Урок целиком и пакет агента →</a></p>
+				{{ место(у.target, у.label, заметки.get(у.target, []), у.anchor, "Заметка к уроку") }}
+				{{ тело_урока(у, заметки) }}
+			</div>
+		</details>
+		{% endfor %}
 	</section>
-
-	{% for д in course.artifacts %}
-	<section>
-		<h2>Документ «{{ д.title | e }}» <span class="muted num" style="font-weight: 400;">{{ д.artifact }} · v{{ д.version }}</span></h2>
-		{% set п = д.binding %}
-		{% if п %}
-		<p class="doc-binding">Шаблон <span class="mono">{{ п.template | e }}</span> <span class="num">v{{ п.version }}</span>
-			{%- if п.latest %}<span class="changed-mark" title="Новая версия шаблона: перевести документ на неё — просьбой агенту">вышла v{{ п.latest }}</span>{% endif %}
-			{%- if п.extends %} <span class="muted">· на основе <span class="mono">{{ п.extends.template | e }}</span> <span class="num">v{{ п.extends.version }}</span></span>{% endif %}</p>
-		{% if п.description %}<p class="doc-description muted">{{ п.description | e }}</p>{% endif %}
-		{% if п.edits %}<ul class="doc-edits">{% for строка in п.edits %}<li>{{ строка | e }}</li>{% endfor %}</ul>
-		{% else %}<p class="doc-binding muted">Правок курса нет: документ как в шаблоне.</p>{% endif %}
-		{% else %}<p class="doc-binding muted">Своя схема, без шаблона.</p>{% endif %}
-		<div class="blocks{% if д.layout == 'canvas' %} canvas{% endif %}">{{ блоки_документа(д.blocks, True, course.notes) }}</div>
-	</section>
-	{% else %}
-	<section class="panel"><h2>Документ курса</h2><p class="muted">Схемы документа нет: ученик ничего не собирает по ходу курса.</p></section>
 	{% endfor %}
 
-	<section class="panel">
-		<h2>Сквозная директива{% if course.directive %} <span class="muted num">v{{ course.directive.version }}</span>{% endif %}</h2>
-		{% if course.directive %}
-		<details><summary>Показать поля</summary>{{ поля_директивы(course.directive_fields, "course_directive", None, course.notes, "Сквозная директива") }}</details>
-		{% else %}<p class="gap-text">Сквозной директивы нет.</p>{% endif %}
+	{% set д = release.document %}
+	<section>
+		{% if д %}
+		<h2>Документ «{{ (д.title or д.key) | e }}» <code>{{ д.key | e }}</code></h2>
+		{% if д.purpose %}<p class="intro">{{ д.purpose | e }}</p>{% endif %}
+		<div class="chapter">
+		{% for р in д.sections %}
+		<details class="row" {{ атрибуты(р.target, р.label) }}>
+			<summary>
+				<code>{{ р.key | e }}</code>
+				<span class="row-title">{{ р.title | e }}</span>
+				<span data-live="{{ р.anchor | e }}-count">{% set открытые = заметки.get(р.target, []) | rejectattr("status", "equalto", "accepted") | list %}{% if открытые %}<span class="note-count" title="Открытых заметок к разделу">✎ {{ открытые | length | e }}</span>{% endif %}</span>
+				<span class="row-side">{{ ("одна запись" if р.rows == "one" else "много записей") | e }}</span>
+			</summary>
+			<div class="row-body">
+				{% if р.description %}<p class="pre">{{ р.description | e }}</p>{% endif %}
+				{% if р.columns %}
+				<table class="columns">
+					<thead><tr><th>Колонка</th><th>Ключ</th><th>Заполнение</th></tr></thead>
+					<tbody>{% for к in р.columns %}<tr><td>{{ к.title | e }}</td><td><code>{{ к.key | e }}</code></td><td>{{ обязательность(к.required) }}</td></tr>{% endfor %}</tbody>
+				</table>
+				{% endif %}
+				<p class="why">{% if р.lessons %}Заполняют: {% for у in р.lessons %}<a href="{{ у.url | e }}">{{ у.number | e }}. {{ у.title | e }}</a>{{ "" if loop.last else ", " }}{% endfor %}{% else %}Ни один урок раздел не заполняет.{% endif %}</p>
+				{{ место(р.target, р.label, заметки.get(р.target, []), р.anchor, "Заметка к разделу") }}
+			</div>
+		</details>
+		{% endfor %}
+		</div>
+		{% else %}
+		<div class="panel"><h2>Документ курса</h2><p class="muted">В релизе документа нет: ученик ничего не собирает по ходу курса.</p></div>
+		{% endif %}
 	</section>
+	{% endif %}
 	{% endif %}
 	<div class="quiet" id="author-quiet"></div>
 
 {% else %}
 	<div>
 		<h1>Кабинет автора</h1>
-		<p class="intro">Курсы, как их собрал агент. Курс правит агент; вы ставите замечания прямо на место — агент увидит их в очереди, поправит и отметит «сделано».</p>
+		<p class="intro">Курсы платформы и их действующие релизы. Курс правит агент новым релизом; вы ставите заметки прямо на место — агент увидит их в очереди, поправит и отметит «сделано».</p>
 	</div>
 	{% if courses %}
 	<ul class="courses">
 		{% for к in courses %}
-		<li><a href="{{ page_url }}?course={{ к.id | urlencode }}">
+		<li><a href="{{ к.url | e }}">
 			<strong>{{ к.title | e }}</strong>
-			<span class="status{% if к.upcoming %} soon{% elif к.published %} live{% endif %}">{{ "анонс" if к.upcoming else ("опубликован" if к.published else "черновик") }}</span>
-			<span class="muted" style="font-size: 14px;">{{ (к.summary or "") | e }}</span>
-			<span class="muted num" style="font-size: 13px;">уроков {{ к.lessons_total }}</span>
-			<span class="course-attention">
-				{% if к.notes_attention %}<span class="note-count">ждут вас {{ к.notes_attention }}</span>{% endif %}
-				{% if к.map_discrepancies %}<span class="map-count">расхождений с картой {{ к.map_discrepancies }}</span>{% endif %}
-				<span class="muted">изменён {{ frappe.utils.pretty_date(к.revision) }}</span>
+			<span class="status{% if к.upcoming %} soon{% elif к.published %} live{% endif %}">{{ к.status | e }}</span>
+			<span class="course-facts">
+				{% if к.release %}<span class="num">релиз v{{ к.release.version | e }} от {{ дата(к.release.published_at) }}</span>{% else %}<span>релиза нет</span>{% endif %}
+				{% if к.open_notes %}<span class="note-count" title="Открытых заметок">заметок {{ к.open_notes | e }}{% if к.notes_attention %}, ждут вас {{ к.notes_attention | e }}{% endif %}</span>{% endif %}
+				{% if к.testers_count %}<span>тестеров {{ к.testers_count | e }}</span>{% endif %}
 			</span>
 		</a></li>
 		{% endfor %}
 	</ul>
 	{% else %}
-	<p class="intro">Курсов пока нет. Попросите агента создать курс — он появится здесь.</p>
+	<p class="intro">Курсов пока нет. Курс появится здесь, как только его заведут: карточкой без программы — до первого релиза — или сразу релизом.</p>
 	{% endif %}
 {% endif %}
 
-{% if course and not missing %}{% include "lms_frappe_app/templates/includes/author_notes.html" %}{% endif %}
+{% if release and not missing %}{% include "lms_frappe_app/templates/includes/author_notes.html" %}{% endif %}
 </div>
 </div>
 
 {% if course and not missing %}
 <script>
 (function () {
-	// Агент правит курс, пока человек читает. Перерисовывать под читателем
-	// нельзя — длинный урок прыгал бы; поэтому только плашка «обновить».
+	// Курс меняется новым релизом, пока человек читает. Перерисовывать под
+	// читателем нельзя — длинная страница прыгала бы; поэтому только плашка
+	// «обновить».
 	const курс = {{ course.id | tojson }};
 	const известная = {{ course.revision | tojson }};
-	let известныеЗамечания = {{ course.notes_revision | tojson }};
+	let известныеЗаметки = {{ course.notes_revision | tojson }};
 	const плашка = document.getElementById("author-notice");
 	const тихо = document.getElementById("author-quiet");
-	const адрес = "/api/method/{{ revision_method }}?course=" + encodeURIComponent(курс);
+	const адрес = "/api/method/" + {{ revision_method | tojson }} + "?course=" + encodeURIComponent(курс);
 	let таймер = setInterval(проверить, 15000);
 
 	async function метки() {
 		const ответ = await fetch(адрес, { credentials: "same-origin", headers: { Accept: "application/json" } });
 		return { ответ, данные: ответ.ok ? ((await ответ.json()).message || {}).data : null };
 	}
-	// Своё замечание или ответ меняют метку замечаний; чтобы не показывать
+	// Своя заметка или ответ меняют метку заметок; чтобы не показывать
 	// плашку о себе, страница сверяет метку сразу после своего действия.
 	window.авторСверитьМетку = async () => {
-		try { const { данные } = await метки(); if (данные) известныеЗамечания = данные.notes_revision; } catch (e) { /* следующий опрос */ }
+		try { const { данные } = await метки(); if (данные) известныеЗаметки = данные.notes_revision; } catch (e) { /* следующий опрос */ }
 	};
 
 	async function проверить() {
 		try {
-			const ответ = await fetch(адрес, { credentials: "same-origin", headers: { Accept: "application/json" } });
+			const { ответ, данные } = await метки();
 			if (ответ.status === 401 || ответ.status === 403) {
 				тихо.innerHTML = 'Сессия закончилась — <a href="/login?redirect-to=' + encodeURIComponent(location.pathname + location.search) + '">войдите</a>, чтобы видеть изменения.';
 				clearInterval(таймер);
 				return;
 			}
-			const тело = await ответ.json();
-			const данные = тело.message && тело.message.data;
 			тихо.textContent = "";
-			const текст = данные && (данные.revision !== известная ? "Агент изменил курс."
-				: данные.notes_revision !== известныеЗамечания ? "Агент ответил на замечание." : "");
+			const текст = данные && (данные.revision !== известная ? "Курс изменился: вышел новый релиз или сменилось состояние."
+				: данные.notes_revision !== известныеЗаметки ? "Агент ответил на заметку." : "");
 			if (текст) {
 				плашка.querySelector("[data-notice-text]").textContent = текст;
 				плашка.classList.add("shown");
@@ -770,8 +628,8 @@
 })();
 
 (function () {
-	// Якорь внутри свёрнутого блока или принятых замечаний: раскрыть, иначе
-	// ссылка из очереди или указателя ведёт в никуда.
+	// Якорь внутри свёрнутого урока, раздела или принятых заметок: раскрыть,
+	// иначе ссылка из очереди или указателя ведёт в никуда.
 	function раскрытьЯкорь() {
 		const цель = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
 		if (!цель) return;
@@ -785,42 +643,6 @@
 	раскрытьЯкорь();
 	addEventListener("hashchange", раскрытьЯкорь);
 
-	const описание = document.getElementById("course-summary");
-	const целиком = document.getElementById("course-summary-more");
-	if (описание && целиком) {
-		const нужна = () => { целиком.hidden = !описание.classList.contains("open") && описание.scrollHeight <= описание.clientHeight + 1; };
-		нужна();
-		addEventListener("resize", нужна);
-		целиком.addEventListener("click", () => {
-			const открыто = описание.classList.toggle("open");
-			целиком.setAttribute("aria-expanded", String(открыто));
-			целиком.textContent = открыто ? "Свернуть" : "Описание целиком";
-		});
-	}
-
-	// Строка с прокруткой вбок гаснет к тому краю, за которым ещё что-то есть.
-	document.querySelectorAll("[data-scroll-row]").forEach(ряд => {
-		const отметить = () => {
-			ряд.classList.toggle("more-left", ряд.scrollLeft > 2);
-			ряд.classList.toggle("more-right", ряд.scrollLeft + ряд.clientWidth < ряд.scrollWidth - 2);
-		};
-		отметить();
-		ряд.addEventListener("scroll", отметить, { passive: true });
-		addEventListener("resize", отметить);
-	});
-
-	// Открыли урок — визит: снимок его мест станет базой отметок «изменено»
-	// в следующий раз. Ответ не ждём: отметки этой страницы уже посчитаны.
-	const урок = document.getElementById("lesson-config");
-	const заметки = document.getElementById("note-config");
-	if (урок && заметки) {
-		const { lesson, seen } = JSON.parse(урок.textContent);
-		fetch("/api/method/" + seen, {
-			method: "POST", credentials: "same-origin", body: new URLSearchParams({ lesson }),
-			headers: { "X-Frappe-CSRF-Token": JSON.parse(заметки.textContent).csrf, Accept: "application/json" },
-		}).catch(() => {});
-	}
-
 	const панель = document.getElementById("lesson-bar");
 	if (!панель) return;
 	// Высота панели меняется, когда появляется плашка «обновить»: якоря
@@ -828,27 +650,6 @@
 	const мерить = () => document.documentElement.style.setProperty("--bar", панель.offsetHeight + "px");
 	мерить();
 	if (window.ResizeObserver) new ResizeObserver(мерить).observe(панель);
-
-	// Где читатель сейчас: раздел, чей верх ушёл под панель последним.
-	const навигация = панель.querySelector(".lesson-nav");
-	const ссылки = [...навигация.querySelectorAll('a[href^="#"]')];
-	const разделы = ссылки.map(а => document.getElementById(а.getAttribute("href").slice(1)));
-	let текущий = null, ждём = false;
-	function отметить() {
-		ждём = false;
-		const граница = панель.getBoundingClientRect().bottom + 16;
-		let номер = -1;
-		разделы.forEach((р, и) => { if (р && р.getBoundingClientRect().top <= граница) номер = и; });
-		// У низа страницы последний раздел может так и не дойти до панели.
-		if (номер >= 0 && innerHeight + scrollY >= document.documentElement.scrollHeight - 4) номер = разделы.length - 1;
-		if (номер === текущий) return;
-		текущий = номер;
-		ссылки.forEach((а, и) => { if (и === номер) а.setAttribute("aria-current", "location"); else а.removeAttribute("aria-current"); });
-		const активная = ссылки[номер];
-		if (активная) навигация.scrollLeft = активная.offsetLeft - навигация.offsetLeft - (навигация.clientWidth - активная.offsetWidth) / 2;
-	}
-	addEventListener("scroll", () => { if (!ждём) { ждём = true; requestAnimationFrame(отметить); } }, { passive: true });
-	отметить();
 })();
 </script>
 {% endif %}

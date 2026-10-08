@@ -16,7 +16,6 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	ПРОБНЫХ_УРОКОВ,
 	пробных_уроков,
 )
-from lms_frappe_app.agent_learning.normalizer import ПРЕДЕЛ_СЕГМЕНТА, предел_сегмента
 from lms_frappe_app.api.student import (
 	ГЛУБИНА_ПЕРЕНОСА,
 	ЛИМИТ_ЗАМЕТОК,
@@ -33,7 +32,6 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 ПАРАМЕТРЫ = (
 	("carry_over_depth", глубина_переноса, ГЛУБИНА_ПЕРЕНОСА),
 	("student_notes_limit", лимит_заметок, ЛИМИТ_ЗАМЕТОК),
-	("lesson_segment_limit", предел_сегмента, ПРЕДЕЛ_СЕГМЕНТА),
 	("web_demo_lessons", пробных_уроков, ПРОБНЫХ_УРОКОВ),
 )
 

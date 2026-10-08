@@ -10,7 +10,6 @@
  "field_order": [
   "session",
   "student",
-  "quiz",
   "lesson",
   "course",
   "release",
@@ -22,7 +21,6 @@
   "score",
   "passed",
   "objective_results",
-  "submission",
   "sb_time",
   "started_at",
   "finished_at",
@@ -49,15 +47,6 @@
    "options": "User",
    "read_only": 1,
    "reqd": 1,
-   "search_index": 1
-  },
-  {
-   "description": "Квиз Frappe Learning; у попытки по уроку из релиза пусто.",
-   "fieldname": "quiz",
-   "fieldtype": "Link",
-   "label": "Квиз",
-   "options": "LMS Quiz",
-   "read_only": 1,
    "search_index": 1
   },
   {
@@ -138,14 +127,6 @@
    "read_only": 1
   },
   {
-   "description": "Стандартная запись Frappe Learning — по ней результат виден в браузере",
-   "fieldname": "submission",
-   "fieldtype": "Link",
-   "label": "Запись результата",
-   "options": "LMS Quiz Submission",
-   "read_only": 1
-  },
-  {
    "fieldname": "sb_time",
    "fieldtype": "Section Break",
    "label": "Время"
@@ -193,7 +174,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-10-08 12:00:00.000000",
+ "modified": "2026-10-09 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",
@@ -239,6 +220,6 @@
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "title_field": "quiz",
+ "title_field": "lesson_key",
  "track_changes": 1
 }

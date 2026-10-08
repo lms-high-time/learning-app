@@ -29,9 +29,3 @@
 ПУСТОЙ_БЛОК = "artifact_content_required"
 ОЧИСТКА_С_ТЕКСТОМ = "artifact_clear_with_content"
 НЕВЕРНЫЙ_ВИД_БЛОКА = "invalid_block_kind"
-
-НЕВЕРНЫЙ_ШАБЛОН = "artifact_invalid_template"
-ШАБЛОН_НЕ_НАЙДЕН = "artifact_template_not_found"
-НЕВЕРНЫЕ_ПРАВКИ = "artifact_invalid_overlay"
-НЕ_ПРИВЯЗАН = "artifact_not_bound"
-ТА_ЖЕ_ВЕРСИЯ = "artifact_template_same_version"

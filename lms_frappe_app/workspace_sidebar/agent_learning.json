@@ -47,56 +47,8 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
-   "label": "Директивы курса",
-   "link_to": "Agent Course Directive",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Директивы уроков",
-   "link_to": "Agent Lesson Directive",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "",
-   "indent": 0,
-   "keep_closed": 0,
    "label": "Схемы документов",
    "link_to": "Agent Course Artifact",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Шаблоны документов",
-   "link_to": "Agent Artifact Template",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Карты курсов",
-   "link_to": "Agent Course Map",
    "link_type": "DocType",
    "show_arrow": 0,
    "type": "Link"
@@ -133,18 +85,6 @@
    "keep_closed": 0,
    "label": "Замечания авторов",
    "link_to": "Agent Author Note",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Визиты авторов",
-   "link_to": "Agent Author Visit",
    "link_type": "DocType",
    "show_arrow": 0,
    "type": "Link"
@@ -399,7 +339,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-08 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",

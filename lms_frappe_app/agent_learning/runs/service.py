@@ -21,11 +21,10 @@ from collections.abc import Collection
 import frappe
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
+from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, УРОК_НЕ_В_РЕЛИЗЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.releases import index
 
 ПРОХОЖДЕНИЕ = "Agent Lesson Run"
-УРОК_НЕ_В_РЕЛИЗЕ = "lesson_not_in_release"
 ТОЧКА_ВСТАВКИ = "lesson_run_insert"
 ТОЧКА_СВЕРКИ = "lesson_run_reconcile"
 

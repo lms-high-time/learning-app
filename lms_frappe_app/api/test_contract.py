@@ -41,6 +41,10 @@ from lms_frappe_app.tests.sample_data import (
 	создать_ученика,
 	урок_релиза,
 	зачислить_на_курс,
+	привязать_главу,
+	привязать_урок,
+	создать_домашку,
+	схема_документа,
 )
 
 #: Документ контракта лежит в корне репозитория, рядом с README и CONTRIBUTING.
@@ -134,8 +138,8 @@ class IntegrationTestContractCoverage(IntegrationTestCase):
 
 	def test_у_метода_ровно_один_раздел(self):
 		"""Раздел на метод: склейка двух методов в один заголовок оставляет
-		второй без параметров, ответа и отказов — так и потерялись
-		`remove_chapter`, `reorder_chapters` и `unpublish_course`."""
+		второй без параметров, ответа и отказов — так однажды и потерялось
+		описание трёх методов."""
 		склеенные = [раздел for раздел in self.разделы if len(раздел) > 1]
 		self.assertFalse(
 			склеенные,
@@ -262,9 +266,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		политика_по_умолчанию()
 		self.примеры = примеры_ответов()
 		суффикс = frappe.generate_hash(length=6)
-		# Moderator, а не Course Creator: удаление уроков Frappe Learning
-		# разрешает только ему.
-		self.куратор = создать_куратора(f"contract-{суффикс}@example.com", роль="Moderator")
+		self.куратор = создать_куратора(f"contract-{суффикс}@example.com")
 		self.ученик = создать_ученика(f"contract-pupil-{суффикс}@example.com")
 		self.организация = создать_организацию(f"Контракт {суффикс}")
 		добавить_в_организацию(self.ученик, self.организация)
@@ -292,6 +294,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		курс, уроки = self._собрать_курс()
 		курс_релиза = self._опубликовать_релиз()
 		репорт, сдача = self._пройти_курс(курс, уроки, курс_релиза)
+		self._посмотреть_прохождения(курс_релиза)
 		self._разобрать_репорт(курс_релиза, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
@@ -301,14 +304,38 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
 		релиз = пример_релиза(f"contract-{self.суффикс}")
-		курс = self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))["course"]
+		курс = self.сверить(
+			"authoring.publish_release", authoring.publish_release(release=релиз, instructors=[self.куратор])
+		)["course"]
 		# Повтор отвечает теми же ключами, что и публикация.
 		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		self.сверить("authoring.course_release", authoring.course_release(course=курс))
+		self.сверить("authoring.course_release", authoring.course_release(course=курс, lesson="l-1"))
+		self.сверить("authoring.course_releases", authoring.course_releases(course=курс))
+		self.сверить("authoring.course_revision", authoring.course_revision(course=курс))
+		заметка = self.сверить(
+			"authoring.add_note",
+			authoring.add_note(course=курс, target="goal.l-1/term:T1", text="Проверь пример"),
+		)["id"]
+		self.сверить("authoring.reply_note", authoring.reply_note(note=заметка, text="Шаг 3"))
+		self.сверить(
+			"authoring.set_note_status",
+			authoring.set_note_status(note=заметка, status="done", text="Поправил", via="agent"),
+		)
+		self.сверить("authoring.list_notes", authoring.list_notes(course=курс))
+		self.сверить("authoring.publish_course", authoring.publish_course(course=курс))
+		self.сверить("authoring.unpublish_course", authoring.unpublish_course(course=курс))
+		authoring.publish_course(course=курс)
 		return курс
 
-	# --- сборка курса ---
+	# --- курс без релиза ---
 
 	def _собрать_курс(self) -> tuple[str, list[str]]:
+		"""Курс без релиза: анонс, его правка и программа, заведённая в Learning.
+
+		Методы ученика вне урока релиза (`lesson_entry`, `homework`, документ)
+		читают и такой курс; программу ему даёт не авторинг, а записи Learning.
+		"""
 		frappe.set_user(self.куратор)
 		суффикс = self.суффикс
 
@@ -322,192 +349,27 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			authoring.update_course(course=курс, summary="Курс для сверки контракта"),
 		)
 
-		первая = self.сверить(
-			"authoring.add_chapter", authoring.add_chapter(course=курс, title="Первая")
-		)["id"]
-		вторая = self.сверить(
-			"authoring.add_chapter", authoring.add_chapter(course=курс, title="Вторая")
-		)["id"]
-		self.сверить(
-			"authoring.update_chapter",
-			authoring.update_chapter(chapter=первая, title="Начало"),
+		frappe.set_user("Administrator")
+		с_квизом = self._урок(курс, "Начало", "Циклы")
+		без_квиза = self._урок(курс, "Функции", "Функции и возврат")
+		создать_домашку(
+			с_квизом,
+			title="Цикл из жизни",
+			description="Найдите у себя на работе повторяющееся действие и опишите его циклом.",
+			due_mode="relative",
+			due_days=3,
 		)
+		frappe.set_user(self.куратор)
 
-		с_квизом = self.сверить(
-			"authoring.add_lesson",
-			authoring.add_lesson(chapter=первая, title="Циклы", body="# Циклы\n\nТекст урока."),
-		)["id"]
-		без_квиза = self.сверить(
-			"authoring.add_lesson",
-			authoring.add_lesson(chapter=вторая, title="Функции", body="# Функции\n\nТекст."),
-		)["id"]
-		лишний = authoring.add_lesson(chapter=вторая, title="Лишний", body="# Лишний")["data"]["id"]
-
-		self.сверить(
-			"authoring.update_lesson",
-			authoring.update_lesson(lesson=без_квиза, title="Функции и возврат"),
-		)
-		self.сверить(
-			"authoring.move_lesson", authoring.move_lesson(lesson=лишний, position=1)
-		)
-		self.сверить(
-			"authoring.reorder_lessons",
-			authoring.reorder_lessons(chapter=вторая, lessons=[без_квиза, лишний]),
-		)
-		self.сверить(
-			"authoring.reorder_chapters",
-			authoring.reorder_chapters(course=курс, chapters=[первая, вторая]),
-		)
-
-		# Лишнее убирается до публикации: пустая глава и урок без следов.
-		self.сверить("authoring.remove_lesson", authoring.remove_lesson(lesson=лишний))
-		пустая = authoring.add_chapter(course=курс, title="Пустая")["data"]["id"]
-		self.сверить("authoring.remove_chapter", authoring.remove_chapter(chapter=пустая))
-
-		self.сверить(
-			"authoring.set_directive",
-			authoring.set_directive(
-				lesson=с_квизом,
-				teaching_directive="Разобрать разницу между while и for",
-				objectives="Понимать разницу между while и for",
-			),
-		)
-		self.сверить(
-			"authoring.set_course_directive",
-			authoring.set_course_directive(
-				course=курс,
-				teaching_directive="Говорить примерами из работы",
-				objectives="Писать циклы\nВыделять функции",
-				remember_about_student="Чем занимается на работе",
-			),
-		)
-		self.сверить(
-			"authoring.set_course_artifact",
-			authoring.set_course_artifact(
-				course=курс,
-				artifact="summary",
-				title="Резюме проекта",
-				blocks=[
-					{
-						"key": "goal",
-						"title": "Цель",
-						"hint": "Одной фразой",
-						"lesson": с_квизом,
-					}
-				],
-			),
-		)
-
-		# Тот же документ из шаблона: урок блока — в правках курса.
-		шаблон = self.сверить(
-			"authoring.set_artifact_template",
-			authoring.set_artifact_template(
-				template=f"summary-{суффикс}",
-				title="Резюме проекта",
-				blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой"}],
-				note="Первая версия",
-				description="Резюме проекта: цель одной фразой",
-			),
-		)["template"]
-		self.сверить("authoring.list_artifact_templates", authoring.list_artifact_templates())
-		self.сверить("authoring.artifact_template", authoring.artifact_template(template=шаблон))
-		self.сверить(
-			"authoring.set_course_artifact_template",
-			authoring.set_course_artifact_template(
-				course=курс,
-				artifact="summary",
-				template=шаблон,
-				overlay={"blocks": {"goal": {"lesson": с_квизом}}},
-			),
-		)
-		authoring.set_artifact_template(
-			template=шаблон,
+		# Документ курса — тем же `записать_схему`, что пишет его из релиза.
+		схема_документа(
+			course=курс,
+			artifact="summary",
 			title="Резюме проекта",
-			blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой, с цифрой"}],
-			note="Цель — с цифрой",
-		)
-		self.сверить(
-			"authoring.upgrade_course_artifact",
-			authoring.upgrade_course_artifact(course=курс, artifact="summary", dry_run=True),
-		)
-		self.сверить(
-			"authoring.upgrade_course_artifact",
-			authoring.upgrade_course_artifact(course=курс, artifact="summary"),
+			blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой", "lesson": с_квизом}],
 		)
 
-		self.сверить(
-			"authoring.add_quiz",
-			authoring.add_quiz(
-				lesson=с_квизом,
-				questions=[
-					{
-						"text": "Сколько раз выполнится цикл?",
-						"options": [{"text": "Трижды", "correct": True}, {"text": "Ни разу"}],
-					},
-					{
-						"text": "Что проверяет while?",
-						"options": [{"text": "Условие", "correct": True}, {"text": "Длину"}],
-					},
-				],
-			),
-		)
-		лишний_вопрос = self.сверить(
-			"authoring.add_question",
-			authoring.add_question(
-				lesson=с_квизом,
-				question={
-					"text": "Лишний вопрос",
-					"options": [{"text": "Да", "correct": True}, {"text": "Нет"}],
-				},
-			),
-		)["question"]
-		self.сверить(
-			"authoring.update_question",
-			authoring.update_question(question=лишний_вопрос, text="Лишний вопрос, переписанный"),
-		)
-		self.сверить(
-			"authoring.remove_question",
-			authoring.remove_question(lesson=с_квизом, question=лишний_вопрос),
-		)
-
-		self.сверить(
-			"authoring.add_homework",
-			authoring.add_homework(
-				lesson=с_квизом,
-				title="Цикл из жизни",
-				description="Найдите у себя на работе повторяющееся действие и опишите его циклом.",
-			),
-		)
-		self.сверить(
-			"authoring.update_homework",
-			authoring.update_homework(lesson=с_квизом, due_mode="relative", due_days=3),
-		)
-		# Задание второго урока ставится и снимается, пока по нему никто не сдавал.
-		authoring.add_homework(lesson=без_квиза, title="Лишнее", description="Лишнее задание")
-		self.сверить("authoring.remove_homework", authoring.remove_homework(lesson=без_квиза))
-		self.сверить("authoring.get_lesson", authoring.get_lesson(lesson=с_квизом))
-		self.сверить("authoring.course_draft", authoring.course_draft(course=курс))
 		self.сверить("authoring.course_revision", authoring.course_revision(course=курс))
-		self.сверить("authoring.course_map_check", authoring.course_map_check(course=курс))
-		self.сверить(
-			"authoring.set_course_map",
-			authoring.set_course_map(
-				course=курс,
-				levels=[{"key": "result", "title": "Результат"}],
-				nodes=[{"id": "R", "level": "result", "text": "Курс собран"}],
-			),
-		)
-		self.сверить("authoring.course_map_check", authoring.course_map_check(course=курс))
-		замечание = self.сверить(
-			"authoring.add_note",
-			authoring.add_note(course=курс, target="lesson", lesson=с_квизом, text="Проверь пример"),
-		)["id"]
-		self.сверить("authoring.reply_note", authoring.reply_note(note=замечание, text="Шаг 3"))
-		self.сверить(
-			"authoring.set_note_status",
-			authoring.set_note_status(note=замечание, status="done", text="Поправил", via="agent"),
-		)
-		self.сверить("authoring.list_notes", authoring.list_notes(course=курс))
 		# Тестеры до публикации: методы кабинета автора (learning-services#393).
 		тестер = создать_ученика(f"contract-tester-{суффикс}@example.com")
 		self.сверить("authoring.add_testers", authoring.add_testers(course=курс, users=тестер))
@@ -515,18 +377,33 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить(
 			"authoring.remove_tester", authoring.remove_tester(course=курс, user=тестер)
 		)
-		# Анонс до выхода: у него своя карта и подписка на письмо о выходе.
-		self.сверить("authoring.announce_course", authoring.announce_course(course=курс))
+		# Анонс до выхода — курс без уроков: у него своя карта и подписка на
+		# письмо о выходе.
+		анонс = authoring.create_course(title=f"Анонс {суффикс}", summary="Скоро")["data"]["id"]
+		self.сверить(
+			"authoring.announce_course",
+			authoring.announce_course(course=анонс, objectives="Писать циклы\nВыделять функции"),
+		)
 		frappe.set_user(self.ученик)
 		self.сверить(
-			"student.notify_when_released", student.notify_when_released(course=курс)
+			"student.notify_when_released", student.notify_when_released(course=анонс)
 		)
-		self.сверить("public.course_map", public.course_map(course=курс))
+		self.сверить("public.course_map", public.course_map(course=анонс))
+		# Открывает `publish_course` только курс из релиза; этот курс — запись напрямую.
+		frappe.set_user("Administrator")
+		frappe.db.set_value("LMS Course", курс, {"published": 1, "upcoming": 0})
 		frappe.set_user(self.куратор)
-		self.сверить("authoring.publish_course", authoring.publish_course(course=курс))
-		self.сверить("authoring.unpublish_course", authoring.unpublish_course(course=курс))
-		authoring.publish_course(course=курс)
 		return курс, [с_квизом, без_квиза]
+
+	def _урок(self, курс: str, название_главы: str, название: str) -> str:
+		"""Глава с одним уроком в конце программы курса — записями Learning."""
+		глава = frappe.get_doc({"doctype": "Course Chapter", "course": курс, "title": название_главы}).insert()
+		привязать_главу(курс, глава.name)
+		урок = frappe.get_doc(
+			{"doctype": "Course Lesson", "chapter": глава.name, "title": название, "body": f"# {название}"}
+		).insert()
+		привязать_урок(глава.name, урок.name)
+		return урок.name
 
 	def _назначить_курс(self, курс: str) -> None:
 		"""Назначение организации: оно приносит дедлайн ученику и строки
@@ -650,6 +527,14 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 							session=занятие, goal=пункт["key"], status="done", evidence="Ученик сделал сам"
 						),
 					)
+
+	# --- прохождения уроков для автора ---
+
+	def _посмотреть_прохождения(self, курс: str) -> None:
+		frappe.set_user(self.куратор)
+		прохождения = self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс))["runs"]
+		self.assertTrue(прохождения, "у ученика нет прохождений — сверять нечего")
+		self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс, lesson="l-1", start=0, limit=1))
 
 	# --- репорт: разбор и итог ---
 

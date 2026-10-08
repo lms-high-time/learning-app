@@ -18,6 +18,10 @@ CI: ни одна прежняя проверка не смотрела на с�
 Тот же класс риска у `LMS Quiz Submission`: там право ученика есть, но только
 `if_owner`. Потеря `if_owner` при слиянии открывает попытки чужих учеников —
 без текста верного варианта, но с `is_correct` по каждому вопросу.
+
+Вопросы, квизы и попытки Learning заводятся здесь же, напрямую: квиз
+приложения идёт по релизу и записей Learning не пишет, а проверяются права
+самих доктайпов Learning.
 """
 
 import json
@@ -27,15 +31,7 @@ import frappe.client
 from frappe.desk import reportview
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning.quiz import начать_попытку, принять_ответ
-from lms_frappe_app.tests.sample_data import (
-	зачислить,
-	создать_вопрос,
-	создать_занятие,
-	создать_квиз,
-	создать_ученика,
-	создать_урок,
-)
+from lms_frappe_app.tests.sample_data import зачислить, создать_ученика, создать_урок
 
 РОЛЬ = "LMS Student"
 ЭТАЛОН = "LMS Question"
@@ -76,14 +72,31 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 		self.ученик = создать_ученика(f"up-{суффикс}@example.com")
 		self.чужой = создать_ученика(f"up-other-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок {суффикс}")
-		self.вопрос = создать_вопрос(
-			"Столица России?",
-			варианты=[("Москва", True), ("Тула", False)],
-			пояснение="Столицей она стала в пятнадцатом веке",
-		)
-		self.квиз = создать_квиз(self.урок, [self.вопрос])
-		зачислить(self.ученик, self.урок)
+		self.курс = зачислить(self.ученик, self.урок)
 		зачислить(self.чужой, self.урок)
+		self.вопрос = frappe.get_doc(
+			{
+				"doctype": ЭТАЛОН,
+				"question": "Столица России?",
+				"type": "Choices",
+				"option_1": "Москва",
+				"is_correct_1": 1,
+				"explanation_1": "Столицей она стала в пятнадцатом веке",
+				"option_2": "Тула",
+				"is_correct_2": 0,
+			}
+		).insert(ignore_permissions=True).name
+		self.квиз = frappe.get_doc(
+			{
+				"doctype": "LMS Quiz",
+				"title": f"Квиз {суффикс}",
+				"lesson": self.урок,
+				"course": self.курс,
+				"total_marks": 1,
+				"passing_percentage": 100,
+				"questions": [{"question": self.вопрос, "marks": 1}],
+			}
+		).insert(ignore_permissions=True).name
 
 	# --- вспомогательное ---
 
@@ -104,23 +117,38 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 			frappe.local.form_dict = прежний
 
 	def _сдать_квиз(self, ученик: str) -> str:
-		"""Проходит квиз от имени ученика и возвращает `LMS Quiz Submission`.
+		"""Заводит `LMS Quiz Submission` от имени ученика и возвращает её имя.
 
 		Именно от его имени: право на записи `if_owner`, а владельца задаёт
 		пользователь сессии в момент вставки. Запись, созданная администратором,
 		проверяла бы не то.
 		"""
-		занятие = создать_занятие(ученик, self.урок)
 		frappe.set_user(ученик)
 		try:
-			попытка = начать_попытку(занятие)["attempt"]
-			принять_ответ(попытка, self.вопрос, "1", "слова ученика")
+			return frappe.get_doc(
+				{
+					"doctype": ПОПЫТКА,
+					"quiz": self.квиз,
+					"course": self.курс,
+					"member": ученик,
+					"score": 1,
+					"score_out_of": 1,
+					"percentage": 100,
+					"passing_percentage": 100,
+					"result": [
+						{
+							"question_name": self.вопрос,
+							"question": "Столица России?",
+							"answer": "Москва",
+							"marks": 1,
+							"marks_out_of": 1,
+							"is_correct": 1,
+						}
+					],
+				}
+			).insert(ignore_permissions=True).name
 		finally:
 			frappe.set_user("Administrator")
-
-		запись = frappe.db.get_value("Agent Quiz Attempt", попытка, "submission")
-		self.assertTrue(запись, "квиз не создал LMS Quiz Submission — проверять нечего")
-		return запись
 
 	# --- эталоны ---
 
@@ -148,9 +176,9 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 	def test_вопрос_своего_квиза_не_открывается_по_имени(self):
 		"""То, что делает `GET /api/resource/LMS Question/<name>`.
 
-		Вопрос берётся из собственного квиза ученика: фильтр списка такую
-		запись всё равно бы вернул, если бы право появилось, — значит, дыру
-		надо ловить и на прямом обращении по имени.
+		Вопрос берётся из квиза урока, на курс которого ученик зачислен:
+		фильтр списка такую запись всё равно бы вернул, если бы право
+		появилось, — значит, дыру надо ловить и на прямом обращении по имени.
 		"""
 		frappe.set_user(self.ученик)
 

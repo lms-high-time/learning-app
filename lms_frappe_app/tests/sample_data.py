@@ -152,57 +152,6 @@ def создать_менеджера(почта: str, organization: str) -> str
 	return почта
 
 
-def создать_вопрос(
-	текст: str,
-	варианты: list[tuple] | None = None,
-	возможные_ответы: list[str] | None = None,
-	пояснение: str | None = None,
-) -> str:
-	"""Вопрос с вариантами (Choices) или со свободным вводом (User Input).
-
-	Вариант — `(текст, верный)` или `(текст, верный, пояснение)`. `пояснение`
-	без своего у варианта достаётся верным вариантам.
-	"""
-	поля = {"doctype": "LMS Question", "question": текст}
-	if возможные_ответы is not None:
-		поля["type"] = "User Input"
-		for номер, ответ in enumerate(возможные_ответы, start=1):
-			поля[f"possibility_{номер}"] = ответ
-	else:
-		поля["type"] = "Choices"
-		верных = sum(1 for вариант in варианты or [] if вариант[1])
-		поля["multiple"] = int(верных > 1)
-		for номер, (вариант, верный, *своё) in enumerate(варианты or [], start=1):
-			поля[f"option_{номер}"] = вариант
-			поля[f"is_correct_{номер}"] = int(верный)
-			пояснение_варианта = своё[0] if своё else (пояснение if верный else None)
-			if пояснение_варианта:
-				поля[f"explanation_{номер}"] = пояснение_варианта
-	return frappe.get_doc(поля).insert(ignore_permissions=True).name
-
-
-def создать_квиз(lesson: str, вопросы: list[str], баллов_за_вопрос: int = 1) -> str:
-	"""Квиз урока. Привязывается и через quiz_id урока — так его ищет Frappe."""
-	курс = frappe.db.get_value(
-		"Course Chapter", frappe.db.get_value("Course Lesson", lesson, "chapter"), "course"
-	)
-	квиз = frappe.get_doc(
-		{
-			"doctype": "LMS Quiz",
-			"title": f"Квиз {frappe.generate_hash(length=6)}",
-			"lesson": lesson,
-			"course": курс,
-			"total_marks": len(вопросы) * баллов_за_вопрос,
-			"passing_percentage": 80,
-			"questions": [
-				{"question": вопрос, "marks": баллов_за_вопрос} for вопрос in вопросы
-			],
-		}
-	).insert(ignore_permissions=True)
-	frappe.db.set_value("Course Lesson", lesson, "quiz_id", квиз.name)
-	return квиз.name
-
-
 def создать_занятие(student: str, lesson: str, run: str | None = None) -> str:
 	"""Занятие с курсом и пространством — по тому же правилу, что у `start_lesson`;
 	`run` — прохождение урока, к которому занятие относится."""
@@ -305,6 +254,33 @@ def отметить_все_пункты(run: str, занятие: str | None = 
 	return ответ
 
 
+def схема_документа(
+	course: str,
+	artifact: str,
+	title: str,
+	blocks,
+	layout: str = "sections",
+	canvas=None,
+	purpose: str | None = None,
+) -> dict:
+	"""Схема документа курса новой версией — ответом в форме контракта:
+	`{ok, data: {id, course, artifact, version}}` или `{ok, error}`.
+
+	Схему документа курса пишет релиз, но его разделы — только текст; файлы,
+	ссылки, формулы и холст движка документов тестам нужны и без него. Пишется
+	тем же `записать_схему`, что и у релиза.
+	"""
+	from lms_frappe_app.agent_learning.artifacts.course import записать_схему
+	from lms_frappe_app.api import контракт, список
+
+	@контракт
+	def записать() -> dict:
+		версия = записать_схему(course, artifact, title, список(blocks), layout, canvas, purpose=purpose)
+		return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
+
+	return записать()
+
+
 def политика_по_умолчанию() -> None:
 	"""Возвращает общие настройки к значениям, на которые опираются тесты.
 
@@ -316,14 +292,12 @@ def политика_по_умолчанию() -> None:
 	настройки.update(
 		{
 			"quiz_required": 1,
-			"pass_threshold": 0.8,
 			"max_attempts": 3,
 			"retry_delay_minutes": 60,
 			"session_timeout_hours": 6,
 			"carry_over_depth": 3,
 			"bridge_after_hours": 24,
 			"student_notes_limit": 20,
-			"lesson_segment_limit": 6000,
 			"web_demo_lessons": 2,
 			"agent_service_url": get_url().rstrip("/"),
 		}
@@ -333,7 +307,7 @@ def политика_по_умолчанию() -> None:
 
 
 def настроить_квиз(**поля) -> None:
-	"""Порог, лимит попыток и паузу задаёт платформа — одна на всех (#353)."""
+	"""Обязательность, лимит попыток и паузу задаёт платформа — одна на всех (#353)."""
 	настройки = frappe.get_doc("Agent Learning Settings")
 	настройки.update(поля)
 	настройки.save(ignore_permissions=True)

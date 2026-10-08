@@ -6,18 +6,18 @@ import io
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import course_builder
 from lms_frappe_app.agent_learning.artifacts import codes, write
+from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
 from lms_frappe_app.agent_learning.spaces import пространство_курса
-from lms_frappe_app.api import authoring, manager, student
+from lms_frappe_app.api import manager, student
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
-	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
+	схема_документа,
 )
 
 CSV = "Месяц;Выручка;Расходы\nЯнварь;100;80\nФевраль;120;90\n".encode()
@@ -341,36 +341,27 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertEqual(строка["document"], {"blocks_total": 3, "blocks_filled": 1})
 
 
-class IntegrationTestArtifactKindsAuthoring(IntegrationTestCase):
-	"""Вид блока в авторинге и готовности курса."""
+class IntegrationTestArtifactKinds(IntegrationTestCase):
+	"""Вид блока и форматы файла в схеме документа курса."""
 
 	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.урок = создать_урок(f"Урок {суффикс}")
 		self.курс = frappe.db.get_value(
 			"Course Chapter", frappe.db.get_value("Course Lesson", self.урок, "chapter"), "course"
 		)
-		frappe.set_user(создать_куратора(f"au-{суффикс}@example.com"))
 
 	def схема(self, блоки: list[dict]) -> dict:
-		return authoring.set_course_artifact(self.курс, "plan", "План", блоки)
+		return схема_документа(self.курс, "plan", "План", блоки)
 
-	def test_вид_и_форматы_сохраняются_и_видны_в_черновике(self):
+	def test_вид_и_форматы_сохраняются(self):
 		self.схема([{"key": "money", "title": "Финплан", "kind": "file", "accept": ".XLSX, csv"}])
 
-		блок = authoring.course_draft(self.курс)["data"]["artifacts"][0]["blocks"][0]
+		блок = _схемы_курса(self.курс)[0].blocks[0]
 
-		self.assertEqual((блок["kind"], блок["accept"]), ("file", ["xlsx", "csv"]))
+		self.assertEqual((блок.kind, блок.accept), ("file", "xlsx,csv"))
 
 	def test_неизвестный_вид_отказ(self):
 		ответ = self.схема([{"key": "money", "title": "Финплан", "kind": "pdf"}])
 
 		self.assertEqual(ответ["error"]["code"], codes.НЕВЕРНЫЙ_ВИД_БЛОКА)
-
-	def test_готовность_предупреждает_о_файле_без_форматов(self):
-		self.схема([{"key": "money", "title": "Финплан", "kind": "file"}])
-
-		коды = [п["code"] for п in course_builder.проверить_готовность(self.курс)["warnings"]]
-
-		self.assertIn(course_builder.ФАЙЛ_БЕЗ_ФОРМАТОВ, коды)

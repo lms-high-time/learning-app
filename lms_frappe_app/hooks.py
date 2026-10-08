@@ -8,9 +8,8 @@ app_license = "agpl-3.0"
 # Apps
 # ------------------
 
-# Приложение опирается на доменную модель Frappe Learning: директива ссылается
-# на Course Lesson, сверка ответа — на LMS Question, итоги пишутся в
-# LMS Course Progress и LMS Quiz Submission.
+# Приложение опирается на доменную модель Frappe Learning: релиз строит главы
+# и уроки курса записями Learning, пройденные уроки пишутся в LMS Course Progress.
 required_apps = ["frappe/lms"]
 
 # Плитка приложения на стартовом экране desk. `Why:` Frappe 16 строит
@@ -168,7 +167,7 @@ fixtures = [
 	# Тестовая запись — отметка на самой записи на курс: доступ по-прежнему даёт
 	# запись, второго основания доступа нет (learning-services#393).
 	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
-	# (learning-services#500).
+	# (learning-services#500). Цели анонса — у курса без релиза (learning-services#512).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -182,6 +181,7 @@ fixtures = [
 					"LMS Course-course_key",
 					"LMS Course-active_release",
 					"LMS Course-course_attribution",
+					"LMS Course-announce_objectives",
 					"Course Chapter-chapter_description",
 				],
 			]
@@ -288,10 +288,29 @@ doc_events = {
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
 	},
-	# Ключ курса и действующий релиз ставит только публикация релиза
-	# (learning-services#500).
+	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
+	# публикация релиза (learning-services#500, #512).
 	"LMS Course": {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512).
+	"Course Chapter": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	"Course Lesson": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	# Строки оглавления удаляются и сами по себе — Desk и `delete_documents` Learning.
+	"Chapter Reference": {
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
+	},
+	"Lesson Reference": {
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
 }
 
@@ -333,6 +352,8 @@ before_tests = "lms_frappe_app.testing.before_tests"
 # Overriding Methods
 # ------------------------------
 
+_редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
+
 # Урок закрывает занятие с агентом, а не время на странице урока —
 # обоснование в модуле (lms-platform#305).
 override_whitelisted_methods = {
@@ -344,6 +365,14 @@ override_whitelisted_methods = {
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
 	"lms.lms.user.sign_up": "lms_frappe_app.access.sign_up_learning",
 	"frappe.core.doctype.user.user.update_password": "lms_frappe_app.access.update_password",
+	# Редактор Learning не правит главы и уроки курса из релиза: порядок он пишет
+	# мимо `validate` — обоснование в модуле (learning-services#512).
+	"lms.lms.api.delete_chapter": f"{_редактор}.delete_chapter",
+	"lms.lms.api.update_lesson_index": f"{_редактор}.update_lesson_index",
+	"lms.lms.api.update_chapter_index": f"{_редактор}.update_chapter_index",
+	"lms.lms.api.delete_lesson": f"{_редактор}.delete_lesson",
+	"lms.lms.api.create_lesson": f"{_редактор}.create_lesson",
+	"lms.lms.api.upsert_chapter": f"{_редактор}.upsert_chapter",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -360,11 +389,12 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# Замечания и визиты кабинета автора — не содержание курса: удалению урока
-# они не мешают. Замечание остаётся с пометкой «места больше нет», визит —
-# пустым следом. `Why:` без этого агент не мог удалить урок, к которому
-# поставили замечание (lms-high-time/learning-services#271).
-ignore_links_on_delete = ["Agent Author Note", "Agent Author Visit"]
+# Замечания кабинета автора — не содержание курса: удалению урока они не
+# мешают, замечание остаётся с пометкой «места больше нет». `Why:` урок курса
+# из релиза удаляется только вместе с курсом, и его замечания уходят раньше
+# (`releases.service.удалить_курс`); урок курса без релиза удаляют в
+# редакторе Learning, а замечание со ссылкой на него остановило бы удаление.
+ignore_links_on_delete = ["Agent Author Note"]
 
 # Request Events
 # ----------------

@@ -107,13 +107,3 @@ class IntegrationTestCourseTesters(IntegrationTestCase):
 	def test_ученик_тестеров_не_назначает(self):
 		with self.assertRaises(frappe.PermissionError):
 			self.от_имени(self.тестер, authoring.add_testers, course=self.курс, users=self.второй)
-
-	def test_кабинет_показывает_тестеров(self):
-		from lms_frappe_app.www.author import сведения
-
-		self.добавить(self.тестер)
-		frappe.set_user(self.куратор)
-		с = сведения(self.куратор, course=self.курс, view="testers")
-		self.assertEqual(с["view"], "testers")
-		self.assertEqual([т["user"] for т in с["testers"]], [self.тестер])
-		self.assertEqual(с["course"]["testers_count"], 1)

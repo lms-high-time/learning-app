@@ -13,7 +13,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning import quiz, release_quiz
-from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН
+from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН, ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА
 from lms_frappe_app.agent_learning.constants import (
 	ЗАНЯТИЕ_БРОШЕНО,
 	ЗАНЯТИЕ_ЖДЁТ_КВИЗ,
@@ -25,6 +25,7 @@ from lms_frappe_app.agent_learning.constants import (
 )
 from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.quiz import (
+	КВИЗА_НЕТ,
 	НУЖНЫ_СЛОВА,
 	ПОПЫТКА_ЗАВЕРШЕНА,
 	ПОПЫТКИ_ИСЧЕРПАНЫ,
@@ -37,6 +38,7 @@ from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
+	добавить_в_организацию,
 	зачислить,
 	настроить_квиз,
 	отметить_все_пункты,
@@ -44,6 +46,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_домашку,
 	создать_занятие,
 	создать_куратора,
+	создать_организацию,
 	создать_ученика,
 )
 
@@ -109,14 +112,14 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			self.assertNotIn(поле, выдано)
 		попытка = frappe.get_doc(ПОПЫТКА, начало["attempt"])
 		self.assertEqual(
-			(попытка.release, попытка.lesson_key, попытка.lesson, попытка.course, попытка.quiz),
-			(run.release, "l-1", run.lesson, run.course, None),
+			(попытка.release, попытка.lesson_key, попытка.lesson, попытка.course),
+			(run.release, "l-1", run.lesson, run.course),
 		)
 		self.assertEqual(
 			(попытка.session, попытка.student, попытка.attempt_number), (занятие, self.ученик, 1)
 		)
 
-	def test_первый_вопрос_в_форме_старого_квиза_с_ключами_вариантов(self):
+	def test_первый_вопрос_с_ключами_вариантов(self):
 		run, занятие = self.урок()
 
 		вопрос = release_quiz.начать(run, занятие)["question"]
@@ -142,7 +145,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "status"), ЗАНЯТИЕ_ЖДЁТ_КВИЗ)
 
 	def test_старт_не_меняет_занятие_не_в_работе(self):
-		"""Как у `quiz.начать_попытку`: в ожидание квиза переводится только занятие в работе."""
+		"""В ожидание квиза переводится только занятие в работе."""
 		настроить_квиз(max_attempts=5, retry_delay_minutes=0)
 		run, занятие = self.урок()
 		первая = release_quiz.начать(run, занятие)["attempt"]
@@ -208,6 +211,26 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.отказ(ЧУЖОЕ_ЗАНЯТИЕ, release_quiz.начать, run, создать_занятие(другой, run.lesson))
 
+	def test_урок_без_вопросов_даёт_внятный_код(self):
+		run, занятие = self.урок()
+		frappe.db.delete("Agent Release Question", {"parent": run.release, "lesson_key": "l-1"})
+
+		self.отказ(КВИЗА_НЕТ, release_quiz.начать, run, занятие)
+		self.assertFalse(frappe.db.exists(ПОПЫТКА, {"student": self.ученик}))
+
+	def test_квиз_по_курсу_приостановленной_организации_не_начать(self):
+		"""Доступ проверяется и при старте попытки: занятие могло начаться до приостановки."""
+		run, занятие = self.урок()
+		frappe.set_user("Administrator")
+		организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}")
+		добавить_в_организацию(self.ученик, организация)
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": организация, "course": run.course}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value("Learning Organization", организация, "status", "Suspended")
+
+		self.отказ(ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА, release_quiz.начать, run, занятие)
+
 	# --- ответ ---
 
 	def test_верный_ответ_с_пояснением(self):
@@ -223,13 +246,12 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		запись = frappe.get_all(
 			"Agent Quiz Answer",
 			filters={"attempt": попытка},
-			fields=["question", "question_key", "objective_key", "answer", "is_correct"],
+			fields=["question_key", "objective_key", "answer", "is_correct"],
 		)
 		self.assertEqual(
 			[dict(з) for з in запись],
 			[
 				{
-					"question": None,
 					"question_key": С1,
 					"objective_key": "l-1-D1",
 					"answer": "V1",
@@ -264,6 +286,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			),
 			[1, 0],
 		)
+
+	def test_ключ_важнее_текста(self):
+		"""Текст варианта `V2` совпадает с ключом `V1`: ответ `V1` — это вариант `V1`."""
+		релиз = релиз_двух_целей(self.ключ)
+		[вопрос] = [в for в in релиз["lessons"][0]["quiz"]["questions"] if в["key"] == С1]
+		[второй] = [в for в in вопрос["options"] if в["key"] == "V2"]
+		второй["text"] = "V1"
+		self.assertEqual(релиз["lessons"][0]["quiz"]["answers"][С1]["correct"], "V1")
+		run, занятие = self.урок(релиз)
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+
+		self.assertTrue(self.ответить(попытка, С1, "V1")["verdict"]["correct"])
 
 	def test_ключ_варианта_без_учёта_регистра_и_списком_из_одного(self):
 		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=3))
@@ -303,16 +337,16 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		журнал = frappe.get_all(
 			"Agent Quiz Event",
 			filters={"attempt": попытка},
-			fields=["kind", "question", "question_key", "answer", "student_words", "is_correct", "lesson"],
+			fields=["kind", "question_key", "answer", "student_words", "is_correct", "lesson"],
 			order_by="creation asc",
 		)
 
 		self.assertEqual(
-			[(з.kind, з.question, з.question_key) for з in журнал],
+			[(з.kind, з.question_key) for з in журнал],
 			[
-				(ПРОВЕРКА_ВОПРОС_ВЫДАН, None, С1),
-				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, None, С1),
-				(ПРОВЕРКА_ВОПРОС_ВЫДАН, None, С2),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
+				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С1),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
 			],
 		)
 		self.assertEqual(
@@ -327,6 +361,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		попытка = release_quiz.начать(run, занятие)["attempt"]
 
 		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, "S9/l-1-D1")
+
+	def test_ответ_в_попытку_без_релиза_отклоняется_без_записей(self):
+		"""Попытка без релиза — эталона нет: отказ, и ни ответа, ни события журнала."""
+		run, занятие = self.урок()
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, попытка, "release", None)
+		событий = frappe.db.count("Agent Quiz Event", {"attempt": попытка})
+
+		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1)
+
+		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
+		self.assertEqual(frappe.db.count("Agent Quiz Event", {"attempt": попытка}), событий)
 
 	def test_повторный_ответ_на_вопрос_отклоняется(self):
 		run, занятие = self.урок()
@@ -458,8 +504,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	# --- итог ---
 
 	def test_порог_урока_из_релиза_в_целых(self):
-		"""4 вопроса, 3 верных (75%): порог 70 — сдан, 80 — нет; порог платформы не читается."""
-		настроить_квиз(pass_threshold=0.9)
+		"""4 вопроса, 3 верных (75%): порог 70 — сдан, 80 — нет."""
 		for порог, сдан in ((70, True), (75, True), (80, False)):
 			with self.subTest(порог=порог):
 				релиз = релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=4)
@@ -562,6 +607,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(итог["attempts_left"], 2)
 		закончена = frappe.db.get_value(ПОПЫТКА, ответ["attempt"], "finished_at")
 		момент = datetime.fromisoformat(итог["retry_after"])
+		self.assertIsNotNone(момент.tzinfo, "время пересдачи — с поясом сайта")
 		self.assertEqual(момент.replace(tzinfo=None), add_to_date(закончена, minutes=60))
 
 	def test_последняя_попытка_без_паузы_в_итоге(self):
@@ -571,6 +617,16 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		итог = self.сдать(run, занятие, ["V2"])["result"]
 
 		self.assertEqual((итог["attempts_left"], итог["retry_after"]), (0, None))
+
+	def test_без_лимита_остаток_попыток_не_число(self):
+		"""«Без лимита» — ноль в общих настройках: остатка нет, а пауза есть."""
+		настроить_квиз(max_attempts=0, retry_delay_minutes=60)
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=1))
+
+		итог = self.сдать(run, занятие, ["V2"])["result"]
+
+		self.assertIsNone(итог["attempts_left"])
+		self.assertIsNotNone(итог["retry_after"])
 
 	def test_несданная_попытка_урок_не_закрывает(self):
 		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=1))
@@ -607,8 +663,21 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertTrue(
 			frappe.db.exists("Agent Homework Submission", {"member": self.ученик, "lesson": run.lesson})
 		)
-		self.assertFalse(frappe.db.exists("LMS Quiz Submission", {"member": self.ученик}))
-		self.assertFalse(frappe.db.get_value(ПОПЫТКА, ответ["attempt"], "submission"))
+
+	def test_квиз_сдаётся_и_после_закрытия_занятия_по_бездействию(self):
+		"""Ученик вернулся к последнему вопросу через сутки — зачёт не теряется, а брошенное занятие брошенным и остаётся."""
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=1))
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value("Agent Learning Session", занятие, "status", ЗАНЯТИЕ_БРОШЕНО)
+
+		итог = self.ответить(попытка, С1, "V1")["result"]
+
+		self.assertTrue(итог["passed"])
+		self.assertEqual(итог["session_status"], ЗАНЯТИЕ_БРОШЕНО)
+		self.assertEqual(frappe.db.get_value(ПОПЫТКА, попытка, "status"), ПОПЫТКА_ЗАЧТЕНА)
+		self.assertEqual(
+			frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run.name, "status"), прохождения.ПРОЙДЕН
+		)
 
 	# --- закрытие урока без квиза ---
 
@@ -695,7 +764,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	def test_повторный_зачёт_не_двигает_прохождение(self):
 		# Политика — своя, а не из общих настроек: их читают через общий кеш, и
 		# параллельный прогон мог сменить паузу перед повтором посреди теста.
-		политика = {"quiz_required": 1, "pass_threshold": 0.8, "max_attempts": 5, "retry_delay_minutes": 0}
+		политика = {"quiz_required": 1, "max_attempts": 5, "retry_delay_minutes": 0}
 		self.enterContext(patch.object(release_quiz, "политика_квиза_для_курса", return_value=политика))
 		run, занятие = self.урок()
 		self.assertTrue(self.сдать(run, занятие, ["V1", "V1"])["result"]["passed"])
