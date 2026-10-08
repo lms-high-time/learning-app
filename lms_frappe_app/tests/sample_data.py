@@ -205,8 +205,9 @@ def создать_квиз(lesson: str, вопросы: list[str], баллов
 	return квиз.name
 
 
-def создать_занятие(student: str, lesson: str) -> str:
-	"""Занятие с курсом и пространством — по тому же правилу, что у `start_lesson`."""
+def создать_занятие(student: str, lesson: str, run: str | None = None) -> str:
+	"""Занятие с курсом и пространством — по тому же правилу, что у `start_lesson`;
+	`run` — прохождение урока, к которому занятие относится."""
 	from lms_frappe_app.agent_learning.spaces import пространство_курса
 
 	глава = frappe.db.get_value("Course Lesson", lesson, "chapter")
@@ -218,6 +219,7 @@ def создать_занятие(student: str, lesson: str) -> str:
 			"lesson": lesson,
 			"course": курс,
 			"organization": пространство_курса(student, курс) if курс else None,
+			"run": run,
 		}
 	).insert(ignore_permissions=True).name
 
@@ -259,7 +261,11 @@ def сдать_отчёт(session: str) -> dict:
 def зачислить(ученик: str, lesson: str) -> str:
 	"""Зачисление на курс урока — основание доступа ко всему учебному потоку."""
 	глава = frappe.db.get_value("Course Lesson", lesson, "chapter")
-	курс = frappe.db.get_value("Course Chapter", глава, "course")
+	return зачислить_на_курс(ученик, frappe.db.get_value("Course Chapter", глава, "course"))
+
+
+def зачислить_на_курс(ученик: str, курс: str) -> str:
+	"""Зачисление на курс; уже зачислен — без второй записи."""
 	if not frappe.db.exists("LMS Enrollment", {"member": ученик, "course": курс}):
 		frappe.get_doc(
 			{
@@ -270,6 +276,55 @@ def зачислить(ученик: str, lesson: str) -> str:
 			}
 		).insert(ignore_permissions=True)
 	return курс
+
+
+def курс_из_релиза(автор: str | None = None, *, релиз: dict | None = None) -> tuple[str, str]:
+	"""Курс из релиза: (курс, релиз). Публикует `релиз` как есть, без него — образец
+	`release_sample.пример_релиза` с новым ключом курса; от имени `автор`
+	(по умолчанию `Administrator`), текущий пользователь после вызова прежний."""
+	from lms_frappe_app.agent_learning.releases import service
+	from lms_frappe_app.tests.release_sample import пример_релиза
+
+	автор = автор or "Administrator"
+	релиз = релиз or пример_релиза(f"sample-{frappe.generate_hash(length=8)}")
+	прежний = frappe.session.user
+	frappe.set_user(автор)
+	try:
+		итог = service.опубликовать(релиз, None, автор)
+	finally:
+		frappe.set_user(прежний)
+	return итог["course"], итог["release"]
+
+
+def урок_релиза(курс: str, ключ: str) -> str:
+	"""`Course Lesson` урока действующего релиза курса по ключу урока."""
+	from lms_frappe_app.agent_learning.releases import index
+
+	релиз = frappe.db.get_value("LMS Course", курс, "active_release")
+	return index.урок(релиз, ключ)["lesson"]
+
+
+def занятие_релиза(ученик: str, курс: str, ключ: str) -> str:
+	"""Занятие по уроку курса из релиза — со ссылкой на прохождение урока (найденное или новое)."""
+	from lms_frappe_app.agent_learning.runs import service
+
+	run = service.прохождение(ученик, курс, ключ)
+	return создать_занятие(ученик, run.lesson, run=run.name)
+
+
+def отметить_все_пункты(run: str) -> dict | None:
+	"""Отмечает `done` все открытые обязательные пункты прохождения — по порядку релиза.
+
+	Отдаёт ответ последней отметки; открытых не было — `None`. `Why:` тестам
+	квиза и закрытия урока отметки не интересны, но без них ворота квиза не
+	пустят.
+	"""
+	from lms_frappe_app.agent_learning.runs import service
+
+	ответ = None
+	for пункт in service.открытые_обязательные(frappe.get_doc("Agent Lesson Run", run)):
+		ответ = service.отметить(run, пункт["goal"], "done", "Свидетельство для теста")
+	return ответ
 
 
 def политика_по_умолчанию() -> None:
