@@ -12,7 +12,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
-from lms_frappe_app.tests.release_sample import релиз_двух_целей
+from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	зачислить_на_курс,
@@ -60,10 +60,26 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 	def отметить(self, занятие: str, пункт: str, статус: str = "done", **поля) -> dict:
 		return student.mark_goal(занятие, пункт, статус, поля.pop("evidence", СВИДЕТЕЛЬСТВО), **поля)
 
-	def прохождение(self, курс: str | None = None):
+	def прохождение(self, курс: str | None = None, ключ: str = "l-1"):
 		return frappe.get_doc(
-			прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик, "course": курс or self.курс, "lesson_key": "l-1"}
+			прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик, "course": курс or self.курс, "lesson_key": ключ}
 		)
+
+	def снятый_урок(self) -> tuple[str, str]:
+		"""Курс, где начат урок `l-2`, а новый релиз его снял: (курс, занятие по уроку)."""
+		frappe.set_user("Administrator")
+		ключ = f"chain-gone-{frappe.generate_hash(length=6)}"
+		курс, _ = курс_из_релиза(релиз=пример_релиза(ключ))
+		зачислить_на_курс(self.ученик, курс)
+		frappe.set_user(self.ученик)
+		занятие = self.старт(урок_релиза(курс, "l-2"))["session"]
+		без_урока = пример_релиза(ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		frappe.set_user("Administrator")
+		курс_из_релиза(релиз=без_урока)
+		frappe.set_user(self.ученик)
+		return курс, занятие
 
 	def курс_двух_целей(self) -> tuple[str, str]:
 		frappe.set_user("Administrator")
@@ -133,6 +149,25 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual(неизвестный["goals"], ["term:T1", "l-1-D1/V1", "refute:M1"])
 		старое = создать_занятие(self.ученик, self.курс_старой_модели())
 		self.отказ(student.lesson_item(старое, "term:T1"), "course_not_released")
+
+	def test_подробности_после_отзыва_доступа_отказ(self):
+		занятие = self.старт()["session"]
+		frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+
+		self.отказ(student.lesson_item(занятие, "term:T1"), "not_enrolled")
+
+	def test_урок_снят_из_релиза_подробностей_и_закрытия_нет(self):
+		"""Прохождение урока, снятого новым релизом, отстаёт от действующего: подробности
+		пункта и закрытие урока отказывают `lesson_not_in_release`."""
+		курс, занятие = self.снятый_урок()
+
+		подробности = self.отказ(student.lesson_item(занятие, "term:T1"), "lesson_not_in_release")
+		закрытие = self.отказ(student.complete_lesson(занятие), "lesson_not_in_release")
+
+		for ошибка in (подробности, закрытие):
+			self.assertEqual((ошибка["course"], ошибка["lesson_key"]), (курс, "l-2"))
+		self.assertNotEqual(self.прохождение(курс, "l-2").status, прохождения.ПРОЙДЕН)
+		self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "status"), "In Progress")
 
 	# --- mark_goal ---
 
@@ -268,6 +303,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual(self.прохождение(курс).status, прохождения.ПРОЙДЕН)
 		self.assertEqual(прохождения.главы(self.ученик, курс)[0]["status"], прохождения.ПРОЙДЕН)
 		self.assertIsNone(self.старт(урок)["next_step"])
+		[мой] = [к for к in self.данные(student.list_my_courses())["courses"] if к["id"] == курс]
+		self.assertEqual(мой["progress"], {"lessons_total": 1, "lessons_completed": 1})
+		self.assertIsNone(мой["next_lesson"])
 
 	def test_квиз_закрыт_пока_открыты_пункты(self):
 		курс, урок = self.курс_двух_целей()
@@ -321,6 +359,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual(ошибка["status"], "Abandoned")
 		self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
 		self.assertFalse(frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": self.урок}))
+		self.assertFalse(
+			frappe.db.exists("Agent Session Event", {"session": старт["session"], "kind": "Verdict Returned"})
+		)
 
 	def test_ответ_не_принят_после_отзыва_доступа(self):
 		"""Доступ проверяется на каждом ответе: иначе попытка доходила бы до зачёта по курсу, которого у ученика уже нет."""
