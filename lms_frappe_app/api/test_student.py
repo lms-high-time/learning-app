@@ -10,6 +10,9 @@ from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.artifacts import codes
 from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ
 from lms_frappe_app.tests.sample_data import (
+	курс_из_релиза,
+	урок_релиза,
+	зачислить_на_курс,
 	настроить_квиз,
 	привязать_урок,
 	создать_курс,
@@ -185,9 +188,7 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 	# --- отметки целей по ходу (learning-services#409) ---
 
-	def test_отметка_по_номеру_с_прогрессом_и_следом_на_странице_курса(self):
-		from lms_frappe_app.api import public
-
+	def test_отметка_по_номеру_с_прогрессом(self):
 		занятие = создать_занятие(self.ученик, self.урок)
 		ответ = student.mark_objective(занятие, 2, "covered", "Прочитал цикл в своём скрипте")
 		self.assertTrue(ответ["ok"], ответ)
@@ -195,13 +196,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual((данные["objective"], данные["text"]), (2, "Уметь читать код"))
 		self.assertEqual(данные["progress"]["marked"], 1)
 		self.assertEqual(данные["progress"]["open"], [{"number": 1, "text": "Понимать цикл"}])
-
-		цели = public.course_map(course=self.курс)["data"]["chapters"][0]["lessons"][0]["objectives"]
-		self.assertEqual(
-			{ц["text"]: ц.get("status") for ц in цели},
-			{"Понимать цикл": None, "Уметь читать код": "covered"},
-			"отметка видна на странице курса сразу, без итога урока",
-		)
 
 	def test_разобранная_цель_без_заметки_и_skipped_по_ходу_отклоняются(self):
 		занятие = создать_занятие(self.ученик, self.урок)
@@ -250,10 +244,12 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 			[("Понимать цикл", "Объяснил цикл своими словами")],
 		)
 
-	def test_напоминание_об_отметках_в_ответах_посреди_занятия(self):
+	def test_прогресс_целей_только_у_занятия_курса_из_релиза(self):
+		"""Цели урока по прохождению — у курса из релиза (`test_lesson_readers`); у курса
+		старой модели и вне занятия ключа нет."""
 		занятие = создать_занятие(self.ученик, self.урок)
 		ответ = student.remember(kind="observation", key="pace", text="Торопится", session=занятие)
-		self.assertEqual(ответ["data"]["objectives_progress"]["marked"], 0)
+		self.assertNotIn("objectives_progress", ответ["data"])
 		факт = student.remember(kind="fact", key="role", text="Руководитель")
 		self.assertNotIn("objectives_progress", факт["data"], "вне занятия ключа нет")
 
@@ -887,6 +883,20 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 
 		self.assertEqual([п["objective"] for п in перенос], ["Цель второго"])
 
+
+class IntegrationTestCourseOutlineRelease(IntegrationTestCase):
+	"""Дерево курса из релиза: агент должен уметь вернуться к пройденному."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.ученик = создать_ученика(f"out-rel-{суффикс}@example.com")
+		self.курс, _ = курс_из_релиза()
+		зачислить_на_курс(self.ученик, self.курс)
+		self.первый = урок_релиза(self.курс, "l-1")
+		self.второй = урок_релиза(self.курс, "l-2")
+		frappe.set_user(self.ученик)
+
 	def уроки(self):
 		структура = student.course_outline(self.курс)["data"]
 		return [урок for глава in структура["chapters"] for урок in глава["lessons"]]
@@ -894,7 +904,7 @@ class IntegrationTestCourseOutline(IntegrationTestCase):
 	def test_структура_показывает_все_уроки_и_текущий(self):
 		уроки = self.уроки()
 
-		self.assertEqual([у["id"] for у in уроки], [self.первый, self.второй])
+		self.assertEqual([у["id"] for у in уроки], [self.первый, self.второй, урок_релиза(self.курс, "l-3")])
 		self.assertTrue(уроки[0]["current"])
 		self.assertFalse(уроки[0]["completed"])
 

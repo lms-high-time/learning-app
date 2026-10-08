@@ -419,14 +419,37 @@ def история(ученик: str, курс: str, кроме: str, глуби
 
 
 def главы(ученик: str, курс: str) -> list[dict]:
-	"""Главы действующего релиза с прогрессом ученика по курсу.
+	"""Главы действующего релиза с прогрессом ученика по курсу (`прогресс_глав`); нет релиза — пусто.
 
-	Глава — `{key, status, lessons_total, lessons_started, lessons_passed}`,
-	по порядку релиза. Урок начат, когда статус его прохождения не
+	Ничего не пишет.
+	"""
+	релиз = действующий(курс)
+	if not релиз:
+		return []
+	return прогресс_глав(index.уроки_глав(релиз), статусы_уроков(ученик, курс))
+
+
+def статусы_уроков(ученик: str, курс: str) -> dict[str, str]:
+	"""Ключ урока → сохранённый статус прохождения ученика по курсу — простым чтением."""
+	return dict(
+		frappe.get_all(
+			ПРОХОЖДЕНИЕ,
+			filters={"student": ученик, "course": курс},
+			fields=["lesson_key", "status"],
+			as_list=True,
+		)
+	)
+
+
+def прогресс_глав(уроки_глав: dict[str, list[str]], статус: dict[str, str]) -> list[dict]:
+	"""Прогресс по главам: `{key, status, lessons_total, lessons_started, lessons_passed}`.
+
+	`уроки_глав` — глава → ключи её уроков в действующем релизе, по порядку
+	релиза (`index.уроки_глав`); `статус` — ключ урока → статус прохождения
+	(`статусы_уроков`). Урок начат, когда статус его прохождения не
 	`not_started`, пройден — когда `passed`. Глава пройдена, когда пройдены
 	все её уроки; начата — хоть один; иначе не начата. Считаются только уроки
-	действующего релиза: прохождение снятого урока в счёт не идёт. Нет
-	действующего релиза — пусто. Ничего не пишет.
+	из `уроки_глав`: прохождение снятого урока в счёт не идёт.
 
 	`Why:` счёт — по хранимому статусу, без сверки прохождений. Сверка не
 	меняет деления «не начат / начат / пройден»: `not_started` зависит только
@@ -435,19 +458,8 @@ def главы(ученик: str, курс: str) -> list[dict]:
 	чтения: GET откатывает записи, а блокирующее чтение сразу после
 	публикации ловит взаимоблокировку снимочной изоляции.
 	"""
-	релиз = действующий(курс)
-	if not релиз:
-		return []
-	статус = dict(
-		frappe.get_all(
-			ПРОХОЖДЕНИЕ,
-			filters={"student": ученик, "course": курс},
-			fields=["lesson_key", "status"],
-			as_list=True,
-		)
-	)
 	итог = []
-	for ключ, уроки in index.уроки_глав(релиз).items():
+	for ключ, уроки in уроки_глав.items():
 		начато = sum(статус.get(у, "not_started") != "not_started" for у in уроки)
 		пройдено = sum(статус.get(у) == ПРОЙДЕН for у in уроки)
 		if уроки and пройдено == len(уроки):
@@ -466,6 +478,55 @@ def главы(ученик: str, курс: str) -> list[dict]:
 			}
 		)
 	return итог
+
+
+def статусы_целей(ученик: str, курс: str) -> dict[tuple[str, str], str]:
+	"""(ключ урока, ключ цели) → сохранённый статус цели в прохождениях ученика по курсу.
+
+	Простым чтением, без блокировки и сверки (см. `прогресс_глав`); снятые
+	цели тоже отдаются — читающий берёт цели из действующего релиза, и статус
+	цели, которую сверка вернёт, тот же. Одним запросом на курс.
+	"""
+	return {
+		(с[0], с[1]): с[2]
+		for с in frappe.db.sql(
+			"""
+			select r.lesson_key, o.objective_key, o.status
+			from `tabAgent Lesson Run Objective` o
+			join `tabAgent Lesson Run` r on r.name = o.parent
+			where o.parenttype = 'Agent Lesson Run' and r.student = %(student)s and r.course = %(course)s
+			""",
+			{"student": ученик, "course": курс},
+		)
+	}
+
+
+def цели_урока(ученик: str, курс: str, релиз: str, ключ_урока: str) -> list[dict]:
+	"""Цели урока действующего релиза `релиз` со статусом из прохождения ученика: `[{key, text, status}]`.
+
+	Порядок и тексты — из релиза, статус — сохранённый в прохождении (нет
+	прохождения или цели в нём — `not_started`). Пунктов и свидетельств нет:
+	это уровень, который видят ученик и руководитель. Простым чтением, одним
+	запросом, без блокировки и сверки (см. `прогресс_глав`).
+	"""
+	return [
+		{"key": с[0], "text": с[1], "status": с[2] or "not_started"}
+		for с in frappe.db.sql(
+			"""
+			select t.objective_key, t.text, o.status
+			from `tabAgent Release Objective` t
+			left join `tabAgent Lesson Run` r
+				on r.student = %(student)s and r.course = %(course)s and r.lesson_key = t.lesson_key
+			left join `tabAgent Lesson Run Objective` o
+				on o.parent = r.name and o.parenttype = 'Agent Lesson Run'
+				and o.objective_key = t.objective_key
+			where t.parenttype = 'Agent Course Release' and t.parent = %(release)s
+				and t.lesson_key = %(lesson)s
+			order by t.idx
+			""",
+			{"student": ученик, "course": курс, "release": релиз, "lesson": ключ_урока},
+		)
+	]
 
 
 def статусы(run) -> None:

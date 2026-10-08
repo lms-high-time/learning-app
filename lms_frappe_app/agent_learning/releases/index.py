@@ -177,6 +177,65 @@ def уроки_глав(релиз: str) -> dict[str, list[str]]:
 	return главы
 
 
+def главы(релиз: str) -> list[dict]:
+	"""Главы релиза по порядку: `{key, title, description}`."""
+	return [
+		{"key": г.chapter_key, "title": г.title, "description": г.description}
+		for г in frappe.get_all(
+			ГЛАВА,
+			filters={"parenttype": РЕЛИЗ, "parent": релиз},
+			fields=["chapter_key", "title", "description"],
+			order_by="idx asc",
+		)
+	]
+
+
+def уроки(релиз: str) -> list[dict]:
+	"""Уроки релиза по порядку — те же поля, что у `урок`, одной выборкой."""
+	return frappe.get_all(
+		УРОК, filters={"parenttype": РЕЛИЗ, "parent": релиз}, fields=ПОЛЯ_УРОКА, order_by="idx asc"
+	)
+
+
+def цели(релиз: str) -> dict[str, list[dict]]:
+	"""Цели всех уроков релиза без пунктов: ключ урока → `[{key, text}]` по порядку."""
+	итог: dict[str, list[dict]] = {}
+	for ц in frappe.get_all(
+		ЦЕЛЬ,
+		filters={"parenttype": РЕЛИЗ, "parent": релиз},
+		fields=["lesson_key", "objective_key", "text"],
+		order_by="idx asc",
+	):
+		итог.setdefault(ц.lesson_key, []).append({"key": ц.objective_key, "text": ц.text})
+	return итог
+
+
+def разделы(релиз: str) -> dict[str, dict]:
+	"""Разделы документа релиза: ключ → `{key, title, description}`."""
+	return {
+		р.section_key: {"key": р.section_key, "title": р.title, "description": р.description}
+		for р in frappe.get_all(
+			РАЗДЕЛ,
+			filters={"parenttype": РЕЛИЗ, "parent": релиз},
+			fields=["section_key", "title", "description"],
+			order_by="idx asc",
+		)
+	}
+
+
+#: Поля урока релиза, которые отдают `урок`, `урок_по_записи` и `уроки`.
+ПОЛЯ_УРОКА = [
+	"lesson_key",
+	"chapter_key",
+	"title",
+	"hook",
+	"lesson",
+	"pass_percentage",
+	"section_keys",
+	"homework",
+]
+
+
 def урок(релиз: str, ключ: str) -> dict | None:
 	"""Урок релиза по ключу: его запись Learning, глава, порог квиза, разделы, домашка."""
 	return _урок(релиз, {"lesson_key": ключ})
@@ -189,19 +248,7 @@ def урок_по_записи(релиз: str, lesson: str) -> dict | None:
 
 def _урок(релиз: str, отбор: dict) -> dict | None:
 	найдено = frappe.get_all(
-		УРОК,
-		filters={"parenttype": РЕЛИЗ, "parent": релиз, **отбор},
-		fields=[
-			"lesson_key",
-			"chapter_key",
-			"title",
-			"hook",
-			"lesson",
-			"pass_percentage",
-			"section_keys",
-			"homework",
-		],
-		limit=1,
+		УРОК, filters={"parenttype": РЕЛИЗ, "parent": релиз, **отбор}, fields=ПОЛЯ_УРОКА, limit=1
 	)
 	return найдено[0] if найдено else None
 

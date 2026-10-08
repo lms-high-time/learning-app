@@ -11,7 +11,6 @@ from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН
 from lms_frappe_app.tests.sample_data import (
 	привязать_урок,
 	зачислить,
-	создать_занятие,
 	создать_ученика,
 	создать_урок,
 )
@@ -64,27 +63,16 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 		for цель in цели:
 			self.assertNotIn("status", цель)
 
-	def test_зачисленный_видит_своё_покрытие(self):
+	def test_зачисленный_на_курс_старой_модели_видит_цели_без_покрытия(self):
+		"""Покрытие целей — из прохождений уроков курса из релиза (`test_lesson_readers`);
+		у курса старой модели их нет, и цель приходит без `status` и зачисленному."""
 		зачислить(self.ученик, self.урок)
-		занятие = создать_занятие(self.ученик, self.урок)
 		frappe.set_user(self.ученик)
-		from lms_frappe_app.api import student
-
-		student.report_outcomes(
-			session=занятие,
-			outcomes=json.dumps(
-				[
-					{"objective": "Назвать спонсора проекта", "status": "covered"},
-					{"objective": "Отличить проект от операций", "status": "touched"},
-				]
-			),
-		)
 
 		цели = self.карта()["chapters"][0]["lessons"][0]["objectives"]
 
 		self.assertEqual(
-			{ц["text"]: ц["status"] for ц in цели},
-			{"Назвать спонсора проекта": "covered", "Отличить проект от операций": "touched"},
+			цели, [{"text": "Назвать спонсора проекта"}, {"text": "Отличить проект от операций"}]
 		)
 
 	# --- программа курса: зачин, пройденность, следующий урок (learning-services#322) ---

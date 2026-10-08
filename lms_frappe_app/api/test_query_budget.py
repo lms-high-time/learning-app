@@ -42,15 +42,17 @@ from lms_frappe_app.tests.sample_data import (
 	создать_урок,
 	создать_ученика,
 )
+from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import manager, review, student, team
 from lms_frappe_app.testing import сколько_запросов
 
 #: Сколько обращений к базе делает метод на данных этого модуля. Меняется
 #: вместе с кодом и только осознанно — см. пояснение модуля.
 БЮДЖЕТ = {
-	# +1 за программы курса (learning-services#405): входит ли курс в
-	# программу — одна выборка, пока не входит.
-	"course_outline": 14,
+	# Курс из релиза (learning-services#506): доступ — четыре выборки,
+	# действующий релиз, главы, уроки, цели и разделы релиза, статусы уроков и
+	# целей прохождений ученика — по одной на курс, программы курса — одна.
+	"course_outline": 12,
 	# Курс из релиза (learning-services#506), прохождение уже есть: урок
 	# релиза по записи, действующий релиз ещё раз при сверке прохождения,
 	# прохождение с блокировкой и двумя таблицами строк, есть ли вопросы,
@@ -65,7 +67,10 @@ from lms_frappe_app.testing import сколько_запросов
 	# точке сохранения (три); журнал проверки — об ответе и о выданном следом
 	# вопросе; отвеченные с блокировкой.
 	"submit_answer": 14,
-	"student_detail": 12,
+	# Покрытие целей — из прохождений (learning-services#506): прохождения
+	# ученика и цели нужных прохождений с текстами релиза — две выборки на
+	# всю выдачу вместо одной выборки отметок занятий.
+	"student_detail": 13,
 	# Домашки ученика (learning-services#439), три сдачи в двух курсах: сдачи,
 	# уроки, задания и комментарии — по одной выборке, курсы ученика — раз,
 	# порядок уроков ради адресов — раз на курс, а не на сдачу.
@@ -140,7 +145,13 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 	# --- ворота ---
 
 	def test_бюджет_course_outline(self):
-		self._ворота("course_outline", lambda: student.course_outline(self.курс))
+		"""Курс из релиза, у ученика прохождения двух уроков: число запросов не растёт с уроками."""
+		урок = self._курс_релиза()[0]
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		for ключ in ("l-1", "l-2"):
+			run = прохождения.прохождение(self.ученик, курс, ключ)
+			прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
+		self._ворота("course_outline", lambda: student.course_outline(курс))
 
 	def test_бюджет_start_lesson(self):
 		# Прогревочное занятие бросается, чтобы измеряемый вызов завёл своё, а
@@ -185,6 +196,13 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		self._ворота("allocations", lambda: team.allocations(organization=self.организация))
 
 	def test_бюджет_student_detail(self):
+		"""Занятия курса старой модели и два занятия урока курса из релиза — со своим
+		прохождением и без него."""
+		урок = self._курс_релиза()[0]
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		создать_занятие(self.ученик, урок, run=run.name)
+		создать_занятие(self.ученик, урок)
 		frappe.set_user(self.менеджер)
 		self._ворота("student_detail", lambda: manager.student_detail(self.ученик))
 

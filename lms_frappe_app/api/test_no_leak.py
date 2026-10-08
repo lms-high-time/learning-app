@@ -34,7 +34,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_ученика,
 	создать_урок,
 )
-from lms_frappe_app.api import manager, review, student
+from lms_frappe_app.api import manager, public, review, student
 
 ПРАВИЛЬНЫЙ_ВАРИАНТ = "Москва"
 НЕВЕРНЫЙ_ВАРИАНТ = "Тула"
@@ -233,6 +233,17 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 ТЕКСТ_ПУНКТА = "Подробности пункта из пакета агента"
 #: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
 ЗАКРЫТОЕ_РЕЛИЗА = (ПОЯСНЕНИЕ_РЕЛИЗА, ПОЯСНЕНИЕ_ВТОРОГО, ПАКЕТ_АГЕНТА, ТЕКСТ_ПУНКТА, КАРТА_КУРСА, СВИДЕТЕЛЬСТВО)
+#: Пункты целей агента — ключи и названия: методы уровня целей урока (дерево
+#: курса, карта, занятие урока, прогресс в заметке и документе, отчёт
+#: руководителя) отдают цели без пунктов (learning-services#506).
+ПУНКТЫ_РЕЛИЗА = (
+	"term:T1",
+	"l-1-D1/V1",
+	"refute:M1",
+	"Термин «пример»",
+	"Выбор: «первый»",
+	"Если проявится",
+)
 ВОПРОС_1, ВОПРОС_2 = "S1/l-1-D1", "S2/l-1-D1"
 ПОПЫТКА = "Agent Quiz Attempt"
 ОТВЕТ = "Agent Quiz Answer"
@@ -294,7 +305,9 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		self.проверить("list_my_courses", student.list_my_courses())
 		self.проверить("get_my_progress", student.get_my_progress())
-		self.проверить("course_outline", student.course_outline(self.курс))
+		self.проверить("course_outline", student.course_outline(self.курс), *ПУНКТЫ_РЕЛИЗА)
+		self.проверить("course_map", public.course_map(course=self.курс), *ПУНКТЫ_РЕЛИЗА)
+		self.проверить("lesson_session", student.lesson_session(self.урок), *ПУНКТЫ_РЕЛИЗА)
 		урок = student.start_lesson(lesson=self.урок)
 		self.assertTrue(урок["ok"], урок)
 		# Пакет агента — только агентским методам, и старт отдаёт его урок
@@ -317,6 +330,18 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			"mark_goal",
 			student.mark_goal(занятие, "l-1-D1/V1", "done", СВИДЕТЕЛЬСТВО, resume_from="С примера ученика"),
 		)
+		# Посреди занятия: прогресс — цели урока, без пунктов.
+		заметка = self.проверить(
+			"remember", student.remember("observation", "pace", "Торопится", session=занятие), *ПУНКТЫ_РЕЛИЗА
+		)
+		self.assertIn("objectives_progress", заметка)
+		документ = self.проверить(
+			"update_artifact",
+			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Встреча"}]),
+			*ПУНКТЫ_РЕЛИЗА,
+		)
+		self.assertIn("objectives_progress", документ)
+		self.проверить("lesson_session", student.lesson_session(self.урок), *ПУНКТЫ_РЕЛИЗА)
 		квиз = student.request_quiz(занятие)
 		self.assertNotIn("correct", self.проверить("request_quiz", квиз))
 		попытка = квиз["data"]["attempt"]
@@ -343,7 +368,8 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 
 		frappe.set_user(self.менеджер)
 		self.проверить("org_report", manager.org_report())
-		self.проверить("student_detail", manager.student_detail(self.ученик))
+		отчёт = self.проверить("student_detail", manager.student_detail(self.ученик), *ПУНКТЫ_РЕЛИЗА)
+		self.assertIn("Цель урока «Урок первый»", отчёт)
 
 	def test_снимок_и_ответ_не_называют_верного(self):
 		"""Снимок попытки — без `correct`; неверный ответ — только `correct: false`,

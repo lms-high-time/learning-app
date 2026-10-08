@@ -24,7 +24,6 @@ from lms_frappe_app.tests.sample_data import (
 	политика_по_умолчанию,
 	создать_занятие,
 	создать_ученика,
-	создать_урок,
 	урок_релиза,
 )
 from lms_frappe_app.api import student
@@ -37,7 +36,8 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"lesson-{суффикс}@example.com")
-		self.урок = создать_урок(f"Урок {суффикс}")
+		self.курс, _ = курс_из_релиза()
+		self.урок = урок_релиза(self.курс, "l-1")
 		зачислить(self.ученик, self.урок)
 		self.чужой = создать_ученика(f"lesson-other-{суффикс}@example.com")
 		# Зачисление — под Administrator: обычному ученику Learning запрещает
@@ -114,6 +114,7 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 
 		self.assertEqual(self.событий(занятие), событий_до)
 		self.assertEqual(self.занятий(), занятий_до)
+		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
 
 
 class IntegrationTestStartState(IntegrationTestCase):

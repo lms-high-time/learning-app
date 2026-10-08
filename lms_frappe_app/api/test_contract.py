@@ -559,7 +559,6 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self._назначить_курс(курс)
 		frappe.set_user(self.ученик)
 		self.сверить("student.list_my_courses", student.list_my_courses())
-		self.сверить("student.course_outline", student.course_outline(course=курс))
 		self.сверить("public.lesson_entry", public.lesson_entry(lesson=с_квизом))
 		self.сверить("public.course_map", public.course_map(course=курс))
 
@@ -569,8 +568,9 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		зачислить_на_курс(self.ученик, курс_релиза)
 		frappe.set_user(self.ученик)
 		self._пройти_урок_релиза(курс_релиза)
+		self.сверить("student.course_outline", student.course_outline(course=курс_релиза))
+		self.сверить("student.lesson_session", student.lesson_session(lesson=урок_релиза(курс_релиза, "l-1")))
 		занятие = создать_занятие(self.ученик, с_квизом)
-		self.сверить("student.lesson_session", student.lesson_session(lesson=с_квизом))
 		self.сверить("student.lesson_material", student.lesson_material(session=занятие))
 		self.сверить("student.teaching_notes", student.teaching_notes(session=занятие))
 		self.сверить("student.student_context", student.student_context(session=занятие))
