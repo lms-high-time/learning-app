@@ -35,10 +35,8 @@ from lms_frappe_app.tests.sample_data import (
 	привязать_главу,
 	привязать_урок,
 	политика_по_умолчанию,
-	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
-	создать_квиз,
 	создать_менеджера,
 	создать_организацию,
 	создать_урок,
@@ -132,18 +130,7 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		for курс in (self.курс, self.второй_курс):
 			self._назначить(курс)
 
-		for урок in self.уроки:
-			self._директива(урок)
-
-		self.вопросы = [
-			создать_вопрос(f"Вопрос {номер} {суффикс}", [("да", True), ("нет", False)])
-			for номер in range(1, 5)
-		]
-		создать_квиз(self.уроки[0], self.вопросы)
-
 		self.менеджер = создать_менеджера(f"qbm-{суффикс}@example.com", self.организация)
-		занятие = создать_занятие(self.ученик, self.уроки[1])
-		frappe.db.set_value("Agent Learning Session", занятие, "course", self.курс)
 
 		frappe.set_user(self.ученик)
 		# Документы заполняются от имени ученика: документ, заведённый
@@ -214,8 +201,7 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		self._ворота("allocations", lambda: team.allocations(organization=self.организация))
 
 	def test_бюджет_student_detail(self):
-		"""Занятия курса старой модели и два занятия урока курса из релиза — со своим
-		прохождением и без него."""
+		"""Два занятия урока курса из релиза — со своим прохождением и без него."""
 		урок = self._курс_релиза()[0]
 		курс = frappe.db.get_value("Course Lesson", урок, "course")
 		run = прохождения.прохождение(self.ученик, курс, "l-1")
@@ -262,16 +248,6 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 				"course": курс,
 				"deadline": "2026-12-31",
 				"mandatory": 1,
-			}
-		).insert(ignore_permissions=True)
-
-	def _директива(self, урок: str) -> None:
-		frappe.get_doc(
-			{
-				"doctype": "Agent Lesson Directive",
-				"lesson": урок,
-				"objectives": "Понимать цикл",
-				"teaching_directive": "Начать с примера",
 			}
 		).insert(ignore_permissions=True)
 

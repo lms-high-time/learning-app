@@ -347,6 +347,16 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		# Предупреждение, а не отказ: урок закрывается и с пустым разделом документа.
 		self.assertEqual([(б["artifact"], б["key"]) for б in закрыто["empty_blocks"]], [("notebook", "log")])
 
+	def test_заполненный_раздел_урока_не_предупреждает(self):
+		frappe.db.delete("Agent Release Question", {"parent": self.релиз, "lesson_key": "l-1"})
+		старт = self.старт()
+		self.отметить_обязательные(старт["session"], старт["lesson_map"])
+		self.данные(student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]))
+
+		закрыто = self.данные(student.complete_lesson(старт["session"]))
+
+		self.assertEqual(закрыто["empty_blocks"], [])
+
 	def test_закрытое_занятие_урок_не_закрывает(self):
 		frappe.set_user("Administrator")
 		настроить_квиз(quiz_required=0)

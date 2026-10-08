@@ -22,6 +22,7 @@ from lms_frappe_app.tests.sample_data import (
 	занятие_релиза,
 	зачислить_на_курс,
 	курс_из_релиза,
+	урок_релиза,
 	отметить_все_пункты,
 	создать_занятие,
 	создать_менеджера,
@@ -47,12 +48,13 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		добавить_в_организацию(self.ученик, self.компания_а)
 		добавить_в_организацию(self.чужой, self.компания_б)
 
-		self.урок = создать_урок(f"Урок {суффикс}")
+		self.курс, _ = курс_из_релиза()
+		self.урок = урок_релиза(self.курс, "l-1")
 		# Оба зачислены: методы занятия проверяют доступ к курсу, и без
 		# зачисления тесты изоляции падали бы по другой причине, чем проверяют.
-		зачислить(self.ученик, self.урок)
-		зачислить(self.чужой, self.урок)
-		self.чужое_занятие = создать_занятие(self.чужой, self.урок)
+		зачислить_на_курс(self.ученик, self.курс)
+		зачислить_на_курс(self.чужой, self.курс)
+		self.чужое_занятие = занятие_релиза(self.чужой, self.курс, "l-1")
 
 	# --- отчётность ---
 
@@ -90,7 +92,6 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		"""
 		frappe.set_user(self.ученик)
 		действия = {
-			"отметка": lambda: student.mark_objective(self.чужое_занятие, 1, "touched", "не моё занятие"),
 			"отметка пункта": lambda: student.mark_goal(self.чужое_занятие, "term:T1", "done", "не моё занятие"),
 			# Пункты урока — инструмент агента чужого ученика.
 			"подробности пункта": lambda: student.lesson_item(self.чужое_занятие, "term:T1"),
@@ -102,11 +103,6 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 			"репорт": lambda: student.report_issue(
 				session=self.чужое_занятие, kind="stuck", text="не моё занятие"
 			),
-			# Контекст по запросу (#410): заметки и указания чужого занятия —
-			# чужие данные, а контекст ещё и отмечает итоги репортов.
-			"материал": lambda: student.lesson_material(self.чужое_занятие),
-			"указания": lambda: student.teaching_notes(self.чужое_занятие),
-			"контекст": lambda: student.student_context(self.чужое_занятие),
 		}
 
 		for имя, действие in действия.items():
@@ -123,9 +119,7 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		Проверки не мешают друг другу: права только читаются, а ответ в чужую
 		попытку отклоняется раньше, чем что-либо запишется.
 		"""
-		курс, _ = курс_из_релиза()
-		зачислить_на_курс(self.чужой, курс)
-		занятие = занятие_релиза(self.чужой, курс, "l-1")
+		занятие = self.чужое_занятие
 		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
 		frappe.set_user(self.чужой)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]

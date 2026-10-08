@@ -62,15 +62,6 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		)
 		создать_квиз(self.урок, [self.вопрос])
 
-		frappe.get_doc(
-			{
-				"doctype": "Agent Lesson Directive",
-				"lesson": self.урок,
-				"teaching_directive": "Спросить, какие города ученик считает столицами",
-				"success_criteria": "Называет верно",
-			}
-		).insert(ignore_permissions=True)
-
 		self.организация = создать_организацию(f"Компания {суффикс}")
 		добавить_в_организацию(self.ученик, self.организация)
 		frappe.get_doc(
@@ -106,15 +97,8 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("list_my_courses", student.list_my_courses())
 		self.проверить("get_my_progress", student.get_my_progress())
 
-		# Курс старой модели: `start_lesson` ему отказывает, занятие для старых
-		# методов заводится напрямую; старт проверяет класс курса из релиза.
+		# Методы агента по уроку проверяет класс курса из релиза.
 		занятие = создать_занятие(self.ученик, self.урок)
-		self.проверить(
-			"report_issue",
-			student.report_issue(занятие, kind="stuck", text="Ученик встал на примере"),
-		)
-		# Целей у директивы этого урока нет, поэтому отчёт пустой и проходит.
-		self.проверить("report_outcomes", student.report_outcomes(занятие, outcomes=[]))
 		self.проверить(
 			"remember",
 			student.remember(kind="fact", key="role", text="Руководитель отдела"),
@@ -142,30 +126,6 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("count_scenario_turn", student.count_scenario_turn("profile"))
 		self.проверить("reset_scenario_state", student.reset_scenario_state("profile"))
 
-	def test_репорты_ученику_без_занятия_вопроса_и_владельца(self):
-		"""Ученик видит свои репорты и их итог, но не внутреннюю привязку:
-		занятие — устройство платформы, идентификатор вопроса квиза ученику ни
-		о чём не говорит, а `owner` у перенесённого репорта — сотрудник."""
-		frappe.set_user(self.ученик)
-		занятие = создать_занятие(self.ученик, self.урок)
-		репорт = student.report_issue(
-			занятие, kind="quiz_question_issue", text="Вопрос двусмысленный", question=self.вопрос
-		)["data"]["report"]
-		frappe.set_user("Administrator")
-		frappe.get_doc("Agent Course Report", репорт).update(
-			{"status": "Fixed", "resolution": "Переписали вопрос"}
-		).save(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-		запрещённые = (ТЕКСТ_ПОЯСНЕНИЯ, self.вопрос, занятие, "Administrator")
-
-		мои = student.my_reports()
-		проверить_ответ(self, мои, "my_reports", запрещённые_тексты=запрещённые)
-		итоги = student.student_context(занятие)["data"]["closed_reports"]
-		проверить_ответ(self, итоги, "closed_reports", запрещённые_тексты=запрещённые)
-
-		self.assertEqual([р["id"] for р in мои["data"]["reports"]], [репорт])
-		self.assertEqual([р["id"] for р in итоги], [репорт])
-
 	def test_ни_один_метод_руководителя_не_отдаёт_эталон(self):
 		frappe.set_user(self.ученик)
 		создать_занятие(self.ученик, self.урок)
@@ -174,34 +134,6 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 
 		self.проверить("org_report", manager.org_report())
 		self.проверить("student_detail", manager.student_detail(self.ученик))
-
-	def test_отчёт_руководителя_не_несёт_ответов_ученика(self):
-		# Отчёт про результат, а не про содержание диалога.
-		frappe.set_user("Administrator")
-		frappe.db.set_value(
-			"Agent Lesson Directive",
-			{"lesson": self.урок},
-			"objectives",
-			"Отличать столицу от крупнейшего города",
-		)
-		frappe.set_user(self.ученик)
-		занятие = создать_занятие(self.ученик, self.урок)
-		# Заметка агента о том, что сделал ученик, — ровно то, что отчёт
-		# руководителя не имеет права раскрывать (learning-services#409).
-		self.проверить(
-			"mark_objective",
-			student.mark_objective(
-				занятие, 1, "covered", "ученик перепутал столицу с крупнейшим городом"
-			),
-		)
-
-		frappe.set_user(self.менеджер)
-		проверить_ответ(
-			self,
-			manager.student_detail(self.ученик),
-			"student_detail",
-			запрещённые_тексты=("перепутал столицу",),
-		)
 
 	def test_методы_куратора_не_отдают_эталон(self):
 		"""Очередь и карточка домашки (learning-services#452): сдача, задание и
@@ -370,6 +302,30 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.проверить("org_report", manager.org_report())
 		отчёт = self.проверить("student_detail", manager.student_detail(self.ученик), *ПУНКТЫ_РЕЛИЗА)
 		self.assertIn("Цель урока «Урок первый»", отчёт)
+
+	def test_репорты_ученику_без_занятия_вопроса_и_владельца(self):
+		"""Ученик видит свои репорты и их итог, но не внутреннюю привязку:
+		занятие — устройство платформы, ключ вопроса квиза ученику ни о чём не
+		говорит, а `owner` у перенесённого репорта — сотрудник."""
+		frappe.set_user(self.ученик)
+		занятие = создать_занятие(self.ученик, self.урок)
+		репорт = student.report_issue(
+			занятие, kind="quiz_question_issue", text="Вопрос двусмысленный", question=ВОПРОС_1
+		)["data"]["report"]
+		frappe.set_user("Administrator")
+		frappe.get_doc("Agent Course Report", репорт).update(
+			{"status": "Fixed", "resolution": "Переписали вопрос"}
+		).save(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		запрещённые = (*ЗАКРЫТОЕ_РЕЛИЗА, ВОПРОС_1, занятие, "Administrator")
+
+		мои = student.my_reports()
+		проверить_ответ(self, мои, "my_reports", запрещённые_тексты=запрещённые)
+		итоги = student.start_lesson(lesson=self.урок)["data"]["closed_reports"]
+		проверить_ответ(self, итоги, "closed_reports", запрещённые_тексты=запрещённые)
+
+		self.assertEqual([р["id"] for р in мои["data"]["reports"]], [репорт])
+		self.assertEqual([р["id"] for р in итоги], [репорт])
 
 	def test_снимок_и_ответ_не_называют_верного(self):
 		"""Снимок попытки — без `correct`; неверный ответ — только `correct: false`,

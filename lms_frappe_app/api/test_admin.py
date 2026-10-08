@@ -22,7 +22,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
-	сдать_отчёт,
 )
 
 
@@ -53,8 +52,18 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
 		student.remember("observation", "pace", "Любит примеры", session=self.занятие)
 		student.remember("fact", "role", "Владелец кофейни")
-		self.репорт = student.report_issue(self.занятие, "stuck", "Непонятен пример")["data"]["report"]
-		сдать_отчёт(self.занятие)
+		frappe.set_user("Administrator")
+		self.репорт = frappe.get_doc(
+			{
+				"doctype": "Agent Course Report",
+				"session": self.занятие,
+				"course": self.курс,
+				"lesson": self.урок,
+				"kind": "Stuck",
+				"text": "Непонятен пример",
+			}
+		).insert(ignore_permissions=True).name
+		frappe.set_user(self.ученик)
 		self.попытка = quiz.начать_попытку(self.занятие)["attempt"]
 		frappe.set_user("Administrator")
 

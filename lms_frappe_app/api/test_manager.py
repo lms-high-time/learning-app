@@ -154,7 +154,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		# Отчёт про результат, а не про содержание диалога с агентом.
 		занятие = создать_занятие(self.ученик_а, self.урок)
 		frappe.get_doc("Agent Learning Session", занятие).записать_событие(
-			"Checkpoint Reported", "ученик спросил про вложенные циклы"
+			"Directive Issued", "ученик спросил про вложенные циклы"
 		)
 
 		frappe.set_user(self.менеджер)
@@ -170,7 +170,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		Это тот же учебный результат, что и зачёт, просто мельче: в отличие
 		от заметок об ученике, он про результат, а не про разговор. Покрытие —
 		цели урока из прохождения, без пунктов и свидетельств
-		(learning-services#506); у занятия курса старой модели его нет.
+		(learning-services#506); у занятия курса без релиза его нет.
 		"""
 		курс, _ = курс_из_релиза()
 		frappe.get_doc(

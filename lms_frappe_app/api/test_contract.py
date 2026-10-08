@@ -39,7 +39,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
-	создать_занятие,
 	урок_релиза,
 	зачислить_на_курс,
 )
@@ -293,7 +292,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		курс, уроки = self._собрать_курс()
 		курс_релиза = self._опубликовать_релиз()
 		репорт, сдача = self._пройти_курс(курс, уроки, курс_релиза)
-		self._разобрать_репорт(курс, репорт)
+		self._разобрать_репорт(курс_релиза, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
 
@@ -562,22 +561,13 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("public.lesson_entry", public.lesson_entry(lesson=с_квизом))
 		self.сверить("public.course_map", public.course_map(course=курс))
 
-		# Методы агента по уроку — только курс из релиза (learning-services#506);
-		# занятие курса старой модели для старых методов заводится напрямую.
+		# Методы агента по уроку — только курс из релиза (learning-services#506).
 		frappe.set_user("Administrator")
 		зачислить_на_курс(self.ученик, курс_релиза)
 		frappe.set_user(self.ученик)
-		self._пройти_урок_релиза(курс_релиза)
+		занятие = self._пройти_урок_релиза(курс_релиза)
 		self.сверить("student.course_outline", student.course_outline(course=курс_релиза))
 		self.сверить("student.lesson_session", student.lesson_session(lesson=урок_релиза(курс_релиза, "l-1")))
-		занятие = создать_занятие(self.ученик, с_квизом)
-		self.сверить("student.lesson_material", student.lesson_material(session=занятие))
-		self.сверить("student.teaching_notes", student.teaching_notes(session=занятие))
-		self.сверить("student.student_context", student.student_context(session=занятие))
-		self.сверить(
-			"student.mark_objective",
-			student.mark_objective(session=занятие, objective=1, status="touched", note="с примера"),
-		)
 		репорт = self.сверить(
 			"student.report_issue",
 			student.report_issue(session=занятие, kind="stuck", text="Встал на примере"),
@@ -610,16 +600,6 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("student.scenario_state", student.scenario_state(key="profile"))
 		self.сверить("student.count_scenario_turn", student.count_scenario_turn(key="profile"))
 		self.сверить("student.reset_scenario_state", student.reset_scenario_state(key="profile"))
-
-		self.сверить(
-			"student.report_outcomes",
-			student.report_outcomes(
-				session=занятие,
-				outcomes=[
-					{"objective": "Понимать разницу между while и for", "status": "covered"}
-				],
-			),
-		)
 		self.сверить("student.homework", student.homework(lesson=с_квизом))
 		сдача = self.сверить(
 			"student.submit_homework",
@@ -631,8 +611,10 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("student.get_my_progress", student.get_my_progress())
 		return репорт, сдача
 
-	def _пройти_урок_релиза(self, курс: str) -> None:
-		"""Урок с квизом — от старта до итога, урок без вопросов — до закрытия."""
+	def _пройти_урок_релиза(self, курс: str) -> str:
+		"""Урок с квизом — от старта до итога, урок без вопросов — до закрытия.
+
+		Отдаёт занятие урока с квизом."""
 		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-1")))
 		занятие = старт["session"]
 		self.сверить("student.lesson_item", student.lesson_item(session=занятие, goal="term:T1"))
@@ -656,6 +638,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-2")))
 		self._отметить_обязательные(старт["session"], старт["lesson_map"])
 		self.сверить("student.complete_lesson", student.complete_lesson(session=старт["session"]))
+		return занятие
 
 	def _отметить_обязательные(self, занятие: str, карта: list[dict]) -> None:
 		for цель in карта:

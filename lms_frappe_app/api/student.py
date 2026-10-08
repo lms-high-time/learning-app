@@ -16,7 +16,7 @@ import frappe
 from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning import announcements, directives, quiz, release_quiz
+from lms_frappe_app.agent_learning import announcements, quiz, release_quiz
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import signals as сигналы
 from lms_frappe_app.agent_learning.access import (
@@ -57,8 +57,6 @@ from lms_frappe_app.agent_learning.constants import (
 	СОБЫТИЕ_ВЕРДИКТ,
 	ЧЛЕНСТВО_ДЕЙСТВУЕТ,
 	СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА,
-	СОБЫТИЕ_МАТЕРИАЛ_ВЫДАН,
-	СОБЫТИЕ_ОТМЕТКА,
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning_session import (
@@ -80,16 +78,14 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 	ЧУЖОЕ_ЗАНЯТИЕ,
 )
-from lms_frappe_app.agent_learning.normalizer import нормализовать_урок
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.agent_learning.permissions import видит_всё
 from lms_frappe_app.agent_learning.profile import КЛЮЧИ_ПРОФИЛЯ, заполненность, профиль
 from lms_frappe_app.agent_learning.structure import уроки_курса
-from lms_frappe_app.api import контракт, список, текущий_пользователь
+from lms_frappe_app.api import контракт, текущий_пользователь
 
 НЕЧЕГО_УЧИТЬ = "nothing_to_study"
-ЦЕЛИ_НЕ_СОВПАЛИ = "objectives_mismatch"
 НУЖЕН_КВИЗ = "quiz_required"
 ПУНКТЫ_ОТКРЫТЫ = "goals_open"
 ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
@@ -104,12 +100,6 @@ from lms_frappe_app.api import контракт, список, текущий_п
 #: Откуда пришёл вызов: свой агент ученика или веб-чат платформы. Канал `web`
 #: только ограничивает передавшего — подделывать его незачем.
 КАНАЛЫ = ("agent", "web")
-
-#: Как прошла цель на занятии. Набор закрыт: значение вне его — отказ
-#: `objectives_mismatch`.
-СТАТУСЫ_ЦЕЛЕЙ = ("covered", "touched", "skipped")
-СТАТУС_РАЗОБРАНА = "covered"
-СТАТУС_ЗАДЕТА = "touched"
 
 ПЕРЕПОЛНЕНО = "note_limit_reached"
 ЗАМЕТКА_НЕ_НАЙДЕНА = "note_not_found"
@@ -132,7 +122,7 @@ def лимит_заметок() -> int:
 
 
 #: Сколько влезает в репорт. `Why:` `objective` в схеме — `Data`, то есть
-#: varchar(140), а цели приходят из директивы, где длина ничем не ограничена:
+#: varchar(140), а цель присылает агент, и длина её ничем не ограничена:
 #: длинная цель уезжала агенту ошибкой базы мимо контракта, да ещё с
 #: присланным текстом в сообщении. Обрезка, а не отказ: и цель, и описание —
 #: слова агента о проблеме, и терять сам сигнал из-за длины незачем.
@@ -1217,248 +1207,6 @@ def _список_домашки(значение, тип: type) -> list:
 	return list(значение)
 
 
-@frappe.whitelist(methods=["POST"])
-@контракт
-def lesson_material(session: str, segment: int = 1) -> dict:
-	"""Материал урока по занятию: часть длинного урока, медиа, блоки документа.
-
-	Шаг лёгкого старта курса старой модели: агент берёт материал, когда дошёл
-	до объяснения, и следующую часть — когда разобрал эту.
-	Сегмент считается с единицы; больше последнего — последний.
-	"""
-	занятие = _своё_занятие(session)
-	материал = нормализовать_урок(занятие.lesson)
-	сегмент = min(max(1, int(segment or 1)), материал.total_segments or 1)
-	занятие.записать_событие(СОБЫТИЕ_МАТЕРИАЛ_ВЫДАН, f"сегмент {сегмент}")
-	return {
-		"session": session,
-		"lesson": занятие.lesson,
-		"content": {
-			"markdown": материал.сегмент(сегмент),
-			"segment_index": сегмент,
-			"total_segments": материал.total_segments,
-		},
-		"media": [{"kind": м.kind, "title": м.title, "url": м.url} for м in материал.media],
-		# Подсказка «сегодня собираем резюме проекта», как в `start_lesson`.
-		"artifact_blocks": _блоки_урока(
-			занятие.student, занятие.course, занятие.lesson, занятие.organization or None
-		),
-	}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def teaching_notes(session: str) -> dict:
-	"""Указания автора агенту по занятию: директива урока и сквозная директива курса.
-
-	Отдельно от материала и с грифом `teacher_only`: указания адресованы
-	агенту, ученику их не показывают.
-	"""
-	занятие = _своё_занятие(session)
-	директива = _директива(занятие.lesson)
-	курсовая = _директива_курса(занятие.course)
-	занятие.записать_событие(СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА, f"урок {занятие.lesson}")
-	return {
-		"session": session,
-		"directive": директива.get("directive"),
-		"course_directive": курсовая.get("directive"),
-	}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def student_context(session: str) -> dict:
-	"""Контекст ученика по занятию: заметки, незакрытое и сделанное, новости по репортам.
-
-	Курс старой модели. Итоги репортов отдаются один раз: вызов отмечает их
-	доставленными.
-	"""
-	занятие = _своё_занятие(session)
-	ученик, курс = занятие.student, занятие.course
-	перенос, сделанное = _незакрытые_цели(ученик, курс, кроме=занятие.lesson)
-	итоги = _репорты_ученика(ученик, course=курс, только_новые_итоги=True)
-	ответ = {
-		"session": session,
-		**_заметки(ученик, курс),
-		"carried_over": перенос,
-		"recent_work": сделанное,
-		"closed_reports": итоги,
-	}
-	# Отметка — после сборки ответа, как в `start_lesson`.
-	_отметить_показанные(итоги)
-	return ответ
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def report_outcomes(session: str, outcomes) -> dict:
-	"""Итог по целям урока курса старой модели.
-
-	Дополняет отметки `mark_objective`: пункт итога замещает отметку той же
-	цели, цели без пункта остаются с отметкой. Цель — текстом или номером из `objectives`.
-	Вместе с отметками итог обязан покрыть все цели урока — без сверки
-	обязательный отчёт вырождается в пустой список.
-	"""
-	занятие = _своё_занятие(session)
-	цели = _цели_урока(занятие.lesson)
-	сданные = {}
-	чужие = []
-	for пункт in список(outcomes):
-		цель = _цель_пункта(пункт.get("objective"), цели)
-		статус = (пункт.get("status") or "").strip()
-		if статус not in СТАТУСЫ_ЦЕЛЕЙ:
-			raise Отказ(
-				ЦЕЛИ_НЕ_СОВПАЛИ,
-				"Статус цели должен быть covered, touched или skipped",
-				objective=цель,
-				status=статус,
-			)
-		продолжить = (пункт.get("resume_from") or "").strip()
-		if len(продолжить) > ДЛИНА_ПРОДОЛЖЕНИЯ:
-			raise Отказ(
-				ЦЕЛИ_НЕ_СОВПАЛИ,
-				f"«С чего продолжать» — одна фраза, не длиннее {ДЛИНА_ПРОДОЛЖЕНИЯ} знаков",
-				objective=цель,
-				field="resume_from",
-			)
-		if цель not in цели:
-			чужие.append(цель)
-		сданные[цель] = (статус, продолжить or None)
-
-	прежние = {с.objective: с for с in занятие.outcomes if с.objective in цели}
-	итог = {
-		цель: (с.status, с.resume_from or None, с.evidence or None) for цель, с in прежние.items()
-	}
-	for цель, (статус, продолжить) in сданные.items():
-		# Свидетельство разбора переживает итог, пока цель остаётся разобранной:
-		# итог «covered» не должен стирать, что ученик сделал.
-		было = итог.get(цель)
-		итог[цель] = (статус, продолжить, было[2] if было and статус == "covered" else None)
-
-	нет = [цель for цель in цели if цель not in итог]
-	if чужие or нет:
-		raise Отказ(
-			ЦЕЛИ_НЕ_СОВПАЛИ,
-			"Вместе с отметками итог должен покрывать ровно цели урока",
-			missing=нет,
-			unexpected=sorted(чужие),
-		)
-
-	_записать_цели(занятие, цели, итог)
-	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, "итог по целям урока")
-
-	return {
-		"session": session,
-		"reported": len(цели),
-		"progress": _прогресс(занятие, цели),
-		"empty_blocks": _пустые_блоки_урока(
-			занятие.student, занятие.course, занятие.lesson, занятие.organization or None
-		),
-	}
-
-
-@frappe.whitelist(methods=["POST"])
-@контракт
-def mark_objective(session: str, objective, status: str, note: str | None = None) -> dict:
-	"""Отметка одной цели урока по ходу занятия.
-
-	Цель — номером из `objectives`, с единицы. `covered` — разобрали, и
-	ученик применил на своей задаче: `note` обязательна — что он сделал.
-	`touched` — затронули, не проверили: `note` — с чего продолжать.
-	`skipped` ставится только итогом урока. Отметка сразу видна на
-	странице курса и в переносе на следующее занятие, даже если это
-	занятие потом бросят (learning-services#409).
-	"""
-	занятие = _своё_занятие(session)
-	if занятие.status in ЗАВЕРШЁННЫЕ:
-		raise Отказ(ЗАНЯТИЕ_ЗАКРЫТО, "Занятие уже закрыто", session=session)
-	цели = _цели_урока(занятие.lesson)
-	try:
-		номер = int(objective)
-	except (TypeError, ValueError):
-		номер = 0
-	if not 1 <= номер <= len(цели):
-		raise Отказ(
-			ЦЕЛИ_НЕ_СОВПАЛИ,
-			"Нет цели с таким номером: цели нумеруются с единицы в порядке objectives",
-			objective=objective,
-			total=len(цели),
-		)
-	статус = (status or "").strip()
-	if статус not in (СТАТУС_РАЗОБРАНА, СТАТУС_ЗАДЕТА):
-		raise Отказ(
-			ЦЕЛИ_НЕ_СОВПАЛИ,
-			"Отметка по ходу — covered или touched; skipped ставится итогом урока",
-			objective=номер,
-			status=статус,
-		)
-	заметка = (note or "").strip()
-	if len(заметка) > ДЛИНА_ПРОДОЛЖЕНИЯ:
-		raise Отказ(
-			ЦЕЛИ_НЕ_СОВПАЛИ,
-			f"Заметка к отметке — одна фраза, не длиннее {ДЛИНА_ПРОДОЛЖЕНИЯ} знаков",
-			objective=номер,
-			field="note",
-		)
-	if статус == СТАТУС_РАЗОБРАНА and not заметка:
-		raise Отказ(
-			ЦЕЛИ_НЕ_СОВПАЛИ,
-			"К разобранной цели нужна заметка: что ученик сделал на своей задаче",
-			objective=номер,
-			field="note",
-		)
-
-	цель = цели[номер - 1]
-	итог = {
-		с.objective: (с.status, с.resume_from or None, с.evidence or None)
-		for с in занятие.outcomes
-		if с.objective in цели
-	}
-	итог[цель] = (
-		статус,
-		заметка if статус == СТАТУС_ЗАДЕТА else None,
-		заметка if статус == СТАТУС_РАЗОБРАНА else None,
-	)
-	_записать_цели(занятие, цели, итог)
-	занятие.записать_событие(СОБЫТИЕ_ОТМЕТКА, f"цель {номер}: {статус}")
-	прогресс = _прогресс(занятие, цели)
-	return {
-		"session": session,
-		"objective": номер,
-		"text": цель,
-		"status": статус,
-		"progress": прогресс,
-		"warnings": _не_взято(занятие),
-	}
-
-
-#: Что агент лёгкого старта должен был взять до отметок — и чем.
-НЕ_ВЗЯТО = (
-	(СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА, "teaching_notes_not_taken"),
-	(СОБЫТИЕ_МАТЕРИАЛ_ВЫДАН, "lesson_material_not_taken"),
-)
-
-
-def _не_взято(занятие) -> list[str]:
-	"""Предупреждения порядка: отметки идут, а указания или материал не взяты.
-
-	Мягкая проверка, а не отказ (решение владельца, learning-services#407):
-	слабый агент не упирается в тупик, а отклонение видно ему в ответе.
-	Полный старт отдаёт и то и другое сразу — ему предупреждать не о чем.
-	"""
-	if not занятие.brief_start:
-		return []
-	выданы = set(
-		frappe.get_all(
-			"Agent Session Event",
-			filters={"session": занятие.name, "kind": ("in", [вид for вид, _ in НЕ_ВЗЯТО])},
-			pluck="kind",
-			ignore_permissions=True,
-		)
-	)
-	return [код for вид, код in НЕ_ВЗЯТО if вид not in выданы]
-
-
 def _флаг(значение) -> bool:
 	return значение not in (False, None, 0, "0", "", "false", "False")
 
@@ -1509,14 +1257,17 @@ def report_issue(
 ) -> dict:
 	"""Репорт агента о том, что мешает курсу работать.
 
-	Курс, урок и действующую редакцию указаний (у курса из релиза — действующий
-	релиз) берёт сервер из занятия: привязка от агента указала бы на чужой урок.
-	`question` у курса из релиза — ключ вопроса урока в действующем релизе.
+	Курс, урок и действующий релиз берёт сервер из занятия: привязка от агента
+	указала бы на чужой урок. `question` — ключ вопроса урока в действующем
+	релизе. Курс без действующего релиза — отказ `course_not_released`.
 
 	Номер репорта — для ученика: по нему тот найдёт свой репорт в
 	`my_reports` и узнает, чем кончилось дело.
 	"""
 	занятие = _своё_занятие(session)
+	релиз = прохождения.действующий(занятие.course)
+	if not релиз:
+		raise Отказ(КУРС_НЕ_В_РЕЛИЗЕ, "У курса нет действующего релиза", course=занятие.course)
 	имя_вида = (kind or "").strip().lower()
 	вид = ВИДЫ_РЕПОРТОВ.get(имя_вида)
 	if not вид:
@@ -1530,21 +1281,11 @@ def report_issue(
 	if not описание:
 		raise Отказ(ПУСТОЙ_РЕПОРТ, "Опишите, что не так", kind=kind)
 
-	релиз = прохождения.действующий(занятие.course)
-	if релиз:
-		# Курс из релиза: вопрос — ключ вопроса урока в действующем релизе,
-		# указаний старой модели у урока нет.
-		ключ = index.ключ_урока(релиз, занятие.lesson)
-		if question and not (ключ and index.есть_вопрос(релиз, ключ, question)):
-			raise Отказ(quiz.ЧУЖОЙ_ВОПРОС, "Вопрос не из квиза этого урока", question=question)
-		привязка = {"release": релиз, "question_key": question or None}
-	else:
-		if question and question not in quiz.вопросы_урока(занятие.lesson):
-			raise Отказ(quiz.ЧУЖОЙ_ВОПРОС, "Вопрос не из квиза этого урока", question=question)
-		привязка = {
-			"lesson_directive": directives.действующая("Agent Lesson Directive", {"lesson": занятие.lesson}),
-			"question": question,
-		}
+	# Урок, снятый из действующего релиза, вопросов не имеет: репорт о нём
+	# доходит, но без вопроса.
+	ключ = index.ключ_урока(релиз, занятие.lesson)
+	if question and not (ключ and index.есть_вопрос(релиз, ключ, question)):
+		raise Отказ(quiz.ЧУЖОЙ_ВОПРОС, "Вопрос не из квиза этого урока", question=question)
 
 	# `ignore_permissions` здесь — то же, что у прочих записей ученика:
 	# владение уже проверено `_своё_занятие`, а прав на создание у
@@ -1556,7 +1297,8 @@ def report_issue(
 			"session": занятие.name,
 			"course": занятие.course,
 			"lesson": занятие.lesson,
-			**привязка,
+			"release": релиз,
+			"question_key": question or None,
 			"kind": вид,
 			"objective": (objective or "").strip()[:ДЛИНА_ЦЕЛИ],
 			"text": описание[:ДЛИНА_ОПИСАНИЯ],
@@ -2203,9 +1945,6 @@ def _отметить_показанные(репорты: list[dict]) -> None:
 #: значение для настройки `carry_over_depth`. Считаются разные уроки, а не
 #: занятия: урок, пройденный дважды, входит в глубину один раз.
 ГЛУБИНА_ПЕРЕНОСА = 3
-#: «С чего продолжать» — одна фраза к незакрытой цели, а не конспект занятия:
-#: пересказ целиком способен вернуть объяснение, которое ученика запутало (#238).
-ДЛИНА_ПРОДОЛЖЕНИЯ = 500
 #: Сколько часов с прошлого занятия по курсу, чтобы начать с мостика, а не с
 #: зачина; запасное значение для настройки `bridge_after_hours` (#238).
 ПЕРЕРЫВ_ДЛЯ_МОСТИКА = 24
@@ -2279,103 +2018,6 @@ def _состояние_старта(ученик: str, курс: str, lesson: s
 	return {"opening": opening, "last_session_at": последнее.isoformat() if последнее else None}
 
 
-def _незакрытые_цели(ученик: str, курс: str, кроме: str) -> tuple[list[dict], list[dict]]:
-	"""Цели прошлых уроков курса: незакрытые — и что ученик сделал по разобранным.
-
-	Первое — перенос: цели `touched` и `skipped`, от них строится мостик.
-	Второе — `recent_work`: заметки `evidence` к разобранным целям, чтобы
-	следующее занятие опиралось на сделанное, а не только на недоделанное.
-
-	Брошенные занятия в счёт: отметки теперь ставятся по ходу, и занятие,
-	прерванное на середине, оставляет их (learning-services#409).
-	"""
-	занятия = frappe.get_all(
-		"Agent Learning Session",
-		filters={"student": ученик, "course": курс, "status": ("in", ЗАВЕРШЁННЫЕ)},
-		fields=["name", "lesson", "finished_at", "last_activity_at"],
-		order_by="finished_at desc",
-		ignore_permissions=True,
-	)
-	перенос, работа = [], []
-	увиденные = set()
-	глубина = глубина_переноса()
-	for занятие in занятия:
-		# Урок мог проходиться дважды: значим последний отчёт по нему.
-		if занятие.lesson == кроме or занятие.lesson in увиденные:
-			continue
-		строки = frappe.get_all(
-			"Agent Objective Outcome",
-			filters={"parent": занятие.name, "parenttype": "Agent Learning Session"},
-			fields=["objective", "status", "resume_from", "evidence"],
-			order_by="idx asc",
-			ignore_permissions=True,
-		)
-		if not строки:
-			# Занятие без отметок урока не описывает: брошенная попытка не
-			# должна заслонить прежнее занятие по тому же уроку.
-			continue
-		увиденные.add(занятие.lesson)
-		if len(увиденные) > глубина:
-			break
-		когда = занятие.finished_at or занятие.last_activity_at
-		for строка in строки:
-			if строка.status in ("touched", "skipped"):
-				перенос.append(
-					{
-						"objective": строка.objective,
-						"status": строка.status,
-						"resume_from": строка.resume_from or None,
-						"lesson": занятие.lesson,
-						"when": когда.isoformat() if когда else None,
-					}
-				)
-			elif строка.evidence:
-				работа.append(
-					{
-						"objective": строка.objective,
-						"evidence": строка.evidence,
-						"lesson": занятие.lesson,
-						"when": когда.isoformat() if когда else None,
-					}
-				)
-	return перенос, работа
-
-
-def _цели_урока(lesson: str) -> list[str]:
-	"""Цели действующей директивы урока, в порядке автора."""
-	return _директива(lesson).get("objectives", [])
-
-
-def _цель_пункта(значение, цели: list[str]) -> str:
-	"""Цель пункта итога: текст как есть, номер — цель с этим номером."""
-	if isinstance(значение, int) or (isinstance(значение, str) and значение.strip().isdigit()):
-		номер = int(значение)
-		if 1 <= номер <= len(цели):
-			return цели[номер - 1]
-	return str(значение or "").strip()
-
-
-def _записать_цели(занятие, цели: list[str], итог: dict) -> None:
-	"""Строки отметок в порядке директивы, а не в порядке прихода.
-
-	Порядок из директивы: строки читаются так, как автор задумывал урок.
-	"""
-	занятие.outcomes = []
-	for цель in цели:
-		if цель in итог:
-			статус, продолжить, сделано = итог[цель]
-			занятие.append(
-				"outcomes",
-				{
-					"objective": цель,
-					"status": статус,
-					"resume_from": продолжить,
-					"evidence": сделано,
-				},
-			)
-	занятие.save(ignore_permissions=True)
-
-
 def _цели_открытого_занятия(ученик: str, course: str) -> list[dict] | None:
 	"""Цели урока открытого занятия ученика по курсу (`_цели_занятия`); занятия нет — `None`."""
 	открытые = frappe.get_all(
@@ -2402,22 +2044,6 @@ def _цели_занятия(занятие) -> list[dict] | None:
 	if not ключ:
 		return None
 	return прохождения.цели_урока(занятие.student, занятие.course, релиз, ключ)
-
-
-def _прогресс(занятие, цели: list[str] | None = None) -> dict:
-	"""Сколько целей урока отмечено и какие ещё нет — с номерами.
-
-	Отмеченной считается цель с любым статусом: так её видит страница
-	курса. Номера — те же, которыми отмечает `mark_objective`.
-	"""
-	цели = _цели_урока(занятие.lesson) if цели is None else цели
-	отмечены = {с.objective for с in занятие.outcomes}
-	открытые = [
-		{"number": номер, "text": цель}
-		for номер, цель in enumerate(цели, start=1)
-		if цель not in отмечены
-	]
-	return {"marked": len(цели) - len(открытые), "total": len(цели), "open": открытые}
 
 
 def _курс_урока(lesson: str) -> str:
@@ -2606,80 +2232,3 @@ def _первый_непройденный(уроки: list[str], пройден
 
 def _следующий_урок(ученик: str, курс: str) -> dict | None:
 	return _первый_непройденный(уроки_курса(курс), _пройденные(ученик, курс))
-
-
-def _директива(lesson: str) -> dict:
-	"""Действующая директива урока — отдельным полем и с пометкой адресата.
-
-	Материал и директива приходят разными полями, а сама директива помечена
-	`audience: teacher_only`. Это одна из трёх митигаций против пересказа
-	директивы ученику; гарантий она не даёт — гарантию даёт серверный квиз.
-	"""
-	д = directives.запись(
-		"Agent Lesson Directive",
-		{"lesson": lesson},
-		(
-			"objectives",
-			"teaching_directive",
-			"probing_questions",
-			"common_misconceptions",
-			"success_criteria",
-		),
-	)
-	if not д:
-		return {}
-	return {
-		"objectives": _строки(д.objectives),
-		"directive": {
-			"audience": "teacher_only",
-			"teaching_directive": д.teaching_directive,
-			"probing_questions": _строки(д.probing_questions),
-			"common_misconceptions": _строки(д.common_misconceptions),
-			"success_criteria": _строки(д.success_criteria),
-		},
-	}
-
-
-def _директива_курса(course: str) -> dict:
-	"""Сквозная директива курса — тем же способом, что и урочная.
-
-	Цели курса идут наружу, а не внутрь директивы: их агент вправе озвучить
-	ученику, как и цели урока.
-	"""
-	д = directives.запись(
-		"Agent Course Directive",
-		{"course": course},
-		(
-			"objectives",
-			"teaching_directive",
-			"student_profile",
-			"glossary",
-			"remember_about_student",
-		),
-	)
-	if not д:
-		return {}
-	return {
-		"objectives": _строки(д.objectives),
-		"directive": {
-			"audience": "teacher_only",
-			"teaching_directive": д.teaching_directive,
-			"student_profile": д.student_profile,
-			"glossary": _строки(д.glossary),
-			# Внутрь директивы, а не рядом: по каким признакам его оценивают,
-			# ученику знать не нужно — начнёт подстраиваться.
-			"remember_about_student": _строки(д.remember_about_student),
-		},
-	}
-
-
-#: Правило разбора многострочных полей директивы живёт в `directives`: его же
-#: применяет карта курса, и две копии дали бы разный состав целей.
-_строки = directives.строки
-
-
-def _осталось_попыток(ученик: str, lesson: str, политика: dict) -> int | None:
-	квиз = quiz._квиз_урока(lesson)
-	if not квиз:
-		return None
-	return quiz.осталось_попыток(quiz.попытки_квиза(ученик, квиз), политика)

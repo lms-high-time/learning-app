@@ -80,8 +80,6 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertEqual(данные["quiz"], {"required": True, "pass_threshold": 0.7, "attempts_left": 3})
 		self.assertEqual(данные["start"]["opening"], "first_in_course")
 		self.assertIsNone(данные["resume_from"])
-		for поле in ("content", "media", "objectives", "student_context", "course_directive", "brief"):
-			self.assertNotIn(поле, данные)
 		self.assertEqual(
 			frappe.get_all(
 				"Agent Session Event", filters={"session": данные["session"]}, pluck="kind", ignore_permissions=True
