@@ -1489,8 +1489,9 @@ def report_issue(
 ) -> dict:
 	"""Репорт агента о том, что мешает курсу работать.
 
-	Курс, урок и действующую редакцию указаний берёт сервер из занятия:
-	привязка от агента указала бы на чужой урок.
+	Курс, урок и действующую редакцию указаний (у курса из релиза — действующий
+	релиз) берёт сервер из занятия: привязка от агента указала бы на чужой урок.
+	`question` у курса из релиза — ключ вопроса урока в действующем релизе.
 
 	Номер репорта — для ученика: по нему тот найдёт свой репорт в
 	`my_reports` и узнает, чем кончилось дело.
@@ -1509,8 +1510,21 @@ def report_issue(
 	if not описание:
 		raise Отказ(ПУСТОЙ_РЕПОРТ, "Опишите, что не так", kind=kind)
 
-	if question and question not in quiz.вопросы_урока(занятие.lesson):
-		raise Отказ(quiz.ЧУЖОЙ_ВОПРОС, "Вопрос не из квиза этого урока", question=question)
+	релиз = прохождения.действующий(занятие.course)
+	if релиз:
+		# Курс из релиза: вопрос — ключ вопроса урока в действующем релизе,
+		# указаний старой модели у урока нет.
+		ключ = index.ключ_урока(релиз, занятие.lesson)
+		if question and not (ключ and index.есть_вопрос(релиз, ключ, question)):
+			raise Отказ(quiz.ЧУЖОЙ_ВОПРОС, "Вопрос не из квиза этого урока", question=question)
+		привязка = {"release": релиз, "question_key": question or None}
+	else:
+		if question and question not in quiz.вопросы_урока(занятие.lesson):
+			raise Отказ(quiz.ЧУЖОЙ_ВОПРОС, "Вопрос не из квиза этого урока", question=question)
+		привязка = {
+			"lesson_directive": directives.действующая("Agent Lesson Directive", {"lesson": занятие.lesson}),
+			"question": question,
+		}
 
 	# `ignore_permissions` здесь — то же, что у прочих записей ученика:
 	# владение уже проверено `_своё_занятие`, а прав на создание у
@@ -1522,11 +1536,8 @@ def report_issue(
 			"session": занятие.name,
 			"course": занятие.course,
 			"lesson": занятие.lesson,
-			"lesson_directive": directives.действующая(
-				"Agent Lesson Directive", {"lesson": занятие.lesson}
-			),
+			**привязка,
 			"kind": вид,
-			"question": question,
 			"objective": (objective or "").strip()[:ДЛИНА_ЦЕЛИ],
 			"text": описание[:ДЛИНА_ОПИСАНИЯ],
 		}

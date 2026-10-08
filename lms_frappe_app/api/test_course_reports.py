@@ -16,6 +16,9 @@ from lms_frappe_app.api.authoring import (
 from lms_frappe_app.tests.sample_data import (
 	привязать_урок,
 	зачислить,
+	зачислить_на_курс,
+	курс_из_релиза,
+	урок_релиза,
 	создать_занятие,
 	создать_куратора,
 	создать_ученика,
@@ -323,3 +326,62 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		).save(ignore_permissions=True)
 
 		self.assertEqual(self.итоги_на_занятии(), [])
+
+
+class IntegrationTestCourseReportsRelease(IntegrationTestCase):
+	"""Репорт по уроку курса из релиза: вопрос — ключ вопроса урока в релизе,
+	привязка — действующий релиз, а не редакция указаний (learning-services#506)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.куратор = создать_куратора(f"rep-rel-author-{суффикс}@example.com")
+		self.ученик = создать_ученика(f"rep-rel-pupil-{суффикс}@example.com")
+		self.курс, self.релиз = курс_из_релиза()
+		зачислить_на_курс(self.ученик, self.курс)
+		self.занятие = создать_занятие(self.ученик, урок_релиза(self.курс, "l-1"))
+		frappe.set_user(self.ученик)
+
+	def test_вопрос_по_ключу_релиза_и_привязка_к_релизу(self):
+		ответ = student.report_issue(
+			session=self.занятие, kind="quiz_question_issue", text="Два верных варианта", question="S1/l-1-D1"
+		)
+		self.assertTrue(ответ["ok"], ответ)
+
+		запись = frappe.db.get_value(
+			"Agent Course Report",
+			ответ["data"]["report"],
+			["question", "question_key", "release", "lesson_directive"],
+			as_dict=True,
+		)
+		self.assertEqual(
+			запись,
+			{"question": None, "question_key": "S1/l-1-D1", "release": self.релиз, "lesson_directive": None},
+		)
+		frappe.set_user(self.куратор)
+		[репорт] = authoring.course_reports(course=self.курс)["data"]["reports"]
+		self.assertEqual(
+			(репорт["question"], репорт["question_key"], репорт["release"], репорт["directive_version"]),
+			(None, "S1/l-1-D1", self.релиз, None),
+		)
+
+	def test_вопрос_чужого_урока_отказ_без_записи(self):
+		ответ = student.report_issue(
+			session=self.занятие, kind="quiz_question_issue", text="Не тот вопрос", question="S1/l-2-D1"
+		)
+
+		self.assertEqual(ответ["error"]["code"], "question_mismatch")
+		self.assertFalse(frappe.db.exists("Agent Course Report", {"session": self.занятие}))
+
+	def test_репорт_без_вопроса(self):
+		ответ = student.report_issue(
+			session=self.занятие, kind="stuck", text="Встал на примере", objective="Цель"
+		)
+
+		запись = frappe.db.get_value(
+			"Agent Course Report",
+			ответ["data"]["report"],
+			["question_key", "release", "objective"],
+			as_dict=True,
+		)
+		self.assertEqual(запись, {"question_key": None, "release": self.релиз, "objective": "Цель"})
