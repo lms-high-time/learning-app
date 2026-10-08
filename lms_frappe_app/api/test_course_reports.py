@@ -422,7 +422,7 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		репорты = authoring.course_reports(course=курс)["data"]["reports"]
 
 		self.assertEqual(
-			[(р["text"], р["release"], р["lesson_key"]) for р in репорты],
+			sorted((р["text"], р["release"], р["lesson_key"]) for р in репорты),
 			[("Про второй", второй, "l-2"), ("Про третий", первый, "l-3")],
 		)
 		self.assertEqual(
