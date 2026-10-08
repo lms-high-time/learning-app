@@ -63,8 +63,6 @@
 # --- журнал занятия ---
 
 СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА = "Directive Issued"
-СОБЫТИЕ_МАТЕРИАЛ_ВЫДАН = "Material Issued"
-СОБЫТИЕ_ОТМЕТКА = "Checkpoint Reported"
 СОБЫТИЕ_КВИЗ_НАЧАТ = "Quiz Started"
 СОБЫТИЕ_ВЕРДИКТ = "Verdict Returned"
 СОБЫТИЕ_ЗАНЯТИЕ_БРОШЕНО = "Session Abandoned"

@@ -89,7 +89,7 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 
 	def test_запись_журнала_не_изменяется(self):
 		занятие = self.занятие()
-		событие = занятие.записать_событие("Checkpoint Reported", "разобрали цикл")
+		событие = занятие.записать_событие("Directive Issued", "выдан пакет урока")
 
 		событие.note = "переписано"
 		with self.assertRaises(frappe.ValidationError):
@@ -133,3 +133,53 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 		занятие.reload()
 
 		self.assertEqual(занятие.status, "Completed")
+
+
+class IntegrationTestDropObjectiveOutcomes(IntegrationTestCase):
+	"""Патч убирает отметки целей по занятию: доктайп, таблицу, колонку и события.
+
+	Состояние старого сайта собирается без сохранения документов: схема, из
+	которой они ушли, их уже не примет. Событие — с выдуманным занятием:
+	патч меняет схему, это фиксирует транзакцию, и настоящее занятие осталось
+	бы в базе после теста.
+	"""
+
+	ОТМЕТКИ = "Agent Objective Outcome"
+
+	def test_патч_убирает_доктайп_таблицу_колонку_и_события(self):
+		from lms_frappe_app.patches.v0_1.drop_objective_outcomes import execute
+
+		frappe.db.sql_ddl(
+			f"CREATE TABLE IF NOT EXISTS `tab{self.ОТМЕТКИ}` (`name` varchar(140) PRIMARY KEY, `parent` varchar(140))"
+		)
+		frappe.db.sql_ddl(
+			f"ALTER TABLE `tab{DOCTYPE}` ADD COLUMN IF NOT EXISTS `brief_start` int(1) NOT NULL DEFAULT 0"
+		)
+		frappe.client_cache.delete_value(f"table_columns::tab{DOCTYPE}")
+		if not frappe.db.exists("DocType", self.ОТМЕТКИ):
+			доктайп = frappe.get_doc(
+				{
+					"doctype": "DocType",
+					"name": self.ОТМЕТКИ,
+					"module": "Agent Learning",
+					"istable": 1,
+					"fields": [{"fieldname": "objective", "fieldtype": "Data", "label": "Цель"}],
+				}
+			)
+			доктайп.db_insert()
+			доктайп.fields[0].db_insert()
+		событие = frappe.get_doc(
+			{"doctype": "Agent Session Event", "session": "нет-такого-занятия", "kind": "Material Issued"}
+		)
+		событие.db_insert()
+		self.assertTrue(frappe.db.table_exists(self.ОТМЕТКИ, cached=False))
+		self.assertTrue(frappe.db.has_column(DOCTYPE, "brief_start"))
+
+		execute()
+		execute()  # повторный запуск не падает
+
+		self.assertFalse(frappe.db.table_exists(self.ОТМЕТКИ, cached=False))
+		self.assertFalse(frappe.db.exists("DocType", self.ОТМЕТКИ))
+		self.assertFalse(frappe.db.exists("DocField", {"parent": self.ОТМЕТКИ}))
+		self.assertFalse(frappe.db.has_column(DOCTYPE, "brief_start"))
+		self.assertFalse(frappe.db.exists("Agent Session Event", событие.name))
