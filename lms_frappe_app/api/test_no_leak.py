@@ -273,8 +273,10 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 #: ученику и руководителю они не показываются (learning-services#504).
 СВИДЕТЕЛЬСТВО = "Свидетельство агента к пункту прохождения"
 СЛОВА_УЧЕНИКА = "Слова ученика в ответ на вопрос из релиза"
+#: Подробности пункта из пакета агента — отдаёт только `lesson_item`.
+ТЕКСТ_ПУНКТА = "Подробности пункта из пакета агента"
 #: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
-ЗАКРЫТОЕ_РЕЛИЗА = (ПОЯСНЕНИЕ_РЕЛИЗА, ПОЯСНЕНИЕ_ВТОРОГО, ПАКЕТ_АГЕНТА, КАРТА_КУРСА, СВИДЕТЕЛЬСТВО)
+ЗАКРЫТОЕ_РЕЛИЗА = (ПОЯСНЕНИЕ_РЕЛИЗА, ПОЯСНЕНИЕ_ВТОРОГО, ПАКЕТ_АГЕНТА, ТЕКСТ_ПУНКТА, КАРТА_КУРСА, СВИДЕТЕЛЬСТВО)
 ВОПРОС_1, ВОПРОС_2 = "S1/l-1-D1", "S2/l-1-D1"
 ПОПЫТКА = "Agent Quiz Attempt"
 ОТВЕТ = "Agent Quiz Answer"
@@ -305,7 +307,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			}
 		)
 		квиз["answers"][ВОПРОС_2] = {"correct": "V2", "explanation": ПОЯСНЕНИЕ_ВТОРОГО}
-		релиз["agent"] = {"lessons": {"l-1": {"directive": ПАКЕТ_АГЕНТА}}}
+		релиз["agent"] = {"lessons": {"l-1": {"directive": ПАКЕТ_АГЕНТА, "items": {"term:T1": ТЕКСТ_ПУНКТА}}}}
 		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
 		frappe.set_user("Administrator")
 		данные = релизы.опубликовать(релиз, None, "Administrator")
@@ -345,6 +347,20 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			self, урок, "start_lesson", запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПАКЕТ_АГЕНТА)
 		)
 		self.assertIn(ПАКЕТ_АГЕНТА, выдано)
+		занятие = урок["data"]["session"]
+		# Подробности пункта — тоже пакет агента, но только своего пункта.
+		выдано = проверить_ответ(
+			self,
+			student.lesson_item(занятие, "term:T1"),
+			"lesson_item",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ТЕКСТ_ПУНКТА),
+		)
+		self.assertIn(ТЕКСТ_ПУНКТА, выдано)
+		self.проверить("lesson_item", student.lesson_item(занятие, "l-1-D1/V1"))
+		self.проверить(
+			"mark_goal",
+			student.mark_goal(занятие, "l-1-D1/V1", "done", СВИДЕТЕЛЬСТВО, resume_from="С примера ученика"),
+		)
 		self.проверить(
 			"update_artifact",
 			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),

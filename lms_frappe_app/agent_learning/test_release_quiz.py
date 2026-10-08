@@ -23,7 +23,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ПРОВЕРКА_ВОПРОС_ВЫДАН,
 	ПРОВЕРКА_ОТВЕТ_ПРИНЯТ,
 )
-from lms_frappe_app.agent_learning.errors import ЧУЖОЕ_ЗАНЯТИЕ, Отказ
+from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.quiz import (
 	НУЖНЫ_СЛОВА,
 	ПОПЫТКА_ЗАВЕРШЕНА,
@@ -768,3 +768,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(ответ["error"]["code"], "busy")
 		self.assertEqual(ответ["error"]["attempt"], попытка)
 		откат.assert_called_once_with()
+
+	def test_архивное_прохождение_квиз_не_начинает(self):
+		run, занятие = self.урок()
+		frappe.db.set_value(прохождения.ПРОХОЖДЕНИЕ, run.name, "student", None)
+
+		self.отказ(ПРОХОЖДЕНИЕ_В_АРХИВЕ, release_quiz.начать, frappe.get_doc(прохождения.ПРОХОЖДЕНИЕ, run.name), занятие)

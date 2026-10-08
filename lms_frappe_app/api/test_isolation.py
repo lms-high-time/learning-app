@@ -90,6 +90,9 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		действия = {
 			"отметка": lambda: student.mark_objective(self.чужое_занятие, 1, "touched", "не моё занятие"),
+			"отметка пункта": lambda: student.mark_goal(self.чужое_занятие, "term:T1", "done", "не моё занятие"),
+			# Пункты урока — инструмент агента чужого ученика.
+			"подробности пункта": lambda: student.lesson_item(self.чужое_занятие, "term:T1"),
 			# Иначе можно сжечь чужую попытку — они лимитированы.
 			"квиз": lambda: student.request_quiz(self.чужое_занятие),
 			# Репорт берёт курс и урок из занятия: пропущенный сюда, он

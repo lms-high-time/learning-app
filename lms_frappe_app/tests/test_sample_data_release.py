@@ -70,7 +70,7 @@ class IntegrationTestФикстурыРелиза(IntegrationTestCase):
 		ответ = отметить_все_пункты(run, занятие)
 
 		self.assertEqual(ответ["lesson"]["status"], "covered")
-		self.assertIsNone(ответ["next"])
+		self.assertEqual(ответ["next_step"], {"kind": "complete"})
 		пункты = {п.goal_key: (п.status, п.session) for п in frappe.get_doc("Agent Lesson Run", run).goals}
 		self.assertEqual(
 			пункты,

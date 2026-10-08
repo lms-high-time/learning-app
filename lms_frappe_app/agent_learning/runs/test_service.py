@@ -595,7 +595,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		архив = {"student": None, "archived_student": self.ученик, "archived_at": now_datetime()}
 		frappe.db.set_value(ПРОХОЖДЕНИЕ, run.name, архив)
 
-		self.отказ("not_your_session", run.name, "term:T1", "done", "Ученик объяснил сам")
+		self.отказ("run_archived", run.name, "term:T1", "done", "Ученик объяснил сам")
 		self.assertIsNone(self.перечитать(run).started_at)
 
 	def test_отметка_пишет_пункт_и_начинает_урок(self):
@@ -612,7 +612,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 				"status": "done",
 				"objective": {"key": "l-1-D1", "status": "touched", "open": ["exec:E1"]},
 				"lesson": {"status": "in_progress"},
-				"next": {"objective": "l-1-D1", "goal": "exec:E1", "title": "Сделать пример"},
+				"next_step": {"kind": "goal", "objective": "l-1-D1", "goal": "exec:E1", "title": "Сделать пример"},
 			},
 		)
 		run = self.перечитать(run)
@@ -648,8 +648,8 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		# `planned` закрывает пункт для цели, как `done`; обе цели разобраны — урок разобран.
 		ответ = service.отметить(имя, "exec:E1", "planned", "Сделает дома")
 		self.assertEqual(
-			(ответ["objective"], ответ["lesson"]["status"], ответ["next"]),
-			({"key": "l-1-D1", "status": "covered", "open": []}, "covered", None),
+			(ответ["objective"], ответ["lesson"]["status"], ответ["next_step"]),
+			({"key": "l-1-D1", "status": "covered", "open": []}, "covered", {"kind": "complete"}),
 		)
 		ответ = service.отметить(имя, "exec:E1", "open", None)
 		self.assertEqual(итог(ответ), ("touched", "in_progress"))
@@ -668,10 +668,10 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 			],
 		)
 
-		self.assertEqual(service.отметить(run.name, "exec:E1", "done", "Сделал")["next"]["goal"], "term:T1")
+		self.assertEqual(service.отметить(run.name, "exec:E1", "done", "Сделал")["next_step"]["goal"], "term:T1")
 		ответ = service.отметить(run.name, "term:T1", "done", "Объяснил")
 		self.assertEqual(
-			(ответ["objective"]["open"], ответ["next"]["goal"], ответ["next"]["objective"]),
+			(ответ["objective"]["open"], ответ["next_step"]["goal"], ответ["next_step"]["objective"]),
 			([], "return:R1", "l-1-D2"),
 		)
 		service.отметить(run.name, "return:R1", "done", "Вернулся")
