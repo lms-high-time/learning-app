@@ -805,7 +805,9 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 сверенное с новым релизом, сохраняется и тогда, когда отметке отказано.
 `not_your_session` — занятие другого ученика, а также урока или прохождения,
 к которым занятие не относится; `course_not_released` (с `course` и
-`lesson`); `not_enrolled`, `organization_suspended`; `goal_status_unknown` (с
+`lesson`); `not_enrolled`, `organization_suspended`; `session_closed` (с
+`status`) — занятие закрыто, `Completed` или `Abandoned`: урок продолжают в
+новом занятии, `start_lesson`; `goal_status_unknown` (с
 `status` и `allowed`); `evidence_required` (с `status`); `evidence_too_long`
 и `resume_from_too_long` (с `limit` и `length`); `goal_unknown` (с `goal` и
 `goals`); `goal_removed` — пункт снят новым релизом; `not_needed_required` (с

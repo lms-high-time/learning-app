@@ -213,6 +213,18 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 		self.отказ(self.отметить(занятие, "term:T1"), "run_archived")
 
+	def test_закрытое_занятие_отметок_не_принимает(self):
+		for статус in ("Completed", "Abandoned"):
+			with self.subTest(статус=статус):
+				занятие = создать_занятие(self.ученик, self.урок)
+				frappe.db.set_value("Agent Learning Session", занятие, "status", статус)
+
+				ошибка = self.отказ(self.отметить(занятие, "term:T1"), "session_closed")
+
+				self.assertEqual(ошибка["status"], статус)
+				self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+				self.assertFalse(frappe.db.get_value("Agent Learning Session", занятие, "run"))
+
 	def test_отметка_отказы_до_записи(self):
 		занятие = создать_занятие(self.ученик, self.урок)
 		старое = создать_занятие(self.ученик, self.курс_старой_модели())
