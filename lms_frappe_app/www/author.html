@@ -1,6 +1,13 @@
 {% extends "templates/web.html" %}
 {% from "lms_frappe_app/templates/includes/author_notes_macros.html" import место, карточка, атрибуты, статус %}
 
+{#
+	Базовый шаблон Frappe выводит `{{ title | striptags }}`, а `striptags`
+	раскодирует сущности и не экранирует: название `&lt;/title&gt;&lt;img …&gt;`
+	проходит очистку Frappe (в нём нет `<` и `>`) и становится живым тегом.
+#}
+{% block title %}{{ title | e }}{% endblock %}
+
 {% macro дата(значение) %}{{ (frappe.utils.format_datetime(значение, "dd.MM.yyyy HH:mm") if значение else "—") | e }}{% endmacro %}
 
 {#

@@ -2,10 +2,13 @@
 # See license.txt
 
 import re
+import unittest
+from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import quote
 
 import frappe
+import jinja2
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import notices
@@ -20,6 +23,19 @@ from lms_frappe_app.www import author
 ПАКЕТ_УРОКА = "Директива урока l-1"
 #: Строка, которая без экранирования закрыла бы атрибут и вставила тег.
 ВРЕД = 'x"><img src=x onerror=alert(1)>'
+#: Тег сущностями: `<` и `>` в нём нет, и очистку Frappe он проходит. Вывод,
+#: который раскодирует сущности и не экранирует (`striptags` в `<title>`
+#: базового шаблона Frappe), сделал бы из него живой тег.
+СУЩНОСТИ = "&lt;/title&gt;&lt;img src=x onerror=alert(1)&gt;"
+#: Шаблоны кабинета автора — их вывод проверяет `TestЭкранированиеШаблонов`.
+ШАБЛОНЫ_КАБИНЕТА = (
+	"www/author.html",
+	"templates/includes/author_notes.html",
+	"templates/includes/author_notes_macros.html",
+	"templates/includes/author_testers.html",
+)
+#: Вывод без фильтра, в котором нечего экранировать: разделитель списка.
+ЛИТЕРАЛЫ = ('"" if loop.last else ", "',)
 
 
 def сведения_для(пользователь: str, **параметры) -> dict:
@@ -43,6 +59,88 @@ def страница(пользователь: str, **параметры) -> str
 	html = ответ.get_data(as_text=True)
 	assert ответ.status_code == 200, html[:500]
 	return html
+
+
+def отравленный_релиз(ключ: str) -> dict:
+	"""Образец релиза, где каждый текст для автора несёт нагрузку.
+
+	Названия курса, глав и уроков — сущностями: курс в `<title>` списка и
+	экрана курса, урок — страницы урока. Урок `l-2` — с кавычкой, которая
+	закрыла бы атрибут. Остальные тексты — с тегом.
+	"""
+	р = пример_релиза(ключ)
+	к = р["course"]
+	к["title"] = f"Курс {СУЩНОСТИ}"
+	for поле in ("summary", "description", "promise", "goal"):
+		к[поле] = f"{к[поле]} {ВРЕД}"
+	for т in к["glossary"]:
+		т["term"], т["definition"] = f"{т['term']} {ВРЕД}", f"{т['definition']} {ВРЕД}"
+	for г in р["chapters"]:
+		г["title"], г["description"] = f"{г['title']} {СУЩНОСТИ}", f"{г['description']} {ВРЕД}"
+	for у in р["lessons"]:
+		у["title"] = f"{у['title']} {СУЩНОСТИ}"
+		у["hook"] = f"Зачин {ВРЕД}"
+		for ц in у["objectives"]:
+			ц["text"] = f"{ц['text']} {ВРЕД}"
+			for п in ц["goals"]:
+				п["title"] = f"{п['title']} {ВРЕД}"
+		for в in у["quiz"]["questions"]:
+			в["text"] = f"{в['text']} {ВРЕД}"
+			for о in в["options"]:
+				о["text"] = f"{о['text']} {ВРЕД}"
+		for ответ in у["quiz"]["answers"].values():
+			ответ["explanation"] = f"{ответ['explanation']} {ВРЕД}"
+		if у["homework"]:
+			д = у["homework"]
+			д["title"], д["description"] = f"{д['title']} {ВРЕД}", f"{д['description']} {ВРЕД}"
+	р["lessons"][1]["title"] = 'Урок второй x" data-x="1'
+	д = р["document"]
+	д["title"], д["purpose"] = f"{д['title']} {ВРЕД}", f"{д['purpose']} {ВРЕД}"
+	for раздел in д["sections"]:
+		раздел["title"], раздел["description"] = (
+			f"{раздел['title']} {ВРЕД}",
+			f"{раздел['description']} {ВРЕД}",
+		)
+		for кол in раздел["columns"]:
+			кол["title"] = f"{кол['title']} {ВРЕД}"
+	return р
+
+
+def неэкранированные(исходник: str, макросы: set[str]) -> list[tuple[int, str]]:
+	"""Выводы `{{ … }}` шаблона, которые не экранируют: `(строка, выражение)`.
+
+	Вывод годится, если кончается на `| e`, `| escape` или `| tojson`, если он
+	весь — вызов макроса из `макросы` (их вывод проверяется тем же правилом)
+	или литерал из `ЛИТЕРАЛЫ`. Содержимое `{% raw %}` — текст, а не вывод.
+	"""
+	найдено = []
+	токены: list | None = None
+	for строка, вид, значение in jinja2.Environment().lex(исходник):
+		if вид == "variable_begin":
+			токены, начало = [], строка
+		elif вид == "variable_end" and токены is not None:
+			if not _экранирует(токены, макросы):
+				найдено.append((начало, "".join(з for _, з in токены).strip()))
+			токены = None
+		elif токены is not None:
+			токены.append((вид, значение))
+	return найдено
+
+
+def _экранирует(токены: list[tuple[str, str]], макросы: set[str]) -> bool:
+	if "".join(з for _, з in токены).strip() in ЛИТЕРАЛЫ:
+		return True
+	значимые = [(в, з) for в, з in токены if в != "whitespace"]
+	if len(значимые) >= 2 and значимые[-2][1] == "|" and значимые[-1][1] in ("e", "escape", "tojson"):
+		return True
+	if len(значимые) >= 3 and значимые[0][1] in макросы and значимые[1][1] == "(":
+		глубина = 0
+		for н, (в, з) in enumerate(значимые[1:], start=1):
+			if в == "operator":
+				глубина += {"(": 1, ")": -1}.get(з, 0)
+			if глубина == 0:
+				return н == len(значимые) - 1
+	return False
 
 
 def места_заметок(html: str) -> set[str]:
@@ -223,14 +321,11 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertEqual(html.count("Директива урока l-2"), 1)
 
 	def test_ключи_и_тексты_релиза_экранируются(self):
-		"""Ключи пакета агента — произвольные строки, названия и заметки — текст
-		автора: ни один не выходит в HTML тегом или концом атрибута. Названия
-		курса и урока — имена записей Learning, `<` и `>` в них Frappe не
-		пускает: в названии урока — кавычка, тег — в карточке курса и зачине."""
-		релиз = пример_релиза(f"xss-{self.ключ}")
-		релиз["course"]["summary"] = f"Карточка {ВРЕД}"
-		релиз["lessons"][0]["title"] = 'Урок x" data-x="1'
-		релиз["lessons"][0]["hook"] = f"Зачин {ВРЕД}"
+		"""Ключи пакета агента — произвольные строки, тексты релиза и заметки —
+		текст автора: ни один не выходит в HTML тегом или концом атрибута, и
+		`<title>` тоже. В названиях глав и уроков `<` и `>` релиз не пускает
+		(`title_forbidden_chars`) — там нагрузка сущностями и кавычкой."""
+		релиз = отравленный_релиз(f"xss-{self.ключ}")
 		пакет = релиз["agent"]["lessons"]["l-1"]
 		пакет[ВРЕД] = "Часть пакета с таким ключом"
 		пакет["extra"] = {ВРЕД: "Запись с таким ключом"}
@@ -239,19 +334,21 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertTrue(ответ["ok"], ответ)
 		курс = ответ["data"]["course"]
 		self.assertTrue(authoring.add_note(course=курс, target="lesson.l-1", text=f"Заметка {ВРЕД}")["ok"])
+		сущности = СУЩНОСТИ.replace("&", "&amp;")
 
 		for параметры, дошло in (
-			({}, None),
-			({"course": курс}, "Урок x&#34; data-x=&#34;1"),
+			({}, сущности),
+			({"course": курс}, "Урок второй x&#34; data-x=&#34;1"),
 			({"course": курс, "view": "notes"}, "Заметка x&#34;"),
 			({"course": курс, "lesson": "l-1"}, "onerror=alert(1)&gt;"),
 		):
 			with self.subTest(**параметры):
-				# `<title>` — текст, а не разметка: его базовый шаблон Frappe
-				# чистит `striptags`, и кавычка там ничего не закрывает.
-				html = re.sub(r"<title>.*?</title>", "", страница(self.куратор, **параметры), flags=re.S)
-				if дошло:
-					self.assertIn(дошло, html, "строка не дошла до страницы — проверять нечего")
+				html = страница(self.куратор, **параметры)
+				self.assertIn(дошло, html, "строка не дошла до страницы — проверять нечего")
+				if "course" in параметры:
+					заголовок = re.search(r"<title>(.*?)</title>", html, re.S).group(1)
+					self.assertIn(сущности, заголовок)
+				self.assertNotIn("</title><img", html)
 				self.assertNotIn("<img src=x", html)
 				self.assertNotIn('<img src="x"', html)
 				self.assertNotIn('x"><img', html)
@@ -425,3 +522,36 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		с = сведения_для(self.куратор, course=self.курс)
 		self.assertNotEqual(с["course"]["revision"], отметки["revision"])
 		self.assertIsNotNone(с["course"]["notes_revision"])
+
+
+class TestЭкранированиеШаблонов(unittest.TestCase):
+	"""Каждый вывод шаблонов кабинета экранирован — правилом, а не вниманием.
+
+	`Why:` Jinja во Frappe работает без автоэкранирования, а тексты и ключи
+	релиза — произвольные строки автора: один вывод без `| e` — хранимый XSS
+	в кабинете куратора. Так уже было с `<title>` (learning-services#512).
+	"""
+
+	def setUp(self):
+		корень = Path(__file__).resolve().parents[1]
+		self.шаблоны = {путь: (корень / путь).read_text(encoding="utf-8") for путь in ШАБЛОНЫ_КАБИНЕТА}
+		self.макросы = {
+			имя for текст in self.шаблоны.values() for имя in re.findall(r"{%-?\s*macro\s+(\w+)", текст)
+		}
+
+	def test_каждый_вывод_экранирован(self):
+		for путь, текст in self.шаблоны.items():
+			with self.subTest(путь):
+				self.assertEqual(неэкранированные(текст, self.макросы), [])
+
+	def test_правило_ловит_вывод_без_экранирования(self):
+		"""Проверка проверки: голый вывод, фильтр не последним и чужой вызов — нарушения."""
+		исходник = (
+			"{{ title }}\n{{ x | e | upper }}\n{{ frappe.render(x) }}\n{{ место(a) ~ b }}\n"
+			'{{ место(a, b) }}{{ x | tojson }}{{ "" if loop.last else ", " }}'
+			"{% raw %}{{ сырое }}{% endraw %}"
+		)
+		self.assertEqual(
+			неэкранированные(исходник, {"место"}),
+			[(1, "title"), (2, "x | e | upper"), (3, "frappe.render(x)"), (4, "место(a) ~ b")],
+		)
