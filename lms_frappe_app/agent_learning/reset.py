@@ -33,6 +33,7 @@ from frappe.utils import now_datetime
 from lms_frappe_app.agent_learning.constants import (
 	ЗАНЯТИЕ_БРОШЕНО,
 	ОТКРЫТЫЕ,
+	ПОПЫТКА_БРОШЕНА,
 	ПОПЫТКА_ИДЁТ,
 )
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
@@ -40,9 +41,6 @@ from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation i
 	назначения_пользователя,
 )
 from lms_frappe_app.agent_learning.structure import уроки_курса
-
-#: Попытка, прерванная сбросом, — брошенная, как занятие.
-ПОПЫТКА_БРОШЕНА = "Abandoned"
 
 
 def сбросить_прогресс(ученик: str, курс: str, кто: str) -> dict:

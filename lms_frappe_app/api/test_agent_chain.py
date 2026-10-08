@@ -93,9 +93,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 					ответ = self.данные(self.отметить(занятие, пункт["key"]))
 		return ответ
 
-	def курс_старой_модели(self) -> str:
+	def курс_без_релиза(self) -> str:
 		frappe.set_user("Administrator")
-		урок = создать_урок(f"Старый {frappe.generate_hash(length=6)}")
+		урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
 		зачислить(self.ученик, урок)
 		frappe.set_user(self.ученик)
 		return урок
@@ -144,7 +144,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.отказ(student.lesson_item(чужое, "term:T1"), "not_your_session")
 		неизвестный = self.отказ(student.lesson_item(занятие, "term:T9"), "goal_unknown")
 		self.assertEqual(неизвестный["goals"], ["term:T1", "l-1-D1/V1", "refute:M1"])
-		старое = создать_занятие(self.ученик, self.курс_старой_модели())
+		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 		self.отказ(student.lesson_item(старое, "term:T1"), "course_not_released")
 
 	def test_подробности_после_отзыва_доступа_отказ(self):
@@ -260,7 +260,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 	def test_отметка_отказы_до_записи(self):
 		занятие = создать_занятие(self.ученик, self.урок)
-		старое = создать_занятие(self.ученик, self.курс_старой_модели())
+		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 
 		self.отказ(self.отметить(старое, "term:T1"), "course_not_released")
 		self.отказ(self.отметить(занятие, "term:T1", evidence=""), "evidence_required")
@@ -411,8 +411,8 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 		self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
 
-	def test_курс_старой_модели_квиз_и_закрытие_отказывают(self):
-		урок = self.курс_старой_модели()
+	def test_курс_без_релиза_квиз_и_закрытие_отказывают(self):
+		урок = self.курс_без_релиза()
 		занятие = создать_занятие(self.ученик, урок)
 
 		self.отказ(student.request_quiz(занятие), "course_not_released")

@@ -389,11 +389,11 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# Замечания и визиты кабинета автора — не содержание курса: удалению урока
-# они не мешают. Замечание остаётся с пометкой «места больше нет», визит —
-# пустым следом. `Why:` без этого агент не мог удалить урок, к которому
-# поставили замечание (lms-high-time/learning-services#271).
-ignore_links_on_delete = ["Agent Author Note", "Agent Author Visit"]
+# Замечания кабинета автора — не содержание курса: удалению урока они не
+# мешают, замечание остаётся с пометкой «места больше нет». `Why:` без этого
+# агент не мог удалить урок, к которому поставили замечание
+# (lms-high-time/learning-services#271).
+ignore_links_on_delete = ["Agent Author Note"]
 
 # Request Events
 # ----------------

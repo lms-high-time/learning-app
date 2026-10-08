@@ -21,7 +21,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_занятие,
 	создать_куратора,
 	создать_ученика,
-	создать_урок,
 )
 
 
@@ -91,32 +90,6 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		self.assertEqual(репорты[0]["kind"], "directive_mismatch")
 		self.assertEqual(репорты[0]["text"], "Слишком напористо, вопросы подряд")
 		self.assertEqual((репорты[0]["lesson"], репорты[0]["lesson_key"]), (self.урок, "l-1"))
-
-	def test_репорт_называет_редакцию_директивы_на_момент_жалобы(self):
-		"""Претензия к директиве без её редакции нечитаема: курс с тех пор
-		переписывали, и непонятно, на что жаловались. Редакция есть у репорта
-		урока с директивой; репорт по курсу из релиза ссылается на релиз."""
-		урок = создать_урок(f"Урок с директивой {frappe.generate_hash(length=6)}")
-		курс = frappe.db.get_value("Course Chapter", frappe.db.get_value("Course Lesson", урок, "chapter"), "course")
-		директива = frappe.get_doc(
-			{"doctype": "Agent Lesson Directive", "lesson": урок, "objectives": "Назвать спонсора"}
-		).insert(ignore_permissions=True)
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Report",
-				"session": создать_занятие(self.ученик, урок),
-				"course": курс,
-				"lesson": урок,
-				"lesson_directive": директива.name,
-				"kind": "Directive Mismatch",
-				"text": "Указание не подходит",
-			}
-		).insert(ignore_permissions=True)
-		frappe.set_user(self.куратор)
-
-		репорт = authoring.course_reports(course=курс)["data"]["reports"][0]
-
-		self.assertTrue(репорт["directive_version"])
 
 	def test_кто_пожаловался_не_отдаётся(self):
 		"""`Why:` куратору нужно, что не так с курсом, а не кто сказал. Имя в
@@ -331,7 +304,7 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 
 class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 	"""Репорт по уроку курса из релиза: вопрос — ключ вопроса урока в релизе,
-	привязка — действующий релиз, а не редакция указаний (learning-services#506)."""
+	привязка — действующий релиз (learning-services#506)."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -352,19 +325,20 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		запись = frappe.db.get_value(
 			"Agent Course Report",
 			ответ["data"]["report"],
-			["question", "question_key", "release", "lesson_directive"],
+			["question_key", "release"],
 			as_dict=True,
 		)
-		self.assertEqual(
-			запись,
-			{"question": None, "question_key": "S1/l-1-D1", "release": self.релиз, "lesson_directive": None},
-		)
+		self.assertEqual(запись, {"question_key": "S1/l-1-D1", "release": self.релиз})
 		frappe.set_user(self.куратор)
 		[репорт] = authoring.course_reports(course=self.курс)["data"]["reports"]
 		self.assertEqual(
-			(репорт["question"], репорт["question_key"], репорт["release"], репорт["directive_version"]),
-			(None, "S1/l-1-D1", self.релиз, None),
+			set(репорт),
+			{
+				"id", "kind", "lesson", "lesson_key", "objective", "question_key", "text",
+				"reported_at", "release", "status", "resolution", "resolved_at",
+			},
 		)
+		self.assertEqual((репорт["question_key"], репорт["release"]), ("S1/l-1-D1", self.релиз))
 
 	def test_вопрос_чужого_урока_отказ_без_записи(self):
 		ответ = student.report_issue(

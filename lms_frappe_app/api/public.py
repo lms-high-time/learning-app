@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import frappe
 
-from lms_frappe_app.agent_learning import announcements, directives, testers
+from lms_frappe_app.agent_learning import announcements, testers
 from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
@@ -48,8 +48,7 @@ def course_map(course: str, space: str | None = None) -> dict:
 	разобрана», а отсутствие ключа спутать не с чем.
 
 	Цели урока курса из релиза — тексты целей релиза, без пунктов. У курса
-	старой модели — цели действующей директивы, без статуса; из директивы
-	наружу выходят только цели.
+	без релиза целей у уроков нет — пустые списки.
 
 	Зачин урока (`hook`) обращён к ученику и виден всем. Зачисленному — ещё
 	пройденность урока (`completed`) и следующий незакрытый урок курса
@@ -268,11 +267,11 @@ def _цели_уроков(course: str, уроки: list[str], ученик: str
 	`covered`): не начатая приходит без ключа, как «не дошли». Статусы —
 	сохранённые, простым чтением, без сверки (`runs.статусы_целей`).
 
-	Курс старой модели — цели действующей директивы урока, без `status`.
+	Курс без релиза — пустые списки: цели урока задаёт только релиз.
 	"""
 	релиз = прохождения.действующий(course)
 	if not релиз:
-		return {урок: [{"text": цель} for цель in _цели_директивы(урок)] for урок in уроки}
+		return {урок: [] for урок in уроки}
 	ключи = {у.lesson: у.lesson_key for у in index.уроки(релиз)}
 	цели = index.цели(релиз)
 	статусы = прохождения.статусы_целей(ученик, course) if ученик else {}
@@ -287,12 +286,6 @@ def _цели_уроков(course: str, уроки: list[str], ученик: str
 			else:
 				итог[урок].append({"text": цель["text"], "status": статус})
 	return итог
-
-
-def _цели_директивы(урок: str) -> list[str]:
-	"""Цели действующей директивы урока — единственное из неё, что видно снаружи."""
-	найденная = directives.запись("Agent Lesson Directive", {"lesson": урок}, ("objectives",))
-	return directives.строки(найденная.objectives) if найденная else []
 
 
 def _документы_курса(

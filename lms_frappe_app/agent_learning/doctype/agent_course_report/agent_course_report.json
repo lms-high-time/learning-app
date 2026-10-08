@@ -9,10 +9,8 @@
   "session",
   "course",
   "lesson",
-  "lesson_directive",
   "release",
   "kind",
-  "question",
   "question_key",
   "objective",
   "text",
@@ -50,15 +48,7 @@
    "reqd": 1
   },
   {
-   "description": "Редакция указаний, действовавшая в момент репорта",
-   "fieldname": "lesson_directive",
-   "fieldtype": "Link",
-   "label": "Указания урока",
-   "options": "Agent Lesson Directive",
-   "read_only": 1
-  },
-  {
-   "description": "Действующий релиз курса в момент репорта; у курса старой модели пусто",
+   "description": "Действующий релиз курса в момент репорта",
    "fieldname": "release",
    "fieldtype": "Link",
    "label": "Релиз",
@@ -73,13 +63,6 @@
    "options": "Stuck\nMisconception\nMaterial Issue\nQuiz Question Issue\nDirective Mismatch\nOut Of Scope",
    "read_only": 1,
    "reqd": 1
-  },
-  {
-   "fieldname": "question",
-   "fieldtype": "Link",
-   "label": "Вопрос квиза",
-   "options": "LMS Question",
-   "read_only": 1
   },
   {
    "description": "Ключ вопроса квиза урока в релизе",
@@ -139,7 +122,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-08 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Report",

@@ -14,7 +14,6 @@ import json
 
 import frappe
 
-from lms_frappe_app.agent_learning import directives
 from lms_frappe_app.agent_learning.artifacts import files, schema
 from lms_frappe_app.agent_learning.artifacts.canvas import проверить_холст
 from lms_frappe_app.agent_learning.artifacts.codes import (
@@ -187,7 +186,8 @@ def записать_схему(
 
 	`блоки` — словари или JSON-строки в форме `блок_наружу`. `purpose` не
 	назван — остаётся у прежней версии (learning-services#462). Пустая строка
-	его убирает.
+	его убирает. Прежнюю версию снимает с действия контроллер, из базы она не
+	уходит.
 	"""
 	строки, холст = проверить_схему(блоки, canvas)
 	ключ = нормализовать_ключ(artifact)
@@ -195,14 +195,17 @@ def записать_схему(
 		purpose = frappe.db.get_value(
 			"Agent Course Artifact", {"course": course, "slug": ключ, "is_active": 1}, "purpose"
 		)
-	return directives.записать(
-		"Agent Course Artifact",
-		{"course": course, "slug": ключ},
+	документ = frappe.get_doc(
 		{
+			"doctype": "Agent Course Artifact",
+			"course": course,
+			"slug": ключ,
+			"is_active": 1,
 			"title": title,
 			"purpose": (purpose or "").strip() or None,
 			"layout": layout,
 			"blocks": строки,
 			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
-		},
-	)
+		}
+	).insert()
+	return {"id": документ.name, "course": course, "slug": ключ, "version": документ.version}

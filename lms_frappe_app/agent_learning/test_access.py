@@ -70,7 +70,7 @@ class IntegrationTestAccess(IntegrationTestCase):
 
 	def test_частному_ученику_политика_из_общих_настроек(self):
 		self.записать_самостоятельно()
-		self.assertEqual(политика_квиза_для_курса(self.ученик, self.курс)["pass_threshold"], 0.8)
+		self.assertEqual(политика_квиза_для_курса(self.ученик, self.курс)["max_attempts"], 3)
 
 	def test_назначение_добавляет_дедлайн_и_обязательность(self):
 		организация = self.организация()
@@ -93,7 +93,7 @@ class IntegrationTestAccess(IntegrationTestCase):
 	# --- 2. две организации ---
 
 	def test_квиз_обязателен_если_требует_хоть_одна_из_двух(self):
-		"""Порог и попытки у всех одни — платформы; различается только обязательность (#353)."""
+		"""Попытки и пауза у всех одни — платформы; различается только обязательность (#353)."""
 		снисходительная = self.организация(quiz_required="No")
 		требовательная = self.организация(quiz_required="Yes")
 		добавить_в_организацию(self.ученик, снисходительная)
@@ -104,7 +104,6 @@ class IntegrationTestAccess(IntegrationTestCase):
 		политика = политика_квиза_для_курса(self.ученик, self.курс)
 
 		self.assertTrue(политика["quiz_required"])
-		self.assertEqual(политика["pass_threshold"], 0.8)
 		self.assertEqual(политика["max_attempts"], 3)
 
 	def test_ближайший_дедлайн_из_двух_назначений(self):
@@ -154,16 +153,16 @@ class IntegrationTestAccess(IntegrationTestCase):
 		self.assertEqual(курс["organization"], действующая)
 
 	def test_приостановленная_организация_не_влияет_на_политику(self):
-		строгая_но_приостановленная = self.организация(pass_threshold=0.99, max_attempts=1)
-		добавить_в_организацию(self.ученик, строгая_но_приостановленная)
-		self.назначить(строгая_но_приостановленная)
+		снисходительная_но_приостановленная = self.организация(quiz_required="No")
+		добавить_в_организацию(self.ученик, снисходительная_но_приостановленная)
+		self.назначить(снисходительная_но_приостановленная)
 		frappe.db.set_value(
-			"Learning Organization", строгая_но_приостановленная, "status", "Suspended"
+			"Learning Organization", снисходительная_но_приостановленная, "status", "Suspended"
 		)
 
 		политика = политика_квиза_для_курса(self.ученик, self.курс)
 
-		self.assertEqual(политика["pass_threshold"], 0.8)
+		self.assertTrue(политика["quiz_required"], "квиз обязателен по настройкам платформы")
 
 	# --- отказы ---
 

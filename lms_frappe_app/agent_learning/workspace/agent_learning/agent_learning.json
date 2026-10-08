@@ -17,7 +17,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Курс",
-   "link_count": 9,
+   "link_count": 5,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -34,39 +34,9 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Директивы курса",
-   "link_count": 0,
-   "link_to": "Agent Course Directive",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Директивы уроков",
-   "link_count": 0,
-   "link_to": "Agent Lesson Directive",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
    "label": "Схемы документов",
    "link_count": 0,
    "link_to": "Agent Course Artifact",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Карты курсов",
-   "link_count": 0,
-   "link_to": "Agent Course Map",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -97,16 +67,6 @@
    "label": "Замечания авторов",
    "link_count": 0,
    "link_to": "Agent Author Note",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Визиты авторов",
-   "link_count": 0,
-   "link_to": "Agent Author Visit",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
@@ -278,7 +238,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",

@@ -292,7 +292,6 @@ def политика_по_умолчанию() -> None:
 	настройки.update(
 		{
 			"quiz_required": 1,
-			"pass_threshold": 0.8,
 			"max_attempts": 3,
 			"retry_delay_minutes": 60,
 			"session_timeout_hours": 6,
@@ -308,7 +307,7 @@ def политика_по_умолчанию() -> None:
 
 
 def настроить_квиз(**поля) -> None:
-	"""Порог, лимит попыток и паузу задаёт платформа — одна на всех (#353)."""
+	"""Обязательность, лимит попыток и паузу задаёт платформа — одна на всех (#353)."""
 	настройки = frappe.get_doc("Agent Learning Settings")
 	настройки.update(поля)
 	настройки.save(ignore_permissions=True)

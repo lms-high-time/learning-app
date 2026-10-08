@@ -872,11 +872,9 @@ def course_reports(
 			"kind",
 			"lesson",
 			"objective",
-			"question",
 			"question_key",
 			"text",
 			"creation",
-			"lesson_directive",
 			"release",
 			"status",
 			"resolution",
@@ -885,7 +883,6 @@ def course_reports(
 		order_by="creation desc",
 		limit=min(int(limit or РЕПОРТОВ_ЗА_РАЗ), РЕПОРТОВ_ЗА_РАЗ),
 	)
-	версии = _версии_директив([з.lesson_directive for з in записи if з.lesson_directive])
 	ключи_уроков = releases_index.ключи_уроков([з.release for з in записи if з.release])
 
 	return {
@@ -897,11 +894,9 @@ def course_reports(
 				"lesson": з.lesson,
 				"lesson_key": ключи_уроков.get((з.release, з.lesson)),
 				"objective": з.objective or None,
-				"question": з.question or None,
 				"question_key": з.question_key or None,
 				"text": з.text,
 				"reported_at": з.creation.isoformat() if з.creation else None,
-				"directive_version": версии.get(з.lesson_directive),
 				"release": з.release or None,
 				"status": ИМЯ_СТАТУСА_РЕПОРТА.get(з.status, з.status),
 				"resolution": з.resolution or None,
@@ -1000,22 +995,3 @@ def _оригинал_дубля(документ, duplicate_of: str | None) -> 
 	if курс != документ.course:
 		raise Отказ(НЕВЕРНЫЙ_ОРИГИНАЛ, "Оригинал — репорт другого курса", duplicate_of=оригинал)
 	return оригинал
-
-
-def _версии_директив(имена: list[str]) -> dict[str, int]:
-	"""Номера редакций директив одним запросом на всю выдачу.
-
-	`Why:` претензия «указание не подходит» без редакции нечитаема — курс с
-	тех пор переписывали, и непонятно, на что жаловались. Запрос на каждый
-	репорт превратил бы чтение полусотни жалоб в полсотни обходов базы.
-	"""
-	if not имена:
-		return {}
-	return {
-		д.name: д.version
-		for д in frappe.get_all(
-			"Agent Lesson Directive",
-			filters={"name": ("in", list(set(имена)))},
-			fields=["name", "version"],
-		)
-	}

@@ -480,8 +480,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	# --- итог ---
 
 	def test_порог_урока_из_релиза_в_целых(self):
-		"""4 вопроса, 3 верных (75%): порог 70 — сдан, 80 — нет; порог платформы не читается."""
-		настроить_квиз(pass_threshold=0.9)
+		"""4 вопроса, 3 верных (75%): порог 70 — сдан, 80 — нет."""
 		for порог, сдан in ((70, True), (75, True), (80, False)):
 			with self.subTest(порог=порог):
 				релиз = релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=4)
@@ -740,7 +739,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	def test_повторный_зачёт_не_двигает_прохождение(self):
 		# Политика — своя, а не из общих настроек: их читают через общий кеш, и
 		# параллельный прогон мог сменить паузу перед повтором посреди теста.
-		политика = {"quiz_required": 1, "pass_threshold": 0.8, "max_attempts": 5, "retry_delay_minutes": 0}
+		политика = {"quiz_required": 1, "max_attempts": 5, "retry_delay_minutes": 0}
 		self.enterContext(patch.object(release_quiz, "политика_квиза_для_курса", return_value=политика))
 		run, занятие = self.урок()
 		self.assertTrue(self.сдать(run, занятие, ["V1", "V1"])["result"]["passed"])

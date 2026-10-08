@@ -290,9 +290,9 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("Agent Learning Session", {"student": self.ученик}))
 		self.assertFalse(frappe.db.exists("Agent Lesson Run", {"student": self.ученик}))
 
-	def test_курс_старой_модели_отказ_без_записей(self):
+	def test_курс_без_релиза_отказ_без_записей(self):
 		frappe.set_user("Administrator")
-		урок = создать_урок(f"Старый {frappe.generate_hash(length=6)}")
+		урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
 		курс = зачислить(self.ученик, урок)
 		frappe.set_user(self.ученик)
 

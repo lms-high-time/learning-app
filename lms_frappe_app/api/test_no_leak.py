@@ -15,7 +15,7 @@
 import json
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.leak_guards import проверить_ответ
@@ -35,8 +35,37 @@ from lms_frappe_app.tests.sample_data import (
 from lms_frappe_app.api import manager, public, review, student
 
 
-class IntegrationTestNoLeak(IntegrationTestCase):
-	"""Ни один метод не отдаёт эталон и не протекает структурами Frappe."""
+class TestLeakGuard(UnitTestCase):
+	"""Проверка проверки: поля эталона релиза ловятся ключами на любой глубине."""
+
+	def утечка(self, ответ, **параметры) -> bool:
+		try:
+			проверить_ответ(self, ответ, "проба", **параметры)
+		except AssertionError:
+			return True
+		return False
+
+	def test_эталон_ловится(self):
+		for ответ in (
+			{"data": {"question": {"correct": "V2"}}},
+			{"data": [{"answers": {}}]},
+			{"verdict": {"explanation": "Почему так"}},
+			'[{"key": "S1", "correct": "V1"}]',
+		):
+			with self.subTest(ответ=ответ):
+				self.assertTrue(self.утечка(ответ))
+
+	def test_вердикт_и_счёт_не_эталон(self):
+		self.assertFalse(self.утечка({"verdict": {"correct": False}, "result": {"correct": 3}}))
+
+	def test_законное_пояснение(self):
+		self.assertFalse(self.утечка({"verdict": {"explanation": "Почему так"}}, кроме=("explanation",)))
+
+
+class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
+	"""Методы вне квиза — ученика, руководителя, куратора — на курсе без
+	релиза: ни структур Frappe, ни полей эталона. Квиз и закрытое из релиза —
+	`IntegrationTestNoLeakRelease`."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -70,10 +99,10 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 
 	def проверить(self, что: str, ответ) -> str:
-		"""Ответ без полей эталона и внутренностей Frappe; тексты из релиза проверяет класс курса из релиза."""
+		"""Ответ без полей эталона и внутренностей Frappe."""
 		return проверить_ответ(self, ответ, что)
 
-	def test_ни_один_метод_ученика_не_отдаёт_эталон(self):
+	def test_методы_ученика_не_протекают(self):
 		frappe.set_user(self.ученик)
 
 		self.проверить("list_my_courses", student.list_my_courses())
@@ -108,7 +137,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("count_scenario_turn", student.count_scenario_turn("profile"))
 		self.проверить("reset_scenario_state", student.reset_scenario_state("profile"))
 
-	def test_ни_один_метод_руководителя_не_отдаёт_эталон(self):
+	def test_методы_руководителя_не_протекают(self):
 		frappe.set_user(self.ученик)
 		создать_занятие(self.ученик, self.урок)
 
@@ -117,7 +146,7 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("org_report", manager.org_report())
 		self.проверить("student_detail", manager.student_detail(self.ученик))
 
-	def test_методы_куратора_не_отдают_эталон(self):
+	def test_методы_куратора_не_протекают(self):
 		"""Очередь и карточка домашки (learning-services#452): сдача, задание и
 		журнал — без эталонов и структур Frappe."""
 		создать_домашку(self.урок)
@@ -354,6 +383,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			верный,
 			"итог сданной попытки",
 			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные),
+			кроме=("explanation",),
 		)
 
 	def test_прохождение_не_читают_ученик_и_руководитель(self):

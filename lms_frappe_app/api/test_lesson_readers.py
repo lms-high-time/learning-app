@@ -63,13 +63,10 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		прохождения.отметить(run.name, "term:T1", "done", "Назвал термин", занятие=занятие)
 		return занятие
 
-	def курс_старой_модели(self) -> str:
+	def курс_без_релиза(self) -> str:
 		frappe.set_user("Administrator")
-		урок = создать_урок(f"Старый {frappe.generate_hash(length=6)}")
+		урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
 		зачислить(self.ученик, урок)
-		frappe.get_doc(
-			{"doctype": "Agent Lesson Directive", "lesson": урок, "objectives": "Цель директивы"}
-		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
 		return урок
 
@@ -124,7 +121,7 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		self.assertEqual([(у["completed"], у["current"]) for у in уроки], [(True, False), (False, True)])
 
 	def test_дерево_курса_старой_модели_отказ(self):
-		урок = self.курс_старой_модели()
+		урок = self.курс_без_релиза()
 		курс = frappe.db.get_value("Course Lesson", урок, "course")
 
 		self.отказ(student.course_outline(курс), "course_not_released")
@@ -148,13 +145,13 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		гостю = self.данные(public.course_map(course=self.курс))["chapters"][0]["lessons"][0]
 		self.assertEqual(гостю["objectives"], [{"text": ЦЕЛЬ_1["text"]}])
 
-	def test_карта_курса_старой_модели_цели_без_статуса(self):
-		урок = self.курс_старой_модели()
+	def test_карта_курса_без_релиза_уроки_без_целей(self):
+		урок = self.курс_без_релиза()
 		курс = frappe.db.get_value("Course Lesson", урок, "course")
 
 		карта = self.данные(public.course_map(course=курс))
 
-		self.assertEqual(карта["chapters"][0]["lessons"][0]["objectives"], [{"text": "Цель директивы"}])
+		self.assertEqual(карта["chapters"][0]["lessons"][0]["objectives"], [])
 
 	# --- lesson_session ---
 
@@ -186,7 +183,7 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
 
 	def test_занятие_урока_старой_модели_отказ(self):
-		self.отказ(student.lesson_session(self.курс_старой_модели()), "course_not_released")
+		self.отказ(student.lesson_session(self.курс_без_релиза()), "course_not_released")
 
 	# --- remember, update_artifact ---
 

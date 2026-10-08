@@ -3,7 +3,7 @@
 
 """Организация-клиент: обязательность квиза, домены и список курсов.
 
-Порог, лимит попыток и пауза — платформы, одни на всех: урок, сданный лично,
+Лимит попыток и пауза — платформы, одни на всех: урок, сданный лично,
 годится любой компании (learning-services#353). Организация решает только,
 обязателен ли квиз.
 """
@@ -35,23 +35,12 @@ class IntegrationTestLearningOrganization(IntegrationTestCase):
 
 	# --- политика квиза ---
 
-	def test_порог_лимит_и_пауза_у_организации_не_свои(self):
-		настроить_квиз(pass_threshold=1, max_attempts=0, retry_delay_minutes=10)
+	def test_лимит_и_пауза_у_организации_не_свои(self):
+		настроить_квиз(max_attempts=0, retry_delay_minutes=10)
 
 		политика = политика_квиза(self.организация)
 
-		self.assertEqual(
-			(политика["pass_threshold"], политика["max_attempts"], политика["retry_delay_minutes"]),
-			(1, 0, 10),
-		)
-
-	def test_пустой_порог_значит_зачёт_без_ошибок(self):
-		"""Запасное значение кода — решение владельца (#353), а не прежние 80%."""
-		настроить_квиз(pass_threshold=0, max_attempts=0)
-
-		политика = политика_квиза()
-
-		self.assertEqual((политика["pass_threshold"], политика["max_attempts"]), (1.0, 0))
+		self.assertEqual((политика["max_attempts"], политика["retry_delay_minutes"]), (0, 10))
 
 	def test_требование_квиза_перекрывается_и_наследуется(self):
 		self.правка(quiz_required="No")

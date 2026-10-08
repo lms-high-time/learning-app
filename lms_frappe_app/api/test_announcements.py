@@ -298,7 +298,11 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 
 class IntegrationTestПереносЦелейАнонса(IntegrationTestCase):
-	"""Патч `announce_objectives`: цели директивы курса — в поле курса (learning-services#512)."""
+	"""Патч `announce_objectives`: цели директивы курса — в поле курса (learning-services#512).
+
+	Доктайпа директив курса больше нет, и таблицы на свежем сайте тоже: её
+	чтение подменено, патч получает строки так, как вернул бы его запрос.
+	"""
 
 	ПОЛЕ = "LMS Course-announce_objectives"
 
@@ -310,36 +314,58 @@ class IntegrationTestПереносЦелейАнонса(IntegrationTestCase):
 		self.заполненный = создать_курс(f"Заполненный {суффикс}")
 		frappe.db.set_value("LMS Course", self.заполненный, "announce_objectives", "Своя цель")
 		self.из_релиза = authoring.publish_release(release=пример_релиза(f"mv-{суффикс}"))["data"]["course"]
-		действующие = {}
-		for курс in (self.анонс, self.заполненный, self.из_релиза):
-			self.директива(курс, "Старая цель")
-			действующие[курс] = self.директива(курс, "Первая\n\nВторая ")
-		# Снятая с действия свежая версия не переносится.
-		frappe.db.set_value(
-			"Agent Course Directive", self.директива(self.анонс, "Снятая"), "is_active", 0
-		)
-		frappe.db.set_value("Agent Course Directive", действующие[self.анонс], "is_active", 1)
+		# Действующие директивы, свежие сверху: так их отдаёт запрос патча.
+		self.директивы = [
+			frappe._dict(course=курс, objectives="Первая\n\nВторая ")
+			for курс in (self.анонс, self.заполненный, self.из_релиза)
+		] + [frappe._dict(course=self.анонс, objectives="Старая цель")]
+		self.запросы: list[str] = []
 
-	def директива(self, курс: str, цели: str) -> str:
-		return frappe.get_doc(
-			{"doctype": "Agent Course Directive", "course": курс, "objectives": цели, "is_active": 1}
-		).insert(ignore_permissions=True).name
+	def выполнить(self) -> None:
+		"""Патч с подменённой таблицей директив и без заведения поля.
+
+		Поле уже есть на тестовом сайте; DDL заведения поля фиксировал бы
+		транзакцию теста.
+		"""
+		from lms_frappe_app.patches.v0_1 import announce_objectives
+
+		исходный_sql = frappe.db.sql
+		исходная_таблица = frappe.db.table_exists
+
+		def sql(запрос, *args, **kwargs):
+			if f"tab{announce_objectives.ДИРЕКТИВА}" in str(запрос):
+				self.запросы.append(str(запрос))
+				return self.директивы
+			return исходный_sql(запрос, *args, **kwargs)
+
+		def table_exists(doctype, *args, **kwargs):
+			return doctype == announce_objectives.ДИРЕКТИВА or исходная_таблица(doctype, *args, **kwargs)
+
+		with (
+			patch.object(announce_objectives, "create_custom_field"),
+			patch.object(frappe.db, "sql", side_effect=sql),
+			patch.object(frappe.db, "table_exists", side_effect=table_exists),
+		):
+			announce_objectives.execute()
 
 	def цели(self, курс: str) -> str | None:
 		return frappe.db.get_value("LMS Course", курс, "announce_objectives")
 
 	def test_переносит_анонсу_без_релиза_и_только_в_пустое_поле(self):
-		from lms_frappe_app.patches.v0_1 import announce_objectives
-
-		# Поле уже есть на тестовом сайте; DDL заведения поля фиксировал бы транзакцию теста.
-		with patch.object(announce_objectives, "create_custom_field"):
-			announce_objectives.execute()
-			announce_objectives.execute()  # повторный запуск ничего не меняет
+		self.выполнить()
+		self.выполнить()  # повторный запуск ничего не меняет
 
 		self.assertEqual(self.цели(self.анонс), "Первая\nВторая")
 		self.assertEqual(self.цели(self.заполненный), "Своя цель")
 		self.assertFalse(self.цели(self.из_релиза))
 		self.assertEqual(announcements.цели_курса(self.анонс), ["Первая", "Вторая"])
+
+	def test_читает_только_действующие_свежие_сверху(self):
+		self.выполнить()
+
+		[запрос] = self.запросы
+		self.assertIn("WHERE is_active = 1", запрос)
+		self.assertIn("ORDER BY creation DESC", запрос)
 
 	def test_заводит_поле_как_в_фикстуре(self):
 		"""Патчи идут раньше синхронизации фикстур: поле патч заводит сам — тем же,
