@@ -13,6 +13,7 @@ from lms_frappe_app.agent_learning.releases import index, projection
 
 # Модулем, а не именами: класс тестов проекции в этом модуле прогнался бы второй раз.
 from lms_frappe_app.agent_learning.releases import test_projection as проекция
+from lms_frappe_app.patches.v0_1 import release_agent_slices
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора
 
@@ -114,5 +115,61 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		self.assertEqual(json.loads(строки[0].columns)[2]["required"], {"if_column": "decision"})
 
 	def test_снимок_хранит_пакет_агента_как_есть(self):
-		self.assertEqual(index.снимок(self.релиз)["agent"], {"opaque": True})
+		self.assertEqual(index.снимок(self.релиз)["agent"], пример_релиза()["agent"])
 		self.assertEqual(index.снимок(self.релиз), пример_релиза())
+
+	# --- пакет агента ---
+
+	def test_срез_урока_и_рамка(self):
+		пакет = пример_релиза()["agent"]
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.assertEqual(index.пакет_урока(self.релиз, ключ), пакет["lessons"][ключ], ключ)
+		self.assertEqual(
+			index.рамка(self.релиз),
+			{"frame": пакет["frame"], "learn_about_student": пакет["learn_about_student"]},
+		)
+		self.assertEqual(index.ключи_выяснять(self.релиз), ["where_applies", "c-team"])
+
+	def test_урок_без_среза_и_релиз_без_пакета(self):
+		релиз = пример_релиза()
+		del релиз["agent"]["lessons"]["l-3"]
+		del релиз["agent"]["frame"]
+		без_среза = self.вставить(релиз, self.итог, 2)
+		self.assertEqual(index.пакет_урока(без_среза, "l-3"), {})
+		self.assertEqual(
+			index.рамка(без_среза), {"learn_about_student": релиз["agent"]["learn_about_student"]}
+		)
+		self.assertEqual(index.пакет_урока(без_среза, "нет-такого"), {})
+
+		релиз = пример_релиза()
+		del релиз["agent"]
+		без_пакета = self.вставить(релиз, self.итог, 3)
+		self.assertEqual(index.пакет_урока(без_пакета, "l-1"), {})
+		self.assertEqual(index.рамка(без_пакета), {})
+		self.assertEqual(index.ключи_выяснять(без_пакета), [])
+
+	def test_ключи_выяснять_терпят_не_ту_форму(self):
+		for версия, что_выяснять, ключи in (
+			(2, "не список", []),
+			(3, [{"key": "a"}, "мусор", {"text": "без ключа"}, {"key": 7}, {"key": "b"}], ["a", "b"]),
+		):
+			релиз = пример_релиза()
+			релиз["agent"]["learn_about_student"] = что_выяснять
+			with self.subTest(что_выяснять=что_выяснять):
+				self.assertEqual(index.ключи_выяснять(self.вставить(релиз, self.итог, версия)), ключи)
+
+	def test_урок_не_отдаёт_пакет_агента(self):
+		self.assertNotIn("agent", index.урок(self.релиз, "l-1"))
+
+	def test_патч_раскладывает_пакет_старых_релизов(self):
+		frappe.db.set_value(index.РЕЛИЗ, self.релиз, "agent_frame", None, update_modified=False)
+		for строка in frappe.get_all(index.УРОК, filters={"parent": self.релиз}, pluck="name"):
+			frappe.db.set_value(index.УРОК, строка, "agent", None, update_modified=False)
+		self.assertEqual(index.рамка(self.релиз), {})
+
+		release_agent_slices.execute()
+		release_agent_slices.execute()
+
+		пакет = пример_релиза()["agent"]
+		self.assertEqual(index.пакет_урока(self.релиз, "l-2"), пакет["lessons"]["l-2"])
+		self.assertEqual(index.рамка(self.релиз)["frame"], пакет["frame"])
