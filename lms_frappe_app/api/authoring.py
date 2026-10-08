@@ -335,7 +335,7 @@ def remove_lesson(lesson: str) -> dict:
 		frappe.delete_doc("Agent Lesson Directive", директива, ignore_permissions=True)
 	# Сдач по уроку нет — проверено следами выше, задание уходит вместе с уроком.
 	if задание := _имя_задания(lesson):
-		_снять_сроки_назначений(задание)
+		homework.снять_сроки_назначений(задание)
 		frappe.delete_doc(homework.ЗАДАНИЕ, задание, ignore_permissions=True)
 	frappe.delete_doc("Course Lesson", lesson)
 	return {"removed": lesson, "chapter": глава, "lessons": structure.уроки_главы(глава)}
@@ -799,16 +799,6 @@ def _имя_задания(lesson: str) -> str | None:
 	return frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson})
 
 
-def _снять_сроки_назначений(задание: str) -> None:
-	"""Сроки задания в назначениях курса уходят вместе с заданием (learning-services#452).
-
-	`Why:` строка назначения ссылается на задание, и без уборки удаление
-	упало бы `LinkExistsError`. Срок назначения — не след ученика: сдач по
-	заданию нет, выставлять его больше некому.
-	"""
-	frappe.db.delete("Course Allocation Homework Due", {"homework": задание})
-
-
 def _задание_урока(lesson: str):
 	if имя := _имя_задания(lesson):
 		return frappe.get_doc(homework.ЗАДАНИЕ, имя)
@@ -898,7 +888,7 @@ def remove_homework(lesson: str) -> dict:
 		raise Отказ(
 			ЗАДАНИЕ_СДАЮТ, "По заданию уже есть сдачи: его можно только переписать", lesson=lesson, submissions=сдач
 		)
-	_снять_сроки_назначений(документ.name)
+	homework.снять_сроки_назначений(документ.name)
 	frappe.delete_doc(homework.ЗАДАНИЕ, документ.name)
 	# Why: удаление записи не двигает ничьего `modified`, и `ревизия` не заметила
 	# бы, что задания больше нет, — зеркало автора осталось бы старым. Отметка

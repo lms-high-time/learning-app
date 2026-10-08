@@ -13,7 +13,8 @@
   "answer_mode",
   "due_mode",
   "due_days",
-  "due_date"
+  "due_date",
+  "retired"
  ],
  "fields": [
   {
@@ -68,12 +69,20 @@
    "fieldname": "due_date",
    "fieldtype": "Date",
    "label": "Сдать до"
+  },
+  {
+   "default": "0",
+   "description": "Домашку убрали из релиза курса, а сдачи по ней есть: новым ученикам она не выдаётся",
+   "fieldname": "retired",
+   "fieldtype": "Check",
+   "label": "Снято из релиза",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-30 18:00:00.000000",
+ "modified": "2026-10-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Lesson Homework",

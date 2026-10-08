@@ -54,11 +54,31 @@ from lms_frappe_app.agent_learning.structure import уроки_курса, ур�
 ТОЧКА_СОХРАНЕНИЯ = "agent_homework_save"
 ТОЧКА_ВСТАВКИ = "agent_homework_insert"
 
-ПОЛЯ_ЗАДАНИЯ = ["name", "lesson", "title", "description", "answer_mode", "due_mode", "due_days", "due_date"]
+ПОЛЯ_ЗАДАНИЯ = [
+	"name",
+	"lesson",
+	"title",
+	"description",
+	"answer_mode",
+	"due_mode",
+	"due_days",
+	"due_date",
+	"retired",
+]
 
 
 def задание_урока(lesson: str) -> frappe._dict | None:
 	return frappe.db.get_value(ЗАДАНИЕ, {"lesson": lesson}, ПОЛЯ_ЗАДАНИЯ, as_dict=True)
+
+
+def снять_сроки_назначений(задание: str) -> None:
+	"""Сроки задания в назначениях курса уходят вместе с заданием (learning-services#452).
+
+	`Why:` строка назначения ссылается на задание, и без уборки удаление
+	упало бы `LinkExistsError`. Срок назначения — не след ученика: сдач по
+	заданию нет, выставлять его больше некому.
+	"""
+	frappe.db.delete("Course Allocation Homework Due", {"homework": задание})
 
 
 def найти_сдачу(
@@ -217,9 +237,12 @@ def выдать(запись) -> None:
 	Сдачу, вставленную параллельным сохранением, выдача берёт и отмечает, а не
 	падает. `Why:` выдача идёт внутри закрытия урока и зачёта квиза — они не
 	должны срываться из-за домашки.
+
+	Задание, снятое из релиза (`retired`), не выдаётся: его сдачи — только
+	уже выданные.
 	"""
 	задание = задание_урока(запись.lesson)
-	if not задание:
+	if not задание or задание.retired:
 		return
 	организация = _организация_записи(запись)
 	сейчас = now_datetime()

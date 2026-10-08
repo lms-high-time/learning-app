@@ -4,10 +4,10 @@
 """Публикация релиза курса (learning-services#500).
 
 Порядок: разобрать → схема → проверки сервера → курс → без изменений? →
-записи под точкой сохранения: проекция глав и уроков, документ, релиз с
-индексом, карточка курса и действующий релиз. Признак «опубликован» не
-трогается: новый курс выходит черновиком, новый релиз опубликованного курса
-действует сразу (решение владельца, #497).
+записи под точкой сохранения: проекция глав и уроков, шаблоны домашек,
+документ, релиз с индексом, карточка курса и действующий релиз. Признак
+«опубликован» не трогается: новый курс выходит черновиком, новый релиз
+опубликованного курса действует сразу (решение владельца, #497).
 
 `Why:` точка сохранения — потому что `@контракт` превращает `Отказ` в
 успешный HTTP-ответ, и Frappe фиксирует всё, что записано до отказа. Все
@@ -25,7 +25,7 @@ from frappe.utils import now_datetime
 from lms_frappe_app.agent_learning import structure
 from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
-from lms_frappe_app.agent_learning.releases import checks, document, index, projection, schema
+from lms_frappe_app.agent_learning.releases import checks, document, homework, index, projection, schema
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 РЕЛИЗ = index.РЕЛИЗ
@@ -62,6 +62,7 @@ def опубликовать(релиз, course: str | None, автор: str) ->
 		прежний = frappe.db.get_value("LMS Course", курс, "active_release")
 		прежний_документ = frappe.db.get_value(РЕЛИЗ, прежний, "document_key") if прежний else None
 		итог = projection.спроецировать(курс, релиз, index.известные(курс), index.ключи(прежний))
+		homework.спроецировать(курс, {итог.уроки[у["key"]]: у["homework"] for у in релиз["lessons"]})
 		схема_документа = document.спроецировать(
 			курс, релиз["document"], релиз["lessons"], итог.уроки, прежний_документ
 		)
@@ -331,11 +332,12 @@ def _ответ(курс, релиз, итог, схема_документа, �
 
 
 def удалить_курс(курс: str) -> None:
-	"""Курс из релиза целиком: релизы, схемы документа, главы, уроки и сам курс.
+	"""Курс из релиза целиком: релизы, схемы документа, домашки, главы, уроки и сам курс.
 
 	Для курсов, по которым учиться больше не будут (решение владельца: старые
-	курсы удаляются вместе с историей). Релизы и схемы документа — проекции
-	релиза, их удаление здесь; остальное удаляет Learning (`delete_course`).
+	курсы удаляются вместе с историей). Релизы, схемы документа и шаблоны
+	домашек — проекции релиза, их удаление здесь; остальное удаляет Learning
+	(`delete_course`).
 	Записи учеников по курсу не трогает: курс с прохождениями уроков
 	(`Agent Lesson Run`) — отказ `course_has_lesson_runs` до первой записи,
 	с записями на курс Learning удаление остановит ссылками.
@@ -361,4 +363,5 @@ def удалить_курс(курс: str) -> None:
 		frappe.flags[УДАЛЯЕТСЯ_КУРС] = None
 	for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
 		frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
+	homework.удалить_шаблоны(курс)
 	delete_course(курс)
