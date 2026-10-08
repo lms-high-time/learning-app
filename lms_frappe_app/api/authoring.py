@@ -1574,7 +1574,7 @@ def remove_tester(course: str, user: str) -> dict:
 def _уроки_главы(глава: str, предел: int) -> list[dict]:
 	"""Уроки главы с наполненностью: факты, по которым сверяют собранное.
 
-	`body_segments` считает тот же разбор, что режет урок для `start_lesson`:
+	`body_segments` считает тот же разбор, что режет урок для `lesson_material`:
 	число на экране автора обязано совпадать с тем, что получит агент.
 	"""
 	from lms_frappe_app.agent_learning import quiz

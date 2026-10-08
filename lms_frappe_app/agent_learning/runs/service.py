@@ -240,6 +240,111 @@ def следующий(run) -> dict | None:
 	return _первый(открытые_обязательные(run))
 
 
+def следующий_шаг(run, есть_квиз: bool, квиз_обязателен: bool) -> dict | None:
+	"""Следующий шаг урока данными: пункт, квиз, закрытие или ничего.
+
+	`{"kind": "goal", objective, goal, title}` — первый открытый обязательный
+	пункт по порядку релиза; `{"kind": "quiz"}` — обязательные закрыты, у урока
+	есть вопросы и квиз обязателен; `{"kind": "complete"}` — закрыты, а квиза
+	нет или он не обязателен; `None` — урок пройден.
+
+	`Why:` данные, а не фраза: шаг читают и агентский MCP, и веб-чат, и каждый
+	складывает свой текст.
+	"""
+	if run.status == ПРОЙДЕН:
+		return None
+	if пункт := следующий(run):
+		return {"kind": "goal", **пункт}
+	return {"kind": "quiz"} if есть_квиз and квиз_обязателен else {"kind": "complete"}
+
+
+def карта(run, тексты: dict[str, str]) -> list[dict]:
+	"""Цели урока по порядку релиза — с текстом, статусом и пунктами; снятые не отдаются.
+
+	`тексты` — ключ цели → текст (`index.тексты_целей`); цель без текста — `None`.
+	"""
+	пункты: dict[str, list[dict]] = {}
+	for п in run.goals:
+		if not п.removed:
+			пункты.setdefault(п.objective_key, []).append(
+				{
+					"key": п.goal_key,
+					"kind": п.kind,
+					"required": bool(п.required),
+					"title": п.title,
+					"status": п.status,
+				}
+			)
+	return [
+		{
+			"key": ц.objective_key,
+			"text": тексты.get(ц.objective_key),
+			"status": ц.status,
+			"goals": пункты.get(ц.objective_key, []),
+		}
+		for ц in run.objectives
+		if not ц.removed
+	]
+
+
+def история(ученик: str, курс: str, кроме: str, глубина: int) -> list[dict]:
+	"""Прошлые уроки ученика по курсу — `глубина` последних начатых или пройденных, кроме урока `кроме`.
+
+	Урок — `{key, title, status, objectives_open}`: незакрытые цели — те, что
+	не `covered`, с текстом из релиза прохождения, по порядку. Последний — по
+	последней отметке пункта, началу или зачёту, что позже. Ничего не пишет и
+	прохождений не сверяет: читает сохранённые статусы.
+
+	`Why:` одна выборка уроков и одна целей с текстами на всю глубину — старт
+	урока платит за историю постоянное число запросов.
+	"""
+	if глубина <= 0:
+		return []
+	уроки = frappe.db.sql(
+		"""
+		select r.name, r.lesson_key, l.title, r.status
+		from `tabAgent Lesson Run` r
+		left join `tabCourse Lesson` l on l.name = r.lesson
+		left join `tabAgent Lesson Run Goal` g
+			on g.parent = r.name and g.parenttype = 'Agent Lesson Run'
+		where r.student = %(student)s and r.course = %(course)s
+			and r.lesson_key != %(except)s and r.status != 'not_started'
+		group by r.name
+		order by greatest(
+			coalesce(max(g.marked_at), r.started_at, r.passed_at),
+			coalesce(r.passed_at, r.started_at, max(g.marked_at))
+		) desc, r.name
+		limit %(depth)s
+		""",
+		{"student": ученик, "course": курс, "except": кроме, "depth": глубина},
+		as_dict=True,
+	)
+	if not уроки:
+		return []
+	цели = frappe.db.sql(
+		"""
+		select o.parent, o.objective_key, o.status, t.text
+		from `tabAgent Lesson Run Objective` o
+		join `tabAgent Lesson Run` r on r.name = o.parent
+		left join `tabAgent Release Objective` t
+			on t.parenttype = 'Agent Course Release' and t.parent = r.release
+			and t.lesson_key = r.lesson_key and t.objective_key = o.objective_key
+		where o.parenttype = 'Agent Lesson Run' and o.parent in %(runs)s
+			and o.removed = 0 and o.status != 'covered'
+		order by o.idx
+		""",
+		{"runs": tuple(у.name for у in уроки)},
+		as_dict=True,
+	)
+	открытые: dict[str, list[dict]] = {}
+	for ц in цели:
+		открытые.setdefault(ц.parent, []).append({"key": ц.objective_key, "text": ц.text, "status": ц.status})
+	return [
+		{"key": у.lesson_key, "title": у.title, "status": у.status, "objectives_open": открытые.get(у.name, [])}
+		for у in уроки
+	]
+
+
 def главы(ученик: str, курс: str) -> list[dict]:
 	"""Главы действующего релиза с прогрессом ученика по курсу.
 

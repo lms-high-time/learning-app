@@ -222,6 +222,23 @@ def цели_урока(релиз: str, ключ: str) -> list[dict]:
 	return цели
 
 
+def тексты_целей(релиз: str, ключ: str) -> dict[str, str]:
+	"""Ключ цели урока релиза → её текст."""
+	return dict(
+		frappe.get_all(
+			ЦЕЛЬ,
+			filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ},
+			fields=["objective_key", "text"],
+			as_list=True,
+		)
+	)
+
+
+def название_главы(релиз: str, ключ: str) -> str | None:
+	"""Название главы релиза по ключу; нет главы — `None`."""
+	return frappe.db.get_value(ГЛАВА, {"parenttype": РЕЛИЗ, "parent": релиз, "chapter_key": ключ}, "title")
+
+
 def вопросы_урока(релиз: str, ключ: str, *, с_ответами: bool = False) -> list[dict]:
 	"""Квиз урока по порядку; верный вариант и пояснение — только с `с_ответами`."""
 	поля = ["question_key", "objective_key", "text", "option_list"] + (
@@ -287,7 +304,12 @@ def ключи_выяснять(релиз: str) -> list[str]:
 	Список не тот — пусто; элемент без строкового ключа пропускается: пакет
 	собирает компилятор, и его форму приложение не проверяет.
 	"""
-	что_выяснять = рамка(релиз).get("learn_about_student")
+	return ключи_рамки(рамка(релиз))
+
+
+def ключи_рамки(рамка_курса: dict) -> list[str]:
+	"""`ключи_выяснять` по рамке, уже прочитанной `рамка`."""
+	что_выяснять = рамка_курса.get("learn_about_student")
 	if not isinstance(что_выяснять, list):
 		return []
 	return [э["key"] for э in что_выяснять if isinstance(э, dict) and _ключ(э.get("key"))]

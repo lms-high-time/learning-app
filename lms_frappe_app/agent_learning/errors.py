@@ -24,6 +24,9 @@ import frappe
 КУРС_НЕ_НАЙДЕН = "course_not_found"
 ЧУЖОЕ_ЗАНЯТИЕ = "not_your_session"
 ЗАНЯТО = "busy"
+#: Методы ученика работают только с курсом из релиза: у курса нет действующего
+#: релиза или урока в нём (learning-services#506).
+КУРС_НЕ_В_РЕЛИЗЕ = "course_not_released"
 
 
 class Отказ(frappe.ValidationError):

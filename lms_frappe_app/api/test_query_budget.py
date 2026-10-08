@@ -23,8 +23,11 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import quiz
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
+	курс_из_релиза,
+	урок_релиза,
 	зачислить,
 	привязать_главу,
 	привязать_урок,
@@ -48,20 +51,14 @@ from lms_frappe_app.testing import сколько_запросов
 	# +1 за программы курса (learning-services#405): входит ли курс в
 	# программу — одна выборка, пока не входит.
 	"course_outline": 14,
-	# +3 за начало занятия (#238): зачин урока, обещание курса и прочие
-	# занятия ученика по курсу — по ним сервер решает, с чего начинать.
-	# +1 за итоги репортов (learning-services#286): одна выборка, пока
-	# нового итога нет.
-	# +1 за пространство (learning-services#341): где начат документ курса —
-	# одна выборка на вызов, её берут и занятие, и блоки документа.
-	# +1 за порядок программы (learning-services#405): входит ли курс в
-	# программу — одна выборка, пока не входит.
-	# +2 за сигналы агенту (learning-services#416): история занятий по уроку —
-	# одна выборка на трудные цели и брошенные попытки — и остаток уроков к
-	# сроку курса, у которого срок есть.
-	# +1 за домашку (learning-services#439): есть ли у курса задания — одна
-	# выборка, пока их нет.
-	"start_lesson": 34,
+	# Курс из релиза (learning-services#506), прохождение уже есть: ключ и
+	# урок релиза, действующий релиз ещё раз при сверке прохождения,
+	# прохождение с блокировкой и двумя таблицами строк, есть ли вопросы,
+	# рамка, срез урока, глава, тексты целей, история прошлых уроков — по
+	# одной выборке; занятие, событие «пакет выдан», начало занятия, итоги
+	# репортов, блоки документа, попытки, сигналы — как прежде. У курса
+	# образца есть задание, поэтому домашка читает порядок уроков.
+	"start_lesson": 52,
 	# +2 за журнал проверки (learning-services#437): запись об ответе и о
 	# выданном следом вопросе.
 	"submit_answer": 17,
@@ -70,9 +67,9 @@ from lms_frappe_app.testing import сколько_запросов
 	# уроки, задания и комментарии — по одной выборке, курсы ученика — раз,
 	# порядок уроков ради адресов — раз на курс, а не на сдачу.
 	"my_homework": 23,
-	# `start_lesson` на курсе с заданиями: задания курса — одной выборкой со
-	# всеми полями, сдача прошлого урока — поиск и документ целиком.
-	"start_lesson_homework": 52,
+	# `start_lesson` на курсе с заданиями у текущего и прошлого урока: сверх
+	# `start_lesson` — поиск и чтение сдачи прошлого урока.
+	"start_lesson_homework": 57,
 	# Очередь куратора (learning-services#452), три сдачи в двух курсах:
 	# сдачи, счёт, значения фильтров, уроки с курсом, названия курсов,
 	# организаций и заданий, имена учеников, проверенные версии — по одной
@@ -146,13 +143,10 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		# Прогревочное занятие бросается, чтобы измеряемый вызов завёл своё, а
 		# не переиспользовал готовое: иначе вставка сессии осталась бы вне
 		# ворот. Прогрев тем же уроком, а не соседним, — соседний не тронул бы
-		# схемы квиза и документов курса, и бюджет поплыл бы на 26 запросов
-		# между прогоном модуля и прогоном всего приложения.
-		прогрев = student.start_lesson(lesson=self.уроки[0])["data"]["session"]
-		frappe.db.set_value("Agent Learning Session", прогрев, "status", "Abandoned")
-		self._ворота(
-			"start_lesson", lambda: student.start_lesson(lesson=self.уроки[0]), прогреть=False
-		)
+		# схемы квиза и документов курса, и бюджет поплыл бы между прогоном
+		# модуля и прогоном всего приложения.
+		урок = self._курс_релиза()[1]
+		self._старт_с_прогревом("start_lesson", урок)
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
@@ -170,12 +164,9 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	def test_бюджет_start_lesson_с_домашкой(self):
 		"""Курс с заданиями: задание текущего урока и сдача прошлого."""
-		self._домашки()
-		прогрев = student.start_lesson(lesson=self.уроки[1])["data"]["session"]
-		frappe.db.set_value("Agent Learning Session", прогрев, "status", "Abandoned")
-		self._ворота(
-			"start_lesson_homework", lambda: student.start_lesson(lesson=self.уроки[1]), прогреть=False
-		)
+		первый, второй = self._курс_релиза(с_домашкой=True)
+		student.submit_homework(lesson=первый, answer="Сделал")
+		self._старт_с_прогревом("start_lesson_homework", второй)
 
 	def test_бюджет_review_queue(self):
 		"""Те же три сдачи в очереди руководителя их организации."""
@@ -195,6 +186,12 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		self._ворота("student_detail", lambda: manager.student_detail(self.ученик))
 
 	# --- механика ворот ---
+
+	def _старт_с_прогревом(self, метод: str, урок: str) -> None:
+		прогрев = student.start_lesson(lesson=урок)
+		self.assertTrue(прогрев["ok"], прогрев)
+		frappe.db.set_value("Agent Learning Session", прогрев["data"]["session"], "status", "Abandoned")
+		self._ворота(метод, lambda: student.start_lesson(lesson=урок), прогреть=False)
 
 	def _ворота(self, метод: str, вызов, *, прогреть: bool = True) -> None:
 		if прогреть:
@@ -276,7 +273,25 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		возвращённая.append("history", {"event": "returned", "by_user": "Administrator", "comment": "Доделай"})
 		возвращённая.save(ignore_permissions=True)
 
+	def _курс_релиза(self, *, с_домашкой: bool = False) -> tuple[str, str]:
+		"""Курс из релиза той же организации — две главы, три урока, документ с
+		блоками первых двух уроков, заполненный учеником; первый и второй уроки.
+
+		`start_lesson` открывает только курс из релиза (learning-services#506).
+		С `с_домашкой` задания есть у первых двух уроков.
+		"""
+		frappe.set_user("Administrator")
+		релиз = пример_релиза(f"qb-{frappe.generate_hash(length=8)}")
+		if с_домашкой:
+			for урок in релиз["lessons"][:2]:
+				урок["homework"] = {"title": "Задание", "description": "Сделайте пример.", "answer_mode": "text", "due_days": None}
+		курс, _ = курс_из_релиза(релиз=релиз)
+		self._назначить(курс)
+		frappe.set_user(self.ученик)
+		student.update_artifact(курс, "notebook", "log", rows=[{"topic": "Первая встреча"}])
+		return урок_релиза(курс, "l-1"), урок_релиза(курс, "l-2")
+
 	def _попытка(self) -> str:
-		занятие = student.start_lesson(lesson=self.уроки[0])["data"]["session"]
+		занятие = создать_занятие(self.ученик, self.уроки[0])
 		сдать_отчёт(занятие)
 		return quiz.начать_попытку(занятие)["attempt"]
