@@ -6,7 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning import quiz, release_quiz
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import admin, student
@@ -55,7 +55,7 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		student.remember("fact", "role", "Владелец кофейни")
 		self.репорт = student.report_issue(self.занятие, "stuck", "Непонятен пример")["data"]["report"]
 		сдать_отчёт(self.занятие)
-		self.попытка = student.request_quiz(self.занятие)["data"]["attempt"]
+		self.попытка = quiz.начать_попытку(self.занятие)["attempt"]
 		frappe.set_user("Administrator")
 
 	def запись(self) -> str:

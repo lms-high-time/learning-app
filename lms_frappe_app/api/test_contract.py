@@ -549,7 +549,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 	# --- учебный поток ---
 
 	def _пройти_курс(self, курс: str, уроки: list[str], курс_релиза: str) -> tuple[str, str]:
-		с_квизом, без_квиза = уроки
+		с_квизом, _ = уроки
 		frappe.set_user(self.ученик)
 
 		self.сверить("student.whoami", student.whoami())
@@ -563,14 +563,12 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("public.lesson_entry", public.lesson_entry(lesson=с_квизом))
 		self.сверить("public.course_map", public.course_map(course=курс))
 
-		# `start_lesson` открывает только курс из релиза (learning-services#506);
+		# Методы агента по уроку — только курс из релиза (learning-services#506);
 		# занятие курса старой модели для старых методов заводится напрямую.
 		frappe.set_user("Administrator")
 		зачислить_на_курс(self.ученик, курс_релиза)
 		frappe.set_user(self.ученик)
-		self.сверить(
-			"student.start_lesson", student.start_lesson(lesson=урок_релиза(курс_релиза, "l-1"))
-		)
+		self._пройти_урок_релиза(курс_релиза)
 		занятие = создать_занятие(self.ученик, с_квизом)
 		self.сверить("student.lesson_session", student.lesson_session(lesson=с_квизом))
 		self.сверить("student.lesson_material", student.lesson_material(session=занятие))
@@ -622,21 +620,6 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 				],
 			),
 		)
-		попытка = self.сверить("student.request_quiz", student.request_quiz(session=занятие))
-		вопрос = попытка["question"]
-		while вопрос is not None:
-			ответ = self.сверить(
-				"student.submit_answer",
-				student.submit_answer(
-					attempt=попытка["attempt"],
-					question=вопрос["id"],
-					answer="1",
-					student_words="Первый вариант",
-				),
-			)
-			вопрос = ответ["next_question"]
-		self.assertTrue(ответ["result"]["passed"], "квиз не зачтён — дальше сверять нечего")
-		# Сданный квиз выдал домашку урока (learning-services#439).
 		self.сверить("student.homework", student.homework(lesson=с_квизом))
 		сдача = self.сверить(
 			"student.submit_homework",
@@ -645,10 +628,45 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("student.my_homework", student.my_homework())
 		self.сверить("student.my_homework", student.my_homework(lesson=с_квизом))
 
-		второе = создать_занятие(self.ученик, без_квиза)
-		self.сверить("student.complete_lesson", student.complete_lesson(session=второе))
 		self.сверить("student.get_my_progress", student.get_my_progress())
 		return репорт, сдача
+
+	def _пройти_урок_релиза(self, курс: str) -> None:
+		"""Урок с квизом — от старта до итога, урок без вопросов — до закрытия."""
+		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-1")))
+		занятие = старт["session"]
+		self.сверить("student.lesson_item", student.lesson_item(session=занятие, goal="term:T1"))
+		self._отметить_обязательные(занятие, старт["lesson_map"])
+		попытка = self.сверить("student.request_quiz", student.request_quiz(session=занятие))
+		вопрос = попытка["question"]
+		while вопрос is not None:
+			ответ = self.сверить(
+				"student.submit_answer",
+				student.submit_answer(
+					attempt=попытка["attempt"], question=вопрос["id"], answer="V1", student_words="Первый вариант"
+				),
+			)
+			вопрос = ответ["next_question"]
+		self.assertTrue(ответ["result"]["passed"], "квиз не зачтён — дальше сверять нечего")
+
+		frappe.set_user("Administrator")
+		релиз = frappe.db.get_value("LMS Course", курс, "active_release")
+		frappe.db.delete("Agent Release Question", {"parent": релиз, "lesson_key": "l-2"})
+		frappe.set_user(self.ученик)
+		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-2")))
+		self._отметить_обязательные(старт["session"], старт["lesson_map"])
+		self.сверить("student.complete_lesson", student.complete_lesson(session=старт["session"]))
+
+	def _отметить_обязательные(self, занятие: str, карта: list[dict]) -> None:
+		for цель in карта:
+			for пункт in цель["goals"]:
+				if пункт["required"]:
+					self.сверить(
+						"student.mark_goal",
+						student.mark_goal(
+							session=занятие, goal=пункт["key"], status="done", evidence="Ученик сделал сам"
+						),
+					)
 
 	# --- репорт: разбор и итог ---
 

@@ -16,11 +16,14 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
-	создать_вопрос,
+	занятие_релиза,
+	зачислить_на_курс,
+	курс_из_релиза,
+	отметить_все_пункты,
 	создать_занятие,
-	создать_квиз,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
@@ -45,10 +48,8 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		добавить_в_организацию(self.чужой, self.компания_б)
 
 		self.урок = создать_урок(f"Урок {суффикс}")
-		self.вопрос = создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])
-		создать_квиз(self.урок, [self.вопрос])
-		# Оба зачислены: квиз проверяет доступ к курсу, и без зачисления
-		# тесты изоляции падали бы по другой причине, чем проверяют.
+		# Оба зачислены: методы занятия проверяют доступ к курсу, и без
+		# зачисления тесты изоляции падали бы по другой причине, чем проверяют.
 		зачислить(self.ученик, self.урок)
 		зачислить(self.чужой, self.урок)
 		self.чужое_занятие = создать_занятие(self.чужой, self.урок)
@@ -95,6 +96,7 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 			"подробности пункта": lambda: student.lesson_item(self.чужое_занятие, "term:T1"),
 			# Иначе можно сжечь чужую попытку — они лимитированы.
 			"квиз": lambda: student.request_quiz(self.чужое_занятие),
+			"закрытие урока": lambda: student.complete_lesson(self.чужое_занятие),
 			# Репорт берёт курс и урок из занятия: пропущенный сюда, он
 			# записал бы чужой урок словами не того ученика.
 			"репорт": lambda: student.report_issue(
@@ -121,8 +123,12 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		Проверки не мешают друг другу: права только читаются, а ответ в чужую
 		попытку отклоняется раньше, чем что-либо запишется.
 		"""
+		курс, _ = курс_из_релиза()
+		зачислить_на_курс(self.чужой, курс)
+		занятие = занятие_релиза(self.чужой, курс, "l-1")
+		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
 		frappe.set_user(self.чужой)
-		попытка = student.request_quiz(self.чужое_занятие)["data"]["attempt"]
+		попытка = student.request_quiz(занятие)["data"]["attempt"]
 
 		# Хозяин не правит свою попытку напрямую. Главное: иначе зачёт ставится
 		# без единого ответа. Проверено эксплуатацией до починки — PUT со
@@ -136,7 +142,7 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		# Чужая попытка не читается даже по имени.
 		self.assertFalse(frappe.has_permission("Agent Quiz Attempt", "read", doc=попытка))
 
-		ответ = student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
+		ответ = student.submit_answer(попытка, "S1/l-1-D1", "V1", "слова ученика")
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
@@ -189,21 +195,26 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.компания = создать_организацию(f"Компания {суффикс}")
-		self.урок = создать_урок(f"Урок {суффикс}")
-		self.вопрос = создать_вопрос("Столица?", варианты=[("Москва", True), ("Тула", False)])
-		создать_квиз(self.урок, [self.вопрос])
+		релиз = пример_релиза(f"answers-{суффикс}")
+		релиз["lessons"][0]["quiz"]["questions"][0]["options"] = [
+			{"key": "V1", "text": "Москва"},
+			{"key": "V2", "text": "Тула"},
+		]
+		курс, _ = курс_из_релиза(релиз=релиз)
 
 		self.сотрудник = создать_ученика(f"emp-{суффикс}@example.com")
 		добавить_в_организацию(self.сотрудник, self.компания)
 		# Курс даёт компания: руководителю видна работа в её пространстве (#344).
 		frappe.get_doc(
-			{"doctype": "Course Allocation", "organization": self.компания, "course": зачислить(self.сотрудник, self.урок)}
+			{"doctype": "Course Allocation", "organization": self.компания, "course": зачислить_на_курс(self.сотрудник, курс)}
 		).insert(ignore_permissions=True)
 		self.руководитель = создать_менеджера(f"boss-{суффикс}@example.com", self.компания)
 
+		занятие = занятие_релиза(self.сотрудник, курс, "l-1")
+		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
 		frappe.set_user(self.сотрудник)
-		попытка = student.request_quiz(создать_занятие(self.сотрудник, self.урок))["data"]
-		student.submit_answer(попытка["attempt"], self.вопрос, "1", "слова ученика")
+		попытка = student.request_quiz(занятие)["data"]
+		student.submit_answer(попытка["attempt"], попытка["question"]["id"], "V1", "слова ученика")
 		frappe.set_user("Administrator")
 
 	def test_записи_ответов_не_читает_никто_кроме_служебных_ролей(self):

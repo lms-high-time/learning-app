@@ -142,19 +142,6 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.проверить("count_scenario_turn", student.count_scenario_turn("profile"))
 		self.проверить("reset_scenario_state", student.reset_scenario_state("profile"))
 
-		квиз = student.request_quiz(занятие)
-		выдано = self.проверить("request_quiz", квиз)
-		# Варианты видны, а какой из них верный — нет.
-		self.assertIn(ПРАВИЛЬНЫЙ_ВАРИАНТ, выдано)
-		self.assertIn(НЕВЕРНЫЙ_ВАРИАНТ, выдано)
-
-		попытка = квиз["data"]["attempt"]
-		ответ = student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
-		self.проверить("submit_answer", ответ)
-		# Неверный ответ не должен подсказывать верный: проверку текста
-		# пояснения делает `проверить`.
-		self.assertFalse(ответ["data"]["verdict"]["correct"])
-
 	def test_репорты_ученику_без_занятия_вопроса_и_владельца(self):
 		"""Ученик видит свои репорты и их итог, но не внутреннюю привязку:
 		занятие — устройство платформы, идентификатор вопроса квиза ученику ни
@@ -179,35 +166,9 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 		self.assertEqual([р["id"] for р in мои["data"]["reports"]], [репорт])
 		self.assertEqual([р["id"] for р in итоги], [репорт])
 
-	def test_пояснение_приходит_только_к_верному_ответу(self):
-		frappe.set_user(self.ученик)
-		занятие = создать_занятие(self.ученик, self.урок)
-		попытка = student.request_quiz(занятие)["data"]["attempt"]
-
-		ответ = student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
-
-		self.assertTrue(ответ["data"]["verdict"]["correct"])
-		self.assertIn(ТЕКСТ_ПОЯСНЕНИЯ, ответ["data"]["verdict"]["explanation"])
-
-	def test_неверный_ответ_поясняется_без_пояснения_верного(self):
-		"""Ошибившийся получает «почему нет» к своему варианту, но не текст,
-		поясняющий верный: тот называет ответ до следующей попытки."""
-		frappe.set_user(self.ученик)
-		занятие = создать_занятие(self.ученик, self.урок)
-		попытка = student.request_quiz(занятие)["data"]["attempt"]
-
-		ответ = student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
-
-		self.проверить("submit_answer", ответ)
-		вердикт = ответ["data"]["verdict"]
-		self.assertFalse(вердикт["correct"])
-		self.assertEqual(вердикт["why_wrong"], ПОЯСНЕНИЕ_НЕВЕРНОГО)
-
 	def test_ни_один_метод_руководителя_не_отдаёт_эталон(self):
 		frappe.set_user(self.ученик)
-		занятие = создать_занятие(self.ученик, self.урок)
-		попытка = student.request_quiz(занятие)["data"]["attempt"]
-		student.submit_answer(попытка, self.вопрос, "1", "слова ученика")
+		создать_занятие(self.ученик, self.урок)
 
 		frappe.set_user(self.менеджер)
 
@@ -233,13 +194,8 @@ class IntegrationTestNoLeak(IntegrationTestCase):
 				занятие, 1, "covered", "ученик перепутал столицу с крупнейшим городом"
 			),
 		)
-		попытка = student.request_quiz(занятие)["data"]["attempt"]
-		student.submit_answer(попытка, self.вопрос, "2", "слова ученика")
 
 		frappe.set_user(self.менеджер)
-		# Реплика ученика из журнала — то, что отчёт не имеет права раскрывать.
-		# Прежняя проверка искала здесь текст варианта ответа, которого в
-		# записи не бывает: ответ хранится номером.
 		проверить_ответ(
 			self,
 			manager.student_detail(self.ученик),
@@ -361,6 +317,15 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			"mark_goal",
 			student.mark_goal(занятие, "l-1-D1/V1", "done", СВИДЕТЕЛЬСТВО, resume_from="С примера ученика"),
 		)
+		квиз = student.request_quiz(занятие)
+		self.assertNotIn("correct", self.проверить("request_quiz", квиз))
+		попытка = квиз["data"]["attempt"]
+		первый = student.submit_answer(попытка, ВОПРОС_1, "V2", СЛОВА_УЧЕНИКА)
+		self.assertEqual(первый["data"]["verdict"], {"correct": False})
+		self.проверить("submit_answer", первый, СЛОВА_УЧЕНИКА)
+		итог = student.submit_answer(попытка, ВОПРОС_2, "V1", СЛОВА_УЧЕНИКА)
+		self.assertFalse(итог["data"]["result"]["passed"])
+		self.проверить("submit_answer", итог, СЛОВА_УЧЕНИКА)
 		self.проверить(
 			"update_artifact",
 			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),

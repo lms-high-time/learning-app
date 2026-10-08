@@ -22,11 +22,12 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import quiz
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	курс_из_релиза,
+	занятие_релиза,
+	отметить_все_пункты,
 	урок_релиза,
 	зачислить,
 	привязать_главу,
@@ -40,7 +41,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
-	сдать_отчёт,
 )
 from lms_frappe_app.api import manager, review, student, team
 from lms_frappe_app.testing import сколько_запросов
@@ -59,9 +59,12 @@ from lms_frappe_app.testing import сколько_запросов
 	# репортов, блоки документа, попытки, сигналы — как прежде. У курса
 	# образца есть задание, поэтому домашка читает порядок уроков.
 	"start_lesson": 51,
-	# +2 за журнал проверки (learning-services#437): запись об ответе и о
-	# выданном следом вопросе.
-	"submit_answer": 17,
+	# Квиз урока из релиза (learning-services#506), ответ посреди попытки:
+	# владелец, релиз и курс попытки; попытка с блокировкой; доступ к курсу —
+	# четыре выборки; отвечен ли вопрос, эталон из релиза; вставка ответа в
+	# точке сохранения (три); журнал проверки — об ответе и о выданном следом
+	# вопросе; отвеченные с блокировкой.
+	"submit_answer": 14,
 	"student_detail": 12,
 	# Домашки ученика (learning-services#439), три сдачи в двух курсах: сдачи,
 	# уроки, задания и комментарии — по одной выборке, курсы ученика — раз,
@@ -150,10 +153,10 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
-		student.submit_answer(попытка, self.вопросы[0], "1", "слова ученика")
+		student.submit_answer(попытка, "S1/l-1-D1", "V1", "слова ученика")
 		self._ворота(
 			"submit_answer",
-			lambda: student.submit_answer(попытка, self.вопросы[1], "1", "слова ученика"),
+			lambda: student.submit_answer(попытка, "S2/l-1-D1", "V1", "слова ученика"),
 			прогреть=False,
 		)
 
@@ -292,6 +295,12 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		return урок_релиза(курс, "l-1"), урок_релиза(курс, "l-2")
 
 	def _попытка(self) -> str:
-		занятие = создать_занятие(self.ученик, self.уроки[0])
-		сдать_отчёт(занятие)
-		return quiz.начать_попытку(занятие)["attempt"]
+		"""Попытка квиза урока из релиза с четырьмя вопросами; ответ меряется посреди попытки."""
+		frappe.set_user("Administrator")
+		курс, _ = курс_из_релиза(релиз=релиз_двух_целей(f"qb-quiz-{frappe.generate_hash(length=8)}", вопросов=4))
+		self._назначить(курс)
+		frappe.set_user(self.ученик)
+		занятие = занятие_релиза(self.ученик, курс, "l-1")
+		run = frappe.db.get_value("Agent Learning Session", занятие, "run")
+		отметить_все_пункты(run)
+		return student.request_quiz(занятие)["data"]["attempt"]
