@@ -8,20 +8,28 @@
   попытки, — итоги для страниц Learning. Удаляются: это данные курсов,
   удалённых в learning-services#500. `Why:` патч идёт раньше
   `drop_removed_columns` — без колонки уже не понять, какую сдачу сделало
-  приложение, а какую — сам Learning;
+  приложение, а какую — сам Learning. Следы удалённых сдач — версии,
+  комментарии, уведомления, задачи, просмотры — уходят вместе с ними;
 - попытки без релиза в статусе `In Progress`: ответить на них нельзя, а в
   `student_detail` они висят начатыми вечно. Закрываются брошенными — так же,
   как сброс прогресса закрывает открытую попытку (`reset.сбросить_прогресс`):
   `Abandoned` и `finished_at` — сейчас, без сдвига `modified`.
 
 Повторный запуск ничего не меняет: удалённых сдач нет, закрытые попытки не
-`In Progress`. Колонку и таблицы патч проверяет сам.
+`In Progress`. Колонку — по базе сайта (`drop_removed_columns.колонки`) — и
+таблицы патч проверяет сам.
+
+`Why:` следы сдачи `frappe.delete_doc` убирает задачей в очереди после
+коммита (`delete_dynamic_links`); патч зовёт её сам, сразу: итог миграции не
+зависит от того, дошёл ли воркер.
 """
 
 import frappe
+from frappe.model.delete_doc import delete_dynamic_links
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning.constants import ПОПЫТКА_БРОШЕНА, ПОПЫТКА_ИДЁТ
+from lms_frappe_app.patches.v0_1.drop_removed_columns import колонки
 
 ПОПЫТКА = "Agent Quiz Attempt"
 СДАЧА = "LMS Quiz Submission"
@@ -37,8 +45,7 @@ def execute():
 
 
 def _удалить_сдачи() -> int:
-	frappe.client_cache.delete_value(f"table_columns::tab{ПОПЫТКА}")
-	if "submission" not in frappe.db.get_table_columns(ПОПЫТКА):
+	if "submission" not in колонки(ПОПЫТКА):
 		return 0
 	if not frappe.db.table_exists(СДАЧА, cached=False):
 		return 0
@@ -53,6 +60,7 @@ def _удалить_сдачи() -> int:
 		frappe.delete_doc(
 			СДАЧА, сдача, force=True, ignore_permissions=True, ignore_missing=True, delete_permanently=True
 		)
+		delete_dynamic_links(СДАЧА, сдача)
 		удалено += 1
 	return удалено
 

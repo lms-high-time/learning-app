@@ -44,7 +44,7 @@ from lms_frappe_app.agent_learning.errors import (
 	НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА,
 	Отказ,
 )
-from lms_frappe_app.api import контракт, список, текущий_пользователь
+from lms_frappe_app.api import контракт, текущий_пользователь
 
 #: Роли, которым разрешены методы автора. Совпадают с административными в
 #: `permissions`: там они уже дают полный доступ к учебным записям.

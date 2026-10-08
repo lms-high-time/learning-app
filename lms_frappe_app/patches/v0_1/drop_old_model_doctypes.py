@@ -9,11 +9,17 @@ learning-services#500, а цели анонсов перенёс раньше п
 
 На каждый доктайп:
 
+- записи, настроенные на него, — `frappe.delete_doc` каждой, с её строками
+  и файлами (`ДОКУМЕНТЫ`): отчёты, клиентские и серверные скрипты,
+  уведомления, карточки и графики дашбордов, канбан-доски, форматы печати —
+  нестандартные (стандартные лежат в коде приложений), вложения и письма;
 - метаданные, которые ссылаются на него и которые `frappe.delete_doc` не
-  удаляет: поля и свойства (`Custom Field`, `Property Setter`, `Custom
-  DocPerm`), связи других доктайпов (`DocType Link`), ссылки workspace,
-  сайдбара и иконок, следы записей (`Version`, `Comment`, `DocShare`, `Tag
-  Link`, `User Permission`, `Deleted Document`, настройки списков);
+  удаляет, — строками (`МЕТАДАННЫЕ`): поля и свойства (`Custom Field`,
+  `Property Setter`, `Custom DocPerm`), связи других доктайпов (`DocType
+  Link`), ссылки workspace и сайдбара, следы записей (`Version`, `Comment`,
+  `DocShare`, `Tag Link`, `ToDo`, ссылки писем, журналы действий, просмотров
+  и уведомлений, `User Permission` на доктайп и для доктайпа, `Deleted
+  Document`, настройки списков);
 - запись `DocType` — `frappe.delete_doc`: она снимает поля, права, действия
   и связи самого доктайпа. Папки контроллера у доктайпа нет, и это ей не
   мешает: контроллер `DocType` — общий, а удаление папки она делает только в
@@ -37,8 +43,26 @@ import frappe
 	"Agent Artifact Template",
 )
 
-#: Метаданные о доктайпе: таблица → поле со ссылкой на него. Пара — ещё и
-#: условие на вид ссылки, где ссылка бывает не только на доктайп.
+#: Записи, настроенные на доктайп, — удаляются `frappe.delete_doc` со своими
+#: строками и файлами: доктайп → поле со ссылкой на доктайп. Пара — ещё и
+#: условие: стандартный отчёт и формат печати лежат в коде приложения.
+#: Поля — по схемам Frappe 16.
+ДОКУМЕНТЫ = (
+	("Report", "ref_doctype", ("is_standard", "No")),
+	("Client Script", "dt", None),
+	("Server Script", "reference_doctype", None),
+	("Notification", "document_type", None),
+	("Number Card", "document_type", None),
+	("Dashboard Chart", "document_type", None),
+	("Kanban Board", "reference_doctype", None),
+	("Print Format", "doc_type", ("standard", "No")),
+	("File", "attached_to_doctype", None),
+	("Communication", "reference_doctype", None),
+)
+
+#: Метаданные о доктайпе — удаляются строками: таблица → поле со ссылкой на
+#: него. Пара — ещё и условие на вид ссылки, где ссылка бывает не только на
+#: доктайп.
 МЕТАДАННЫЕ = (
 	("Custom Field", "dt", None),
 	("Property Setter", "doc_type", None),
@@ -47,12 +71,17 @@ import frappe
 	("Workspace Shortcut", "link_to", ("type", "DocType")),
 	("Workspace Quick List", "document_type", None),
 	("Workspace Sidebar Item", "link_to", ("link_type", "DocType")),
-	("Desktop Icon", "link_to", ("link_type", "DocType")),
 	("Version", "ref_doctype", None),
 	("Comment", "reference_doctype", None),
 	("DocShare", "share_doctype", None),
 	("Tag Link", "document_type", None),
+	("ToDo", "reference_type", None),
+	("Communication Link", "link_doctype", None),
+	("Activity Log", "reference_doctype", None),
+	("View Log", "reference_doctype", None),
+	("Notification Log", "document_type", None),
 	("User Permission", "allow", None),
+	("User Permission", "applicable_for", None),
 	("List View Settings", "name", None),
 	("Deleted Document", "deleted_doctype", None),
 )
@@ -78,17 +107,32 @@ def execute():
 
 
 def _метаданные(доктайп: str) -> dict[str, int]:
-	"""Удаляет метаданные о доктайпе; возвращает, сколько строк ушло из каждой таблицы."""
+	"""Удаляет записи и метаданные о доктайпе; возвращает, сколько ушло из каждой таблицы.
+
+	Записи — раньше строк: удаление вложения пишет комментарий «вложение
+	удалено» записи доктайпа, и его уберут строки `Comment`.
+	"""
 	удалено = {}
+	for таблица, поле, вид in ДОКУМЕНТЫ:
+		if not frappe.db.table_exists(таблица):
+			continue
+		for имя in frappe.get_all(таблица, filters=_условие(доктайп, поле, вид), pluck="name"):
+			frappe.delete_doc(
+				таблица,
+				имя,
+				force=True,
+				ignore_permissions=True,
+				ignore_missing=True,
+				delete_permanently=True,
+			)
+			удалено[таблица] = удалено.get(таблица, 0) + 1
 	for таблица, поле, вид in МЕТАДАННЫЕ:
 		if not frappe.db.table_exists(таблица):
 			continue
-		условие = {поле: доктайп}
-		if вид:
-			условие[вид[0]] = вид[1]
+		условие = _условие(доктайп, поле, вид)
 		if сколько := frappe.db.count(таблица, условие):
 			frappe.db.delete(таблица, условие)
-			удалено[таблица] = сколько
+			удалено[таблица] = удалено.get(таблица, 0) + сколько
 	# Таблица настроек вида без префикса `tab`: `table_exists` её не найдёт.
 	if "__UserSettings" in frappe.db.get_tables(cached=False):
 		[[сколько]] = frappe.db.sql("SELECT COUNT(*) FROM `__UserSettings` WHERE doctype = %s", доктайп)
@@ -96,6 +140,13 @@ def _метаданные(доктайп: str) -> dict[str, int]:
 			frappe.db.sql("DELETE FROM `__UserSettings` WHERE doctype = %s", доктайп)
 			удалено["__UserSettings"] = сколько
 	return удалено
+
+
+def _условие(доктайп: str, поле: str, вид: tuple[str, str] | None) -> dict:
+	условие = {поле: доктайп}
+	if вид:
+		условие[вид[0]] = вид[1]
+	return условие
 
 
 def _ссылки_workspace(доктайп: str) -> int:

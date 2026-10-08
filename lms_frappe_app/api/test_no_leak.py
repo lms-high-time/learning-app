@@ -46,20 +46,62 @@ class TestLeakGuard(UnitTestCase):
 		return False
 
 	def test_эталон_ловится(self):
-		for ответ in (
-			{"data": {"question": {"correct": "V2"}}},
-			{"data": [{"answers": {}}]},
-			{"verdict": {"explanation": "Почему так"}},
-			'[{"key": "S1", "correct": "V1"}]',
+		for ответ, параметры in (
+			({"data": {"question": {"correct": "V2"}}}, {}),
+			({"data": [{"answers": {}}]}, {}),
+			({"verdict": {"explanation": "Почему так"}}, {}),
+			('[{"key": "S1", "correct": "V1"}]', {}),
+			# Метка верного варианта булевым или числом — рядом с ключом, текстом, вариантами.
+			({"options": [{"key": "V2", "correct": True}]}, {}),
+			({"question": {"text": "Вопрос", "correct": 1, "total": 2}}, {}),
+			({"verdict": {"key": "V1", "correct": True}}, {}),
+			# Число без `total` — не счёт, а номер варианта.
+			({"correct": 2}, {}),
+			({"verdict": {"correct": 2}}, {}),
+			# Булево вне вердикта.
+			({"next_question": {"correct": False}}, {}),
+			# JSON, закодированный дважды.
+			(json.dumps(json.dumps([{"key": "S1", "correct": "V1"}])), {}),
+			({"state": json.dumps(json.dumps({"answers": {"S1": "V1"}}))}, {}),
+			# Пояснение законно только у верного вердикта и в итоге сданной попытки.
+			({"verdict": {"correct": False, "explanation": "Почему так"}}, {"кроме": ("explanation",)}),
+			({"next_question": {"id": "S2", "explanation": "Почему так"}}, {"кроме": ("explanation",)}),
+			(
+				{"result": {"passed": False, "explanations": [{"id": "S1", "explanation": "Почему так"}]}},
+				{"кроме": ("explanation",)},
+			),
+			({"explanations": [{"id": "S1", "explanation": "Почему так"}]}, {"кроме": ("explanation",)}),
 		):
-			with self.subTest(ответ=ответ):
-				self.assertTrue(self.утечка(ответ))
+			with self.subTest(ответ=ответ, **параметры):
+				self.assertTrue(self.утечка(ответ, **параметры))
 
 	def test_вердикт_и_счёт_не_эталон(self):
-		self.assertFalse(self.утечка({"verdict": {"correct": False}, "result": {"correct": 3}}))
+		self.assertFalse(
+			self.утечка(
+				{
+					"verdict": {"correct": False},
+					"result": {
+						"correct": 3,
+						"total": 4,
+						"objective_results": {"l-1-D1": {"correct": 1, "total": 2}},
+					},
+				}
+			)
+		)
 
 	def test_законное_пояснение(self):
-		self.assertFalse(self.утечка({"verdict": {"explanation": "Почему так"}}, кроме=("explanation",)))
+		for ответ in (
+			{"verdict": {"correct": True, "explanation": "Почему так"}},
+			{
+				"result": {
+					"passed": True,
+					"explanations": [{"id": "S1", "text": "Вопрос", "explanation": "Почему так"}],
+				}
+			},
+		):
+			with self.subTest(ответ=ответ):
+				self.assertFalse(self.утечка(ответ, кроме=("explanation",)))
+				self.assertTrue(self.утечка(ответ), "без `кроме` пояснение — утечка")
 
 
 class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
@@ -383,6 +425,24 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			верный,
 			"итог сданной попытки",
 			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные),
+			кроме=("explanation",),
+		)
+
+	def test_верный_ответ_посреди_попытки_без_чужих_пояснений(self):
+		"""Вердикт верного ответа несёт пояснение своего вопроса, а не других:
+		попытка не закончена, итога и `explanations` нет."""
+		попытка = self.попытка()["attempt"]
+
+		верный = self.ответить(попытка, ВОПРОС_1, "V1")
+
+		self.assertEqual(верный["verdict"], {"correct": True, "explanation": ПОЯСНЕНИЕ_РЕЛИЗА})
+		self.assertFalse(верный["attempt_finished"])
+		self.assertNotIn("result", верный)
+		проверить_ответ(
+			self,
+			верный,
+			"верный ответ посреди попытки",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПОЯСНЕНИЕ_РЕЛИЗА),
 			кроме=("explanation",),
 		)
 

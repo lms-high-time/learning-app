@@ -16,8 +16,15 @@
   схемы документа к шаблону.
 
 Индексы на этих колонках одноколоночные: `DROP COLUMN` удаляет их вместе с
-колонкой. Колонки, которой уже нет, и таблицы, которой нет, патч не трогает —
-повторный запуск ничего не делает.
+колонкой. Колонки таблицы уходят одним `ALTER TABLE` с `DROP COLUMN IF
+EXISTS` — только те, что есть в базе сайта. Колонки, которой уже нет, и
+таблицы, которой нет, патч не трогает — повторный запуск ничего не делает.
+
+`submission` попытки ждёт патча `old_quiz_attempts`: по ней тот находит
+сдачи Learning, сделанные приложением. Миграция с `--skip-failing`
+продолжает после упавшего патча, и без этой проверки колонка ушла бы
+раньше сдач; пока `old_quiz_attempts` нет в `Patch Log`, колонка остаётся,
+и патч печатает почему.
 """
 
 import frappe
@@ -32,21 +39,46 @@ import frappe
 	"Agent Course Artifact": ("template", "template_version", "overlay"),
 }
 
+#: Колонка → патч, который должен отработать до её удаления.
+ЖДУТ_ПАТЧА = {("Agent Quiz Attempt", "submission"): "lms_frappe_app.patches.v0_1.old_quiz_attempts"}
+
 
 def execute():
 	for доктайп, поля in КОЛОНКИ.items():
 		есть = колонки(доктайп)
-		удалить = [поле for поле in поля if поле in есть]
-		for поле in удалить:
-			frappe.db.sql_ddl(f"ALTER TABLE `tab{доктайп}` DROP COLUMN `{поле}`")
+		удалить = []
+		for поле in поля:
+			if поле not in есть:
+				continue
+			if (патч := ЖДУТ_ПАТЧА.get((доктайп, поле))) and not frappe.db.exists(
+				"Patch Log", {"patch": патч}
+			):
+				print(f"drop_removed_columns: {доктайп}.{поле} оставлена — патч {патч} ещё не выполнен")
+				continue
+			удалить.append(поле)
+		if удалить:
+			frappe.db.sql_ddl(
+				f"ALTER TABLE `tab{доктайп}` "
+				+ ", ".join(f"DROP COLUMN IF EXISTS `{поле}`" for поле in удалить)
+			)
 		frappe.client_cache.delete_value(f"table_columns::tab{доктайп}")
 		print(f"drop_removed_columns: {доктайп} — удалены колонки: {', '.join(удалить) or 'нет'}")
 
 
 def колонки(доктайп: str) -> set[str]:
-	"""Колонки таблицы доктайпа по базе, мимо кеша; таблицы нет — пусто."""
-	frappe.client_cache.delete_value(f"table_columns::tab{доктайп}")
-	try:
-		return set(frappe.db.get_table_columns(доктайп))
-	except frappe.db.TableMissingError:
-		return set()
+	"""Колонки таблицы доктайпа в базе сайта, мимо кеша; таблицы нет — пусто.
+
+	`Why:` `frappe.db.get_table_columns` ищет таблицу в `information_schema`
+	по имени без базы, а на одном сервере MariaDB бывает несколько сайтов:
+	колонка из чужой базы выглядела бы своей.
+	"""
+	return set(
+		frappe.db.sql(
+			"""
+			SELECT column_name FROM information_schema.columns
+			WHERE table_schema = DATABASE() AND table_name = %s
+			""",
+			f"tab{доктайп}",
+			pluck=True,
+		)
+	)
