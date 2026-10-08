@@ -3,17 +3,20 @@
 
 """Домашка урока из релиза — проекцией в шаблон `Agent Lesson Homework` (learning-services#504)."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service
-from lms_frappe_app.api import student
+from lms_frappe_app.api import authoring, student
 from lms_frappe_app.patches.v0_1 import release_homework
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
+	создать_домашку,
 	создать_занятие,
 	создать_куратора,
 	создать_организацию,
@@ -201,6 +204,48 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		старт = домашка.для_старта(первый, урок, курс, None, полное=True)
 		self.assertEqual(старт["homework"]["title"], "Задание")
 		self.assertEqual(домашка.сохранить(первый, урок, None, answer="Мой ответ").version, 1)
+		# Страница урока — по тому же правилу.
+		for ученик, видит in ((второй, False), (первый, True)):
+			frappe.set_user(ученик)
+			ответ = student.homework(lesson=урок)
+			self.assertTrue(ответ["ok"], ответ)
+			self.assertEqual(ответ["data"]["homework"] is not None, видит, ученик)
+		# Куратору урок показывает только действующее задание.
+		frappe.set_user(self.куратор)
+		урок_автора = authoring.get_lesson(lesson=урок)
+		self.assertTrue(урок_автора["ok"], урок_автора)
+		self.assertIsNone(урок_автора["data"]["homework"])
+
+	def test_снятое_параллельно_задание_новой_сдачи_не_получает(self):
+		"""Выдача и сохранение читали задание до того, как публикация его сняла:
+		блокирующее чтение перед вставкой видит снятое — сдачи нет."""
+		курс = self.опубликовать()["course"]
+		урок = self.урок(курс)
+		self.закрыть_урок(self.ученик(курс, урок), урок)
+		прежнее = домашка.задание_урока(урок)
+		self.опубликовать(self.релиз(None))
+		второй = self.ученик(курс, урок, "second")
+
+		with patch.object(домашка, "задание_урока", return_value=прежнее):
+			self.закрыть_урок(второй, урок)
+			with self.assertRaises(Отказ) as пойман:
+				домашка.сохранить(второй, урок, None, answer="Ответ")
+
+		self.assertEqual(пойман.exception.код, домашка.ЗАДАНИЯ_НЕТ)
+		self.assertEqual(self.сдачи(второй), [])
+
+	def test_снятый_шаблон_со_сдачами_публикация_не_трогает(self):
+		курс = self.опубликовать()["course"]
+		урок = self.урок(курс)
+		self.закрыть_урок(self.ученик(курс, урок), урок)
+		self.опубликовать(self.релиз(None))
+		было = self.шаблон(урок).modified
+		релиз = self.релиз(None)
+		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
+
+		self.опубликовать(релиз)
+
+		self.assertEqual((self.шаблон(урок).retired, self.шаблон(урок).modified), (1, было))
 
 	def test_снятая_домашка_прошлого_урока_только_со_сдачей(self):
 		релиз = пример_релиза(self.ключ)
@@ -279,6 +324,22 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		frappe.set_user(self.куратор)
 		self.ключ = ключ
 		self.assertTrue(self.опубликовать()["unchanged"])
+
+	def test_патч_снимает_и_удаляет_шаблоны_вне_релиза(self):
+		"""Шаблоны, которых в действующем релизе нет: со сдачей — снят, без — удалён."""
+		курс = self.опубликовать(self.релиз(None))["course"]
+		урок, лишний = self.урок(курс), self.урок(курс, "l-1")
+		frappe.set_user("Administrator")
+		со_сдачей = создать_домашку(урок).name
+		создать_домашку(лишний)
+		self.закрыть_урок(self.ученик(курс, урок), урок)
+		frappe.set_user("Administrator")
+
+		release_homework.execute()
+
+		self.assertEqual(self.шаблон(урок).name, со_сдачей)
+		self.assertEqual(self.шаблон(урок).retired, 1)
+		self.assertIsNone(self.шаблон(лишний))
 
 	# --- удаление курса ---
 

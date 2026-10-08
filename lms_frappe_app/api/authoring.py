@@ -1454,8 +1454,9 @@ def get_lesson(lesson: str) -> dict:
 		"directive": _действующая_директива(lesson),
 		"course_directive": _действующая_директива_курса(сведения.course),
 		"quiz": _вопросы_с_эталонами(квиз) if квиз else None,
+		# Снятое из релиза задание (`retired`) у урока больше не действует.
 		"homework": _задание_автора(frappe.get_doc(homework.ЗАДАНИЕ, задание))
-		if (задание := _имя_задания(lesson))
+		if (задание := frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": lesson, "retired": 0}))
 		else None,
 	}
 
@@ -1585,7 +1586,7 @@ def _уроки_главы(глава: str, предел: int) -> list[dict]:
 			запись.lesson: {"title": запись.title, "answer_mode": запись.answer_mode, "due_mode": запись.due_mode}
 			for запись in frappe.get_all(
 				homework.ЗАДАНИЕ,
-				filters={"lesson": ("in", уроки)},
+				filters={"lesson": ("in", уроки), "retired": 0},
 				fields=["lesson", "title", "answer_mode", "due_mode"],
 			)
 		}

@@ -303,6 +303,18 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 			назначение.save(ignore_permissions=True)
 		self.assertEqual(отказ.exception.код, "homework_not_in_course")
 
+	def test_снятое_из_релиза_задание_без_сроков(self):
+		"""Снятое задание (`retired`) новым ученикам не выдаётся: его нет в
+		перечне, новый срок ему не ставят, а прежний не мешает правке назначения."""
+		правило_3 = [{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1}]
+		self.assertTrue(self.задать(правило_3)["ok"])
+		frappe.db.set_value(self.задание_3.doctype, self.задание_3.name, "retired", 1)
+
+		self.assertEqual([с["homework"] for с in self.сроки()], [self.задание_1.name])
+		self.assertTrue(self.задать(правило_3)["ok"])
+		правило_3[0]["due_days"] = 2
+		self.assertEqual(self.код(self.задать(правило_3)), "homework_not_in_course")
+
 	def test_неверные_сроки(self):
 		for неверное in (
 			[{"homework": self.задание_1.name, "due_mode": "none"}],

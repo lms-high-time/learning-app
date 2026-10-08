@@ -614,7 +614,8 @@ def _задания_по_порядку(курсы: list[str]) -> dict[str, list
 			урок.title.as_("lesson_title"),
 			урок.course,
 		)
-		.where(урок.course.isin(курсы))
+		# Снятое из релиза задание новым ученикам не выдаётся — и срок ему не ставят.
+		.where(урок.course.isin(курсы) & (задание.retired == 0))
 	).run(as_dict=True)
 	if not строки:
 		return {}
