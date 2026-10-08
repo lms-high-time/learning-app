@@ -39,6 +39,8 @@ from lms_frappe_app.agent_learning.constants import (
 from lms_frappe_app.agent_learning.course_builder import заполненные, поля_вопроса
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.normalizer import _очистить
+from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.agent_learning.runs import service as прохождения
 
 КВИЗА_НЕТ = "quiz_not_configured"
 НЕЧЕГО_ПРОВЕРЯТЬ = "quiz_not_checkable"
@@ -231,11 +233,20 @@ def требуется_квиз(lesson: str, student: str, course: str) -> bool:
 	`Why:` без этого правила закрытие урока стало бы способом обойти
 	проверку — агент вызвал бы его вместо квиза, и серверный зачёт, на
 	котором держится вся схема, потерял бы смысл.
+
+	Урок из релиза — тот, что есть в действующем релизе курса: квиз у него
+	есть, когда у урока там есть вопросы.
 	"""
 	квиз = _квиз_урока(lesson)
-	if not квиз or not _вопросы_квиза(квиз):
-		return False
-	return bool(политика_квиза_для_курса(student, course)["quiz_required"])
+	есть = bool(квиз and _вопросы_квиза(квиз)) or _квиз_в_релизе(lesson, course)
+	return есть and bool(политика_квиза_для_курса(student, course)["quiz_required"])
+
+
+def _квиз_в_релизе(lesson: str, course: str) -> bool:
+	"""У урока есть вопросы в действующем релизе курса."""
+	релиз = прохождения.действующий(course)
+	ключ = index.ключ_урока(релиз, lesson) if релиз else None
+	return bool(ключ and index.вопросы_урока(релиз, ключ))
 
 
 def _квиз_урока(lesson: str) -> str | None:
@@ -642,12 +653,17 @@ def _записать_итог_frappe(
 	return итог.name
 
 
-def отметить_урок_пройденным(запись) -> None:
-	"""Пишет `LMS Course Progress` — тот же прогресс, что видит браузер.
+def отметить_урок_пройденным(запись, подтверждённые_цели=()) -> None:
+	"""Пишет `LMS Course Progress` — тот же прогресс, что видит браузер, — и
+	`passed` у прохождения урока из релиза.
 
 	Принимает и попытку квиза, и занятие: у обеих есть ученик, урок и курс, а
-	прогресс от способа закрытия урока не зависит.
+	прогресс от способа закрытия урока не зависит. `подтверждённые_цели` —
+	цели, которые сданная попытка из релиза подтвердила квизом
+	(`runs.service.отметить_пройденным`).
 	"""
+	if ключ := _ключ_урока_в_релизе(запись):
+		прохождения.отметить_пройденным(запись.student, запись.course, ключ, подтверждённые_цели)
 	# Домашка выдаётся на каждое закрытие: повторное ничего не меняет, а закрытие
 	# в другом пространстве даёт свою сдачу (learning-services#439). Why: фоном и
 	# после коммита — зачёт квиза и закрытие урока не зависят от домашки: гонка
@@ -683,3 +699,16 @@ def отметить_урок_пройденным(запись) -> None:
 			"status": ПРОЙДЕН,
 		}
 	).insert(ignore_permissions=True)
+
+
+def _ключ_урока_в_релизе(запись) -> str | None:
+	"""Ключ урока из релиза: у попытки — свой, у занятия — его прохождения или действующего релиза.
+
+	Урок не из релиза — `None`.
+	"""
+	if запись.get("lesson_key"):
+		return запись.lesson_key
+	if запись.get("run"):
+		return frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, запись.run, "lesson_key")
+	релиз = прохождения.действующий(запись.course)
+	return index.ключ_урока(релиз, запись.lesson) if релиз else None
