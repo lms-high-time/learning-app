@@ -6,7 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import quiz, release_quiz
+from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import admin, student
@@ -14,10 +14,8 @@ from lms_frappe_app.tests.release_sample import релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
-	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
-	создать_квиз,
 	создать_куратора,
 	создать_организацию,
 	создать_ученика,
@@ -33,8 +31,6 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"reset-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок {суффикс}")
-		вопрос = создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])
-		создать_квиз(self.урок, [вопрос])
 		self.курс = зачислить(self.ученик, self.урок)
 		frappe.get_doc(
 			{
@@ -63,9 +59,19 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 				"text": "Непонятен пример",
 			}
 		).insert(ignore_permissions=True).name
-		frappe.set_user(self.ученик)
-		self.попытка = quiz.начать_попытку(self.занятие)["attempt"]
-		frappe.set_user("Administrator")
+		# Открытая попытка квиза по занятию. Попытку, заведённую квизом урока из
+		# релиза, сбрасывает класс курса из релиза ниже.
+		self.попытка = frappe.get_doc(
+			{
+				"doctype": "Agent Quiz Attempt",
+				"session": self.занятие,
+				"student": self.ученик,
+				"lesson": self.урок,
+				"course": self.курс,
+				"attempt_number": 1,
+				"status": "In Progress",
+			}
+		).insert(ignore_permissions=True).name
 
 	def запись(self) -> str:
 		return frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": self.курс})

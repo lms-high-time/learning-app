@@ -152,57 +152,6 @@ def создать_менеджера(почта: str, organization: str) -> str
 	return почта
 
 
-def создать_вопрос(
-	текст: str,
-	варианты: list[tuple] | None = None,
-	возможные_ответы: list[str] | None = None,
-	пояснение: str | None = None,
-) -> str:
-	"""Вопрос с вариантами (Choices) или со свободным вводом (User Input).
-
-	Вариант — `(текст, верный)` или `(текст, верный, пояснение)`. `пояснение`
-	без своего у варианта достаётся верным вариантам.
-	"""
-	поля = {"doctype": "LMS Question", "question": текст}
-	if возможные_ответы is not None:
-		поля["type"] = "User Input"
-		for номер, ответ in enumerate(возможные_ответы, start=1):
-			поля[f"possibility_{номер}"] = ответ
-	else:
-		поля["type"] = "Choices"
-		верных = sum(1 for вариант in варианты or [] if вариант[1])
-		поля["multiple"] = int(верных > 1)
-		for номер, (вариант, верный, *своё) in enumerate(варианты or [], start=1):
-			поля[f"option_{номер}"] = вариант
-			поля[f"is_correct_{номер}"] = int(верный)
-			пояснение_варианта = своё[0] if своё else (пояснение if верный else None)
-			if пояснение_варианта:
-				поля[f"explanation_{номер}"] = пояснение_варианта
-	return frappe.get_doc(поля).insert(ignore_permissions=True).name
-
-
-def создать_квиз(lesson: str, вопросы: list[str], баллов_за_вопрос: int = 1) -> str:
-	"""Квиз урока. Привязывается и через quiz_id урока — так его ищет Frappe."""
-	курс = frappe.db.get_value(
-		"Course Chapter", frappe.db.get_value("Course Lesson", lesson, "chapter"), "course"
-	)
-	квиз = frappe.get_doc(
-		{
-			"doctype": "LMS Quiz",
-			"title": f"Квиз {frappe.generate_hash(length=6)}",
-			"lesson": lesson,
-			"course": курс,
-			"total_marks": len(вопросы) * баллов_за_вопрос,
-			"passing_percentage": 80,
-			"questions": [
-				{"question": вопрос, "marks": баллов_за_вопрос} for вопрос in вопросы
-			],
-		}
-	).insert(ignore_permissions=True)
-	frappe.db.set_value("Course Lesson", lesson, "quiz_id", квиз.name)
-	return квиз.name
-
-
 def создать_занятие(student: str, lesson: str, run: str | None = None) -> str:
 	"""Занятие с курсом и пространством — по тому же правилу, что у `start_lesson`;
 	`run` — прохождение урока, к которому занятие относится."""

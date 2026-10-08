@@ -21,8 +21,8 @@
 Архивные записи меняются через `db.set_value`, мимо `validate`: у живых записей
 «Ученик» остаётся обязательным, а архивные больше не сохраняются.
 
-Что есть только у Learning — отметки пройденного и итоги квиза для браузера —
-удаляется: своего архива у Learning нет.
+Что есть только у Learning — отметки пройденного — удаляется: своего архива у
+Learning нет.
 """
 
 from __future__ import annotations
@@ -61,16 +61,11 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 		frappe.db.set_value("Agent Learning Session", имя, изменения, update_modified=False)
 
 	попытки = _попытки(ученик, курс, уроки, [имя for имя, _ in занятия])
-	итоги_learning = []
 	for попытка in попытки:
-		изменения = dict(архив, submission=None)
+		изменения = dict(архив)
 		if попытка.status == ПОПЫТКА_ИДЁТ:
 			изменения.update(status=ПОПЫТКА_БРОШЕНА, finished_at=момент)
-		if попытка.submission:
-			итоги_learning.append(попытка.submission)
 		frappe.db.set_value("Agent Quiz Attempt", попытка.name, изменения, update_modified=False)
-	for итог in итоги_learning:
-		frappe.delete_doc("LMS Quiz Submission", итог, ignore_permissions=True, force=True)
 
 	документы = frappe.get_all(
 		"Agent Student Artifact", filters={"student": ученик, "course": курс}, pluck="name"
@@ -177,7 +172,7 @@ def _занятия(ученик: str, курс: str, уроки: list[str]) -> 
 
 
 def _попытки(ученик: str, курс: str, уроки: list[str], занятия: list[str]) -> list:
-	поля = ["name", "status", "submission"]
+	поля = ["name", "status"]
 	найдено = {
 		п.name: п
 		for п in frappe.get_all(

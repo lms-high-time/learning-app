@@ -13,10 +13,8 @@ from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
-	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
-	создать_квиз,
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
@@ -147,15 +145,18 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		self.assertEqual(сдача.status, "Assigned")
 
 	def test_сданный_квиз_выдаёт_домашку(self):
-		from lms_frappe_app.agent_learning.quiz import начать_попытку, принять_ответ
+		from lms_frappe_app.agent_learning import release_quiz
+		from lms_frappe_app.agent_learning.runs import service as прохождения
+		from lms_frappe_app.tests.release_sample import релиз_двух_целей
+		from lms_frappe_app.tests.sample_data import курс_из_релиза
 
-		создать_домашку(self.урок, due_mode="relative", due_days=2)
-		вопрос = создать_вопрос(f"Вопрос {frappe.generate_hash(length=6)}", [("да", True), ("нет", False)])
-		создать_квиз(self.урок, [вопрос])
-		имя = создать_занятие(self.ученик, self.урок)
+		курс, _ = курс_из_релиза(релиз=релиз_двух_целей(f"hw-{frappe.generate_hash(length=6)}", вопросов=1))
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		зачислить(self.ученик, run.lesson)
+		создать_домашку(run.lesson, due_mode="relative", due_days=2)
 		frappe.set_user(self.ученик)
-		попытка = начать_попытку(имя)["attempt"]
-		принять_ответ(попытка, вопрос, "1", "слова ученика")
+		попытка = release_quiz.начать(run, создать_занятие(self.ученик, run.lesson))["attempt"]
+		release_quiz.ответить(попытка, "S1/l-1-D1", "V1", "слова ученика")
 		frappe.set_user("Administrator")
 		self.assertEqual(frappe.db.get_value("Agent Quiz Attempt", попытка, "passed"), 1)
 		[сдача] = self.сдачи()

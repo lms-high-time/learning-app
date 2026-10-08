@@ -9,7 +9,6 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
-from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
@@ -19,9 +18,7 @@ from lms_frappe_app.tests.sample_data import (
 	курс_из_релиза,
 	настроить_квиз,
 	политика_по_умолчанию,
-	создать_вопрос,
 	создать_занятие,
-	создать_квиз,
 	создать_урок,
 	создать_ученика,
 	урок_релиза,
@@ -416,17 +413,11 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 	def test_курс_старой_модели_квиз_и_закрытие_отказывают(self):
 		урок = self.курс_старой_модели()
-		frappe.set_user("Administrator")
-		вопрос = создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])
-		создать_квиз(урок, [вопрос])
-		frappe.set_user(self.ученик)
 		занятие = создать_занятие(self.ученик, урок)
-		попытка = quiz.начать_попытку(занятие)["attempt"]
 
 		self.отказ(student.request_quiz(занятие), "course_not_released")
 		self.отказ(student.complete_lesson(занятие), "course_not_released")
-		self.отказ(student.submit_answer(попытка, вопрос, "1", "Четыре"), "course_not_released")
-		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": попытка}))
+		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": занятие}))
 
 	def test_квиз_при_гонке_за_прохождение_busy(self):
 		занятие = создать_занятие(self.ученик, self.урок)

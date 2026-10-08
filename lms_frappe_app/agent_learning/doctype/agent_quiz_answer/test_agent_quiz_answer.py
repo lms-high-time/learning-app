@@ -4,24 +4,26 @@
 """Запись ответа — основание выставленного зачёта.
 
 `Why:` итог попытки не хранится отдельно, он считается по этим записям: сколько
-набрано из скольких. Поэтому важны две вещи — что баллы в записи отвечают
-вердикту, и что завести её может только сервер. Ответ, записанный мимо метода,
-означал бы зачёт, за которым не стоит ни одной сверки с эталоном.
+верных из скольких. Поэтому важны две вещи — что запись отвечает вердикту, и
+что завести её может только сервер. Ответ, записанный мимо метода, означал бы
+зачёт, за которым не стоит ни одной сверки с эталоном.
 """
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning.quiz import начать_попытку, принять_ответ
+from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning.releases import service as релизы
+from lms_frappe_app.agent_learning.runs import service as прохождения
+from lms_frappe_app.tests.release_sample import релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	политика_по_умолчанию,
-	создать_вопрос,
 	создать_занятие,
-	создать_квиз,
 	создать_ученика,
-	создать_урок,
 )
+
+ВОПРОС = "S1/l-1-D1"
 
 
 class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
@@ -30,38 +32,39 @@ class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
 		политика_по_умолчанию()
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"answer-{суффикс}@example.com")
-		self.урок = создать_урок(f"Урок {суффикс}")
-		self.вопрос = создать_вопрос(
-			f"Столица? {суффикс}", варианты=[("Москва", True), ("Тверь", False)]
-		)
-		создать_квиз(self.урок, [self.вопрос], баллов_за_вопрос=5)
-		зачислить(self.ученик, self.урок)
-		self.попытка = начать_попытку(создать_занятие(self.ученик, self.урок))["attempt"]
+		курс = релизы.опубликовать(
+			релиз_двух_целей(f"answer-{суффикс}", вопросов=1), None, "Administrator"
+		)["course"]
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		зачислить(self.ученик, run.lesson)
+		self.попытка = release_quiz.начать(run, создать_занятие(self.ученик, run.lesson))["attempt"]
+
+	def ответить(self, ответ: str) -> None:
+		release_quiz.ответить(self.попытка, ВОПРОС, ответ, "слова ученика")
 
 	def запись(self):
-		return frappe.get_doc("Agent Quiz Answer", {"attempt": self.попытка, "question": self.вопрос})
+		return frappe.get_doc("Agent Quiz Answer", {"attempt": self.попытка, "question_key": ВОПРОС})
 
-	def test_верный_ответ_приносит_вес_вопроса(self):
-		принять_ответ(self.попытка, self.вопрос, "1", "слова ученика")
+	def test_верный_ответ_приносит_балл(self):
+		self.ответить("V1")
 
 		запись = self.запись()
 		self.assertTrue(запись.is_correct)
-		self.assertEqual(запись.marks, 5)
-		self.assertEqual(запись.marks_out_of, 5)
+		self.assertEqual((запись.marks, запись.marks_out_of), (1, 1))
+		self.assertEqual(запись.objective_key, "l-1-D1")
 
-	def test_неверный_ответ_обнуляет_баллы_но_не_вес(self):
-		"""`Why:` доля считается как «набрано из скольких», и потерянный вес
+	def test_неверный_ответ_обнуляет_балл_но_не_вес(self):
+		"""`Why:` доля считается как «верных из скольких», и потерянный вес
 		вопроса поднял бы итог: ошибка стала бы выгоднее пропуска."""
-		принять_ответ(self.попытка, self.вопрос, "2", "слова ученика")
+		self.ответить("V2")
 
 		запись = self.запись()
 		self.assertFalse(запись.is_correct)
-		self.assertEqual(запись.marks, 0)
-		self.assertEqual(запись.marks_out_of, 5)
+		self.assertEqual((запись.marks, запись.marks_out_of), (0, 1))
 
 	def test_ответ_хранится_обрезанным_до_предела_поля(self):
 		"""Агент волен прислать в ответ хоть всё занятие; запись — про вердикт."""
-		принять_ответ(self.попытка, self.вопрос, "я" * 900, "слова ученика")
+		self.ответить("я" * 900)
 
 		self.assertEqual(len(self.запись().answer), 500)
 
@@ -79,10 +82,10 @@ class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
 				{
 					"doctype": "Agent Quiz Answer",
 					"attempt": self.попытка,
-					"question": self.вопрос,
-					"answer": "1",
+					"question_key": ВОПРОС,
+					"answer": "V1",
 					"is_correct": 1,
-					"marks": 5,
-					"marks_out_of": 5,
+					"marks": 1,
+					"marks_out_of": 1,
 				}
 			).insert()

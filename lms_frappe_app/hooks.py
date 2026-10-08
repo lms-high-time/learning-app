@@ -9,8 +9,7 @@ app_license = "agpl-3.0"
 # ------------------
 
 # Приложение опирается на доменную модель Frappe Learning: директива ссылается
-# на Course Lesson, сверка ответа — на LMS Question, итоги пишутся в
-# LMS Course Progress и LMS Quiz Submission.
+# на Course Lesson, пройденные уроки пишутся в LMS Course Progress.
 required_apps = ["frappe/lms"]
 
 # Плитка приложения на стартовом экране desk. `Why:` Frappe 16 строит
