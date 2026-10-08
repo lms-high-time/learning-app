@@ -106,8 +106,6 @@
 	.author-page .issue-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.author-page .issue-row { display: flex; gap: 6px; align-items: flex-start; }
 	.author-page .issue-row .issue-item { flex: 1; min-width: 0; }
-	.author-page .issue-row .note-add { margin-top: 6px; white-space: nowrap; }
-	.author-page .node .note-dot { fill: var(--warn); stroke: var(--paper); stroke-width: 1.5; }
 	.author-page .issue-item .k { display: block; font-size: 13px; margin-top: 2px; }
 
 	/* Дерево: те же узлы, вложенными списками. Строка — узел, у тезиса —
@@ -141,7 +139,6 @@
 	.author-page .tree-lesson.issue { border-color: var(--gap); }
 	.author-page .tree-mark, .author-page .tree-count { font-size: 12px; color: var(--muted); }
 	.author-page .tree-mark.issue, .author-page .tree-count.gap { color: var(--gap); }
-	.author-page .tree-note { font-family: "IBM Plex Mono", monospace; font-size: 12px; padding: 0 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
 	@media (prefers-reduced-motion: reduce) { .author-page .edge, .author-page .node { transition: none; } }
 </style>
 
@@ -189,30 +186,21 @@
 				{% if not loop.first %}</div>{% endif %}
 				<div class="issue-group"><h3>{{ ГРУППЫ.get(р.group, р.group) }} <span class="muted num">{{ мк.counts[р.group] }}</span></h3>
 			{% endif %}
-			{% if р.node %}{% set цель, урок = "map." ~ р.node, None %}
-			{% elif р.group == "objectives" and р.lesson %}{% set цель, урок = "directive.objectives", р.lesson %}
-			{% elif р.group == "lessons" and р.lesson %}{% set цель, урок = "lesson", р.lesson %}
-			{% elif р.group == "blocks" %}{% set цель, урок = "block." ~ р.artifact ~ "/" ~ р.key, None %}
-			{% else %}{% set цель, урок = "course", None %}{% endif %}
 			<div class="issue-row">
 			<button type="button" class="issue-item" data-index="{{ loop.index0 }}">{{ р.message | e }}
 				{% if р.missing %}<span class="k">Нет: {{ р.missing | join("; ") | e }}</span>{% endif %}
 				{% if р.extra %}<span class="k">Лишнее: {{ р.extra | join("; ") | e }}</span>{% endif %}
 			</button>
-			<button type="button" class="note-add" data-note-target="{{ цель | e }}" data-note-lesson="{{ (урок or '') | e }}"
-				data-note-label="{{ ГРУППЫ.get(р.group, р.group) }} · расхождение с картой" data-note-quote="{{ р.message | e }}">Замечание</button>
 			</div>
 			{% if loop.last %}</div>{% endif %}
 		{% endfor %}
 	</section>
 
 	<script type="application/json" id="map-data">{{ мк | tojson }}</script>
-	<script type="application/json" id="map-notes">{{ map_notes | tojson }}</script>
 	<script>
 	{% raw %}
 	(function () {
 		const data = JSON.parse(document.getElementById('map-data').textContent);
-		const notesByNode = JSON.parse(document.getElementById('map-notes').textContent);
 		const map = data.map, platform = data.platform, matches = data.matches;
 		const levels = map.levels;
 		const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -239,7 +227,7 @@
 		const lessonTarget = key => matches[key] ? 'l:' + matches[key] : 'p:' + key;
 		const blockId = b => 'b:' + b.artifact + '/' + b.key;
 
-		map.nodes.forEach((m, i) => add({ id: 'n:' + m.id, raw: m, kind: 'node', col: levelIndex[m.level], text: m.text, order: i, notes: notesByNode[m.id] || [] }));
+		map.nodes.forEach((m, i) => add({ id: 'n:' + m.id, raw: m, kind: 'node', col: levelIndex[m.level], text: m.text, order: i }));
 		platform.lessons.forEach(l => add({ id: 'l:' + l.id, raw: l, kind: 'lesson', col: LESSONS, text: l.title, n: l.number, ch: chColor(l.chapter), order: l.number }));
 		map.lessons.forEach((p, i) => {
 			if (matches[p.key]) return;
@@ -411,7 +399,6 @@
 				if (n.numbered) svg += `<text class="num" x="${x + PAD}" y="${n.y + PAD + 12}">${esc(n.n)}</text>`;
 				n.lines.forEach((ln, i) => { svg += `<text x="${tx}" y="${n.y + PAD + 12 + i * LINE}">${esc(ln)}</text>`; });
 				if (n.mark) svg += `<text class="mark" x="${x + n.w - PAD}" y="${n.y + n.h - 5}" text-anchor="end">${esc(n.mark)}</text>`;
-				if (n.notes && n.notes.length) svg += `<circle class="note-dot" cx="${x + n.w - 6}" cy="${n.y + 6}" r="5"><title>Открытых замечаний: ${n.notes.length}</title></circle>`;
 				svg += '</g>';
 			});
 			svg += '</g></svg>';
@@ -456,7 +443,6 @@
 			}
 			if (n.issues.length) meta += `<span class="tree-mark issue">${esc(issueMark(n))}</span>`;
 			m.tags.forEach(t => { meta += `<span class="tree-mark">${esc(t)}</span>`; });
-			if (n.notes.length) meta += `<span class="tree-note" title="Открытых замечаний к узлу">✎ ${n.notes.length}</span>`;
 			meta += extra || '';
 			return `<${tag} class="tree-row" data-id="${esc(n.id)}"><button type="button" class="tree-node" data-id="${esc(n.id)}">${esc(n.text)}</button>`
 				+ (meta ? `<span class="tree-meta">${meta}</span>` : '') + `</${tag}>`;
@@ -546,7 +532,7 @@
 		}
 
 		// Выбранный узел живёт в адресе (`&node=T1_4`, `&node=lesson:<id>`):
-		// ссылку на него можно дать в чате или из замечания.
+		// ссылку на него можно дать в чате или из урока.
 		const PREFIX = { l: 'lesson:', p: 'plan:', b: 'block:' };
 		function remember(id) {
 			const url = new URL(location.href);
@@ -642,23 +628,8 @@
 				if (!n.ghost) html += `<p><span class="k">Подсказка агенту:</span> ${n.raw.hint ? esc(n.raw.hint) : '<span class="k">нет</span>'}</p>`;
 			}
 			if (n.issues.length) html += `<p><span class="k">Расхождения:</span></p><ul>${n.issues.map(issueHtml).join('')}</ul>`;
-			if (n.notes && n.notes.length) {
-				html += `<p><span class="k">Замечания:</span></p><ul>${n.notes.map(z => `<li>${esc(z.text)} <span class="k">— ${z.status === 'done' ? 'сделано, проверьте' : z.waiting_on === 'author' ? 'агент спрашивает' : 'ждёт агента'}</span></li>`).join('')}</ul>`;
-			}
-			const place = notePlace(n);
-			html += `<p><button type="button" class="note-add" data-note-target="${esc(place.target)}" data-note-lesson="${esc(place.lesson || '')}" data-note-label="${esc(place.label)}" data-note-quote="${esc(place.quote || '')}">Замечание</button>`
-				+ (n.kind === 'lesson' && !n.ghost ? ` <a href="${esc(n.raw.url)}#section-notes">замечания урока</a>` : '') + '</p>';
+			if (n.kind === 'lesson' && !n.ghost) html += `<p><a href="${esc(n.raw.url)}#section-notes">замечания урока</a></p>`;
 			openTrail(html, n.kind === 'lesson' && !n.ghost ? n.n + '. ' + n.text : n.text);
-		}
-
-		// Куда ставить замечание с карточки узла: узел карты, урок, блок; урок
-		// плана, которого нет на платформе, — к курсу с цитатой.
-		function notePlace(n) {
-			if (n.kind === 'node') return { target: 'map.' + n.raw.id, label: 'Карта · «' + n.text + '»' };
-			if (n.kind === 'lesson' && !n.ghost) return { target: 'lesson', lesson: n.raw.id, label: 'Урок ' + n.n + ' «' + n.text + '»' };
-			if (n.kind === 'lesson') return { target: 'course', label: 'Курс', quote: 'Урок плана «' + n.text + '» — на платформе его нет' };
-			const b = n.ghost ? n.plan : n.raw;
-			return { target: 'block.' + b.artifact + '/' + b.key, label: 'Документ · блок «' + n.text + '»' };
 		}
 
 		const issuesCard = (title, list) => `<div class="kind">Расхождения</div><p><b>${esc(title)}</b></p><ul>${list.map(issueHtml).join('')}</ul>`;
@@ -740,7 +711,7 @@
 			scrollToNode(d.targets[0]);
 		}));
 
-		// Узел из адреса — ссылка из замечания, из урока или из чата
+		// Узел из адреса — ссылка из урока или из чата
 		// открывает карту уже на нём.
 		const start = fromParam(new URLSearchParams(location.search).get('node'));
 		setView(view);

@@ -1,14 +1,19 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-import json
 from urllib.parse import quote
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.api import authoring
-from lms_frappe_app.tests.sample_data import политика_по_умолчанию, создать_куратора, создать_ученика
+from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.sample_data import (
+	политика_по_умолчанию,
+	создать_куратора,
+	создать_ученика,
+	урок_релиза,
+)
 
 
 class IntegrationTestAuthorPage(IntegrationTestCase):
@@ -281,39 +286,40 @@ def сведения_списка(пользователь: str) -> list[dict]:
 
 
 class IntegrationTestAuthorPageNotes(IntegrationTestCase):
-	"""Замечания в кабинете: очередь по тому, что ждёт человека, замечания
-	урока по местам, счётчики и ссылки на места (lms-high-time/learning-services#266)."""
+	"""Заметки в кабинете по ключам релиза: очередь по тому, что ждёт человека,
+	заметки урока по местам, счётчики и ссылки на места
+	(lms-high-time/learning-services#266, #512)."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.куратор = создать_куратора(f"author-notes-{суффикс}@example.com")
 		frappe.set_user(self.куратор)
-		self.курс = authoring.create_course(title=f"Замечания {суффикс}", summary="к")["data"]["id"]
-		глава = authoring.add_chapter(course=self.курс, title="Рамка")["data"]["id"]
-		self.урок = authoring.add_lesson(chapter=глава, title="Первый", body="# Первый\n\nТекст.")["data"]["id"]
-		authoring.set_directive(lesson=self.урок, teaching_directive="Веди")
-		authoring.add_quiz(
-			lesson=self.урок,
-			questions=[{"text": "Что не так?", "options": [{"text": "a", "correct": True}, {"text": "b"}]}],
-		)
-		вопрос = authoring.get_lesson(lesson=self.урок)["data"]["quiz"]["questions"][0]["id"]
+		self.ключ = f"author-notes-{суффикс}"
+		self.курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		self.урок = урок_релиза(self.курс, "l-1")
 
-		def замечание(target, lesson=None, **правки):
-			return authoring.add_note(course=self.курс, target=target, lesson=lesson, text="Замечание", **правки)["data"]["id"]
-
-		self.ждёт_агента = замечание("directive.teaching_directive", self.урок)
-		self.сделано = замечание(f"question.{вопрос}", self.урок)
+		self.ждёт_агента = self.добавить("lesson.l-1")
+		self.сделано = self.добавить("question.S1/l-1-D1")
 		authoring.set_note_status(note=self.сделано, status="done", text="Поправил", via="agent")
-		self.вопрос_агента = замечание("course", via="agent")
-		self.принято = замечание("material", self.урок)
+		self.вопрос_агента = self.добавить("course", via="agent")
+		self.принято = self.добавить("goal.l-1/term:T1")
 		authoring.set_note_status(note=self.принято, status="accepted")
-		self.на_карте = замечание("map.T1")
+		self.на_разделе = self.добавить("section.log")
+
+	def добавить(self, target: str, **правки) -> str:
+		ответ = authoring.add_note(course=self.курс, target=target, text="Заметка", **правки)
+		self.assertTrue(ответ["ok"], ответ)
+		return ответ["data"]["id"]
 
 	def сведения_для(self, **параметры) -> dict:
 		from lms_frappe_app.www.author import сведения
 
 		return сведения(self.куратор, course=self.курс, **параметры)
+
+	def по_ид(self, ид: str) -> dict:
+		очередь = self.сведения_для(view="notes")["notes_queue"]
+		return next(з for записи in очередь.values() for з in записи if з["id"] == ид)
 
 	def test_очередь_по_тому_что_ждёт_человека(self):
 		с = self.сведения_для(view="notes")
@@ -325,151 +331,116 @@ class IntegrationTestAuthorPageNotes(IntegrationTestCase):
 			{
 				"check": [self.сделано],
 				"question": [self.вопрос_агента],
-				"agent": [self.ждёт_агента, self.на_карте],
+				"agent": [self.ждёт_агента, self.на_разделе],
 				"accepted": [self.принято],
 			},
 		)
 		self.assertEqual(с["course"]["notes_attention"], 2)
 
 	def test_ссылки_ведут_на_место(self):
-		с = self.сведения_для(view="notes")
-		по_ид = {з["id"]: з for записи in с["notes_queue"].values() for з in записи}
-
-		урок = по_ид[self.ждёт_агента]["url"]
+		урок = self.по_ид(self.ждёт_агента)["url"]
 		self.assertIn(f"lesson={quote(self.урок)}", урок)
-		self.assertTrue(урок.endswith("#note-directive-teaching_directive"))
-		self.assertIn("view=map", по_ид[self.на_карте]["url"])
-		self.assertIn("node=T1", по_ид[self.на_карте]["url"])
-		self.assertTrue(по_ид[self.вопрос_агента]["url"].endswith("#note-course"))
+		self.assertTrue(урок.endswith("#note-lesson-l-1"))
+		вопрос = self.по_ид(self.сделано)["url"]
+		self.assertIn(f"lesson={quote(self.урок)}", вопрос)
+		self.assertTrue(вопрос.endswith("#section-notes"))
+		self.assertTrue(self.по_ид(self.вопрос_агента)["url"].endswith("#note-course"))
+		раздел = self.по_ид(self.на_разделе)["url"]
+		self.assertNotIn("lesson=", раздел)
+		self.assertTrue(раздел.endswith("#note-section-log"))
 
-	def test_урок_показывает_свои_замечания_по_местам(self):
-		с = self.сведения_для(lesson=self.урок)
+	def test_место_которого_нет_ведёт_в_очередь(self):
+		ид = self.добавить("lesson.l-3")
+		без_третьего = пример_релиза(self.ключ)
+		без_третьего["chapters"] = без_третьего["chapters"][:1]
+		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		authoring.publish_release(release=без_третьего)
 
-		замечания = с["lesson"]["notes"]
-		self.assertEqual([з["id"] for з in замечания["directive.teaching_directive"]], [self.ждёт_агента])
-		self.assertEqual([з["id"] for з in замечания["material"]], [self.принято])
-		self.assertEqual(с["lesson"]["open_notes"], 2)
+		з = self.по_ид(ид)
 
-	def test_в_таблице_структуры_открытые_замечания_урока(self):
+		self.assertTrue(з["missing"])
+		self.assertTrue(з["url"].endswith(f"&view=notes#note-card-{ид}"))
+
+	def test_урок_показывает_свои_заметки_по_местам(self):
+		урок = self.сведения_для(lesson=self.урок)["lesson"]
+
+		self.assertEqual(урок["key"], "l-1")
+		self.assertEqual(
+			{место: [з["id"] for з in записи] for место, записи in урок["notes"].items()},
+			{
+				"lesson.l-1": [self.ждёт_агента],
+				"question.S1/l-1-D1": [self.сделано],
+				"goal.l-1/term:T1": [self.принято],
+			},
+		)
+		self.assertEqual(урок["open_notes"], 3)
+
+	def test_в_таблице_структуры_открытые_заметки_урока(self):
 		с = self.сведения_для()
 
-		(урок,) = [у for г in с["course"]["chapters"] for у in г["lessons"]]
-		self.assertEqual(урок["open_notes"], 2)
+		уроки = {у["key"]: у for г in с["course"]["chapters"] for у in г["lessons"]}
+		self.assertEqual(с["course"]["release"], frappe.db.get_value("LMS Course", self.курс, "active_release"))
+		self.assertEqual((уроки["l-1"]["open_notes"], уроки["l-2"]["open_notes"]), (3, 0))
 		self.assertIsNotNone(с["course"]["notes_revision"])
-		self.assertEqual([з["id"] for з in с["course"]["notes"]["course"]], [self.вопрос_агента])
+		self.assertEqual(
+			{место: [з["id"] for з in записи] for место, записи in с["course"]["notes"].items()},
+			{"course": [self.вопрос_агента], "section.log": [self.на_разделе]},
+		)
 
 	def test_список_курсов_говорит_куда_идти(self):
-		"""Два автора, много курсов: список сразу показывает, где ждут
-		человека, где курс разошёлся с картой и когда его меняли (#270)."""
 		с = self.сведения_для()
 		курс = next(к for к in сведения_списка(self.куратор) if к["id"] == self.курс)
 
 		self.assertEqual(курс["notes_attention"], 2)
-		self.assertIsNone(курс["map_discrepancies"])
 		self.assertEqual(курс["revision"], с["course"]["revision"])
 
-	def по_ид(self, ид: str) -> dict:
-		очередь = self.сведения_для(view="notes")["notes_queue"]
-		return next(з for записи in очередь.values() for з in записи if з["id"] == ид)
-
-	def test_у_сделанного_видно_что_поменялось(self):
-		"""Автор проверяет «сделано» по разнице места с момента замечания, а
-		не перечитывая раздел (lms-high-time/learning-services#271)."""
-		ид = authoring.add_note(course=self.курс, target="material", lesson=self.урок, text="Короче")["data"]["id"]
-		authoring.update_lesson(lesson=self.урок, body="# Первый\n\nТекст покороче.")
-		authoring.set_note_status(note=ид, status="done", text="Сократил", via="agent")
-
-		правки = self.по_ид(ид)["changes"]
-
-		self.assertEqual(правки["state"], "changed")
-		self.assertIn("покороче", json.dumps(правки, ensure_ascii=False))
-
-	def test_сделано_без_правки_видно_сразу(self):
-		self.assertEqual(self.по_ид(self.сделано)["changes"], {"state": "same"})
-
-	def test_у_старого_замечания_разница_недоступна(self):
-		frappe.db.set_value("Agent Author Note", self.сделано, "baseline", None)
-
-		self.assertEqual(self.по_ид(self.сделано)["changes"], {"state": "unavailable"})
-
-	def test_у_открытых_и_у_курса_целиком_разницы_нет(self):
-		authoring.set_note_status(note=self.вопрос_агента, status="done", text="Взял склад", via="agent")
-
-		self.assertNotIn("changes", self.по_ид(self.ждёт_агента))
-		self.assertNotIn("changes", self.по_ид(self.вопрос_агента))
-
-	def test_у_замечания_к_уроку_разница_по_местам(self):
-		ид = authoring.add_note(course=self.курс, target="lesson", lesson=self.урок, text="Весь урок")["data"]["id"]
-		authoring.update_lesson(lesson=self.урок, body="# Первый\n\nНовый текст.")
-		authoring.set_directive(lesson=self.урок, teaching_directive="Веди иначе")
-		authoring.set_note_status(note=ид, status="done", text="Переписал", via="agent")
-
-		места = self.по_ид(ид)["changes"]["places"]
-
-		self.assertEqual([м["label"] for м in места], ["Материал", "Директива · Как вести занятие"])
-
-	def test_карта_получает_замечания_по_узлам(self):
-		с = self.сведения_для(view="map")
-
-		self.assertEqual({узел: [з["id"] for з in записи] for узел, записи in с["map_notes"].items()}, {"T1": [self.на_карте]})
-
-	def блоки(self):
-		authoring.set_course_artifact(
-			course=self.курс,
-			artifact="register",
-			title="Реестр",
-			blocks=[
-				{"key": "risks", "title": "Риски", "lesson": self.урок},
-				{"key": "other", "title": "Другое"},
-			],
-		)
-
-	def добавить(self, target: str, lesson: str | None = None) -> str:
-		return authoring.add_note(course=self.курс, target=target, lesson=lesson, text="…")["data"]["id"]
-
-	def test_указатель_замечаний_урока_с_блоками_урока(self):
-		self.блоки()
-		на_блоке = self.добавить("block.register/risks")
-		self.добавить("block.register/other")
-
+	def test_указатель_заметок_урока(self):
 		урок = self.сведения_для(lesson=self.урок)["lesson"]
 
 		self.assertEqual(
-			[з["id"] for з in урок["notes_index"]], [self.сделано, self.ждёт_агента, на_блоке, self.принято]
+			[з["id"] for з in урок["notes_index"]], [self.сделано, self.ждёт_агента, self.на_разделе, self.принято]
 		)
-		self.assertEqual(урок["open_notes"], 3)
-		(строка,) = [у for г in self.сведения_для()["course"]["chapters"] for у in г["lessons"]]
-		self.assertEqual(строка["open_notes"], 3)
+		места = {з["id"]: (з["place"], з["here"]) for з in урок["notes_index"]}
+		self.assertEqual(
+			места,
+			{
+				self.ждёт_агента: ("Урок целиком", True),
+				self.сделано: ("Вопрос «Ситуация и вопрос»", False),
+				self.на_разделе: ("Документ · раздел «Журнал»", True),
+				self.принято: ("Пункт «Термин «пример»»", False),
+			},
+		)
 
-	def test_указатель_подписывает_место_без_названия_урока(self):
-		self.блоки()
-		на_блоке = self.добавить("block.register/risks")
-		на_уроке = self.добавить("lesson", self.урок)
+	def test_у_курса_без_релиза_мест_для_заметок_нет(self):
+		курс = authoring.create_course(title=f"Без релиза {frappe.generate_hash(length=6)}", summary="к")["data"]["id"]
+		глава = authoring.add_chapter(course=курс, title="Рамка")["data"]["id"]
+		урок = authoring.add_lesson(chapter=глава, title="Первый", body="# Первый")["data"]["id"]
+		from lms_frappe_app.www.author import сведения
 
-		места = {з["id"]: з["place"] for з in self.сведения_для(lesson=self.урок)["lesson"]["notes_index"]}
+		с = сведения(self.куратор, course=курс, lesson=урок)
 
-		self.assertEqual(места[self.ждёт_агента], "Директива · teaching_directive")
-		self.assertEqual(места[self.принято], "Материал")
-		self.assertEqual(места[на_уроке], "Урок целиком")
-		self.assertEqual(места[на_блоке], "Документ register · блок «Риски»")
+		self.assertIsNone(с["course"]["release"])
+		self.assertIsNone(с["lesson"]["key"])
+		self.assertEqual((с["lesson"]["notes"], с["lesson"]["notes_index"]), ({}, []))
 
-	def test_замечание_без_места_на_странице_ведёт_в_очередь(self):
-		# Поля «Вопросы к проекту» в директиве нет — места на странице тоже.
-		без_места = self.добавить("directive.probing_questions", self.урок)
+	def test_страница_заметок_рисуется(self):
+		"""Шаблон кабинета с местами заметок по ключам: экран курса, урок, очередь."""
+		from frappe.website.serve import get_response
 
-		по_ид = {з["id"]: з for з in self.сведения_для(lesson=self.урок)["lesson"]["notes_index"]}
-
-		self.assertTrue(по_ид[self.ждёт_агента]["here"])
-		self.assertFalse(по_ид[без_места]["here"])
-
-	def test_замечание_на_блок_с_уроком_стоит_у_блока(self):
-		self.блоки()
-		с_уроком = self.добавить("block.register/risks", self.урок)
-
-		с = self.сведения_для(lesson=self.урок)
-
-		self.assertEqual([з["id"] for з in с["course"]["notes"]["block.register/risks"]], [с_уроком])
-		self.assertIn(с_уроком, [з["id"] for з in с["lesson"]["notes_index"]])
+		self.addCleanup(setattr, frappe.local, "form_dict", frappe.local.form_dict)
+		for параметры, якоря in (
+			({}, ("note-course", "note-section-log")),
+			({"lesson": self.урок}, ("note-lesson-l-1", f"note-card-{self.ждёт_агента}")),
+			({"view": "notes"}, (f"note-card-{self.сделано}",)),
+		):
+			with self.subTest(**параметры):
+				frappe.local.form_dict = frappe._dict(course=self.курс, **параметры)
+				ответ = get_response("author")
+				страница = ответ.get_data(as_text=True)
+				self.assertEqual(ответ.status_code, 200, страница[:500])
+				for якорь in якоря:
+					self.assertIn(якорь, страница)
+				self.assertNotIn("data-note-lesson", страница)
 
 
 class IntegrationTestAuthorPageLessonMap(IntegrationTestCase):

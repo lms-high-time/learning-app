@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "course",
+  "release",
   "lesson",
   "target",
   "status",
@@ -14,7 +15,6 @@
   "sb_note",
   "quote",
   "text",
-  "baseline",
   "replies"
  ],
  "fields": [
@@ -27,10 +27,20 @@
    "reqd": 1
   },
   {
+   "fieldname": "release",
+   "fieldtype": "Link",
+   "label": "Релиз",
+   "options": "Agent Course Release",
+   "read_only": 1,
+   "description": "Релиз курса, к которому написана заметка: по его ключам задано место."
+  },
+  {
    "fieldname": "lesson",
    "fieldtype": "Link",
    "label": "Урок",
-   "options": "Course Lesson"
+   "options": "Course Lesson",
+   "read_only": 1,
+   "description": "Урок места — запись урока курса по ключу из места."
   },
   {
    "fieldname": "target",
@@ -38,7 +48,7 @@
    "in_list_view": 1,
    "label": "Место",
    "reqd": 1,
-   "description": "course, course_directive.<поле>, lesson, material, directive.<поле>, question.<id>, block.<документ>/<ключ>, map.<узел>"
+   "description": "Место по ключам релиза: course, chapter.<ключ>, lesson.<ключ>, objective.<ключ>, goal.<урок>/<пункт>, question.<ключ>, section.<ключ>, agent.frame, agent.lesson.<ключ>, agent.item.<урок>/<пункт>, map.<узел>"
   },
   {
    "default": "open",
@@ -73,14 +83,6 @@
    "reqd": 1
   },
   {
-   "description": "Снимок места, каким его видел человек, когда ставил или возвращал замечание: «как было» для разницы у «сделано».",
-   "fieldname": "baseline",
-   "fieldtype": "Long Text",
-   "hidden": 1,
-   "label": "Снимок места",
-   "read_only": 1
-  },
-  {
    "fieldname": "replies",
    "fieldtype": "Table",
    "label": "Ответы",
@@ -89,7 +91,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-09-24 21:00:00.000000",
+ "modified": "2026-10-08 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Author Note",

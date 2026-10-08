@@ -357,6 +357,8 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.опубликовать(релиз)
 		курс = первый["course"]
 		уроки = frappe.get_all("Course Lesson", filters={"course": курс}, pluck="name")
+		заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Пример")["data"]["id"]
+		authoring.reply_note(note=заметка, text="Ответ в нить")
 		frappe.set_user("Administrator")
 
 		with self.assertRaises(frappe.ValidationError):
@@ -367,6 +369,8 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists(РЕЛИЗ, {"course": курс}))
 		self.assertFalse(frappe.db.exists("Agent Release Lesson", {"lesson": ("in", уроки)}))
 		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": курс}))
+		self.assertFalse(frappe.db.exists("Agent Author Note", заметка))
+		self.assertFalse(frappe.db.exists("Agent Note Reply", {"parent": заметка}))
 		self.assertFalse(frappe.db.exists("Course Lesson", {"name": ("in", уроки)}))
 		# Флаг снят: релиз другого курса по-прежнему не удаляется.
 		другой = service.опубликовать(

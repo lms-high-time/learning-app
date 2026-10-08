@@ -20,3 +20,4 @@ lms_frappe_app.patches.v0_1.release_homework
 lms_frappe_app.patches.v0_1.release_agent_slices
 lms_frappe_app.patches.v0_1.drop_objective_outcomes
 lms_frappe_app.patches.v0_1.announce_objectives
+lms_frappe_app.patches.v0_1.note_release_keys

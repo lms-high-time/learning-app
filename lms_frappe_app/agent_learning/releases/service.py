@@ -358,12 +358,12 @@ def _ответ(курс, релиз, итог, схема_документа, �
 
 
 def удалить_курс(курс: str) -> None:
-	"""Курс из релиза целиком: релизы, схемы документа, домашки, главы, уроки и сам курс.
+	"""Курс из релиза целиком: релизы, заметки автора, схемы документа, домашки, главы, уроки и сам курс.
 
 	Для курсов, по которым учиться больше не будут (решение владельца: старые
 	курсы удаляются вместе с историей). Релизы, схемы документа и шаблоны
-	домашек — проекции релиза, их удаление здесь; остальное удаляет Learning
-	(`delete_course`).
+	домашек — проекции релиза, а заметки написаны по его ключам: их удаление
+	здесь; остальное удаляет Learning (`delete_course`).
 	Записи учеников по курсу не трогает: курс с прохождениями уроков
 	(`Agent Lesson Run`) — отказ `course_has_lesson_runs` до первой записи,
 	с записями на курс Learning удаление остановит ссылками.
@@ -387,6 +387,8 @@ def удалить_курс(курс: str) -> None:
 			frappe.delete_doc(РЕЛИЗ, имя, ignore_permissions=True)
 	finally:
 		frappe.flags[УДАЛЯЕТСЯ_КУРС] = None
+	for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
+		frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
 	for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
 		frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
 	homework.удалить_шаблоны(курс)

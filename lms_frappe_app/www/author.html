@@ -1,5 +1,5 @@
 {% extends "templates/web.html" %}
-{% from "lms_frappe_app/templates/includes/author_notes_macros.html" import место, карточка, атрибуты, статус, кнопка_замечания, текст_разницы %}
+{% from "lms_frappe_app/templates/includes/author_notes_macros.html" import место, карточка, атрибуты, статус, текст_разницы %}
 
 {% block title %}{{ title }}{% endblock %}
 
@@ -21,21 +21,17 @@
 	{% endif %}
 {% endmacro %}
 
-{% macro поля_директивы(поля, префикс=None, lesson=None, замечания={}, подпись="", изменения=none) %}
+{% macro поля_директивы(поля, префикс=None, изменения=none) %}
 	{% set ПОДПИСИ = field_labels %}
 	{% for п in поля %}
-	{% set target = префикс ~ "." ~ п.name if префикс else None %}
-	{% set метка = подпись ~ " · " ~ ПОДПИСИ.get(п.name, п.name) %}
-	<div class="field"{% if target %} {{ атрибуты(target, lesson, метка) }}{% endif %}>
-		<div class="field-head"><h4>{{ ПОДПИСИ.get(п.name, п.name) }} <code>{{ п.name }}</code></h4>
-			{% if target %}{{ кнопка_замечания(target, lesson, метка) }}{% endif %}</div>
-		{% if target %}{{ правки_места(изменения, target) }}{% endif %}
+	<div class="field">
+		<div class="field-head"><h4>{{ ПОДПИСИ.get(п.name, п.name) }} <code>{{ п.name }}</code></h4></div>
+		{% if префикс %}{{ правки_места(изменения, префикс ~ "." ~ п.name) }}{% endif %}
 		{% if п["items"] is not none %}
 		<ul>{% for пункт in п["items"] %}<li>{{ пункт | e }}</li>{% endfor %}</ul>
 		{% else %}
 		<div class="prose">{{ п.html }}</div>
 		{% endif %}
-		{% if target %}{{ место(target, lesson, метка, замечания.get(target, []), якорь(target), с_кнопкой=False) }}{% endif %}
 	</div>
 	{% endfor %}
 {% endmacro %}
@@ -43,14 +39,18 @@
 {#
 	Блоки документа — строкой на блок: ключ, заголовок, урок, открытые
 	замечания; подсказка агенту и замечания — по нажатию. Десять карточек во
-	всю ширину занимали экран, а сверяют блоки чаще всего по строке.
+	всю ширину занимали экран, а сверяют блоки чаще всего по строке. Блок —
+	раздел документа релиза с тем же ключом: заметка к нему — `section.<ключ>`;
+	`замечания` — `none`, у курса без релиза заметок нет. Правки с прошлого
+	визита — по месту снимка урока (`snapshots`).
 #}
-{% macro блоки_документа(блоки, со_ссылкой, замечания={}, изменения=none) %}
+{% macro блоки_документа(блоки, со_ссылкой, замечания=none, изменения=none) %}
 	{% for б in блоки %}
-	{% set target = "block." ~ б.artifact ~ "/" ~ б.key %}
-	{% set метка = "Документ · блок «" ~ б.title ~ "»" %}
-	{% set открытые = замечания.get(target, []) | rejectattr("status", "equalto", "accepted") | list %}
-	<details class="block-row" style="--span: {{ [б.span or 1, 4] | min }};" {{ атрибуты(target, None, метка) }}>
+	{% set target = "section." ~ б.key %}
+	{% set место_снимка = "block." ~ б.artifact ~ "/" ~ б.key %}
+	{% set метка = "Документ · раздел «" ~ б.title ~ "»" %}
+	{% set открытые = (замечания or {}).get(target, []) | rejectattr("status", "equalto", "accepted") | list %}
+	<details class="block-row" style="--span: {{ [б.span or 1, 4] | min }};"{% if замечания is not none %} {{ атрибуты(target, метка) }}{% endif %}>
 		<summary>
 			<span class="mono muted">{{ б.key }}</span>
 			<span class="block-title">{{ б.title | e }}</span>
@@ -59,12 +59,12 @@
 				{% else %}<span class="block-lesson gap-text">урок не назначен</span>{% endif %}
 			{% endif %}
 			<span data-live="{{ якорь(target) }}-count">{% if открытые %}<span class="note-count" title="Открытых замечаний к блоку">✎ {{ открытые | length }}</span>{% endif %}</span>
-			{% if изменения and изменения.places.get(target) %}<span class="changed-mark">изменено</span>{% endif %}
+			{% if изменения and изменения.places.get(место_снимка) %}<span class="changed-mark">изменено</span>{% endif %}
 		</summary>
 		<div class="block-body">
-			{{ правки_места(изменения, target) }}
+			{{ правки_места(изменения, место_снимка) }}
 			{% if б.hint %}<p class="block-hint">{{ б.hint | e }}</p>{% else %}<p class="muted">Подсказки агенту нет.</p>{% endif %}
-			{{ место(target, None, метка, замечания.get(target, []), якорь(target)) }}
+			{% if замечания is not none %}{{ место(target, метка, замечания.get(target, []), якорь(target)) }}{% endif %}
 		</div>
 	</details>
 	{% endfor %}
@@ -246,10 +246,6 @@
 	.author-page .field { margin-top: 14px; }
 	.author-page .field ul { margin: 0; padding-left: 20px; }
 	.author-page :is(.field-head, .question-head) { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-	.author-page .note-add.quiet {
-		flex: none; border: 0; padding: 0 2px; border-radius: 4px; font-size: 13px; color: var(--muted); background: none; white-space: nowrap;
-	}
-	.author-page .note-add.quiet:hover, .author-page .note-add.quiet:focus-visible { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 	.author-page .queue { display: flex; flex-direction: column; gap: 20px; }
 	.author-page .prose { max-width: 72ch; }
 	/* Широкая таблица материала прокручивается сама, а не распирает страницу
@@ -479,12 +475,13 @@
 		{% endfor %}
 	</section>
 	{% endif %}
-	{{ место("lesson", lesson.id, метка_урока, lesson.notes.get("lesson", []), "note-lesson", "Замечание к уроку") }}
+	{% if lesson.key %}{% set место_урока = "lesson." ~ lesson.key %}
+	{{ место(место_урока, метка_урока, lesson.notes.get(место_урока, []), якорь(место_урока), "Замечание к уроку") }}
+	{% endif %}
 
-	<section class="panel" id="section-material" {{ атрибуты("material", lesson.id, метка_урока ~ " · материал") }}>
+	<section class="panel" id="section-material">
 		<h2>Материал</h2>
 		{{ правки_места(lesson.changes, "material") }}
-		{{ место("material", lesson.id, метка_урока ~ " · материал", lesson.notes.get("material", []), "note-material") }}
 		{% if lesson.segments_html %}
 			{% for сегмент in lesson.segments_html %}
 			<div class="segment">
@@ -499,7 +496,7 @@
 
 	<section class="panel" id="section-directive">
 		<h2>Директива{% if lesson.directive %} <span class="muted num">v{{ lesson.directive.version }} от {{ frappe.utils.format_datetime(lesson.directive.created_at, "dd.MM.yyyy HH:mm") }}</span>{% endif %}</h2>
-		{% if lesson.directive %}{{ поля_директивы(lesson.directive.fields, "directive", lesson.id, lesson.notes, метка_урока ~ " · директива", lesson.changes) }}
+		{% if lesson.directive %}{{ поля_директивы(lesson.directive.fields, "directive", lesson.changes) }}
 		{% else %}<p class="gap-text">Директивы нет — агент ученика поведёт урок только по материалу.</p>{% endif %}
 	</section>
 
@@ -507,11 +504,9 @@
 		<h2>Квиз{% if lesson.quiz %} <span class="muted num">порог {{ lesson.quiz.passing_percentage }}</span>{% endif %}</h2>
 		{% if lesson.quiz %}
 			{% for в in lesson.quiz.questions %}
-			{% set target = "question." ~ в.id %}
-			<div class="question{% if в.broken %} broken{% endif %}" {{ атрибуты(target, lesson.id, метка_урока ~ " · вопрос " ~ loop.index) }}>
-				<div class="question-head"><div><span class="num muted">{{ loop.index }}.</span> {{ (в.text or "Вопрос без текста") | e }}</div>
-					{{ кнопка_замечания(target, lesson.id, метка_урока ~ " · вопрос " ~ loop.index) }}</div>
-				{{ правки_места(lesson.changes, target) }}
+			<div class="question{% if в.broken %} broken{% endif %}">
+				<div class="question-head"><div><span class="num muted">{{ loop.index }}.</span> {{ (в.text or "Вопрос без текста") | e }}</div></div>
+				{{ правки_места(lesson.changes, "question." ~ в.id) }}
 				{% if в.options %}
 				<ol type="a">
 					{% for о in в.options %}
@@ -521,7 +516,6 @@
 				</ol>
 				{% endif %}
 				{% if в.answers %}<p class="why">Верные ответы: {{ в.answers | join("; ") | e }}</p>{% endif %}
-				{{ место(target, lesson.id, метка_урока ~ " · вопрос " ~ loop.index, lesson.notes.get(target, []), якорь(target), с_кнопкой=False) }}
 			</div>
 			{% endfor %}
 		{% else %}<p class="muted">Квиза нет.</p>{% endif %}
@@ -529,7 +523,7 @@
 
 	<section id="section-blocks">
 		<h2>Блоки документа</h2>
-		{% if lesson.blocks %}<div class="blocks">{{ блоки_документа(lesson.blocks, False, course.notes, lesson.changes) }}</div>
+		{% if lesson.blocks %}<div class="blocks">{{ блоки_документа(lesson.blocks, False, course.notes if course.release else none, lesson.changes) }}</div>
 		{% else %}<p class="muted">Урок не собирает ни одного блока документа.</p>{% endif %}
 	</section>
 
@@ -553,7 +547,7 @@
 			{% endfor %}
 		</ul>
 		{% else %}
-		<p class="muted">Замечаний к уроку нет. Нажмите «Замечание» у раздела или выделите текст — агент увидит замечание в очереди.</p>
+		<p class="muted">Замечаний к уроку нет.{% if lesson.key %} Нажмите «Замечание к уроку» или выделите текст в блоке документа — агент увидит замечание в очереди.{% endif %}</p>
 		{% endif %}
 	</section>
 	<div class="quiet" id="author-quiet"></div>
@@ -591,7 +585,7 @@
 	{% elif view == "notes" %}
 	{% set q = notes_queue %}
 	<p class="intro">Замечания к курсу. Агент берёт те, что ждут его, правит курс и отмечает «сделано»; вы принимаете или возвращаете с ответом.</p>
-	{{ место("course", None, "Курс", [], "note-course", "Замечание к курсу") }}
+	{% if course.release %}{{ место("course", "Курс", [], "note-course", "Замечание к курсу") }}{% endif %}
 	<div class="queue" data-live="queue">
 	{% for ключ, заголовок, пояснение in [
 		("check", "Проверьте", "Агент отметил «сделано»: примите или верните с ответом."),
@@ -625,7 +619,7 @@
 		<span class="chip{% if c.with_directive < c.lessons %} short{% endif %}"><span class="n">{{ c.with_directive }}/{{ c.lessons }}</span>с директивой</span>
 		<span class="chip{% if c.with_quiz < c.lessons %} short{% endif %}"><span class="n">{{ c.with_quiz }}/{{ c.lessons }}</span>с квизом</span>
 	</div>
-	{{ место("course", None, "Курс", course.notes.get("course", []), "note-course", "Замечание к курсу") }}
+	{% if course.release %}{{ место("course", "Курс", course.notes.get("course", []), "note-course", "Замечание к курсу") }}{% endif %}
 
 	<section class="panel">
 		<h2>Готовность к публикации</h2>
@@ -677,7 +671,7 @@
 		{% if п.edits %}<ul class="doc-edits">{% for строка in п.edits %}<li>{{ строка | e }}</li>{% endfor %}</ul>
 		{% else %}<p class="doc-binding muted">Правок курса нет: документ как в шаблоне.</p>{% endif %}
 		{% else %}<p class="doc-binding muted">Своя схема, без шаблона.</p>{% endif %}
-		<div class="blocks{% if д.layout == 'canvas' %} canvas{% endif %}">{{ блоки_документа(д.blocks, True, course.notes) }}</div>
+		<div class="blocks{% if д.layout == 'canvas' %} canvas{% endif %}">{{ блоки_документа(д.blocks, True, course.notes if course.release else none) }}</div>
 	</section>
 	{% else %}
 	<section class="panel"><h2>Документ курса</h2><p class="muted">Схемы документа нет: ученик ничего не собирает по ходу курса.</p></section>
@@ -686,7 +680,7 @@
 	<section class="panel">
 		<h2>Сквозная директива{% if course.directive %} <span class="muted num">v{{ course.directive.version }}</span>{% endif %}</h2>
 		{% if course.directive %}
-		<details><summary>Показать поля</summary>{{ поля_директивы(course.directive_fields, "course_directive", None, course.notes, "Сквозная директива") }}</details>
+		<details><summary>Показать поля</summary>{{ поля_директивы(course.directive_fields) }}</details>
 		{% else %}<p class="gap-text">Сквозной директивы нет.</p>{% endif %}
 	</section>
 	{% endif %}

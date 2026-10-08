@@ -1,11 +1,12 @@
 {#
-	Замечания автора в кабинете: карточка, место с кнопкой, атрибуты для
-	цитаты из выделения (lms-high-time/learning-services#266). Макросы без
-	контекста страницы: всё, что нужно, приходит аргументами.
+	Заметки автора в кабинете: карточка, место с кнопкой, атрибуты для
+	цитаты из выделения (lms-high-time/learning-services#266). Место — адрес
+	по ключам релиза. Макросы без контекста страницы: всё, что нужно,
+	приходит аргументами.
 #}
 
-{% macro атрибуты(target, lesson, label) -%}
-	data-note-target="{{ target | e }}" data-note-lesson="{{ (lesson or '') | e }}" data-note-label="{{ label | e }}"
+{% macro атрибуты(target, label) -%}
+	data-note-target="{{ target | e }}" data-note-label="{{ label | e }}"
 {%- endmacro %}
 
 {% macro статус(з) -%}
@@ -16,7 +17,7 @@
 {%- endmacro %}
 
 {#
-	Разница места у «сделано» (lms-high-time/learning-services#271): удалённое
+	Разница места с прошлого визита (lms-high-time/learning-services#271): удалённое
 	зачёркнуто, добавленное подчёркнуто — правка видна и без цвета. Текст —
 	исходный, как его пишет агент: разница честная, и полуизменённую разметку
 	отрисовывать не нужно.
@@ -49,20 +50,6 @@
 	{% else %}{{ блоки_разницы(р) }}{% endif %}
 {% endmacro %}
 
-{% macro правки(р) %}
-	<div class="note-diff">
-	{% if р.state == "same" %}<p class="note-diff-state">Место не менялось с момента замечания.</p>
-	{% elif р.state == "unavailable" %}<p class="note-diff-state">Разница недоступна: замечание поставлено раньше, чем кабинет начал запоминать места.</p>
-	{% elif р.state == "missing" %}<p class="note-diff-state">Места больше нет — сравнивать не с чем.</p>
-	{% else %}
-		<div class="note-diff-head">Что поменялось</div>
-		{% if р.places %}
-			{% for м in р.places %}<div class="note-diff-label">{{ м.label | e }}</div>{{ текст_разницы(м) }}{% endfor %}
-		{% else %}{{ текст_разницы(р) }}{% endif %}
-	{% endif %}
-	</div>
-{% endmacro %}
-
 {% macro карточка(з, с_адресом=False) %}
 	<article class="note-card is-{{ з.status }}{% if з.waiting_on == 'author' %} is-yours{% endif %}" id="note-card-{{ з.id }}">
 		<div class="note-head">
@@ -77,7 +64,6 @@
 		{% for о in з.replies %}
 		<div class="note-reply{% if о.via == 'agent' %} by-agent{% endif %}"><span class="muted">{{ "агент" if о.via == "agent" else (о.author_name or о.author) | e }}</span><span class="note-reply-text">{{ о.text | e }}</span></div>
 		{% endfor %}
-		{% if з.changes %}{{ правки(з.changes) }}{% endif %}
 		<div class="note-actions">
 			{% if з.status == "done" %}
 				<button type="button" class="note-btn primary" data-note-action="accept" data-note="{{ з.id }}">Принять</button>
@@ -95,24 +81,16 @@
 {% endmacro %}
 
 {#
-	Тихая кнопка — в строке заголовка поля директивы или вопроса. Там их по
-	десятку на урок, и пилюли с рамкой шумели сильнее самого текста.
-#}
-{% macro кнопка_замечания(target, lesson, label) -%}
-	<button type="button" class="note-add quiet" {{ атрибуты(target, lesson, label) }} aria-label="Замечание: {{ label | e }}">+ замечание</button>
-{%- endmacro %}
-
-{#
 	Место на странице: якорь, кнопка «Замечание» и замечания этого места.
 	Принятые свёрнуты: они история, а не работа. `data-live` — область,
 	которую скрипт замечаний обновляет с сервера без перезагрузки.
 #}
-{% macro место(target, lesson, label, замечания, якорь, кнопка="Замечание", с_кнопкой=True) %}
+{% macro место(target, label, замечания, якорь, кнопка="Замечание") %}
 	{% set открытые = замечания | rejectattr("status", "equalto", "accepted") | list %}
 	{% set принятые = замечания | selectattr("status", "equalto", "accepted") | list %}
 	<div class="note-place" id="{{ якорь }}" data-live="{{ якорь }}">
-		{% if с_кнопкой %}<button type="button" class="note-add" {{ атрибуты(target, lesson, label) }}>{{ кнопка }}</button>{% endif %}
-		<div class="notes-list" data-for="{{ (lesson or '') | e }}|{{ target | e }}">
+		<button type="button" class="note-add" {{ атрибуты(target, label) }}>{{ кнопка }}</button>
+		<div class="notes-list" data-for="{{ target | e }}">
 			{% for з in открытые %}{{ карточка(з) }}{% endfor %}
 		</div>
 		{% if принятые %}

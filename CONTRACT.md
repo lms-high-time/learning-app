@@ -2575,7 +2575,7 @@ Settings`, по умолчанию 3; `0` — не напоминать) тем,
 | `lessons` | уроки по порядку: ключ, глава, название, зачин, разделы документа, цели с пунктами целей агента, квиз, домашка | урок Learning по ключу; цели, пункты и квиз — в индексе релиза |
 | `document` | документ курса: разделы и колонки; `null` — документа нет | схема документа курса |
 | `agent` | пакет агента: рамка курса (`frame`, `learn_about_student`) и срезы уроков (`lessons.<ключ урока>`) | раскладывается по индексу релиза как есть: срез — к уроку, рамка — к релизу; внутри приложение читает только ключи `learn_about_student[].key` |
-| `map` | карта курса | **непрозрачна**: хранится в снимке как есть, не разбирается |
+| `map` | карта курса | **непрозрачна**: хранится в снимке как есть; приложение читает из неё только подписи узлов для заметок (`add_note`) |
 
 Правила:
 
@@ -2717,16 +2717,21 @@ Learning: ученик всегда на действующем релизе, и
 
 Репорты агентов по курсу: что мешает курсу работать.
 
-**Параметры:** `course`; необязательные `kind` (вид репорта), `lesson`,
-`limit` (не больше 50, оно же по умолчанию), `status` — `new`, `in_progress`,
-`fixed`, `rejected`, `duplicate` или `open` (`new` и `in_progress` вместе).
+**Параметры:** `course`; необязательные `kind` (вид репорта), `lesson` —
+ключ урока, `limit` (не больше 50, оно же по умолчанию), `status` — `new`,
+`in_progress`, `fixed`, `rejected`, `duplicate` или `open` (`new` и
+`in_progress` вместе). Урок по ключу ищется по всей истории релизов курса:
+находятся и репорты урока, снятого из действующего релиза; ключа нет ни в
+одном релизе — список пуст.
 
 ```json
 { "ok": true, "data": { "course": "p3-express", "reports": [
-  { "id": "ACR-00004", "kind": "directive_mismatch", "lesson": "lesson-4",
-    "objective": null, "question": null, "question_key": null,
+  { "id": "ACR-00004", "kind": "directive_mismatch", "lesson": "0004-urok",
+    "lesson_key": "l-4", "objective": null, "question": null,
+    "question_key": "S1/l-4-D1",
     "text": "Много вопросов подряд без вводного объяснения",
-    "reported_at": "2026-09-20T19:50:39", "directive_version": 3, "release": null,
+    "reported_at": "2026-09-20T19:50:39", "directive_version": null,
+    "release": "REL-00007",
     "status": "fixed", "resolution": "Добавили вводное объяснение перед вопросами",
     "resolved_at": "2026-09-21T11:05:00" } ] } }
 ```
@@ -2740,16 +2745,19 @@ Learning: ученик всегда на действующем релизе, и
 претензия «указание не подходит» нечитаема: курс с тех пор переписывали, и
 непонятно, на что жаловались.
 
-Свежие сверху. `objective` и вопрос заполнены, когда репорт был про
-конкретную цель или вопрос квиза: `question` — запись `LMS Question` у курса
-старой модели, `question_key` — ключ вопроса урока в релизе у курса из
-релиза. `release` — действующий релиз курса на момент жалобы; у курса старой
-модели — `null`, у курса из релиза `null` — `directive_version`.
+Свежие сверху. `lesson` — запись `Course Lesson`, `lesson_key` — ключ урока
+в релизе репорта: он не хранится в репорте, а выводится по `release` и
+`lesson` при чтении, одной выборкой на страницу. `objective` и вопрос
+заполнены, когда репорт был про конкретную цель или вопрос квиза: `question`
+— запись `LMS Question` у курса старой модели, `question_key` — ключ вопроса
+урока в релизе у курса из релиза. `release` — действующий релиз курса на
+момент жалобы; у курса старой модели `release` и `lesson_key` — `null`, у
+курса из релиза `null` — `directive_version`.
 `resolution` — ответ ученику, `resolved_at` — когда репорт получил итог; оба
 `null`, пока их нет.
 
-**Отказы:** `course_not_found`, `unknown_report_kind` — с перечнем видов в
-сообщении; `unknown_report_status` (с `status`).
+**Отказы:** `course_not_found`, `unknown_report_kind` (с `kind`) — с
+перечнем видов в сообщении; `unknown_report_status` (с `status`).
 
 ## `lms_frappe_app.api.authoring.resolve_report`
 
@@ -3802,61 +3810,97 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
 
 ## `lms_frappe_app.api.authoring.add_note`
 
-Замечание автора на месте курса. Петля «увидел → агент поправил → принял»:
-человек ставит замечание в кабинете, агент правит курс и отмечает «сделано»,
-человек принимает.
+Заметка автора на месте курса (learning-services#512). Петля «увидел → агент
+поправил → принял»: человек ставит заметку в кабинете, агент правит курс в
+карте и публикует новый релиз, отмечает «сделано», человек принимает.
 
-**Параметры:** `course`, `target`, `text`, `quote`, `lesson`, `via`. Только
-`POST`.
+**Параметры:** `course`, `target`, `text`, `quote`, `via`. Только `POST`.
 
-- `target` — место: `course`, `course_directive.<поле>`, `lesson`, `material`,
-  `directive.<поле>`, `question.<id>`, `block.<документ>/<ключ>`, `map.<узел>`.
-  Месту внутри урока нужен `lesson`; `course` и `course_directive` урока не
-  принимают. Вопрос проверяется по квизу урока; блок и узел карты — только по
-  форме: они могут быть задуманы, но ещё не собраны.
+- `target` — место по ключам действующего релиза курса (раздел «Релиз
+  курса»):
+
+  | `target` | Место |
+  |---|---|
+  | `course` | курс целиком |
+  | `chapter.<ключ>` | глава |
+  | `lesson.<ключ>` | урок |
+  | `objective.<ключ>` | цель урока |
+  | `goal.<урок>/<пункт>` | пункт цели агента в уроке |
+  | `question.<ключ>` | вопрос квиза |
+  | `section.<ключ>` | раздел документа |
+  | `agent.frame` | рамка пакета агента (`frame`, `learn_about_student`) |
+  | `agent.lesson.<ключ>` | срез пакета агента для урока |
+  | `agent.item.<урок>/<пункт>` | подробности пункта в срезе урока (`items`) |
+  | `map.<узел>` | узел карты курса |
+
+  Ключ пишется как в релизе: ключи с `/` и `.` допустимы, `<урок>/<пункт>`
+  делится по ключам уроков релиза. Узел карты — объект с непустым `text` или
+  `title` под своим ключом на любой глубине `map`.
 - `quote` — выделенный текст, необязательный.
 - `via` — кто пишет: `author` (по умолчанию) или `agent`. Признак для
   очереди, а не защита: писать могут только авторские роли.
 
+Заметка помнит релиз, к которому написана: действующий на момент записи.
+
 ```json
 { "ok": true, "data": { "id": "AAN-00012", "course": "course-basics",
-  "lesson": "lesson-4", "target": "directive.teaching_directive",
-  "status": "open", "waiting_on": "agent" } }
+  "target": "goal.l-1/term:T1", "release": "REL-00007", "version": 3,
+  "lesson_key": "l-1", "label": "Урок 1 «Урок первый» · пункт «Термин «пример»»",
+  "missing": false, "status": "open", "waiting_on": "agent" } }
 ```
 
-**Отказы:** `course_not_found`; `invalid_target` с полем `where` (`target`
-или `lesson`); `invalid_note` с `where` — пустой `text` или неизвестный `via`.
+`release` и `version` — релиз заметки и его версия; `lesson_key` — ключ урока
+места, у мест вне урока (`course`, `chapter`, `section`, `agent.frame`,
+`map`) — `null`; `label` — место словами по действующему релизу; `missing` —
+места нет в действующем релизе (у новой заметки всегда `false`).
+
+**Отказы:** `course_not_found`; `course_not_released` (с `course`) — у курса
+нет действующего релиза; `invalid_target` (`where: target`) — адрес не по
+форме таблицы; `note_target_unknown` (с `target` и `release`) — адрес по
+форме, а места с таким ключом в действующем релизе нет; `invalid_note` с
+`where` — пустой `text` или неизвестный `via`.
 
 ## `lms_frappe_app.api.authoring.list_notes`
 
-Замечания курса с нитью ответов, старые сверху.
+Заметки курса с нитью ответов, старые сверху.
 
-**Параметры:** `course`, `status` (`open`, `done`, `accepted`), `lesson`.
+**Параметры:** `course`; необязательные `status` (`open`, `done`, `accepted`)
+и `lesson` — ключ урока: заметки мест этого урока (урок, его цели, пункты,
+вопросы, срез пакета и его пункты). Урок ищется по всей истории релизов
+курса: находятся и заметки урока, снятого из действующего релиза; ключа нет
+ни в одном релизе — список пуст.
 
 ```json
 { "ok": true, "data": { "course": "course-basics", "notes": [
-  { "id": "AAN-00012", "lesson": "lesson-4", "target": "directive.teaching_directive",
-    "label": "Урок 4 «Ответ и мера» · директива · teaching_directive",
-    "missing": false, "quote": "По каждой мере три вопроса…",
-    "text": "Слишком допрос: дай пример меры", "via": "author",
+  { "id": "AAN-00012", "target": "goal.l-1/term:T1",
+    "release": "REL-00007", "version": 3, "lesson_key": "l-1",
+    "label": "Урок 1 «Урок первый» · пункт «Термин «пример»»",
+    "missing": false, "quote": "Термин без примера",
+    "text": "Дай пример из работы склада", "via": "author",
     "author": "curator@example.com", "author_name": "Куратор",
     "status": "done", "waiting_on": "author",
-    "created_at": "2026-09-23T15:40:02.118305", "updated_at": "2026-09-23T15:52:40.004411",
+    "created_at": "2026-10-08T15:40:02.118305", "updated_at": "2026-10-08T15:52:40.004411",
     "replies": [ { "via": "agent", "author": "curator@example.com",
-      "author_name": "Куратор", "text": "Добавил пример меры для склада",
-      "created_at": "2026-09-23T15:52:40.001037" } ] } ] } }
+      "author_name": "Куратор", "text": "Добавил пример склада, релиз v4",
+      "created_at": "2026-10-08T15:52:40.001037" } ] } ] } }
 ```
 
-`label` — место словами по курсу, каким он есть сейчас; `missing` — места
-больше нет. `waiting_on` — чей ход: `done` ждёт автора; открытое — того, кто
-не сказал последнего слова: вопрос агента ждёт автора, замечание автора —
-агента; у принятого — `null`.
+Поля места — как у `add_note`. `label` и `missing` — по действующему
+релизу: `missing: true` — ключа места в нём нет (урок снят, пункт убран,
+раздела нет в документе, узла — в карте); подпись тогда — вид места и ключ,
+например `Урок l-3`. `release` и `version` — релиз, к которому заметка
+написана, а не действующий. У заметки, которую патч переноса архивировал,
+`target` — прежний адрес, `release` и `version` — `null`, `missing` — `true`.
+`waiting_on` — чей ход: `done` ждёт автора; открытая — того, кто не сказал
+последнего слова: вопрос агента ждёт автора, заметка автора — агента; у
+принятой — `null`.
 
-**Отказы:** `course_not_found`; `invalid_note` с `where: status`.
+**Отказы:** `course_not_found`; `invalid_note` с `where: status`. Курс без
+релиза отказом не отвечает: его заметки — архив прежних мест.
 
 ## `lms_frappe_app.api.authoring.reply_note`
 
-Ответ в нить замечания; статус не меняется.
+Ответ в нить заметки; статус не меняется.
 
 **Параметры:** `note`, `text`, `via`. Только `POST`.
 
@@ -3865,16 +3909,19 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
   "waiting_on": "author", "replies": 1 } }
 ```
 
-**Отказы:** `note_not_found`; `invalid_note` с `where`.
+`replies` — сколько ответов в нити.
+
+**Отказы:** `note_not_found` (с `id`); `invalid_note` с `where` — пустой
+`text` или неизвестный `via`.
 
 ## `lms_frappe_app.api.authoring.set_note_status`
 
-Сменить статус замечания. `text` уходит ответом в нить.
+Сменить статус заметки. `text` уходит ответом в нить.
 
 **Параметры:** `note`, `status`, `text`, `via`. Только `POST`.
 
 - `open` → `done` — агент (`via=agent`), с `text`: что поменял;
-- `done` → `accepted` и `open` → `accepted` — автор: принять или снять своё;
+- `done` → `accepted` и `open` → `accepted` — автор: принять или снять свою;
 - `done` → `open` и `accepted` → `open` — автор, с `text`: что не так.
 
 ```json
@@ -3882,8 +3929,9 @@ markdown; `answer_mode` — `text`, `files` или `text_and_files` (по умо
   "waiting_on": "author", "replies": 1 } }
 ```
 
-**Отказы:** `note_not_found`; `invalid_transition` — переход недопустим, не
-тому, кто его делает, или без обязательного текста.
+**Отказы:** `note_not_found` (с `id`); `invalid_transition` (с `status` —
+текущим) — переход недопустим, не тому, кто его делает, или без
+обязательного текста.
 
 ## `lms_frappe_app.api.authoring.set_course_map`
 

@@ -165,8 +165,6 @@
 		dialog.showModal();
 		form.elements.text.focus();
 	}
-	// Карта и список расхождений открывают форму отсюда же.
-	window.открытьЗамечание = params => open('add', params);
 
 	dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
 	form.addEventListener('submit', async e => {
@@ -180,7 +178,7 @@
 			let note = current.note;
 			if (mode === 'add') {
 				const quote = form.elements.quote.value.trim();
-				note = (await call(cfg.methods.add, { course: cfg.course, target: current.target, lesson: current.lesson || '', text, quote, via: 'author' })).id;
+				note = (await call(cfg.methods.add, { course: cfg.course, target: current.target, text, quote, via: 'author' })).id;
 			} else if (mode === 'reply') {
 				await call(cfg.methods.reply, { note, text, via: 'author' });
 			} else {
@@ -223,7 +221,7 @@
 	document.addEventListener('click', async e => {
 		const add = e.target.closest('.note-add');
 		if (add) {
-			open('add', { target: add.dataset.noteTarget, lesson: add.dataset.noteLesson, label: add.dataset.noteLabel, quote: add.dataset.noteQuote || '' });
+			open('add', { target: add.dataset.noteTarget, label: add.dataset.noteLabel, quote: add.dataset.noteQuote || '' });
 			return;
 		}
 		const action = e.target.closest('[data-note-action]');
@@ -261,7 +259,7 @@
 	floatBtn.addEventListener('mousedown', e => e.preventDefault());
 	floatBtn.addEventListener('click', () => {
 		floatBtn.hidden = true;
-		open('add', { target: selectionPlace.dataset.noteTarget, lesson: selectionPlace.dataset.noteLesson, label: selectionPlace.dataset.noteLabel, quote: selectionText });
+		open('add', { target: selectionPlace.dataset.noteTarget, label: selectionPlace.dataset.noteLabel, quote: selectionText });
 	});
 })();
 {% endraw %}

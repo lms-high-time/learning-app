@@ -90,7 +90,7 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		self.assertEqual(len(репорты), 1)
 		self.assertEqual(репорты[0]["kind"], "directive_mismatch")
 		self.assertEqual(репорты[0]["text"], "Слишком напористо, вопросы подряд")
-		self.assertEqual(репорты[0]["lesson"], self.урок)
+		self.assertEqual((репорты[0]["lesson"], репорты[0]["lesson_key"]), (self.урок, "l-1"))
 
 	def test_репорт_называет_редакцию_директивы_на_момент_жалобы(self):
 		"""Претензия к директиве без её редакции нечитаема: курс с тех пор
@@ -143,9 +143,13 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		self.пожаловаться("material_issue", "Про второй урок", lesson=self.второй_урок)
 		frappe.set_user(self.куратор)
 
-		отобранные = authoring.course_reports(course=self.курс, lesson=self.второй_урок)["data"]["reports"]
+		отобранные = authoring.course_reports(course=self.курс, lesson="l-2")["data"]["reports"]
 
-		self.assertEqual([р["text"] for р in отобранные], ["Про второй урок"])
+		self.assertEqual(
+			[(р["text"], р["lesson"], р["lesson_key"]) for р in отобранные],
+			[("Про второй урок", self.второй_урок, "l-2")],
+		)
+		self.assertEqual(authoring.course_reports(course=self.курс, lesson="l-9")["data"]["reports"], [])
 
 	def test_ученику_метод_закрыт(self):
 		"""Роль, а не эндпоинт: агент ученика не должен читать чужие жалобы."""
@@ -394,6 +398,37 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 			"Agent Course Report", ответ["data"]["report"], ["question_key", "release"], as_dict=True
 		)
 		self.assertEqual(запись, {"question_key": None, "release": релиз})
+
+	def test_ключ_урока_по_релизу_репорта(self):
+		"""Ключ урока выводится по релизу, на котором жаловались: и у урока,
+		снятого из действующего релиза; фильтр по ключу находит и его."""
+		frappe.set_user("Administrator")
+		ключ = f"rep-keys-{frappe.generate_hash(length=6)}"
+		курс, первый = курс_из_релиза(релиз=пример_релиза(ключ))
+		зачислить_на_курс(self.ученик, курс)
+		третий = создать_занятие(self.ученик, урок_релиза(курс, "l-3"))
+		frappe.set_user(self.ученик)
+		student.report_issue(session=третий, kind="stuck", text="Про третий")
+		frappe.set_user("Administrator")
+		без_третьего = пример_релиза(ключ)
+		без_третьего["chapters"] = без_третьего["chapters"][:1]
+		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		_, второй = курс_из_релиза(релиз=без_третьего)
+		занятие = создать_занятие(self.ученик, урок_релиза(курс, "l-2"))
+		frappe.set_user(self.ученик)
+		student.report_issue(session=занятие, kind="material_issue", text="Про второй")
+		frappe.set_user(self.куратор)
+
+		репорты = authoring.course_reports(course=курс)["data"]["reports"]
+
+		self.assertEqual(
+			[(р["text"], р["release"], р["lesson_key"]) for р in репорты],
+			[("Про второй", второй, "l-2"), ("Про третий", первый, "l-3")],
+		)
+		self.assertEqual(
+			[р["text"] for р in authoring.course_reports(course=курс, lesson="l-3")["data"]["reports"]],
+			["Про третий"],
+		)
 
 	def test_репорт_без_вопроса(self):
 		ответ = student.report_issue(

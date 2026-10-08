@@ -25,12 +25,13 @@ from lms_frappe_app.agent_learning import (
 	notes,
 	notices,
 	quiz,
-	snapshots,
 	structure,
 	testers,
 )
 from lms_frappe_app.agent_learning.artifacts import templates
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
+from lms_frappe_app.agent_learning.releases import index as releases_index
+from lms_frappe_app.agent_learning.releases import places
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
 from lms_frappe_app.agent_learning.artifacts.course import _действующие_артефакты, записать_схему
@@ -1052,10 +1053,12 @@ def _уроки_для_карты(course: str) -> list[dict]:
 	return уроки
 
 
-# --- замечания автора ---
+# --- заметки автора ---
 
 ЗАМЕЧАНИЕ_НЕ_НАЙДЕНО = "note_not_found"
 НЕВЕРНОЕ_ЗАМЕЧАНИЕ = "invalid_note"
+#: Адрес по форме верен, а такого места в действующем релизе курса нет.
+МЕСТА_НЕТ_В_РЕЛИЗЕ = "note_target_unknown"
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1065,45 +1068,54 @@ def add_note(
 	target: str,
 	text: str,
 	quote: str | None = None,
-	lesson: str | None = None,
 	via: str = "author",
 ) -> dict:
-	"""Замечание на месте курса — чтобы петля «увидел → агент поправил →
+	"""Заметка на месте курса — чтобы петля «увидел → агент поправил →
 	принял» не шла через пересказ в чате.
 
-	`target` — место: `course`, `course_directive.<поле>`, `lesson`,
-	`material`, `directive.<поле>`, `question.<id>`, `block.<документ>/<ключ>`,
-	`map.<узел>`; месту внутри урока нужен `lesson`. `quote` — выделенный
-	текст. `via` — кто пишет: `author` из кабинета, `agent` — агент куратора
-	через MCP; замечание агента — вопрос автору.
+	`target` — место по ключам действующего релиза (`notes.ФОРМЫ_АДРЕСА`);
+	заметка помнит этот релиз. `quote` — выделенный текст. `via` — кто
+	пишет: `author` из кабинета, `agent` — агент куратора через MCP; заметка
+	агента — вопрос автору.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
-	lesson = lesson or None
-	адрес = notes.разобрать_адрес(target, lesson, ПОЛЯ_ДИРЕКТИВЫ, ПОЛЯ_ДИРЕКТИВЫ_КУРСА)
-	_проверить_место_замечания(course, lesson, адрес)
+	релиз = frappe.db.get_value("LMS Course", course, "active_release")
+	if not релиз:
+		raise Отказ(КУРС_БЕЗ_РЕЛИЗА, "У курса нет релиза: заметки пишутся по его ключам", course=course)
+	адрес = notes.разобрать_адрес(target)
 	_проверить_источник(via)
-	место = адрес["kind"] + (f".{адрес['key']}" if адрес["key"] else "")
+	текст = _текст_замечания(text)
+	место = places.Места(релиз).место(адрес)
+	if место["missing"]:
+		raise Отказ(
+			МЕСТА_НЕТ_В_РЕЛИЗЕ,
+			"Такого места нет в действующем релизе курса",
+			target=notes.адрес(адрес),
+			release=релиз,
+		)
 	документ = frappe.get_doc(
 		{
 			"doctype": "Agent Author Note",
 			"course": course,
-			"lesson": lesson,
-			"target": место,
+			"release": релиз,
+			"lesson": место["lesson"],
+			"target": notes.адрес(адрес),
 			"status": "open",
 			"via": via,
 			"quote": (quote or "").strip(),
-			"text": _текст_замечания(text),
-			# Место, каким его видел человек: «как было» для разницы, когда
-			# агент отметит «сделано» (#271).
-			"baseline": snapshots.в_json(snapshots.снимок(course, lesson, место)),
+			"text": текст,
 		}
 	).insert()
 	return {
 		"id": документ.name,
 		"course": course,
-		"lesson": lesson,
 		"target": документ.target,
+		"release": релиз,
+		"version": frappe.db.get_value(releases.РЕЛИЗ, релиз, "version"),
+		"lesson_key": место["lesson_key"],
+		"label": место["label"],
+		"missing": False,
 		"status": документ.status,
 		"waiting_on": notes.ждёт(документ.status, via, []),
 	}
@@ -1112,11 +1124,11 @@ def add_note(
 @frappe.whitelist()
 @контракт
 def list_notes(course: str, status: str | None = None, lesson: str | None = None) -> dict:
-	"""Замечания курса с нитью ответов, старые сверху.
+	"""Заметки курса с нитью ответов, старые сверху.
 
-	Место расшифровано подписью — «Урок 4 «Ответ и мера» · директива ·
-	teaching_directive»; `missing` — места больше нет: урок удалён, вопрос
-	убран, блока нет в схеме, узла — в карте. `waiting_on` — чей ход.
+	Место подписано словами по действующему релизу курса; `missing` — ключа
+	места в действующем релизе нет. `lesson` — ключ урока: заметки мест этого
+	урока. `waiting_on` — чей ход.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
@@ -1125,15 +1137,20 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 		if status not in notes.СТАТУСЫ:
 			raise Отказ(НЕВЕРНОЕ_ЗАМЕЧАНИЕ, "Статус: open, done или accepted", where="status")
 		фильтры["status"] = status
+	известные = None
 	if lesson:
-		фильтры["lesson"] = lesson
-	return {"course": course, "notes": _замечания(course, фильтры)}
+		известные = releases_index.известные(course)
+		запись = известные["lessons"].get(lesson)
+		if not запись:
+			return {"course": course, "notes": []}
+		фильтры["lesson"] = запись
+	return {"course": course, "notes": _замечания(course, фильтры, известные)}
 
 
 @frappe.whitelist(methods=["POST"])
 @контракт
 def reply_note(note: str, text: str, via: str = "author") -> dict:
-	"""Ответ в нить замечания; статус не меняется. Вопрос агента — тоже
+	"""Ответ в нить заметки; статус не меняется. Вопрос агента — тоже
 	ответ: ход переходит к автору."""
 	_автор()
 	документ = _замечание_или_отказ(note)
@@ -1146,36 +1163,20 @@ def reply_note(note: str, text: str, via: str = "author") -> dict:
 @frappe.whitelist(methods=["POST"])
 @контракт
 def set_note_status(note: str, status: str, text: str | None = None, via: str = "author") -> dict:
-	"""Сменить статус замечания.
+	"""Сменить статус заметки.
 
 	Агент отмечает `done` и пишет в `text`, что поменял. Автор принимает —
 	`accepted` — или возвращает в `open` с ответом, что не так; принять можно
-	и открытое — снять своё замечание. Прочее — `invalid_transition`.
+	и открытую — снять свою заметку. Прочее — `invalid_transition`.
 	"""
 	_автор()
 	документ = _замечание_или_отказ(note)
 	notes.проверить_переход(документ.status, status, via, text)
 	if (text or "").strip():
 		_ответить(документ, text.strip(), via)
-	if status == "open":
-		# Вернули — следующее «сделано» сравнивается с тем, что человек видел,
-		# когда возвращал: исходная правка уже проверена.
-		документ.baseline = snapshots.в_json(snapshots.снимок(документ.course, документ.lesson, документ.target))
 	документ.status = status
 	документ.save()
 	return _состояние_замечания(документ)
-
-
-def _проверить_место_замечания(course: str, lesson: str | None, адрес: dict) -> None:
-	if lesson and frappe.db.get_value("Course Lesson", lesson, "course") != course:
-		raise Отказ(notes.НЕВЕРНЫЙ_АДРЕС, "Урок не из этого курса", where="lesson")
-	if адрес["kind"] == "question" and адрес["key"] not in _вопросы_урока(lesson):
-		raise Отказ(notes.НЕВЕРНЫЙ_АДРЕС, "Такого вопроса в квизе урока нет", where="target")
-
-
-def _вопросы_урока(lesson: str | None) -> list[str]:
-	квиз = quiz._квиз_урока(lesson) if lesson else None
-	return frappe.get_all("LMS Quiz Question", filters={"parent": квиз}, pluck="question") if квиз else []
 
 
 def _проверить_источник(via: str) -> None:
@@ -1199,7 +1200,7 @@ def _ответить(документ, текст: str, via: str) -> None:
 
 def _замечание_или_отказ(note: str):
 	if not frappe.db.exists("Agent Author Note", note):
-		raise Отказ(ЗАМЕЧАНИЕ_НЕ_НАЙДЕНО, "Замечания нет", id=note)
+		raise Отказ(ЗАМЕЧАНИЕ_НЕ_НАЙДЕНО, "Заметки нет", id=note)
 	return frappe.get_doc("Agent Author Note", note)
 
 
@@ -1213,11 +1214,29 @@ def _состояние_замечания(документ) -> dict:
 	}
 
 
-def _замечания(course: str, фильтры: dict) -> list[dict]:
+def _замечания(course: str, фильтры: dict, известные: dict | None = None) -> list[dict]:
+	"""Заметки по фильтрам с нитями, подписями мест и версиями релизов.
+
+	Число выборок не растёт с числом заметок: ответы, релизы курса, ключи
+	уроков и каждая нужная часть индекса действующего релиза — по выборке на
+	всю выдачу.
+	"""
 	записи = frappe.get_all(
 		"Agent Author Note",
 		filters=фильтры,
-		fields=["name", "lesson", "target", "quote", "text", "via", "status", "owner", "creation", "modified"],
+		fields=[
+			"name",
+			"release",
+			"lesson",
+			"target",
+			"quote",
+			"text",
+			"via",
+			"status",
+			"owner",
+			"creation",
+			"modified",
+		],
 		order_by="creation asc",
 	)
 	if not записи:
@@ -1238,18 +1257,24 @@ def _замечания(course: str, фильтры: dict) -> list[dict]:
 				"created_at": ответ.created_at.isoformat() if ответ.created_at else None,
 			}
 		)
-	подпись = _подписи_мест(course)
+	версии = {р.name: р.version for р in releases_index.история(course)}
+	if any(запись.lesson for запись in записи):
+		известные = известные or releases_index.известные(course)
+	ключи_уроков = {запись: ключ for ключ, запись in (известные or {"lessons": {}})["lessons"].items()}
+	места = places.Места(frappe.db.get_value("LMS Course", course, "active_release"))
+	подписи = места.места([_адрес_или_нет(запись) for запись in записи])
 	собранное = []
-	for запись in записи:
+	for запись, место in zip(записи, подписи):
 		нить = нити.get(запись.name, [])
-		текст_места, нет_места = подпись(запись.target, запись.lesson)
 		собранное.append(
 			{
 				"id": запись.name,
-				"lesson": запись.lesson,
 				"target": запись.target,
-				"label": текст_места,
-				"missing": нет_места,
+				"release": запись.release or None,
+				"version": версии.get(запись.release),
+				"lesson_key": ключи_уроков.get(запись.lesson),
+				"label": место["label"],
+				"missing": место["missing"],
 				"quote": запись.quote or "",
 				"text": запись.text,
 				"via": запись.via,
@@ -1265,60 +1290,13 @@ def _замечания(course: str, фильтры: dict) -> list[dict]:
 	return собранное
 
 
-def _подписи_мест(course: str):
-	"""Подпись места замечания по курсу, каким он есть сейчас, и признак,
-	что места больше нет."""
-	уроки = {}
-	for глава in structure.главы_курса(course):
-		for урок in structure.уроки_главы(глава["name"]):
-			уроки[урок] = (len(уроки) + 1, frappe.db.get_value("Course Lesson", урок, "title"))
-	блоки = {
-		f"{документ['artifact']}/{блок['key']}": блок["title"]
-		for документ in _действующие_артефакты(course)
-		for блок in документ["blocks"]
-	}
-	карта = directives.запись("Agent Course Map", {"course": course}, ("nodes",))
-	узлы = {узел["id"]: узел["text"] for узел in json.loads(карта.nodes or "[]")} if карта else {}
-
-	def подпись(target: str, lesson: str | None) -> tuple[str, bool]:
-		вид, _, ключ = target.partition(".")
-		урок, нет = "", False
-		if lesson:
-			if lesson in уроки:
-				номер, название = уроки[lesson]
-				урок = f"Урок {номер} «{название}»"
-			else:
-				урок, нет = f"Урок «{lesson}» (удалён)", True
-		if вид == "course":
-			return "Курс", False
-		if вид == "course_directive":
-			return f"Сквозная директива · {ключ}", False
-		if вид == "lesson":
-			return урок, нет
-		if вид == "material":
-			return f"{урок} · материал", нет
-		if вид == "directive":
-			return f"{урок} · директива · {ключ}", нет
-		if вид == "question":
-			if ключ in _вопросы_урока(lesson):
-				return f"{урок} · вопрос «{_коротко(frappe.db.get_value('LMS Question', ключ, 'question'), 80)}»", нет
-			return f"{урок} · вопрос {ключ}", True
-		if вид == "block":
-			документ, _, блок = ключ.partition("/")
-			название = блоки.get(ключ)
-			основа = f"Документ {документ} · блок «{название or блок}»"
-			return (f"{основа} · {урок}" if урок else основа), нет or название is None
-		if вид == "map":
-			текст = узлы.get(ключ)
-			return (f"Карта · «{_коротко(текст, 60)}»", нет) if текст else (f"Карта · узел {ключ}", True)
-		return target, True
-
-	return подпись
-
-
-def _коротко(текст: str | None, предел: int) -> str:
-	текст = " ".join((текст or "").split())
-	return текст if len(текст) <= предел else текст[: предел - 1].rstrip() + "…"
+def _адрес_или_нет(запись) -> dict:
+	"""Разобранный адрес заметки. Заметка без релиза — архив прежнего места
+	(патч `note_release_keys`): её адрес ключом релиза не читается, даже если
+	похож на него, и места у неё нет."""
+	if not запись.release:
+		return {"kind": запись.target, "key": None}
+	return notes.разобрать_адрес(запись.target)
 
 
 def _ждут_агента(course: str) -> int:
@@ -1920,7 +1898,11 @@ def course_reports(
 ) -> dict:
 	"""Репорты агентов по курсу: что мешает курсу работать.
 
-	`status` — статус наружу или `open`: всё, что ждёт разбора.
+	`status` — статус наружу или `open`: всё, что ждёт разбора. `lesson` —
+	ключ урока: он ищется по всей истории релизов курса, так что находятся и
+	репорты урока, снятого из релиза. Ключ урока в репорте не хранится:
+	`lesson_key` выводится по релизу репорта и его уроку одной выборкой на
+	всю страницу.
 
 	`Why:` без чтения механизм разомкнут — `report_issue` умел только
 	записывать, и обратная связь о курсе, который не работает, лежала мёртвым
@@ -1945,10 +1927,13 @@ def course_reports(
 				kind=kind,
 			)
 		фильтры["kind"] = значение
-	if lesson:
-		фильтры["lesson"] = lesson
 	if status:
 		фильтры["status"] = ("in", _статусы_фильтра(status))
+	if lesson:
+		запись = releases_index.известные(course)["lessons"].get(lesson)
+		if not запись:
+			return {"course": course, "reports": []}
+		фильтры["lesson"] = запись
 
 	записи = frappe.get_all(
 		"Agent Course Report",
@@ -1972,6 +1957,7 @@ def course_reports(
 		limit=min(int(limit or РЕПОРТОВ_ЗА_РАЗ), РЕПОРТОВ_ЗА_РАЗ),
 	)
 	версии = _версии_директив([з.lesson_directive for з in записи if з.lesson_directive])
+	ключи_уроков = releases_index.ключи_уроков([з.release for з in записи if з.release])
 
 	return {
 		"course": course,
@@ -1980,6 +1966,7 @@ def course_reports(
 				"id": з.name,
 				"kind": ИМЯ_ВИДА_РЕПОРТА.get(з.kind, з.kind),
 				"lesson": з.lesson,
+				"lesson_key": ключи_уроков.get((з.release, з.lesson)),
 				"objective": з.objective or None,
 				"question": з.question or None,
 				"question_key": з.question_key or None,

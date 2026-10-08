@@ -310,6 +310,16 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("authoring.course_release", authoring.course_release(course=курс, lesson="l-1"))
 		self.сверить("authoring.course_releases", authoring.course_releases(course=курс))
 		self.сверить("authoring.course_revision", authoring.course_revision(course=курс))
+		заметка = self.сверить(
+			"authoring.add_note",
+			authoring.add_note(course=курс, target="goal.l-1/term:T1", text="Проверь пример"),
+		)["id"]
+		self.сверить("authoring.reply_note", authoring.reply_note(note=заметка, text="Шаг 3"))
+		self.сверить(
+			"authoring.set_note_status",
+			authoring.set_note_status(note=заметка, status="done", text="Поправил", via="agent"),
+		)
+		self.сверить("authoring.list_notes", authoring.list_notes(course=курс))
 		self.сверить("authoring.publish_course", authoring.publish_course(course=курс))
 		self.сверить("authoring.unpublish_course", authoring.unpublish_course(course=курс))
 		authoring.publish_course(course=курс)
@@ -507,16 +517,6 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			),
 		)
 		self.сверить("authoring.course_map_check", authoring.course_map_check(course=курс))
-		замечание = self.сверить(
-			"authoring.add_note",
-			authoring.add_note(course=курс, target="lesson", lesson=с_квизом, text="Проверь пример"),
-		)["id"]
-		self.сверить("authoring.reply_note", authoring.reply_note(note=замечание, text="Шаг 3"))
-		self.сверить(
-			"authoring.set_note_status",
-			authoring.set_note_status(note=замечание, status="done", text="Поправил", via="agent"),
-		)
-		self.сверить("authoring.list_notes", authoring.list_notes(course=курс))
 		# Тестеры до публикации: методы кабинета автора (learning-services#393).
 		тестер = создать_ученика(f"contract-tester-{суффикс}@example.com")
 		self.сверить("authoring.add_testers", authoring.add_testers(course=курс, users=тестер))
