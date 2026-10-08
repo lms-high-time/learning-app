@@ -19,6 +19,8 @@
 прогон другое.
 """
 
+import json
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -67,6 +69,13 @@ from lms_frappe_app.testing import сколько_запросов
 	# точке сохранения (три); журнал проверки — об ответе и о выданном следом
 	# вопросе; отвеченные с блокировкой.
 	"submit_answer": 14,
+	# Обычная отметка пункта (learning-services#506): занятие с таблицей строк,
+	# релиз и ключ урока; доступ к курсу — четыре выборки; есть ли вопросы и
+	# политика квиза — четыре; прохождение с блокировкой и двумя таблицами
+	# строк, релиз при сверке, занятие пункта; прежняя версия прохождения для
+	# `track_changes` (три), ссылка на занятие и сохранение (семь);
+	# активность занятия. Сигнал без разобранной цели ничего не читает.
+	"mark_goal": 29,
 	# Покрытие целей — из прохождений (learning-services#506): прохождения
 	# ученика и цели нужных прохождений с текстами релиза — две выборки на
 	# всю выдачу вместо одной выборки отметок занятий.
@@ -144,14 +153,23 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	# --- ворота ---
 
-	def test_бюджет_course_outline(self):
-		"""Курс из релиза, у ученика прохождения двух уроков: число запросов не растёт с уроками."""
+	def test_бюджет_course_outline_не_растёт_с_курсом(self):
+		"""Два курса из релиза — три урока в двух главах и шесть в трёх, у ученика
+		прохождения двух и четырёх уроков: бюджет один на оба."""
+		малый = frappe.db.get_value("Course Lesson", self._курс_релиза()[0], "course")
+		большой = frappe.db.get_value("Course Lesson", self._курс_релиза(глав_больше=True)[0], "course")
+		for курс, ключи in ((малый, ("l-1", "l-2")), (большой, ("l-1", "l-2", "l-4", "l-5"))):
+			for ключ in ключи:
+				run = прохождения.прохождение(self.ученик, курс, ключ)
+				прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
+			with self.subTest(курс=курс):
+				self._ворота("course_outline", lambda курс=курс: student.course_outline(курс))
+
+	def test_бюджет_mark_goal(self):
+		"""Обычная отметка: цель пункта не разобрана — сигналу нечего читать."""
 		урок = self._курс_релиза()[0]
-		курс = frappe.db.get_value("Course Lesson", урок, "course")
-		for ключ in ("l-1", "l-2"):
-			run = прохождения.прохождение(self.ученик, курс, ключ)
-			прохождения.отметить(run.name, "term:T1", "done", "Назвал термин")
-		self._ворота("course_outline", lambda: student.course_outline(курс))
+		занятие = student.start_lesson(lesson=урок)["data"]["session"]
+		self._ворота("mark_goal", lambda: student.mark_goal(занятие, "refute:M1", "done", "Не проявилось"))
 
 	def test_бюджет_start_lesson(self):
 		# Прогревочное занятие бросается, чтобы измеряемый вызов завёл своё, а
@@ -294,15 +312,25 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		возвращённая.append("history", {"event": "returned", "by_user": "Administrator", "comment": "Доделай"})
 		возвращённая.save(ignore_permissions=True)
 
-	def _курс_релиза(self, *, с_домашкой: bool = False) -> tuple[str, str]:
+	def _курс_релиза(self, *, с_домашкой: bool = False, глав_больше: bool = False) -> tuple[str, str]:
 		"""Курс из релиза той же организации — две главы, три урока, документ с
 		блоками первых двух уроков, заполненный учеником; первый и второй уроки.
 
 		`start_lesson` открывает только курс из релиза (learning-services#506).
-		С `с_домашкой` задания есть у первых двух уроков.
+		С `с_домашкой` задания есть у первых двух уроков; с `глав_больше` — ещё
+		третья глава с тремя уроками по образцу первого (`l-4`…`l-6`).
 		"""
 		frappe.set_user("Administrator")
 		релиз = пример_релиза(f"qb-{frappe.generate_hash(length=8)}")
+		if глав_больше:
+			новые = [f"l-{номер}" for номер in (4, 5, 6)]
+			релиз["chapters"].append(
+				{"key": "ch-3", "title": "Глава третья", "description": "Что изменится.", "lessons": новые}
+			)
+			for номер, ключ in enumerate(новые, start=4):
+				урок = json.loads(json.dumps(релиз["lessons"][0], ensure_ascii=False).replace("l-1", ключ))
+				урок.update(chapter="ch-3", title=f"Урок {номер}")
+				релиз["lessons"].append(урок)
 		if с_домашкой:
 			for урок in релиз["lessons"][:2]:
 				урок["homework"] = {"title": "Задание", "description": "Сделайте пример.", "answer_mode": "text", "due_days": None}

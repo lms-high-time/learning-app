@@ -177,6 +177,14 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		self.assertEqual(данные["course_title"], "Пример курса")
 		self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "touched"}])
 
+	def test_урок_без_занятий_цели_не_начаты(self):
+		данные = self.данные(student.lesson_session(self.урок))
+
+		self.assertEqual((данные["session"], данные["status"]), (None, None))
+		self.assertFalse(данные["has_chat_state"])
+		self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
+		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+
 	def test_занятие_урока_старой_модели_отказ(self):
 		self.отказ(student.lesson_session(self.курс_старой_модели()), "course_not_released")
 

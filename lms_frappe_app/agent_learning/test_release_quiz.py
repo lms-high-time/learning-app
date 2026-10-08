@@ -693,7 +693,10 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual((итог["passed"], итог["pass_threshold"]), (True, 0.7))
 
 	def test_повторный_зачёт_не_двигает_прохождение(self):
-		настроить_квиз(max_attempts=5, retry_delay_minutes=0)
+		# Политика — своя, а не из общих настроек: их читают через общий кеш, и
+		# параллельный прогон мог сменить паузу перед повтором посреди теста.
+		политика = {"quiz_required": 1, "pass_threshold": 0.8, "max_attempts": 5, "retry_delay_minutes": 0}
+		self.enterContext(patch.object(release_quiz, "политика_квиза_для_курса", return_value=политика))
 		run, занятие = self.урок()
 		self.assertTrue(self.сдать(run, занятие, ["V1", "V1"])["result"]["passed"])
 		было = frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run.name, ["passed_at", "modified"], as_dict=True)

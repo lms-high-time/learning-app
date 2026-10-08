@@ -274,7 +274,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		занятие = self.старт()["session"]
 
 		with (
-			patch.object(прохождения, "отметить", side_effect=frappe.QueryDeadlockError("1213")),
+			patch.object(прохождения, "отметить_с_целями", side_effect=frappe.QueryDeadlockError("1213")),
 			patch.object(frappe.db, "rollback") as откат,
 		):
 			ошибка = self.отказ(self.отметить(занятие, "term:T1"), "busy")

@@ -22,7 +22,7 @@ from math import ceil
 import frappe
 from frappe.utils import getdate, nowdate
 
-from lms_frappe_app.agent_learning.artifacts.document import _заполнен
+from lms_frappe_app.agent_learning.artifacts.document import заполнен
 from lms_frappe_app.agent_learning.constants import ЗАНЯТИЕ_БРОШЕНО, ПРОЙДЕН
 
 БРОШЕНЫ_ПОДРЯД = "abandoned_in_row"
@@ -133,7 +133,7 @@ def отобрать(занятие, кандидаты: list[dict]) -> list[dic
 	каждой странице, — и одно и то же наблюдение на каждом вызове стало бы
 	шумом, который агент научится пропускать.
 	"""
-	показанные = set((занятие.get("signals_shown") or "").split())
+	показанные = _показанные(занятие)
 	новые = [с for с in кандидаты if с["code"] not in показанные]
 	новые.sort(key=lambda с: ПРИОРИТЕТ.index(с["code"]))
 	новые = новые[:НЕ_БОЛЬШЕ]
@@ -144,6 +144,15 @@ def отобрать(занятие, кандидаты: list[dict]) -> list[dic
 			update_modified=False,
 		)
 	return новые
+
+
+def показан(занятие, код: str) -> bool:
+	"""Сигнал с этим кодом занятие уже показывало (`отобрать`)."""
+	return код in _показанные(занятие)
+
+
+def _показанные(занятие) -> set[str]:
+	return set((занятие.get("signals_shown") or "").split())
 
 
 def документ_пуст(статусы_целей: list[str], блоки: list[dict]) -> list[dict]:
@@ -159,7 +168,7 @@ def документ_пуст(статусы_целей: list[str], блоки: 
 	разобрано = sum(с == "covered" for с in статусы_целей)
 	if not блоки or not статусы_целей or 2 * разобрано < len(статусы_целей):
 		return []
-	if any(_заполнен(б) for б in блоки):
+	if any(заполнен(б) for б in блоки):
 		return []
 	return [
 		{

@@ -8,11 +8,13 @@ from frappe.utils import add_days, nowdate
 
 from lms_frappe_app.agent_learning import signals
 from lms_frappe_app.agent_learning.runs import service as прохождения
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_занятие,
 	создать_организацию,
 	создать_ученика,
+	зачислить_на_курс,
 	курс_из_релиза,
 	урок_релиза,
 )
@@ -106,6 +108,31 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 			self.старт()["signals"],
 			[{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}],
 		)
+
+	def test_меньше_половины_целей_разобрано_не_сигнал(self):
+		"""Урок из трёх целей, разобрана одна: документ пуст, но сигнала нет."""
+		frappe.set_user("Administrator")
+		релиз = пример_релиза(f"sig-third-{frappe.generate_hash(length=6)}")
+		for номер in (2, 3):
+			релиз["lessons"][0]["objectives"].append(
+				{
+					"key": f"l-1-D{номер}",
+					"text": f"Цель {номер}",
+					"goals": [
+						{"key": f"exec:E{номер}", "kind": "execution", "required": True, "title": "Сделать"}
+					],
+				}
+			)
+		курс, _ = курс_из_релиза(релиз=релиз)
+		зачислить_на_курс(self.ученик, курс)
+		frappe.set_user(self.ученик)
+		run = прохождения.прохождение(self.ученик, курс, "l-1").name
+		прохождения.отметить(run, "term:T1", "done", "Назвал термин")
+		прохождения.отметить(run, "l-1-D1/V1", "done", "Выбрал первый")
+
+		ответ = student.start_lesson(lesson=урок_релиза(курс, "l-1"))
+
+		self.assertEqual(ответ["data"]["signals"], [])
 
 	def test_начатый_документ_не_сигнал(self):
 		self.цель_разобрана()
