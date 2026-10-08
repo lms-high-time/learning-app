@@ -99,3 +99,28 @@ class TestПроверкиРелиза(unittest.TestCase):
 			[(п["code"], п["where"]) for п in предупреждения],
 			[("public_text_empty", "course.summary"), ("public_text_empty", "chapters[ch-1].description")],
 		)
+
+	def test_ответы_квиза_в_пакете_агента(self):
+		"""`answers` и `correct` на любой глубине пакета — `agent_leak`, путь — до ключа."""
+		р = пример_релиза()
+		р["agent"]["lessons"]["l-1"]["answers"] = {"S1/l-1-D1": "V1"}
+		р["agent"]["learn_about_student"].append({"key": "x", "text": "т", "changes": [{"correct": "V1"}]})
+		self.assertEqual(
+			[(п["code"], п["where"]) for п in checks.проблемы(р)[0]],
+			[
+				("agent_leak", "agent.learn_about_student[2].changes[0].correct"),
+				("agent_leak", "agent.lessons.l-1.answers"),
+			],
+		)
+
+	def test_ответы_вне_пакета_агента_не_утечка(self):
+		"""Ключи с тем же смыслом в тексте или в карте курса — не утечка."""
+		р = пример_релиза()
+		р["agent"]["frame"] = "answers и correct — слова, а не ключи"
+		р["map"] = {"answers": {"correct": "V1"}}
+		self.assertEqual(checks.проблемы(р), ([], []))
+
+	def test_релиз_без_пакета_агента_чист(self):
+		р = пример_релиза()
+		del р["agent"]
+		self.assertEqual(checks.проблемы(р), ([], []))

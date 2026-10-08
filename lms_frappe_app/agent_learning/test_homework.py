@@ -124,13 +124,23 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 
 	def test_complete_lesson_выдаёт_домашку(self):
 		from lms_frappe_app.api import student
-		from lms_frappe_app.tests.sample_data import сдать_отчёт
+		from lms_frappe_app.tests.sample_data import (
+			занятие_релиза,
+			зачислить_на_курс,
+			курс_из_релиза,
+			настроить_квиз,
+			отметить_все_пункты,
+			политика_по_умолчанию,
+		)
 
-		создать_домашку(self.урок, due_mode="relative", due_days=2)
+		self.addCleanup(политика_по_умолчанию)
+		настроить_квиз(quiz_required=0)
+		курс, _ = курс_из_релиза()
+		зачислить_на_курс(self.ученик, курс)
+		занятие = занятие_релиза(self.ученик, курс, "l-3")
+		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
 		frappe.set_user(self.ученик)
-		старт = student.start_lesson(lesson=self.урок)["data"]
-		сдать_отчёт(старт["session"])
-		ответ = student.complete_lesson(старт["session"])
+		ответ = student.complete_lesson(занятие)
 		self.assertTrue(ответ["ok"], ответ)
 		frappe.set_user("Administrator")
 		[сдача] = self.сдачи()

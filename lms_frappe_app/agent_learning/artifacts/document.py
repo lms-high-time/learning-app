@@ -136,7 +136,7 @@ def _блок(
 	return итог
 
 
-def _заполнен(блок: dict) -> bool:
+def заполнен(блок: dict) -> bool:
 	if "filled" in блок:
 		return блок["filled"]
 	return bool(блок["content"].strip() or блок["file"] or блок["url"])
@@ -299,7 +299,7 @@ def _пустые_блоки_урока(ученик: str, курс: str, lesson
 	return [
 		{"artifact": блок["artifact"], "key": блок["key"], "title": блок["title"]}
 		for блок in _блоки_урока(ученик, курс, lesson, пространство)
-		if not _заполнен(блок)
+		if not заполнен(блок)
 	]
 
 

@@ -12,7 +12,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime
 
-from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning import quiz, release_quiz
 from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН
 from lms_frappe_app.agent_learning.constants import (
 	ЗАНЯТИЕ_БРОШЕНО,
@@ -23,7 +23,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ПРОВЕРКА_ВОПРОС_ВЫДАН,
 	ПРОВЕРКА_ОТВЕТ_ПРИНЯТ,
 )
-from lms_frappe_app.agent_learning.errors import ЧУЖОЕ_ЗАНЯТИЕ, Отказ
+from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.quiz import (
 	НУЖНЫ_СЛОВА,
 	ПОПЫТКА_ЗАВЕРШЕНА,
@@ -39,11 +39,10 @@ from lms_frappe_app.tests.release_sample import пример_релиза, ре�
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	настроить_квиз,
+	отметить_все_пункты,
 	политика_по_умолчанию,
-	создать_вопрос,
 	создать_домашку,
 	создать_занятие,
-	создать_квиз,
 	создать_куратора,
 	создать_ученика,
 )
@@ -622,6 +621,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 	def test_урок_из_релиза_с_обязательным_квизом_так_не_закрыть(self):
 		run, занятие = self.урок()
+		отметить_все_пункты(run.name)
 
 		ответ = self.закрыть(занятие)
 
@@ -637,6 +637,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	def test_квиз_не_обязателен_урок_закрывается_и_пройден(self):
 		настроить_квиз(quiz_required=0)
 		run, занятие = self.урок()
+		отметить_все_пункты(run.name)
 
 		ответ = self.закрыть(занятие)
 
@@ -652,12 +653,11 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 	def test_закрытие_без_прохождения_заводит_его_пройденным(self):
 		"""Урок закрыт до первой отметки — счёт глав всё равно видит его пройденным."""
-		настроить_квиз(quiz_required=0)
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))
 		урок = index.урок(frappe.db.get_value("LMS Course", курс, "active_release"), "l-1")["lesson"]
 		зачислить(self.ученик, урок)
 
-		self.assertTrue(self.закрыть(создать_занятие(self.ученик, урок))["ok"])
+		quiz.отметить_урок_пройденным(frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, урок)))
 
 		self.assertEqual(
 			frappe.db.get_value(
@@ -693,7 +693,10 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual((итог["passed"], итог["pass_threshold"]), (True, 0.7))
 
 	def test_повторный_зачёт_не_двигает_прохождение(self):
-		настроить_квиз(max_attempts=5, retry_delay_minutes=0)
+		# Политика — своя, а не из общих настроек: их читают через общий кеш, и
+		# параллельный прогон мог сменить паузу перед повтором посреди теста.
+		политика = {"quiz_required": 1, "pass_threshold": 0.8, "max_attempts": 5, "retry_delay_minutes": 0}
+		self.enterContext(patch.object(release_quiz, "политика_квиза_для_курса", return_value=политика))
 		run, занятие = self.урок()
 		self.assertTrue(self.сдать(run, занятие, ["V1", "V1"])["result"]["passed"])
 		было = frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run.name, ["passed_at", "modified"], as_dict=True)
@@ -754,17 +757,22 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		откат.assert_called_once_with()
 
 	def test_submit_answer_при_гонке_за_прохождение_busy(self):
-		"""Квиз Learning у урока из релиза: сданная попытка закрывает урок и пишет прохождение."""
+		"""Сданная попытка закрывает урок и пишет прохождение — гонка за него даёт `busy`."""
 		run, занятие = self.урок()
-		frappe.set_user("Administrator")
-		вопрос = создать_вопрос("Два плюс два?", варианты=[("4", True), ("5", False)])
-		создать_квиз(run.lesson, [вопрос])
+		отметить_все_пункты(run.name)
 		frappe.set_user(self.ученик)
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
+		student.submit_answer(попытка, С1, "V1", "слова ученика")
 
 		with self.гонка_за_прохождение() as откат:
-			ответ = student.submit_answer(попытка, вопрос, "1", "слова ученика")
+			ответ = student.submit_answer(попытка, С2, "V1", "слова ученика")
 
 		self.assertEqual(ответ["error"]["code"], "busy")
 		self.assertEqual(ответ["error"]["attempt"], попытка)
 		откат.assert_called_once_with()
+
+	def test_архивное_прохождение_квиз_не_начинает(self):
+		run, занятие = self.урок()
+		frappe.db.set_value(прохождения.ПРОХОЖДЕНИЕ, run.name, "student", None)
+
+		self.отказ(ПРОХОЖДЕНИЕ_В_АРХИВЕ, release_quiz.начать, frappe.get_doc(прохождения.ПРОХОЖДЕНИЕ, run.name), занятие)

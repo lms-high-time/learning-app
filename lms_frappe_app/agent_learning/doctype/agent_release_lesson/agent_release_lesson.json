@@ -12,7 +12,8 @@
   "lesson",
   "pass_percentage",
   "section_keys",
-  "homework"
+  "homework",
+  "agent"
  ],
  "fields": [
   {
@@ -70,11 +71,18 @@
    "fieldtype": "JSON",
    "label": "Домашнее задание",
    "read_only": 1
+  },
+  {
+   "fieldname": "agent",
+   "fieldtype": "JSON",
+   "label": "Пакет агента: срез урока",
+   "description": "agent.lessons.<ключ урока> релиза как есть; нет среза — {}",
+   "read_only": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-08 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Release Lesson",

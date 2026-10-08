@@ -248,6 +248,10 @@ def student_detail(user: str) -> dict:
 	более: отчёт про результат, а не про содержание диалога. Покрытие целей
 	при этом отдаётся — это тот же учебный результат, что и зачёт, просто
 	мельче: видно, какие темы разобраны, а на какие обратить внимание дальше.
+	Покрытие — цели урока со статусом из прохождения урока, без пунктов и
+	свидетельств. Прохождение одно на урок и общее для всех пространств
+	ученика, как и факт прохождения урока: у занятий одного урока покрытие
+	одно и то же — каким оно стало к этому часу.
 	"""
 	менеджер = текущий_пользователь()
 	if not свои_организации_пересекаются(менеджер, user):
@@ -272,12 +276,12 @@ def student_detail(user: str) -> dict:
 	занятия = frappe.get_all(
 		"Agent Learning Session",
 		filters={"student": user, **({"organization": ("in", пространства)} if пространства is not None else {})},
-		fields=["name", "lesson", "course", "status", "started_at", "finished_at"],
+		fields=["name", "lesson", "course", "status", "started_at", "finished_at", "run"],
 		order_by="started_at desc",
 		limit=50,
 	)
 	попытки = _попытки_в_пространствах(user, пространства)
-	покрытие = _покрытие_целей([з.name for з in занятия])
+	покрытие = _цели_прохождений(user, занятия)
 	return {
 		"user": user,
 		"full_name": frappe.db.get_value("User", user, "full_name"),
@@ -342,25 +346,48 @@ def _попытки_в_пространствах(user: str, организац�
 	return запрос.run(as_dict=True)
 
 
-def _покрытие_целей(занятия: list[str]) -> dict[str, list[dict]]:
-	"""Как прошли цели каждого занятия — одним запросом на всю выдачу.
+def _цели_прохождений(ученик: str, занятия: list) -> dict[str, list[dict]]:
+	"""Цели урока каждого занятия со статусом из прохождения: занятие → `[{key, text, status}]`.
+
+	Прохождение занятия — его `run`, у занятия без него — живое прохождение
+	ученика по уроку занятия. Тексты — из релиза прохождения; снятые новым
+	релизом цели не отдаются. Занятие курса без релиза — пусто.
 
 	`Why:` занятий здесь до полусотни, и запрос на каждое превратил бы
-	открытие карточки сотрудника в полсотни обходов базы.
+	открытие карточки сотрудника в полсотни обходов базы: прохождения ученика
+	— одной выборкой, цели всех нужных прохождений — второй.
 	"""
-	покрытие: dict[str, list[dict]] = {}
 	if not занятия:
-		return покрытие
-	for строка in frappe.get_all(
-		"Agent Objective Outcome",
-		filters={"parent": ("in", занятия), "parenttype": "Agent Learning Session"},
-		fields=["parent", "objective", "status"],
-		order_by="parent asc, idx asc",
-	):
-		покрытие.setdefault(строка.parent, []).append(
-			{"objective": строка.objective, "status": строка.status}
+		return {}
+	живые = {
+		(п.course, п.lesson): п.name
+		for п in frappe.get_all(
+			"Agent Lesson Run",
+			filters={"student": ученик, "course": ("in", list({з.course for з in занятия}))},
+			fields=["name", "course", "lesson"],
 		)
-	return покрытие
+	}
+	прохождение = {з.name: з.run or живые.get((з.course, з.lesson)) for з in занятия}
+	нужные = {имя for имя in прохождение.values() if имя}
+	if not нужные:
+		return {}
+	цели: dict[str, list[dict]] = {}
+	for с in frappe.db.sql(
+		"""
+		select o.parent, o.objective_key, o.status, t.text
+		from `tabAgent Lesson Run Objective` o
+		join `tabAgent Lesson Run` r on r.name = o.parent
+		left join `tabAgent Release Objective` t
+			on t.parenttype = 'Agent Course Release' and t.parent = r.release
+			and t.lesson_key = r.lesson_key and t.objective_key = o.objective_key
+		where o.parenttype = 'Agent Lesson Run' and o.parent in %(runs)s and o.removed = 0
+		order by o.idx
+		""",
+		{"runs": tuple(нужные)},
+		as_dict=True,
+	):
+		цели.setdefault(с.parent, []).append({"key": с.objective_key, "text": с.text, "status": с.status})
+	return {занятие: цели.get(имя, []) for занятие, имя in прохождение.items() if имя}
 
 
 def _адресаты(назначение) -> list[str]:

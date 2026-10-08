@@ -11,7 +11,7 @@ from frappe.tests import IntegrationTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
 from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.agent_learning.releases import service
+from lms_frappe_app.agent_learning.releases import index, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_урок
@@ -189,6 +189,29 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		релиз["lessons"][0]["quiz"]["answers"][вопрос]["correct"] = "V9"
 		отказ = self.отказ(service.РЕЛИЗ_НЕ_СХОДИТСЯ, релиз)
 		self.assertEqual(отказ.подробности["problems"][0]["code"], "quiz_correct")
+		self.assertIsNone(self.курс_по_ключу())
+
+	def test_пакет_агента_раскладывается_при_публикации(self):
+		релиз = пример_релиза(self.ключ)
+		del релиз["agent"]["lessons"]["l-3"]
+
+		имя = self.опубликовать(релиз)["release"]
+
+		пакет = релиз["agent"]
+		self.assertEqual(index.пакет_урока(имя, "l-1"), пакет["lessons"]["l-1"])
+		self.assertEqual(index.пакет_урока(имя, "l-3"), {})
+		self.assertEqual(index.рамка(имя)["learn_about_student"], пакет["learn_about_student"])
+
+	def test_ответы_квиза_в_пакете_агента_отказ(self):
+		for ключ in ("answers", "correct"):
+			релиз = пример_релиза(self.ключ)
+			релиз["agent"]["lessons"]["l-2"]["items"]["l-2-D1/V1"] = {ключ: "V1"}
+			with self.subTest(ключ=ключ):
+				отказ = self.отказ(service.РЕЛИЗ_НЕ_СХОДИТСЯ, релиз)
+				self.assertEqual(
+					отказ.подробности["problems"],
+					[{"code": "agent_leak", "where": f"agent.lessons.l-2.items.l-2-D1/V1.{ключ}"}],
+				)
 		self.assertIsNone(self.курс_по_ключу())
 
 	def test_курс_передан(self):

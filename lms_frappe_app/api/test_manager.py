@@ -6,7 +6,9 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.tests.sample_data import (
+	курс_из_релиза,
 	создать_вопрос,
 	создать_квиз,
 	добавить_в_организацию,
@@ -152,7 +154,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		# Отчёт про результат, а не про содержание диалога с агентом.
 		занятие = создать_занятие(self.ученик_а, self.урок)
 		frappe.get_doc("Agent Learning Session", занятие).записать_событие(
-			"Checkpoint Reported", "ученик спросил про вложенные циклы"
+			"Directive Issued", "ученик спросил про вложенные циклы"
 		)
 
 		frappe.set_user(self.менеджер)
@@ -166,19 +168,28 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		"""Руководителю нужно знать, какие темы разобраны, а какие нет.
 
 		Это тот же учебный результат, что и зачёт, просто мельче: в отличие
-		от заметок об ученике, он про результат, а не про разговор.
+		от заметок об ученике, он про результат, а не про разговор. Покрытие —
+		цели урока из прохождения, без пунктов и свидетельств
+		(learning-services#506); у занятия курса без релиза его нет.
 		"""
-		занятие = frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик_а, self.урок))
-		занятие.append("outcomes", {"objective": "Посчитать сроки", "status": "skipped"})
-		занятие.save(ignore_permissions=True)
+		курс, _ = курс_из_релиза()
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.компания_а, "course": курс}
+		).insert(ignore_permissions=True)
+		run = прохождения.прохождение(self.ученик_а, курс, "l-1")
+		занятие = создать_занятие(self.ученик_а, run.lesson, run=run.name)
+		прохождения.отметить(run.name, "term:T1", "done", "Свидетельство агента", занятие=занятие)
+		создать_занятие(self.ученик_а, self.урок)
 
 		frappe.set_user(self.менеджер)
-		данные = manager.student_detail(self.ученик_а)["data"]
+		сессии = {с["course"]: с for с in manager.student_detail(self.ученик_а)["data"]["sessions"]}
 
 		self.assertEqual(
-			данные["sessions"][0]["objectives"],
-			[{"objective": "Посчитать сроки", "status": "skipped"}],
+			сессии[курс]["objectives"],
+			[{"key": "l-1-D1", "text": "Цель урока «Урок первый»", "status": "touched"}],
 		)
+		self.assertEqual(сессии[self.курс]["objectives"], [])
+		self.assertNotIn("Свидетельство агента", json.dumps(сессии, ensure_ascii=False, default=str))
 
 
 class IntegrationTestManagerRole(IntegrationTestCase):

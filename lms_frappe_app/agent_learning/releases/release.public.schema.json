@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/lms-high-time/learning-app/master/lms_frappe_app/agent_learning/releases/release.public.schema.json",
   "title": "Релиз курса: публичная и серверная часть",
-  "description": "То, что разбирает открытое приложение: курс, главы, уроки с целями, квизом и домашним заданием, документ курса. Части agent и map — непрозрачные объекты: приложение хранит их как есть. Формат — CONTRACT.md, раздел «Релиз курса».",
+  "description": "То, что разбирает открытое приложение: курс, главы, уроки с целями, квизом и домашним заданием, документ курса. Пакет agent раскладывается по урокам, его содержание и карта map не разбираются. Формат — CONTRACT.md, раздел «Релиз курса».",
   "type": "object",
   "required": ["format", "course", "chapters", "lessons", "document"],
   "additionalProperties": false,
@@ -12,7 +12,7 @@
     "chapters": {"type": "array", "items": {"$ref": "#/$defs/chapter"}},
     "lessons": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/lesson"}},
     "document": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/document"}]},
-    "agent": {"type": "object", "description": "Пакет агента: приложение хранит как есть, не разбирает."},
+    "agent": {"type": "object", "description": "Пакет агента: приложение раскладывает его по ключам уроков в срезы индекса релиза, содержание срезов не разбирает."},
     "map": {"type": "object", "description": "Карта курса, из которой собран релиз: для истории и автора."}
   },
   "$defs": {

@@ -6,7 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning import quiz, release_quiz
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import admin, student
@@ -22,7 +22,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
-	сдать_отчёт,
 )
 
 
@@ -49,13 +48,23 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 
 		# Ученик позанимался: занятие, попытка квиза, документ, заметки, репорт.
 		frappe.set_user(self.ученик)
-		self.занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		self.занятие = создать_занятие(self.ученик, self.урок)
 		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
 		student.remember("observation", "pace", "Любит примеры", session=self.занятие)
 		student.remember("fact", "role", "Владелец кофейни")
-		self.репорт = student.report_issue(self.занятие, "stuck", "Непонятен пример")["data"]["report"]
-		сдать_отчёт(self.занятие)
-		self.попытка = student.request_quiz(self.занятие)["data"]["attempt"]
+		frappe.set_user("Administrator")
+		self.репорт = frappe.get_doc(
+			{
+				"doctype": "Agent Course Report",
+				"session": self.занятие,
+				"course": self.курс,
+				"lesson": self.урок,
+				"kind": "Stuck",
+				"text": "Непонятен пример",
+			}
+		).insert(ignore_permissions=True).name
+		frappe.set_user(self.ученик)
+		self.попытка = quiz.начать_попытку(self.занятие)["attempt"]
 		frappe.set_user("Administrator")
 
 	def запись(self) -> str:
@@ -117,22 +126,6 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		self.assertIsNone(self.запись())
 		frappe.set_user(self.ученик)
 		self.assertNotIn(self.курс, [к["id"] for к in student.list_my_courses()["data"]["courses"]])
-
-	def test_после_записи_заново_занятие_первое_и_попытки_полные(self):
-		frappe.set_user(self.ученик)
-		до = student.start_lesson(lesson=self.урок)["data"]["quiz"]["attempts_left"]
-		self.сбросить()
-		зачислить(self.ученик, self.урок)
-
-		frappe.set_user(self.ученик)
-		урок = student.start_lesson(lesson=self.урок)["data"]
-
-		self.assertNotEqual(урок["session"], self.занятие)
-		self.assertEqual(урок["start"]["opening"], "first_in_course")
-		self.assertEqual(урок["artifact_blocks"][0]["content"], "", "документ начинается пустым")
-		self.assertEqual(урок["student_context"]["carried_over"], [])
-		if до is not None:
-			self.assertGreaterEqual(урок["quiz"]["attempts_left"], до)
 
 	def test_ответы_на_репорты_ученик_видит_и_после_сброса(self):
 		self.сбросить()
@@ -247,3 +240,20 @@ class IntegrationTestResetProgressRelease(IntegrationTestCase):
 			релизы.опубликовать(второй, None, "Administrator")
 		self.assertEqual(прохождения.сверить_курс(self.курс), 1, "сверено только живое прохождение")
 		self.assertEqual(frappe.db.get_value("Agent Lesson Run", self.run.name, "release"), прежний_релиз)
+
+	def test_после_записи_заново_занятие_первое_и_попытки_полные(self):
+		frappe.set_user(self.ученик)
+		до = student.start_lesson(lesson=self.run.lesson)["data"]
+		frappe.set_user("Administrator")
+		self.сбросить()
+		зачислить(self.ученик, self.run.lesson)
+
+		frappe.set_user(self.ученик)
+		урок = student.start_lesson(lesson=self.run.lesson)["data"]
+
+		self.assertNotEqual(урок["session"], до["session"])
+		self.assertEqual(урок["start"]["opening"], "first_in_course")
+		self.assertEqual(урок["history"]["lessons"], [])
+		self.assertEqual({п["status"] for ц in урок["lesson_map"] for п in ц["goals"]}, {"open"})
+		if до["quiz"]["attempts_left"] is not None:
+			self.assertGreater(урок["quiz"]["attempts_left"], до["quiz"]["attempts_left"])

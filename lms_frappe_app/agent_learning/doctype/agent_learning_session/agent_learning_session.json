@@ -22,9 +22,6 @@
   "via_trusted_service",
   "web_chat",
   "signals_shown",
-  "brief_start",
-  "sb_outcomes",
-  "outcomes",
   "sb_archive",
   "archived_student",
   "archived_at"
@@ -142,27 +139,6 @@
    "read_only": 1
   },
   {
-   "default": "0",
-   "description": "Занятие начато лёгким стартом: материал и указания агент берёт отдельными вызовами (learning-services#410).",
-   "fieldname": "brief_start",
-   "fieldtype": "Check",
-   "label": "Лёгкий старт",
-   "read_only": 1
-  },
-  {
-   "fieldname": "sb_outcomes",
-   "fieldtype": "Section Break",
-   "label": "Покрытие целей"
-  },
-  {
-   "fieldname": "outcomes",
-   "fieldtype": "Table",
-   "label": "Цели урока",
-   "options": "Agent Objective Outcome",
-   "read_only": 1,
-   "description": "Заполняется отчётом агента, а не руками"
-  },
-  {
    "collapsible": 1,
    "fieldname": "sb_archive",
    "fieldtype": "Section Break",
@@ -187,7 +163,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-08 12:00:00.000000",
+ "modified": "2026-10-08 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning Session",

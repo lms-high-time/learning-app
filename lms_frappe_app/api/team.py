@@ -25,7 +25,7 @@ from lms_frappe_app.agent_learning.artifacts.document import (
 	_блок,
 	_вложения,
 	_данные,
-	_заполнен,
+	заполнен,
 	_содержимое,
 	_файлы,
 )
@@ -166,14 +166,14 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 		заполнено = 0
 		for блок in схема.blocks:
 			описание = _блок(блок, содержимое, вложения, файлы, схема, данные)
-			заполнен = _заполнен(описание)
-			заполнено += заполнен
+			заполнен_ли = заполнен(описание)
+			заполнено += заполнен_ли
 			блоки[блок.block_key]["entries"].append(
 				{
 					"user": участник["user"],
 					"full_name": участник["full_name"],
 					"left": участник["left"],
-					"filled": заполнен,
+					"filled": заполнен_ли,
 					"content": описание["content"],
 					"file": описание["file"],
 					"url": описание["url"],

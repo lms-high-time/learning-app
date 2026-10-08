@@ -18,11 +18,12 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	НАСТРОЙКИ,
 )
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН
-from lms_frappe_app.api import public, student
+from lms_frappe_app.api import public
 from lms_frappe_app.tests.sample_data import (
 	привязать_урок,
 	зачислить,
 	политика_по_умолчанию,
+	создать_занятие,
 	создать_урок,
 	создать_ученика,
 )
@@ -51,6 +52,10 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		frappe.db.set_single_value(НАСТРОЙКИ, поле, значение)
 		frappe.clear_document_cache(НАСТРОЙКИ, НАСТРОЙКИ)
 
+	def пробный_урок(self, урок: str) -> None:
+		"""Урок, начатый в веб-чате: занятие с отметкой веб-канала — так его считает проба."""
+		frappe.db.set_value("Agent Learning Session", создать_занятие(self.ученик, урок), "web_chat", 1)
+
 	def войти(self, урок: str) -> dict:
 		ответ = public.lesson_entry(lesson=урок)
 		self.assertTrue(ответ["ok"], ответ.get("error"))
@@ -64,17 +69,17 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		self.assertEqual(вход["study"]["demo_left"], 2)
 
 	def test_пробные_кончились_ведёт_к_своему_агенту(self):
-		student.start_lesson(lesson=self.уроки[0], channel="web")
-		student.start_lesson(lesson=self.уроки[1], channel="web")
+		self.пробный_урок(self.уроки[0])
+		self.пробный_урок(self.уроки[1])
 
 		вход = self.войти(self.уроки[2])
 
 		self.assertEqual(вход["study"], {"channel": "agent", "url": "/lms/agent", "demo_left": 0})
 
 	def test_начатый_в_чате_урок_ведёт_в_чат_и_без_пробных(self):
-		"""Тем же правилом, что `start_lesson`: возврат в урок пробного не тратит."""
-		student.start_lesson(lesson=self.уроки[0], channel="web")
-		student.start_lesson(lesson=self.уроки[1], channel="web")
+		"""Тем же правилом, что `start_lesson` с каналом `web`: возврат в урок пробного не тратит."""
+		self.пробный_урок(self.уроки[0])
+		self.пробный_урок(self.уроки[1])
 
 		вход = self.войти(self.уроки[0])
 

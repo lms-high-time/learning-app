@@ -21,7 +21,7 @@ from collections.abc import Collection
 import frappe
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning.errors import ЧУЖОЕ_ЗАНЯТИЕ, Отказ
+from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.releases import index
 
 ПРОХОЖДЕНИЕ = "Agent Lesson Run"
@@ -35,6 +35,7 @@ from lms_frappe_app.agent_learning.releases import index
 НЕ_НУЖЕН_ОБЯЗАТЕЛЬНОМУ = "not_needed_required"
 НУЖНО_СВИДЕТЕЛЬСТВО = "evidence_required"
 ДЛИННОЕ_СВИДЕТЕЛЬСТВО = "evidence_too_long"
+ДЛИННОЕ_ПРОДОЛЖЕНИЕ = "resume_from_too_long"
 
 ОТКРЫТ = "open"
 НЕ_НУЖЕН = "not_needed"
@@ -42,7 +43,13 @@ from lms_frappe_app.agent_learning.releases import index
 #: Статусы пункта, которые закрывают его для цели: разобран или отложен на потом.
 ЗАКРЫВАЮТ_ЦЕЛЬ = frozenset({"done", "planned"})
 ПРЕДЕЛ_СВИДЕТЕЛЬСТВА = 500
+#: Предел заметки «с чего продолжить» — одна фраза, а не конспект занятия.
+ПРЕДЕЛ_ПРОДОЛЖЕНИЯ = 500
 ПРОЙДЕН = "passed"
+#: Статус урока, цели и главы, которых ещё не касались.
+НЕ_НАЧАТО = "not_started"
+#: Время раньше любого настоящего — подстановка вместо пустого в сравнении времён.
+НИКОГДА = "1000-01-01 00:00:00"
 
 
 def прохождение(ученик: str, курс: str, ключ_урока: str):
@@ -91,21 +98,54 @@ def отметить(
 	статус: str,
 	свидетельство: str | None,
 	занятие: str | None = None,
+	*,
+	квиз_обязателен: bool = False,
+	продолжить: str | None = None,
 ) -> dict:
-	"""Отметка пункта прохождения; отдаёт остаток по цели пункта и следующий шаг урока.
+	"""Отметка пункта прохождения (`отметить_с_целями`) — ответ без статусов целей урока."""
+	return отметить_с_целями(
+		имя_прохождения,
+		ключ_пункта,
+		статус,
+		свидетельство,
+		занятие,
+		квиз_обязателен=квиз_обязателен,
+		продолжить=продолжить,
+	)[0]
+
+
+def отметить_с_целями(
+	имя_прохождения: str,
+	ключ_пункта: str,
+	статус: str,
+	свидетельство: str | None,
+	занятие: str | None = None,
+	*,
+	квиз_обязателен: bool = False,
+	продолжить: str | None = None,
+) -> tuple[dict, list[str]]:
+	"""Отметка пункта прохождения; отдаёт остаток по цели пункта и следующий шаг урока,
+	а вторым — статусы целей урока после отметки (снятые не в счёт).
+
+	Статусы целей нужны сигналу после отметки (`blocks_empty`): прохождение
+	уже прочитано, и перечитывать цели урока незачем.
 
 	Прохождение перечитывается с блокировкой и сверяется с действующим
 	релизом до отметки. Строка пункта получает статус, свидетельство, время
 	и занятие этой отметки; первая отметка не в `open` начинает урок
 	(`started_at`). Возврат в `open` свидетельства не требует и стирает
-	прежнее: открытый пункт ничем не подтверждён.
+	прежнее: открытый пункт ничем не подтверждён. `продолжить` — заметка «с
+	чего продолжить»: непустая пишется в прохождение тем же сохранением, что и
+	отметка, пустая прежнюю не трогает. `квиз_обязателен` — для следующего
+	шага (`следующий_шаг`): у урока есть вопросы, и политика требует квиз.
 
-	Отказ — только на форме: неизвестный статус или пункт, снятый пункт,
-	`not_needed` у обязательного, закрывающий статус без свидетельства,
-	свидетельство длиннее предела, занятие другого ученика, урока или
-	прохождения, архивное прохождение, урок, снятый из релиза. Сверка
-	сохраняется до проверки пункта и остаётся, даже когда отметке потом
-	отказано: прохождение и так должно стоять на действующем релизе.
+	Отказ — только на форме (`форма_отметки`): неизвестный статус, закрывающий
+	статус без свидетельства, свидетельство или заметка длиннее предела; и на
+	прохождении: неизвестный или снятый пункт, `not_needed` у обязательного,
+	занятие другого ученика, урока или прохождения, архивное прохождение
+	(`run_archived`), урок, снятый из релиза. Сверка сохраняется до проверки
+	пункта и остаётся, даже когда отметке потом отказано: прохождение и так
+	должно стоять на действующем релизе.
 
 	Прохождение, не сверенное с действующим релизом, сохраняется дважды — две
 	версии `track_changes`: «принят новый релиз» и «отмечен пункт» в истории
@@ -121,23 +161,9 @@ def отметить(
 	руководитель, а пункты им не показываются; история — `track_changes`
 	прохождения и поля строки.
 	"""
-	if статус not in СТАТУСЫ_ПУНКТА:
-		raise Отказ(
-			СТАТУС_НЕИЗВЕСТЕН, "Неизвестный статус пункта", status=статус, allowed=list(СТАТУСЫ_ПУНКТА)
-		)
-	свидетельство = None if статус == ОТКРЫТ else (свидетельство or "").strip()
-	if статус != ОТКРЫТ and not свидетельство:
-		raise Отказ(НУЖНО_СВИДЕТЕЛЬСТВО, "Отметка пункта требует свидетельства", status=статус)
-	if свидетельство and len(свидетельство) > ПРЕДЕЛ_СВИДЕТЕЛЬСТВА:
-		raise Отказ(
-			ДЛИННОЕ_СВИДЕТЕЛЬСТВО,
-			"Свидетельство длиннее предела",
-			limit=ПРЕДЕЛ_СВИДЕТЕЛЬСТВА,
-			length=len(свидетельство),
-		)
+	свидетельство, продолжить = форма_отметки(статус, свидетельство, продолжить)
 	run = frappe.get_doc(ПРОХОЖДЕНИЕ, имя_прохождения, for_update=True)
-	if not run.student:
-		raise Отказ(ЧУЖОЕ_ЗАНЯТИЕ, "Прохождение в архиве: прогресс ученика сброшен", run=run.name)
+	требовать_живое(run)
 	релиз = действующий(run.course)
 	_сверить_с(run, релиз)
 	if run.release != релиз:
@@ -166,12 +192,14 @@ def отметить(
 	строка.marked_at, строка.session = now_datetime(), занятие or None
 	if статус != ОТКРЫТ and not run.started_at:
 		run.started_at = строка.marked_at
+	if продолжить:
+		run.resume_from = продолжить
 	статусы(run)
 	run.save(ignore_permissions=True)
 
 	[цель] = [ц for ц in run.objectives if ц.objective_key == строка.objective_key]
 	открытые = открытые_обязательные(run)
-	return {
+	ответ = {
 		"goal": строка.goal_key,
 		"status": строка.status,
 		"objective": {
@@ -180,8 +208,76 @@ def отметить(
 			"open": [п["goal"] for п in открытые if п["objective"] == цель.objective_key],
 		},
 		"lesson": {"status": run.status},
-		"next": _первый(открытые),
+		"next_step": следующий_шаг(run, квиз_обязателен),
 	}
+	return ответ, [ц.status for ц in run.objectives if not ц.removed]
+
+
+def форма_отметки(
+	статус: str, свидетельство: str | None, продолжить: str | None
+) -> tuple[str | None, str | None]:
+	"""Свидетельство и заметка «с чего продолжить» отметки — обрезанные; форма не та — отказ.
+
+	Свидетельство у `open` — `None`, у прочих статусов обязательно. Пустая
+	заметка — `None`. Ничего не читает и не пишет: метод контракта зовёт её
+	до первой записи, `отметить` — ещё раз.
+	"""
+	if статус not in СТАТУСЫ_ПУНКТА:
+		raise Отказ(
+			СТАТУС_НЕИЗВЕСТЕН, "Неизвестный статус пункта", status=статус, allowed=list(СТАТУСЫ_ПУНКТА)
+		)
+	свидетельство = None if статус == ОТКРЫТ else (свидетельство or "").strip()
+	if статус != ОТКРЫТ and not свидетельство:
+		raise Отказ(НУЖНО_СВИДЕТЕЛЬСТВО, "Отметка пункта требует свидетельства", status=статус)
+	if свидетельство and len(свидетельство) > ПРЕДЕЛ_СВИДЕТЕЛЬСТВА:
+		raise Отказ(
+			ДЛИННОЕ_СВИДЕТЕЛЬСТВО,
+			"Свидетельство длиннее предела",
+			limit=ПРЕДЕЛ_СВИДЕТЕЛЬСТВА,
+			length=len(свидетельство),
+		)
+	продолжить = (продолжить or "").strip() or None
+	if продолжить and len(продолжить) > ПРЕДЕЛ_ПРОДОЛЖЕНИЯ:
+		raise Отказ(
+			ДЛИННОЕ_ПРОДОЛЖЕНИЕ,
+			"Заметка «с чего продолжить» длиннее предела",
+			limit=ПРЕДЕЛ_ПРОДОЛЖЕНИЯ,
+			length=len(продолжить),
+		)
+	return свидетельство, продолжить
+
+
+def требовать_живое(run) -> None:
+	"""Архивное прохождение (`student` пуст после сброса прогресса) — отказ `run_archived`."""
+	if not run.student:
+		raise Отказ(ПРОХОЖДЕНИЕ_В_АРХИВЕ, "Прохождение в архиве: прогресс ученика сброшен", run=run.name)
+
+
+def по_имени(имя: str):
+	"""Прохождение по имени — с блокировкой, сверенное с действующим релизом; архивное — отказ `run_archived`."""
+	run = frappe.get_doc(ПРОХОЖДЕНИЕ, имя, for_update=True)
+	требовать_живое(run)
+	сверить(run)
+	return run
+
+
+def статус_пункта(ученик: str, курс: str, ключ_урока: str, ключ_пункта: str) -> str:
+	"""Сохранённый статус пункта в прохождении ученика — простым чтением; нет прохождения или пункта — `open`.
+
+	`Why:` без блокировки и сверки: это путь чтения, а сверка писала бы на нём
+	(см. `главы`).
+	"""
+	строки = frappe.db.sql(
+		"""
+		select g.status from `tabAgent Lesson Run Goal` g
+		join `tabAgent Lesson Run` r on r.name = g.parent
+		where g.parenttype = 'Agent Lesson Run' and r.student = %(student)s
+			and r.course = %(course)s and r.lesson_key = %(lesson)s and g.goal_key = %(goal)s
+		limit 1
+		""",
+		{"student": ученик, "course": курс, "lesson": ключ_урока, "goal": ключ_пункта},
+	)
+	return строки[0][0] if строки else ОТКРЫТ
 
 
 def отметить_пройденным(
@@ -240,15 +336,149 @@ def следующий(run) -> dict | None:
 	return _первый(открытые_обязательные(run))
 
 
-def главы(ученик: str, курс: str) -> list[dict]:
-	"""Главы действующего релиза с прогрессом ученика по курсу.
+def следующий_шаг(run, квиз_обязателен: bool) -> dict | None:
+	"""Следующий шаг урока данными: пункт, квиз, закрытие или ничего.
 
-	Глава — `{key, status, lessons_total, lessons_started, lessons_passed}`,
-	по порядку релиза. Урок начат, когда статус его прохождения не
+	`{"kind": "goal", objective, goal, title}` — первый открытый обязательный
+	пункт по порядку релиза; `{"kind": "quiz"}` — обязательные закрыты, а квиз
+	обязателен (у урока есть вопросы, и политика его требует); `{"kind":
+	"complete"}` — закрыты, а квиз не обязателен; `None` — урок пройден.
+
+	`Why:` данные, а не фраза: шаг читают и агентский MCP, и веб-чат, и каждый
+	складывает свой текст.
+	"""
+	if run.status == ПРОЙДЕН:
+		return None
+	if пункт := следующий(run):
+		return {"kind": "goal", **пункт}
+	return {"kind": "quiz"} if квиз_обязателен else {"kind": "complete"}
+
+
+def карта(run, тексты: dict[str, str]) -> list[dict]:
+	"""Цели урока по порядку релиза — с текстом, статусом и пунктами; снятые не отдаются.
+
+	`тексты` — ключ цели → текст (`index.тексты_целей`); цель без текста — `None`.
+	"""
+	пункты: dict[str, list[dict]] = {}
+	for п in run.goals:
+		if not п.removed:
+			пункты.setdefault(п.objective_key, []).append(
+				{
+					"key": п.goal_key,
+					"kind": п.kind,
+					"required": bool(п.required),
+					"title": п.title,
+					"status": п.status,
+				}
+			)
+	return [
+		{
+			"key": ц.objective_key,
+			"text": тексты.get(ц.objective_key),
+			"status": ц.status,
+			"goals": пункты.get(ц.objective_key, []),
+		}
+		for ц in run.objectives
+		if not ц.removed
+	]
+
+
+def история(ученик: str, курс: str, кроме: str, глубина: int) -> list[dict]:
+	"""Прошлые уроки ученика по курсу — `глубина` последних начатых или пройденных, кроме урока `кроме`.
+
+	Урок — `{key, title, status, objectives_open}`: название и тексты
+	незакрытых целей (не `covered`, по порядку) — из релиза прохождения. Последний — по
+	последней отметке пункта, началу или зачёту, что позже. Ничего не пишет и
+	прохождений не сверяет: читает сохранённые статусы.
+
+	`Why:` одна выборка уроков и одна целей с текстами на всю глубину — старт
+	урока платит за историю постоянное число запросов.
+	"""
+	if глубина <= 0:
+		return []
+	уроки = frappe.db.sql(
+		"""
+		select r.name, r.lesson_key, rl.title, r.status
+		from `tabAgent Lesson Run` r
+		left join `tabAgent Release Lesson` rl
+			on rl.parenttype = 'Agent Course Release' and rl.parent = r.release
+			and rl.lesson_key = r.lesson_key
+		where r.student = %(student)s and r.course = %(course)s
+			and r.lesson_key != %(except)s and r.status != 'not_started'
+		order by greatest(
+			coalesce(
+				(
+					select max(g.marked_at) from `tabAgent Lesson Run Goal` g
+					where g.parent = r.name and g.parenttype = 'Agent Lesson Run'
+				),
+				cast(%(never)s as datetime(6))
+			),
+			coalesce(r.started_at, cast(%(never)s as datetime(6))),
+			coalesce(r.passed_at, cast(%(never)s as datetime(6)))
+		) desc, r.name
+		limit %(depth)s
+		""",
+		{"student": ученик, "course": курс, "except": кроме, "depth": глубина, "never": НИКОГДА},
+		as_dict=True,
+	)
+	if not уроки:
+		return []
+	цели = frappe.db.sql(
+		"""
+		select o.parent, o.objective_key, o.status, t.text
+		from `tabAgent Lesson Run Objective` o
+		join `tabAgent Lesson Run` r on r.name = o.parent
+		left join `tabAgent Release Objective` t
+			on t.parenttype = 'Agent Course Release' and t.parent = r.release
+			and t.lesson_key = r.lesson_key and t.objective_key = o.objective_key
+		where o.parenttype = 'Agent Lesson Run' and o.parent in %(runs)s
+			and o.removed = 0 and o.status != 'covered'
+		order by o.idx
+		""",
+		{"runs": tuple(у.name for у in уроки)},
+		as_dict=True,
+	)
+	открытые: dict[str, list[dict]] = {}
+	for ц in цели:
+		открытые.setdefault(ц.parent, []).append({"key": ц.objective_key, "text": ц.text, "status": ц.status})
+	return [
+		{"key": у.lesson_key, "title": у.title, "status": у.status, "objectives_open": открытые.get(у.name, [])}
+		for у in уроки
+	]
+
+
+def главы(ученик: str, курс: str) -> list[dict]:
+	"""Главы действующего релиза с прогрессом ученика по курсу (`прогресс_глав`); нет релиза — пусто.
+
+	Ничего не пишет.
+	"""
+	релиз = действующий(курс)
+	if not релиз:
+		return []
+	return прогресс_глав(index.уроки_глав(релиз), статусы_уроков(ученик, курс))
+
+
+def статусы_уроков(ученик: str, курс: str) -> dict[str, str]:
+	"""Ключ урока → сохранённый статус прохождения ученика по курсу — простым чтением."""
+	return dict(
+		frappe.get_all(
+			ПРОХОЖДЕНИЕ,
+			filters={"student": ученик, "course": курс},
+			fields=["lesson_key", "status"],
+			as_list=True,
+		)
+	)
+
+
+def прогресс_глав(уроки_глав: dict[str, list[str]], статус: dict[str, str]) -> list[dict]:
+	"""Прогресс по главам: `{key, status, lessons_total, lessons_started, lessons_passed}`.
+
+	`уроки_глав` — глава → ключи её уроков в действующем релизе, по порядку
+	релиза (`index.уроки_глав`); `статус` — ключ урока → статус прохождения
+	(`статусы_уроков`). Урок начат, когда статус его прохождения не
 	`not_started`, пройден — когда `passed`. Глава пройдена, когда пройдены
 	все её уроки; начата — хоть один; иначе не начата. Считаются только уроки
-	действующего релиза: прохождение снятого урока в счёт не идёт. Нет
-	действующего релиза — пусто. Ничего не пишет.
+	из `уроки_глав`: прохождение снятого урока в счёт не идёт.
 
 	`Why:` счёт — по хранимому статусу, без сверки прохождений. Сверка не
 	меняет деления «не начат / начат / пройден»: `not_started` зависит только
@@ -257,27 +487,16 @@ def главы(ученик: str, курс: str) -> list[dict]:
 	чтения: GET откатывает записи, а блокирующее чтение сразу после
 	публикации ловит взаимоблокировку снимочной изоляции.
 	"""
-	релиз = действующий(курс)
-	if not релиз:
-		return []
-	статус = dict(
-		frappe.get_all(
-			ПРОХОЖДЕНИЕ,
-			filters={"student": ученик, "course": курс},
-			fields=["lesson_key", "status"],
-			as_list=True,
-		)
-	)
 	итог = []
-	for ключ, уроки in index.уроки_глав(релиз).items():
-		начато = sum(статус.get(у, "not_started") != "not_started" for у in уроки)
+	for ключ, уроки in уроки_глав.items():
+		начато = sum(статус.get(у, НЕ_НАЧАТО) != НЕ_НАЧАТО for у in уроки)
 		пройдено = sum(статус.get(у) == ПРОЙДЕН for у in уроки)
 		if уроки and пройдено == len(уроки):
 			состояние = ПРОЙДЕН
 		elif начато:
 			состояние = "in_progress"
 		else:
-			состояние = "not_started"
+			состояние = НЕ_НАЧАТО
 		итог.append(
 			{
 				"key": ключ,
@@ -288,6 +507,55 @@ def главы(ученик: str, курс: str) -> list[dict]:
 			}
 		)
 	return итог
+
+
+def статусы_целей(ученик: str, курс: str) -> dict[tuple[str, str], str]:
+	"""(ключ урока, ключ цели) → сохранённый статус цели в прохождениях ученика по курсу.
+
+	Простым чтением, без блокировки и сверки (см. `прогресс_глав`); снятые
+	цели тоже отдаются — читающий берёт цели из действующего релиза, и статус
+	цели, которую сверка вернёт, тот же. Одним запросом на курс.
+	"""
+	return {
+		(с[0], с[1]): с[2]
+		for с in frappe.db.sql(
+			"""
+			select r.lesson_key, o.objective_key, o.status
+			from `tabAgent Lesson Run Objective` o
+			join `tabAgent Lesson Run` r on r.name = o.parent
+			where o.parenttype = 'Agent Lesson Run' and r.student = %(student)s and r.course = %(course)s
+			""",
+			{"student": ученик, "course": курс},
+		)
+	}
+
+
+def цели_урока(ученик: str, курс: str, релиз: str, ключ_урока: str) -> list[dict]:
+	"""Цели урока действующего релиза `релиз` со статусом из прохождения ученика: `[{key, text, status}]`.
+
+	Порядок и тексты — из релиза, статус — сохранённый в прохождении (нет
+	прохождения или цели в нём — `not_started`). Пунктов и свидетельств нет:
+	это уровень, который видят ученик и руководитель. Простым чтением, одним
+	запросом, без блокировки и сверки (см. `прогресс_глав`).
+	"""
+	return [
+		{"key": с[0], "text": с[1], "status": с[2] or НЕ_НАЧАТО}
+		for с in frappe.db.sql(
+			"""
+			select t.objective_key, t.text, o.status
+			from `tabAgent Release Objective` t
+			left join `tabAgent Lesson Run` r
+				on r.student = %(student)s and r.course = %(course)s and r.lesson_key = t.lesson_key
+			left join `tabAgent Lesson Run Objective` o
+				on o.parent = r.name and o.parenttype = 'Agent Lesson Run'
+				and o.objective_key = t.objective_key
+			where t.parenttype = 'Agent Course Release' and t.parent = %(release)s
+				and t.lesson_key = %(lesson)s
+			order by t.idx
+			""",
+			{"student": ученик, "course": курс, "release": релиз, "lesson": ключ_урока},
+		)
+	]
 
 
 def статусы(run) -> None:
@@ -313,11 +581,11 @@ def статусы(run) -> None:
 		elif закрыто:
 			цель.status = "touched"
 		else:
-			цель.status = "not_started"
+			цель.status = НЕ_НАЧАТО
 	if run.status == ПРОЙДЕН:
 		return
 	if not run.started_at:
-		run.status = "not_started"
+		run.status = НЕ_НАЧАТО
 	elif all(ц.status == "covered" for ц in цели):
 		run.status = "covered"
 	else:
@@ -520,7 +788,7 @@ def _сверить_цели(run, цели: list[dict]) -> None:
 		if строка := прежние.get(ключ):
 			строка.removed = 0
 		else:
-			run.append("objectives", {"objective_key": ключ, "status": "not_started"})
+			run.append("objectives", {"objective_key": ключ, "status": НЕ_НАЧАТО})
 	for строка in run.objectives:
 		if строка.objective_key not in порядок:
 			строка.removed = 1

@@ -9,7 +9,7 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.programs import ПОРЯДОК_ПРОГРАММЫ, программы_курсов
 from lms_frappe_app.api import public, student
 from lms_frappe_app.testing import сколько_запросов
-from lms_frappe_app.tests.sample_data import создать_ученика, создать_урок
+from lms_frappe_app.tests.sample_data import курс_из_релиза, создать_ученика, создать_урок, урок_релиза
 
 
 class IntegrationTestPrograms(IntegrationTestCase):
@@ -19,7 +19,10 @@ class IntegrationTestPrograms(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"program-{суффикс}@example.com")
 		self.посторонний = создать_ученика(f"program-other-{суффикс}@example.com")
-		self.урок_первого = создать_урок(f"Первый {суффикс}")
+		# Первый курс — из релиза: его дерево (`course_outline`) отдаётся только
+		# курсу из релиза.
+		первый, _ = курс_из_релиза()
+		self.урок_первого = урок_релиза(первый, "l-1")
 		self.урок_второго = создать_урок(f"Второй {суффикс}")
 		self.первый = self._курс(self.урок_первого)
 		self.второй = self._курс(self.урок_второго)

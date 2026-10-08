@@ -37,6 +37,14 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 				fields=["correct"],
 			)
 
+	def test_ученик_не_читает_пакет_агента(self):
+		"""Срез урока и рамка — в индексе релиза: ученику их отдают только методы агента."""
+		frappe.set_user(self.ученик)
+		with self.assertRaises(frappe.PermissionError):
+			frappe.get_list("Agent Course Release", fields=["agent_frame"])
+		with self.assertRaises(frappe.PermissionError):
+			frappe.get_list("Agent Release Lesson", parent_doctype="Agent Course Release", fields=["agent"])
+
 	def test_куратор_читает_но_не_создаёт_релиз(self):
 		"""Релиз создаёт только сервис публикации: права `create` нет ни у кого."""
 		модератор = создать_куратора(

@@ -41,7 +41,7 @@ class IntegrationTestChatState(IntegrationTestCase):
 		self.чужое_занятие = создать_занятие(self.чужой, self.урок)
 
 		frappe.set_user(self.ученик)
-		self.занятие = student.start_lesson(lesson=self.урок)["data"]["session"]
+		self.занятие = создать_занятие(self.ученик, self.урок)
 
 	def test_без_сохранения_состояния_нет(self):
 		данные = student.chat_state(self.занятие)["data"]

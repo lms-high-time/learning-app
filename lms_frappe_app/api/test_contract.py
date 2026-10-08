@@ -39,6 +39,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
+	урок_релиза,
+	зачислить_на_курс,
 )
 
 #: Документ контракта лежит в корне репозитория, рядом с README и CONTRIBUTING.
@@ -288,20 +290,21 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def test_ключи_ответов_совпадают_с_примерами_контракта(self):
 		курс, уроки = self._собрать_курс()
-		self._опубликовать_релиз()
-		репорт, сдача = self._пройти_курс(курс, уроки)
-		self._разобрать_репорт(курс, репорт)
+		курс_релиза = self._опубликовать_релиз()
+		репорт, сдача = self._пройти_курс(курс, уроки, курс_релиза)
+		self._разобрать_репорт(курс_релиза, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
 
 	# --- релиз курса ---
 
-	def _опубликовать_релиз(self) -> None:
+	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
 		релиз = пример_релиза(f"contract-{self.суффикс}")
-		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		курс = self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))["course"]
 		# Повтор отвечает теми же ключами, что и публикация.
 		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
+		return курс
 
 	# --- сборка курса ---
 
@@ -544,8 +547,8 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	# --- учебный поток ---
 
-	def _пройти_курс(self, курс: str, уроки: list[str]) -> tuple[str, str]:
-		с_квизом, без_квиза = уроки
+	def _пройти_курс(self, курс: str, уроки: list[str], курс_релиза: str) -> tuple[str, str]:
+		с_квизом, _ = уроки
 		frappe.set_user(self.ученик)
 
 		self.сверить("student.whoami", student.whoami())
@@ -555,23 +558,16 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self._назначить_курс(курс)
 		frappe.set_user(self.ученик)
 		self.сверить("student.list_my_courses", student.list_my_courses())
-		self.сверить("student.course_outline", student.course_outline(course=курс))
 		self.сверить("public.lesson_entry", public.lesson_entry(lesson=с_квизом))
 		self.сверить("public.course_map", public.course_map(course=курс))
 
-		занятие = self.сверить(
-			"student.start_lesson", student.start_lesson(lesson=с_квизом)
-		)["session"]
-		self.сверить("student.lesson_session", student.lesson_session(lesson=с_квизом))
-		# Лёгкий старт по тому же уроку продолжает то же занятие (#410).
-		self.сверить("student.start_lesson", student.start_lesson(lesson=с_квизом, brief=True))
-		self.сверить("student.lesson_material", student.lesson_material(session=занятие))
-		self.сверить("student.teaching_notes", student.teaching_notes(session=занятие))
-		self.сверить("student.student_context", student.student_context(session=занятие))
-		self.сверить(
-			"student.mark_objective",
-			student.mark_objective(session=занятие, objective=1, status="touched", note="с примера"),
-		)
+		# Методы агента по уроку — только курс из релиза (learning-services#506).
+		frappe.set_user("Administrator")
+		зачислить_на_курс(self.ученик, курс_релиза)
+		frappe.set_user(self.ученик)
+		занятие = self._пройти_урок_релиза(курс_релиза)
+		self.сверить("student.course_outline", student.course_outline(course=курс_релиза))
+		self.сверить("student.lesson_session", student.lesson_session(lesson=урок_релиза(курс_релиза, "l-1")))
 		репорт = self.сверить(
 			"student.report_issue",
 			student.report_issue(session=занятие, kind="stuck", text="Встал на примере"),
@@ -604,31 +600,6 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("student.scenario_state", student.scenario_state(key="profile"))
 		self.сверить("student.count_scenario_turn", student.count_scenario_turn(key="profile"))
 		self.сверить("student.reset_scenario_state", student.reset_scenario_state(key="profile"))
-
-		self.сверить(
-			"student.report_outcomes",
-			student.report_outcomes(
-				session=занятие,
-				outcomes=[
-					{"objective": "Понимать разницу между while и for", "status": "covered"}
-				],
-			),
-		)
-		попытка = self.сверить("student.request_quiz", student.request_quiz(session=занятие))
-		вопрос = попытка["question"]
-		while вопрос is not None:
-			ответ = self.сверить(
-				"student.submit_answer",
-				student.submit_answer(
-					attempt=попытка["attempt"],
-					question=вопрос["id"],
-					answer="1",
-					student_words="Первый вариант",
-				),
-			)
-			вопрос = ответ["next_question"]
-		self.assertTrue(ответ["result"]["passed"], "квиз не зачтён — дальше сверять нечего")
-		# Сданный квиз выдал домашку урока (learning-services#439).
 		self.сверить("student.homework", student.homework(lesson=с_квизом))
 		сдача = self.сверить(
 			"student.submit_homework",
@@ -637,10 +608,48 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить("student.my_homework", student.my_homework())
 		self.сверить("student.my_homework", student.my_homework(lesson=с_квизом))
 
-		второе = student.start_lesson(lesson=без_квиза)["data"]["session"]
-		self.сверить("student.complete_lesson", student.complete_lesson(session=второе))
 		self.сверить("student.get_my_progress", student.get_my_progress())
 		return репорт, сдача
+
+	def _пройти_урок_релиза(self, курс: str) -> str:
+		"""Урок с квизом — от старта до итога, урок без вопросов — до закрытия.
+
+		Отдаёт занятие урока с квизом."""
+		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-1")))
+		занятие = старт["session"]
+		self.сверить("student.lesson_item", student.lesson_item(session=занятие, goal="term:T1"))
+		self._отметить_обязательные(занятие, старт["lesson_map"])
+		попытка = self.сверить("student.request_quiz", student.request_quiz(session=занятие))
+		вопрос = попытка["question"]
+		while вопрос is not None:
+			ответ = self.сверить(
+				"student.submit_answer",
+				student.submit_answer(
+					attempt=попытка["attempt"], question=вопрос["id"], answer="V1", student_words="Первый вариант"
+				),
+			)
+			вопрос = ответ["next_question"]
+		self.assertTrue(ответ["result"]["passed"], "квиз не зачтён — дальше сверять нечего")
+
+		frappe.set_user("Administrator")
+		релиз = frappe.db.get_value("LMS Course", курс, "active_release")
+		frappe.db.delete("Agent Release Question", {"parent": релиз, "lesson_key": "l-2"})
+		frappe.set_user(self.ученик)
+		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-2")))
+		self._отметить_обязательные(старт["session"], старт["lesson_map"])
+		self.сверить("student.complete_lesson", student.complete_lesson(session=старт["session"]))
+		return занятие
+
+	def _отметить_обязательные(self, занятие: str, карта: list[dict]) -> None:
+		for цель in карта:
+			for пункт in цель["goals"]:
+				if пункт["required"]:
+					self.сверить(
+						"student.mark_goal",
+						student.mark_goal(
+							session=занятие, goal=пункт["key"], status="done", evidence="Ученик сделал сам"
+						),
+					)
 
 	# --- репорт: разбор и итог ---
 

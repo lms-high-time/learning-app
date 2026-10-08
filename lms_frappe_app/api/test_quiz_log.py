@@ -14,17 +14,17 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.api import student
+from lms_frappe_app.tests.release_sample import релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
-	зачислить,
+	занятие_релиза,
+	зачислить_на_курс,
+	курс_из_релиза,
+	отметить_все_пункты,
 	политика_по_умолчанию,
-	создать_вопрос,
-	создать_занятие,
-	создать_квиз,
 	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
-	создать_урок,
 	создать_ученика,
 )
 
@@ -44,16 +44,16 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		добавить_в_организацию(self.ученик, self.организация)
 		self.менеджер = создать_менеджера(f"qlogm-{суффикс}@example.com", self.организация)
 
-		self.урок = создать_урок(f"Урок {суффикс}")
-		self.курс = зачислить(self.ученик, self.урок)
-		self.первый = создать_вопрос(f"Столица? {суффикс}", варианты=[("Москва", True), ("Тула", False)])
-		self.второй = создать_вопрос(f"Оператор повторения? {суффикс}", возможные_ответы=["цикл"])
-		создать_квиз(self.урок, [self.первый, self.второй])
-		self.занятие = создать_занятие(self.ученик, self.урок)
+		self.курс, _ = курс_из_релиза(релиз=релиз_двух_целей(f"qlog-{суффикс}"))
+		зачислить_на_курс(self.ученик, self.курс)
+		self.первый, self.второй = "S1/l-1-D1", "S2/l-1-D1"
+		self.занятие = занятие_релиза(self.ученик, self.курс, "l-1")
+		self.урок = frappe.db.get_value("Agent Learning Session", self.занятие, "lesson")
 		# Занятие в пространстве организации: так попытку читает руководитель,
 		# и запрет на журнал проверяется там, где он действительно что-то
 		# отнимает.
 		frappe.db.set_value("Agent Learning Session", self.занятие, "organization", self.организация)
+		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", self.занятие, "run"))
 
 		frappe.set_user(self.ученик)
 		начало = student.request_quiz(self.занятие)
@@ -66,7 +66,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 			filters={"attempt": self.попытка},
 			fields=[
 				"kind",
-				"question",
+				"question_key",
 				"answer",
 				"student_words",
 				"is_correct",
@@ -85,14 +85,14 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 	# --- что пишется ---
 
 	def test_попытка_целиком_ложится_в_журнал_по_порядку(self):
-		self.assertTrue(self.ответить(self.первый, "1", "Москва, конечно")["ok"])
+		self.assertTrue(self.ответить(self.первый, "V1", "Первый, конечно")["ok"])
 		итог = self.ответить(self.второй, "мимо", "Не помню, пусть будет «мимо»")
 		self.assertTrue(итог["data"]["attempt_finished"])
 
 		события = self.события()
 
 		self.assertEqual(
-			[(с.kind, с.question) for с in события],
+			[(с.kind, с.question_key) for с in события],
 			[
 				(ВЫДАН, self.первый),
 				(ПРИНЯТ, self.первый),
@@ -103,7 +103,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		первый, второй = события[1], события[3]
 		self.assertEqual(
 			(первый.answer, первый.student_words, первый.is_correct),
-			("1", "Москва, конечно", 1),
+			("V1", "Первый, конечно", 1),
 		)
 		self.assertEqual(
 			(второй.answer, второй.student_words, второй.is_correct),
@@ -125,7 +125,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 
 		self.assertEqual(повтор["attempt"], self.попытка)
 		self.assertEqual(
-			[(с.kind, с.question) for с in self.события()],
+			[(с.kind, с.question_key) for с in self.события()],
 			[(ВЫДАН, self.первый), (ВЫДАН, self.первый)],
 		)
 
@@ -134,7 +134,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 	def test_без_слов_ученика_ответ_не_принят(self):
 		for слова in (None, "", "   \n\t"):
 			with self.subTest(слова=слова):
-				ответ = self.ответить(self.первый, "1", слова)
+				ответ = self.ответить(self.первый, "V1", слова)
 
 				self.assertFalse(ответ["ok"])
 				self.assertEqual(ответ["error"]["code"], quiz.НУЖНЫ_СЛОВА)
@@ -143,18 +143,16 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		# остаётся открытым для ответа со словами.
 		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": self.попытка}))
 		self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
-		self.assertTrue(self.ответить(self.первый, "1", "Москва")["ok"])
+		self.assertTrue(self.ответить(self.первый, "V1", "Первый")["ok"])
 
 	def test_отклонённый_ответ_в_журнал_не_попадает(self):
-		чужой = создать_вопрос("Не из этого квиза", варианты=[("да", True), ("нет", False)])
-
-		ответ = self.ответить(чужой, "1", "да")
+		ответ = self.ответить("S9/l-1-D1", "V1", "да")
 
 		self.assertEqual(ответ["error"]["code"], quiz.ЧУЖОЙ_ВОПРОС)
 		self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
 
 	def test_длинные_слова_обрезаются_а_не_отклоняются(self):
-		ответ = self.ответить(self.первый, "1", "я" * (quiz.ДЛИНА_СЛОВ + 500))
+		ответ = self.ответить(self.первый, "V1", "я" * (quiz.ДЛИНА_СЛОВ + 500))
 
 		self.assertTrue(ответ["ok"])
 		принят = next(с for с in self.события() if с.kind == ПРИНЯТ)
@@ -162,7 +160,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 
 	def test_слова_на_вердикт_не_влияют(self):
 		"""Судит сервер по `answer`: слова только лежат в журнале."""
-		вердикт = self.ответить(self.первый, "2", "Москва, я уверен")["data"]["verdict"]
+		вердикт = self.ответить(self.первый, "V2", "Первый, я уверен")["data"]["verdict"]
 
 		self.assertFalse(вердикт["correct"])
 
@@ -171,7 +169,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 	def test_ученик_и_руководитель_журнал_не_читают(self):
 		"""В журнале ответы рядом с вердиктом — готовые эталоны. Руководитель
 		попытку своего сотрудника читает, а журнал по ней — нет."""
-		self.ответить(self.первый, "1", "Москва")
+		self.ответить(self.первый, "V1", "Первый")
 		событие = frappe.get_all(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name", limit=1)[0]
 
 		frappe.set_user(self.менеджер)
@@ -185,7 +183,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 				self.assertEqual(self._видно_списком(), [])
 
 	def test_модератор_журнал_читает_но_не_правит(self):
-		self.ответить(self.первый, "1", "Москва")
+		self.ответить(self.первый, "V1", "Первый")
 		событие = frappe.get_all(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name", limit=1)[0]
 		модератор = создать_куратора(
 			f"qlogmod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator"

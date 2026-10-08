@@ -194,14 +194,14 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 
 		self.опубликовать(self.релиз(None))
 
-		старт = домашка.для_старта(второй, урок, курс, None, полное=True)
+		старт = домашка.для_старта(второй, урок, курс, None)
 		self.assertIsNone(старт["homework"])
 		with self.assertRaises(Отказ) as пойман:
 			домашка.сохранить(второй, урок, None, answer="Ответ без выдачи")
 		self.assertEqual(пойман.exception.код, домашка.ЗАДАНИЯ_НЕТ)
 		self.assertEqual(self.сдачи(второй), [])
 		# Ученик с выданной сдачей видит задание на старте и сдаёт его.
-		старт = домашка.для_старта(первый, урок, курс, None, полное=True)
+		старт = домашка.для_старта(первый, урок, курс, None)
 		self.assertEqual(старт["homework"]["title"], "Задание")
 		self.assertEqual(домашка.сохранить(первый, урок, None, answer="Мой ответ").version, 1)
 		# Страница урока — по тому же правилу.
@@ -258,8 +258,8 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 
 		self.опубликовать()
 
-		self.assertIsNone(домашка.для_старта(второй, урок, курс, None, полное=True)["previous_homework"])
-		прошлое = домашка.для_старта(первый, урок, курс, None, полное=True)["previous_homework"]
+		self.assertIsNone(домашка.для_старта(второй, урок, курс, None)["previous_homework"])
+		прошлое = домашка.для_старта(первый, урок, курс, None)["previous_homework"]
 		self.assertEqual((прошлое["lesson"], прошлое["title"]), (прошлый, "Задание"))
 		self.assertIsNotNone(прошлое["submission"])
 
