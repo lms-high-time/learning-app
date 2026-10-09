@@ -358,6 +358,7 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		без_урока = пример_релиза(ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		_, релиз = курс_из_релиза(релиз=без_урока)
 		frappe.set_user(self.ученик)
 
@@ -388,6 +389,7 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		без_третьего = пример_релиза(ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		del без_третьего["agent"]["lessons"]["l-3"]
 		_, второй = курс_из_релиза(релиз=без_третьего)
 		занятие = создать_занятие(self.ученик, урок_релиза(курс, "l-2"))
 		frappe.set_user(self.ученик)

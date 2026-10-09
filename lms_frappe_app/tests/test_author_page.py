@@ -384,12 +384,13 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		"""Ключи пакета агента — произвольные строки, тексты релиза и заметки —
 		текст автора: ни один не выходит в HTML тегом или концом атрибута, и
 		`<title>` тоже. В названиях глав и уроков `<` и `>` релиз не пускает
-		(`title_forbidden_chars`) — там нагрузка сущностями и кавычкой."""
+		(`title_forbidden_chars`) — там нагрузка сущностями и кавычкой. Ключи
+		`items` и `sections` среза — ключи пунктов и разделов урока
+		(`broken_ref`), им нагрузку не дать."""
 		релиз = отравленный_релиз(f"xss-{self.ключ}")
 		пакет = релиз["agent"]["lessons"]["l-1"]
 		пакет[ВРЕД] = "Часть пакета с таким ключом"
 		пакет["extra"] = {ВРЕД: "Запись с таким ключом"}
-		пакет["items"][ВРЕД] = "Пункт пакета с таким ключом"
 		ответ = authoring.publish_release(release=релиз)
 		self.assertTrue(ответ["ok"], ответ)
 		курс = ответ["data"]["course"]
@@ -507,6 +508,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		del без_третьего["agent"]["lessons"]["l-3"]
 		authoring.publish_release(release=без_третьего)
 
 		с = сведения_для(self.куратор, course=self.курс, view="notes")

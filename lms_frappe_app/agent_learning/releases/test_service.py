@@ -132,6 +132,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		релиз = пример_релиза(self.ключ)
 		релиз["chapters"] = релиз["chapters"][:1]
 		релиз["lessons"] = релиз["lessons"][:2]
+		del релиз["agent"]["lessons"]["l-3"]
 
 		ответ = self.опубликовать(релиз)
 
@@ -229,6 +230,50 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 				)
 		self.assertIsNone(self.курс_по_ключу())
 
+	def test_лишние_ключи_пакета_агента_отказ_до_первой_записи(self):
+		"""Хвост снятого урока, пункт не из целей урока, подсказка к разделу,
+		который урок не заполняет, — отказ; курс и его версии как были."""
+		первый = self.опубликовать()
+		курс = первый["course"]
+
+		def хвост(р):
+			р["chapters"] = р["chapters"][:1]
+			р["lessons"] = р["lessons"][:2]
+
+		порчи = {
+			"agent.lessons": (хвост, "l-3"),
+			"agent.lessons.l-1.items": (
+				lambda р: р["agent"]["lessons"]["l-1"]["items"].update({"l-1-D1/V9": "Подробности."}),
+				"l-1-D1/V9",
+			),
+			"agent.lessons.l-1.sections": (
+				lambda р: р["agent"]["lessons"]["l-1"]["sections"].update({"rules": "Подсказка."}),
+				"rules",
+			),
+		}
+		было = {
+			doctype: frappe.get_all(doctype, filters={"course": курс}, fields=["name", "modified"])
+			for doctype in ("Course Lesson", "Course Chapter")
+		}
+		for где, (порча, ключ) in порчи.items():
+			релиз = пример_релиза(self.ключ)
+			релиз["lessons"][0]["title"] = "Урок первый, исправленный"
+			порча(релиз)
+			with self.subTest(где=где):
+				отказ = self.отказ(service.РЕЛИЗ_НЕ_СХОДИТСЯ, релиз)
+				self.assertEqual(
+					отказ.подробности["problems"], [{"code": "broken_ref", "where": где, "key": ключ}]
+				)
+		self.assertEqual(frappe.db.count(РЕЛИЗ, {"course": курс}), 1)
+		self.assertEqual(frappe.db.get_value("LMS Course", курс, "active_release"), первый["release"])
+		self.assertEqual(
+			{
+				doctype: frappe.get_all(doctype, filters={"course": курс}, fields=["name", "modified"])
+				for doctype in было
+			},
+			было,
+		)
+
 	def test_курс_передан(self):
 		frappe.set_user("Administrator")
 		анонс = создать_курс(f"Анонс {frappe.generate_hash(length=6)}")
@@ -275,6 +320,8 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		релиз["document"] = None
 		for урок in релиз["lessons"]:
 			урок["sections"] = []
+		for срез in релиз["agent"]["lessons"].values():
+			срез["sections"] = {}
 
 		ответ = self.опубликовать(релиз)
 
@@ -358,6 +405,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		del без_третьего["agent"]["lessons"]["l-3"]
 		self.опубликовать(без_третьего)
 
 		ответ = self.опубликовать()
@@ -372,6 +420,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		del без_третьего["agent"]["lessons"]["l-3"]
 		self.опубликовать(без_третьего)
 
 		ответ = self.опубликовать()
@@ -417,6 +466,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		del без_третьего["agent"]["lessons"]["l-3"]
 		self.опубликовать(без_третьего)
 		frappe.db.set_value(
 			"Course Lesson", {"course": первый["course"], "lesson_key": "l-3"}, "lesson_key", None

@@ -50,6 +50,7 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		релиз = пример_релиза(self.ключ)
 		релиз["chapters"] = релиз["chapters"][:1]
 		релиз["lessons"] = релиз["lessons"][:2]
+		del релиз["agent"]["lessons"]["l-3"]
 		return релиз
 
 	def урок(self, курс: str, ключ: str = "l-3") -> str:

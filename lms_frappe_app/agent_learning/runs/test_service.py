@@ -40,8 +40,10 @@ def итог(ответ: dict) -> tuple[str, str]:
 
 
 def убрать_пункт(релиз: dict, ключ: str) -> None:
-	for цель in релиз["lessons"][0]["objectives"]:
+	урок = релиз["lessons"][0]
+	for цель in урок["objectives"]:
 		цель["goals"] = [п for п in цель["goals"] if п["key"] != ключ]
+	релиз["agent"]["lessons"][урок["key"]]["items"].pop(ключ, None)
 
 
 class IntegrationTestПрохождение(IntegrationTestCase):
@@ -207,6 +209,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 
 		второй = релиз_двух_целей(self.ключ)
 		второй["lessons"][0]["objectives"].pop()
+		del второй["agent"]["lessons"]["l-1"]["items"]["return:R1"]
 		self.опубликовать(второй)
 		run = service.прохождение(self.ученик, курс, "l-1")
 		self.assertEqual(self.цели(run)["l-1-D2"], ("covered", 1))
@@ -229,6 +232,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		второй = релиз_двух_целей(self.ключ)
 		второй["lessons"][0]["objectives"][0]["text"] = "Цель, переписанная автором"
 		второй["lessons"][0]["objectives"].pop()
+		del второй["agent"]["lessons"]["l-1"]["items"]["return:R1"]
 		self.опубликовать(второй)
 		run = service.прохождение(self.ученик, курс, "l-1")
 
@@ -251,6 +255,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		без_урока = пример_релиза(self.ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		self.опубликовать(без_урока)
 		self.assertEqual(self.перечитать(run).release, релиз_урока)
 		for строки_индекса in ("Agent Release Lesson", "Agent Release Objective"):
@@ -525,6 +530,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		без_урока = пример_релиза(self.ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		self.опубликовать(без_урока)
 
 		run = service.прохождение(self.ученик, курс, "l-2")
@@ -626,6 +632,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		без_урока = пример_релиза(self.ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		self.опубликовать(без_урока)
 
 		подробности = self.отказ("lesson_not_in_release", run.name, "term:T1", "done", "Ученик объяснил сам")
@@ -849,6 +856,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		без_урока = пример_релиза(self.ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		self.опубликовать(без_урока)
 
 		self.assertEqual(self.главы(курс)["ch-1"], ("not_started", 1, 0, 0))
