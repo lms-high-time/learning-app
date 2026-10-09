@@ -80,7 +80,9 @@
    "fieldname": "data",
    "fieldtype": "JSON",
    "label": "Таблицы и поля",
-   "description": "Строки таблиц и значения полей документа (learning-services#330)"
+   "description": "Строки таблиц и значения полей документа (learning-services#330)",
+   "report_hide": 1,
+   "print_hide": 1
   },
   {
    "collapsible": 1,
@@ -107,7 +109,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-28 12:00:00.000000",
+ "modified": "2026-10-09 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Student Artifact",

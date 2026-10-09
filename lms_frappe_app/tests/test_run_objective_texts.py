@@ -49,6 +49,7 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 		второй = релиз_двух_целей(ключ)
 		второй["lessons"][0]["objectives"][0]["text"] = "Цель, переписанная автором"
 		второй["lessons"][0]["objectives"].pop()
+		del второй["agent"]["lessons"]["l-1"]["items"]["return:R1"]
 		# Сайт до патча: публикация не освобождала прежнюю версию, а текстов в
 		# строках прохождений нет.
 		with patch.object(frappe, "enqueue"), patch.object(retention, "освободить_прежние"):

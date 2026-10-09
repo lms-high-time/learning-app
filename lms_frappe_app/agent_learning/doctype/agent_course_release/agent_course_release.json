@@ -160,7 +160,9 @@
    "label": "Пакет агента: рамка курса",
    "description": "frame и learn_about_student из пакета агента релиза как есть; нет — {}",
    "hidden": 1,
-   "read_only": 1
+   "read_only": 1,
+   "report_hide": 1,
+   "print_hide": 1
   },
   {
    "fieldname": "snapshot",
@@ -168,12 +170,14 @@
    "label": "Снимок релиза",
    "hidden": 1,
    "description": "Релиз целиком, как опубликован; пусто — содержимое версии освобождено: сервер его не хранит, у версии с коммитом его восстанавливает git по коммиту, у версии без коммита кандидата из источника проверяет дайджест — при сборке тем же компилятором и с той же нормализацией",
-   "read_only": 1
+   "read_only": 1,
+   "report_hide": 1,
+   "print_hide": 1
   }
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-09 22:00:00.000000",
+ "modified": "2026-10-09 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Release",

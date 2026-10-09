@@ -31,6 +31,8 @@ from lms_frappe_app.agent_learning import announcements
 	"у курса из релиза цели — названия глав релиза.",
 	"insert_after": "course_attribution",
 	"module": "Agent Learning",
+	"report_hide": 1,
+	"print_hide": 1,
 }
 
 

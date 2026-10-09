@@ -1,15 +1,21 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Курс из релиза правит только публикация (learning-services#500, #512).
+"""Курс из релиза правит только публикация (learning-services#500, #512, #526).
 
 Поля релиза у `LMS Course`, порядок глав курса, хуки `validate` и `on_trash`
-у `Course Chapter` и `Course Lesson`, удаление строк оглавления, переименование.
+у `Course Chapter` и `Course Lesson`, вставка и удаление строк оглавления, переименование;
+домашки и схема документа курса и права Course Creator на них.
 Пути — те, которыми ходят Desk и Learning: `frappe.client`, `frappe.delete_doc`,
 `delete_documents`.
 """
 
+import json
+from unittest.mock import patch
+
 import frappe
+from frappe.client import delete as удалить_из_desk
+from frappe.client import insert as вставить_из_desk
 from frappe.client import rename_doc, set_value
 from frappe.client import save as сохранить_из_desk
 from frappe.tests import IntegrationTestCase
@@ -20,14 +26,42 @@ from lms_frappe_app.agent_learning.doctype.agent_course_release.test_agent_cours
 )
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 from lms_frappe_app.agent_learning.releases import service
+from lms_frappe_app.agent_learning.releases.course_guard import ДОКУМЕНТ
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	курс_из_релиза,
+	создать_домашку,
 	создать_куратора,
 	создать_курс,
 	создать_урок,
+	схема_документа,
 	урок_релиза,
 )
+
+ДОМАШКА = "Agent Lesson Homework"
+БЛОК_СХЕМЫ = "Agent Artifact Block"
+БЛОК = {"key": "notes", "title": "Заметки"}
+
+
+def права_из_файла(тест, *doctypes: str) -> None:
+	"""Права доктайпов на время теста — из их файлов `.json`, а не из базы сайта.
+
+	`Why:` права в базе меняет только `migrate`, а тест проверяет права, с
+	которыми доктайп уходит в приложение. Подменяется список прав в объекте
+	меты доктайпа — он общий для всего процесса тестов, поэтому подмена
+	снимается в конце теста вместе с кэшем прав ролей. Права в базе сайта она
+	не меняет. На свежем сайте права совпадают с файлом.
+	"""
+	тест.addCleanup(setattr, frappe.local, "role_permissions", {})
+	for doctype in doctypes:
+		имя = frappe.scrub(doctype)
+		путь = frappe.get_app_path("lms_frappe_app", "agent_learning", "doctype", имя, f"{имя}.json")
+		with open(путь) as файл:
+			права = [frappe._dict(право) for право in json.load(файл)["permissions"]]
+		заплатка = patch.object(frappe.get_meta(doctype), "permissions", права)
+		заплатка.start()
+		тест.addCleanup(заплатка.stop)
+	frappe.local.role_permissions = {}
 
 
 class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
@@ -201,6 +235,47 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		self.assertTrue(frappe.db.exists("Chapter Reference", глава))
 		self.assertTrue(frappe.db.exists("Lesson Reference", урок))
 
+	def test_строку_оглавления_курса_из_релиза_не_вставить(self):
+		"""`POST /api/resource` со строкой вставляет её по праву `create` на родителе,
+		мимо `validate` курса и главы; строку курса без релиза — можно."""
+		куратор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com")
+		вторая = frappe.get_doc(
+			{"doctype": "Course Chapter", "course": self.свободный_курс, "title": "Вторая"}
+		).insert()
+		другой_урок = frappe.get_doc(
+			{"doctype": "Course Lesson", "chapter": self.свободная_глава, "title": "Другой"}
+		).insert()
+
+		def глава(курс: str):
+			return frappe.new_doc(
+				"Chapter Reference",
+				parent=курс,
+				parenttype="LMS Course",
+				parentfield="chapters",
+				chapter=вторая.name,
+			)
+
+		def урок(глава_: str):
+			return frappe.new_doc(
+				"Lesson Reference",
+				parent=глава_,
+				parenttype="Course Chapter",
+				parentfield="lessons",
+				lesson=другой_урок.name,
+			)
+
+		frappe.set_user(куратор)
+		self.отказ(глава(self.курс).insert)
+		self.отказ(урок(self.глава).insert)
+		глава(self.свободный_курс).insert()
+		урок(self.свободная_глава).insert()
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists("Chapter Reference", {"parent": self.курс, "chapter": вторая.name}))
+		self.assertFalse(
+			frappe.db.exists("Lesson Reference", {"parent": self.глава, "lesson": другой_урок.name})
+		)
+
 	def test_строку_оглавления_курса_без_релиза_удалить_можно(self):
 		модератор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com", "Moderator")
 		урок = frappe.db.get_value("Lesson Reference", {"parent": self.свободная_глава}, "name")
@@ -307,3 +382,187 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		self.assertFalse(frappe.db.exists("Course Lesson", self.урок))
 		# Флаг удаления снят: другой курс из релиза по-прежнему охраняется.
 		self.отказ(lambda: frappe.delete_doc("Course Lesson", урок_релиза(другой, "l-1")))
+
+
+class IntegrationTestДомашкаИДокументКурсаИзРелиза(IntegrationTestCase):
+	"""Домашки и схему документа курса из релиза правит только публикация;
+	курса без релиза — Moderator и System Manager в Desk (learning-services#526)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		права_из_файла(self, ДОМАШКА, ДОКУМЕНТ)
+		суффикс = frappe.generate_hash(length=6)
+		self.ключ = f"guard-hw-{суффикс}"
+		self.куратор = создать_куратора(f"rel-guard-cc-{суффикс}@example.com")
+		self.курс, _ = курс_из_релиза(self.куратор, релиз=пример_релиза(self.ключ))
+		self.урок = урок_релиза(self.курс, "l-1")
+		self.домашка = frappe.db.get_value(ДОМАШКА, {"lesson": урок_релиза(self.курс, "l-3")})
+		self.схема = frappe.db.get_value(ДОКУМЕНТ, {"course": self.курс, "is_active": 1})
+		self.свободный_урок = создать_урок(f"Без релиза {суффикс}")
+		self.свободный_курс = frappe.db.get_value("Course Lesson", self.свободный_урок, "course")
+		self.свободная_домашка = создать_домашку(self.свободный_урок).name
+		self.урок_без_домашки = создать_урок(f"Без релиза и домашки {суффикс}")
+		self.свободная_схема = схема_документа(self.свободный_курс, "journal", "Журнал", [БЛОК])["data"]["id"]
+		self.модератор = создать_куратора(f"rel-guard-mod-{суффикс}@example.com", "Moderator")
+		self.админ = создать_куратора(f"rel-guard-sm-{суффикс}@example.com", "System Manager")
+
+	def отказ(self, действие):
+		with self.assertRaises(Отказ) as пойман:
+			действие()
+		self.assertEqual(пойман.exception.код, КУРС_ИЗ_РЕЛИЗА)
+
+	def правки(self, домашка: str, схема: str, урок: str, курс: str) -> dict:
+		"""Пути `/api/resource` и Desk: создать, сохранить и удалить домашку и схему.
+
+		`урок` — урок без домашки, `курс` — курс новой схемы.
+		"""
+
+		def сохранить(doctype, имя, **поля):
+			return lambda: сохранить_из_desk(
+				frappe.as_json({**frappe.get_doc(doctype, имя).as_dict(), **поля})
+			)
+
+		return {
+			"домашка: создать": lambda: вставить_из_desk(
+				{
+					"doctype": ДОМАШКА,
+					"lesson": урок,
+					"title": "Своя",
+					"description": "Своё задание.",
+					"answer_mode": "text",
+					"due_mode": "none",
+				}
+			),
+			"домашка: сохранить": сохранить(ДОМАШКА, домашка, title="Правка мимо релиза"),
+			"домашка: удалить": lambda: удалить_из_desk(ДОМАШКА, домашка),
+			"схема: создать": lambda: вставить_из_desk(
+				{"doctype": ДОКУМЕНТ, "course": курс, "slug": "own", "title": "Своя", "is_active": 1}
+			),
+			"схема: сохранить": сохранить(ДОКУМЕНТ, схема, title="Правка мимо релиза"),
+			"схема: удалить": lambda: удалить_из_desk(ДОКУМЕНТ, схема),
+		}
+
+	def test_куратор_только_читает_домашки_и_схемы(self):
+		"""Ни курса из релиза, ни чужого курса без релиза: права на запись у Course Creator нет."""
+		for doctype in (ДОМАШКА, ДОКУМЕНТ):
+			self.assertTrue(frappe.has_permission(doctype, "read", user=self.куратор), doctype)
+			for право in ("write", "create", "delete"):
+				self.assertFalse(frappe.has_permission(doctype, право, user=self.куратор), (doctype, право))
+		frappe.set_user(self.куратор)
+		for правки in (
+			self.правки(self.домашка, self.схема, self.урок, self.курс),
+			self.правки(
+				self.свободная_домашка, self.свободная_схема, self.урок_без_домашки, self.свободный_курс
+			),
+		):
+			for что, действие in правки.items():
+				with self.subTest(что), self.assertRaises(frappe.PermissionError):
+					действие()
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value(ДОМАШКА, self.домашка, "title"), "Задание")
+		self.assertTrue(frappe.db.exists(ДОКУМЕНТ, self.свободная_схема))
+
+	def test_курс_из_релиза_не_правят_и_модератор_с_администратором(self):
+		for кто in (self.модератор, self.админ, "Administrator"):
+			frappe.set_user(кто)
+			for что, действие in self.правки(self.домашка, self.схема, self.урок, self.курс).items():
+				with self.subTest(кто=кто, что=что):
+					self.отказ(действие)
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value(ДОМАШКА, self.домашка, "title"), "Задание")
+		self.assertTrue(frappe.db.exists(ДОКУМЕНТ, self.схема))
+
+	def test_домашку_и_схему_не_перенести_в_курс_из_релиза_и_из_него(self):
+		frappe.set_user(self.админ)
+		домашка = frappe.get_doc(ДОМАШКА, self.свободная_домашка)
+		домашка.lesson = self.урок
+		self.отказ(домашка.save)
+		домашка = frappe.get_doc(ДОМАШКА, self.домашка)
+		домашка.lesson = self.свободный_урок
+		self.отказ(домашка.save)
+		схема = frappe.get_doc(ДОКУМЕНТ, self.свободная_схема)
+		схема.course = self.курс
+		self.отказ(схема.save)
+		схема = frappe.get_doc(ДОКУМЕНТ, self.схема)
+		схема.course = self.свободный_курс
+		self.отказ(схема.save)
+
+	def test_строку_схемы_курса_из_релиза_не_удалить_и_схему_не_переименовать(self):
+		строка = frappe.db.get_value(БЛОК_СХЕМЫ, {"parent": self.схема}, "name")
+		frappe.set_user(self.модератор)
+		self.отказ(lambda: frappe.delete_doc(БЛОК_СХЕМЫ, строка))
+		self.отказ(lambda: rename_doc(ДОКУМЕНТ, self.схема, f"{self.схема}-renamed"))
+		self.отказ(lambda: rename_doc(ДОКУМЕНТ, self.свободная_схема, self.схема, merge=True))
+		frappe.set_user("Administrator")
+		self.assertTrue(frappe.db.exists(БЛОК_СХЕМЫ, строка))
+		self.assertTrue(frappe.db.exists(ДОКУМЕНТ, self.схема))
+
+	def test_строку_схемы_курса_из_релиза_не_вставить_и_не_править(self):
+		"""`POST /api/resource` и `PUT` строки: вставка и правка строки по праву на
+		схеме, мимо её `validate`; строку схемы курса без релиза — можно."""
+
+		def строка(схема: str):
+			return frappe.new_doc(
+				БЛОК_СХЕМЫ,
+				parent=схема,
+				parenttype=ДОКУМЕНТ,
+				parentfield="blocks",
+				block_key="extra",
+				title="Лишний",
+			)
+
+		прежняя = frappe.get_doc(БЛОК_СХЕМЫ, frappe.db.get_value(БЛОК_СХЕМЫ, {"parent": self.схема}, "name"))
+		for кто in (self.модератор, "Administrator"):
+			frappe.set_user(кто)
+			with self.subTest(кто=кто):
+				self.отказ(строка(self.схема).insert)
+				правка = frappe.get_doc(БЛОК_СХЕМЫ, прежняя.name)
+				правка.title = "Правка мимо релиза"
+				self.отказ(правка.save)
+		frappe.set_user(self.модератор)
+		строка(self.свободная_схема).insert()
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": self.схема, "block_key": "extra"}))
+		self.assertEqual(frappe.db.get_value(БЛОК_СХЕМЫ, прежняя.name, "title"), прежняя.title)
+		self.assertTrue(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": self.свободная_схема, "block_key": "extra"}))
+
+	def test_курс_без_релиза_правят_модератор_и_администратор(self):
+		for кто in (self.модератор, self.админ):
+			frappe.set_user("Administrator")
+			урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
+			курс = frappe.db.get_value("Course Lesson", урок, "course")
+			домашка = создать_домашку(урок).name
+			схема = схема_документа(курс, "journal", "Журнал", [БЛОК])["data"]["id"]
+			frappe.set_user(кто)
+			for что, действие in self.правки(домашка, схема, self.урок_без_домашки, курс).items():
+				with self.subTest(кто=кто, что=что):
+					действие()
+			frappe.set_user("Administrator")
+			self.assertFalse(frappe.db.exists(ДОМАШКА, домашка))
+			self.assertFalse(frappe.db.exists(ДОКУМЕНТ, схема))
+			self.assertTrue(frappe.db.exists(ДОКУМЕНТ, {"course": курс, "slug": "own"}))
+			# Домашка урока без домашки заведена: следующему кругу урок нужен снова пустой.
+			frappe.delete_doc(ДОМАШКА, frappe.db.get_value(ДОМАШКА, {"lesson": self.урок_без_домашки}))
+
+	def test_публикация_куратором_правит_снимает_и_удаляет(self):
+		"""Новая версия от Course Creator: домашка и схема правятся, домашка снимается."""
+		релиз = пример_релиза(self.ключ)
+		уроки = {у["key"]: у for у in релиз["lessons"]}
+		уроки["l-3"]["homework"]["title"] = "Задание, исправленное"
+		релиз["document"]["title"] = "Тетрадь, исправленная"
+		frappe.set_user(self.куратор)
+
+		service.опубликовать(релиз, None, self.куратор)
+
+		self.assertEqual(frappe.db.get_value(ДОМАШКА, self.домашка, "title"), "Задание, исправленное")
+		действующая = frappe.db.get_value(
+			ДОКУМЕНТ, {"course": self.курс, "is_active": 1}, ["title", "version"], as_dict=True
+		)
+		self.assertEqual((действующая.title, действующая.version), ("Тетрадь, исправленная", 2))
+
+		уроки["l-3"]["homework"] = None
+		service.опубликовать(релиз, None, self.куратор)
+
+		self.assertFalse(frappe.db.exists(ДОМАШКА, self.домашка))

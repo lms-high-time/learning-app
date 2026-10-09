@@ -205,6 +205,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		без_урока = пример_релиза(ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		релизы.опубликовать(без_урока, None, "Administrator")
 		for строки_индекса in ("Agent Release Lesson", "Agent Release Objective"):
 			frappe.db.delete(строки_индекса, {"parent": релиз_урока})

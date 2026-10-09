@@ -36,6 +36,63 @@ class TestПроверкиРелиза(unittest.TestCase):
 		р["lessons"][0]["sections"] = ["nope"]
 		self.assertIn("broken_ref", _коды(р))
 
+	def test_хвост_снятого_урока_в_пакете_агента(self):
+		"""Урок снят из уроков и из главы, а его срез в пакете остался."""
+		р = пример_релиза()
+		р["chapters"] = р["chapters"][:1]
+		р["lessons"] = р["lessons"][:2]
+		self.assertEqual(
+			checks.проблемы(р)[0], [{"code": "broken_ref", "where": "agent.lessons", "key": "l-3"}]
+		)
+
+	def test_пункт_пакета_не_из_целей_урока(self):
+		"""Пункт другого урока — тоже чужой: пространство пункта — урок."""
+		р = пример_релиза()
+		р["agent"]["lessons"]["l-1"]["items"]["l-2-D1/V1"] = "Подробности пункта другого урока."
+		self.assertEqual(
+			checks.проблемы(р)[0],
+			[{"code": "broken_ref", "where": "agent.lessons.l-1.items", "key": "l-2-D1/V1"}],
+		)
+
+	def test_запись_раздела_в_срезе_не_из_документа(self):
+		р = пример_релиза()
+		р["agent"]["lessons"]["l-3"]["sections"]["nope"] = "Запись раздела, которого нет."
+		self.assertEqual(
+			checks.проблемы(р)[0],
+			[{"code": "broken_ref", "where": "agent.lessons.l-3.sections", "key": "nope"}],
+		)
+
+	def test_запись_раздела_документа_который_урок_не_заполняет_допустима(self):
+		"""Раздел `rules` в документе есть, урок `l-1` в него не пишет: ссылка сходится."""
+		р = пример_релиза()
+		р["agent"]["lessons"]["l-1"]["sections"]["rules"] = "Запись раздела в срезе."
+		self.assertEqual(checks.проблемы(р), ([], []))
+
+	def test_запись_раздела_в_релизе_без_документа(self):
+		р = пример_релиза()
+		р["document"] = None
+		for урок in р["lessons"]:
+			урок["sections"] = []
+		self.assertEqual(
+			[(п["where"], п["key"]) for п in checks.проблемы(р)[0]],
+			[
+				("agent.lessons.l-1.sections", "log"),
+				("agent.lessons.l-2.sections", "log"),
+				("agent.lessons.l-2.sections", "rules"),
+			],
+		)
+
+	def test_пакет_неполный_или_иной_формы_не_ошибка(self):
+		"""Пакет непрозрачен: полноты сервер не требует, части не-объекты не разбирает."""
+		р = пример_релиза()
+		del р["agent"]["lessons"]["l-1"]
+		del р["agent"]["lessons"]["l-2"]["items"]["term:T1"]
+		р["agent"]["lessons"]["l-2"]["sections"] = ["не", "объект"]
+		р["agent"]["lessons"]["l-3"] = "срез строкой"
+		self.assertEqual(checks.проблемы(р), ([], []))
+		р["agent"]["lessons"] = ["не", "объект"]
+		self.assertEqual(checks.проблемы(р), ([], []))
+
 	def test_уроки_глав_не_в_порядке_уроков(self):
 		р = пример_релиза()
 		р["chapters"][0]["lessons"] = ["l-2", "l-1"]
@@ -102,14 +159,30 @@ class TestПроверкиРелиза(unittest.TestCase):
 			],
 		)
 
-	def test_знаки_в_названиях_не_имён_допустимы(self):
-		"""Курс называется слагом, домашка, документ и разделы — не по названию."""
+	def test_знаки_в_названиях_домашки_и_документа(self):
+		"""Название домашки и документа — `title_field` своего доктайпа: `<` и `>` в
+		нём — тоже `title_forbidden_chars`."""
 		р = пример_релиза()
-		р["course"]["title"] = "Курс a < b"
 		р["lessons"][2]["homework"]["title"] = "Задание <1>"
-		р["document"]["title"] = "Тетрадь <черновик>"
+		р["document"]["title"] = "Тетрадь a < b"
+		self.assertEqual(
+			[(п["code"], п["where"], п["chars"]) for п in checks.проблемы(р)[0]],
+			[
+				("title_forbidden_chars", "lessons[l-3].homework.title", ["<", ">"]),
+				("title_forbidden_chars", "document.title", ["<"]),
+			],
+		)
+
+	def test_знаки_в_прочих_названиях_допустимы(self):
+		"""Разделы — блоки схемы, а не записи со своим названием; курс называется
+		слагом, его карточка — предупреждение `course_card_markup`."""
+		р = пример_релиза()
 		р["document"]["sections"][0]["title"] = "Раздел > 1"
-		self.assertEqual(checks.проблемы(р), ([], []))
+		р["course"]["title"] = "Курс a < b"
+		self.assertEqual(
+			checks.проблемы(р),
+			([], [{"code": "course_card_markup", "where": "course.title", "chars": ["<"]}]),
+		)
 
 	def test_пустые_тексты_ученику_предупреждения(self):
 		р = пример_релиза()

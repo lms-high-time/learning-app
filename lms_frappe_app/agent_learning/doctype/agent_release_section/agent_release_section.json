@@ -24,14 +24,18 @@
    "fieldname": "title",
    "fieldtype": "Data",
    "label": "Название",
-   "in_list_view": 1,
-   "read_only": 1
+   "read_only": 1,
+   "ignore_xss_filter": 1,
+   "report_hide": 1
   },
   {
    "fieldname": "description",
    "fieldtype": "Small Text",
+   "ignore_xss_filter": 1,
    "label": "Описание",
-   "read_only": 1
+   "print_hide": 1,
+   "read_only": 1,
+   "report_hide": 1
   },
   {
    "fieldname": "rows",
@@ -45,12 +49,14 @@
    "fieldname": "columns",
    "fieldtype": "JSON",
    "label": "Колонки",
-   "read_only": 1
+   "print_hide": 1,
+   "read_only": 1,
+   "report_hide": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-09 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Release Section",

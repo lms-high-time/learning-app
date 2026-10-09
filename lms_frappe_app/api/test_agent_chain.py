@@ -73,6 +73,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		без_урока = пример_релиза(ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		frappe.set_user("Administrator")
 		курс_из_релиза(релиз=без_урока)
 		frappe.set_user(self.ученик)

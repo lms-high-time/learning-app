@@ -4,6 +4,8 @@
 import frappe
 from frappe.model.document import Document
 
+from lms_frappe_app.agent_learning.errors import запретить_угловые
+
 РАСКЛАДКИ = ("sections", "canvas")
 
 
@@ -33,6 +35,10 @@ class AgentCourseArtifact(Document):
 		self.version = self._следующая_версия()
 
 	def validate(self):
+		if self.is_new() or self.has_value_changed("title"):
+			# Why: название, записанное до запрета, не мешает сохранять запись
+			# по другим полям — снятие шаблона при публикации, правка срока.
+			запретить_угловые(self.title, "title")
 		if self.version < 1:
 			frappe.throw(frappe._("Версия схемы начинается с единицы"))
 		self.slug = нормализовать_ключ(self.slug)

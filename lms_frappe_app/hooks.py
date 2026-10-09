@@ -169,6 +169,9 @@ fixtures = [
 	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
 	# (learning-services#500). Цели анонса — у курса без релиза (learning-services#512).
 	# Ключи глав и уроков из релиза — на самих записях (learning-services#514).
+	# Зачин, обещание и описание главы хранятся как есть, без очистки Frappe
+	# (`ignore_xss_filter`, learning-services#521), и скрыты из отчётов и печати
+	# Desk: там Frappe выводит их без экранирования.
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -318,12 +321,50 @@ doc_events = {
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
-	# Строки оглавления удаляются и сами по себе — Desk и `delete_documents` Learning.
+	# Строки оглавления вставляются и удаляются и сами по себе — `/api/resource`,
+	# Desk и `delete_documents` Learning.
 	"Chapter Reference": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
 	"Lesson Reference": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
+	},
+	# Прогресс курса из релиза — по урокам программы: пройденный урок, снятый
+	# из релиза, Learning засчитывал бы (learning-services#522).
+	"LMS Enrollment": {
+		"on_update": "lms_frappe_app.agent_learning.course_progress.сверить",
+	},
+	# Отметка урока, один ключ на две ишью:
+	# - learning-services#525: урок курса из релиза закрывает только занятие —
+	#   Learning пишет отметку и прямыми вызовами Python, мимо подмены методов.
+	#   `проверить_отметку` — первым: отказ раньше, чем #522 пометит снятие.
+	# - learning-services#522: снятый пройденный урок опускает и долю, достигшую
+	#   100: сброс прогресса даёт 0, а не 100.
+	"LMS Course Progress": {
+		"validate": [
+			"lms_frappe_app.agent_learning.browser_progress.проверить_отметку",
+			"lms_frappe_app.agent_learning.course_progress.отметить_снятие",
+		],
+		"on_trash": "lms_frappe_app.agent_learning.course_progress.отметить_снятие",
+		"on_update": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
+		"after_delete": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
+	},
+	# Домашки уроков и схему документа курса из релиза пишет только публикация
+	# (learning-services#526).
+	"Agent Lesson Homework": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_домашку",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_домашку",
+	},
+	"Agent Course Artifact": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_документ",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_документ",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	"Agent Artifact Block": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 	},
 }
 
@@ -367,12 +408,16 @@ before_tests = "lms_frappe_app.testing.before_tests"
 
 _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 
+_прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
+
 # Урок закрывает занятие с агентом, а не время на странице урока —
-# обоснование в модуле (lms-platform#305).
+# обоснование в модуле (lms-platform#305). Подмена сверяет строку вызова, а
+# Learning импортирует `save_progress` ещё в два модуля: подменено каждое имя
+# (learning-services#525).
 override_whitelisted_methods = {
-	"lms.lms.doctype.course_lesson.course_lesson.save_progress": (
-		"lms_frappe_app.agent_learning.browser_progress.save_progress"
-	),
+	"lms.lms.doctype.course_lesson.course_lesson.save_progress": _прогресс,
+	"lms.lms.api.save_progress": _прогресс,
+	"lms.lms.doctype.lms_quiz.lms_quiz.save_progress": _прогресс,
 	# Вход по почте (learning-services#460): занятый адрес не тупик, смена
 	# пароля подтверждается письмом — обоснование в `access.py`.
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
