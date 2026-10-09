@@ -30,7 +30,7 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 		self.addCleanup(frappe.set_user, "Administrator")
 		frappe.set_user("Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		ключ = f"run-texts-{суффикс}"
+		self.ключ = ключ = f"run-texts-{суффикс}"
 		первый = релизы.опубликовать(релиз_двух_целей(ключ), None, "Administrator")
 		self.курс, self.первый = первый["course"], первый["release"]
 		self.прохождения = [
@@ -49,7 +49,7 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 		второй["lessons"][0]["objectives"][0]["text"] = "Цель, переписанная автором"
 		второй["lessons"][0]["objectives"].pop()
 		with patch.object(frappe, "enqueue"):
-			релизы.опубликовать(второй, None, "Administrator")
+			self.второй = релизы.опубликовать(второй, None, "Administrator")["release"]
 		# Сайт до патча: текстов в строках прохождений нет.
 		frappe.db.set_value(ЦЕЛЬ, {"parent": ("in", self.прохождения)}, "text", None, update_modified=False)
 
@@ -64,18 +64,53 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 	def test_по_релизу_прохождения_архивные_тоже(self):
 		with redirect_stdout(io.StringIO()) as вывод:
 			run_objective_texts.execute()
+		with redirect_stdout(io.StringIO()) as повтор:
+			run_objective_texts.execute()
 
 		self.assertEqual(self.тексты(), [ПЕРВЫЕ, ПЕРВЫЕ])
-		self.assertIn("run_objective_texts:", вывод.getvalue())
+		self.assertIn(
+			f"run_objective_texts: {self.курс} — текстов записано: релиз прохождения 4, "
+			"последний релиз с целью 0; без текста осталось 0",
+			вывод.getvalue(),
+		)
+		self.assertNotIn(self.курс, повтор.getvalue())
 
-	def test_без_индекса_релиза_прохождения_по_действующему(self):
+	def test_без_индекса_релиза_прохождения_по_последнему_релизу_с_целью(self):
 		frappe.db.delete("Agent Release Objective", {"parent": self.первый})
 
 		run_objective_texts.заполнить()
 
-		# Снятой цели в действующем релизе нет — текст взять неоткуда.
+		# Снятой цели нет ни в одном оставшемся индексе — текст взять неоткуда.
 		ожидаемо = {"l-1-D1": "Цель, переписанная автором", "l-1-D2": None}
 		self.assertEqual(self.тексты(), [ожидаемо, ожидаемо])
+
+	def test_цель_снятая_до_патча_получает_последний_текст(self):
+		"""Сверка довела прохождения до второй версии, где цели `l-1-D2` уже нет:
+		её текст — из первой, последней версии курса с этой целью."""
+		frappe.db.set_value(
+			ПРОХОЖДЕНИЕ, {"name": ("in", self.прохождения)}, "release", self.второй, update_modified=False
+		)
+
+		записано = run_objective_texts.заполнить()
+
+		ожидаемо = {"l-1-D1": "Цель, переписанная автором", "l-1-D2": ПЕРВЫЕ["l-1-D2"]}
+		self.assertEqual(self.тексты(), [ожидаемо, ожидаемо])
+		self.assertEqual(
+			записано, {"релиз прохождения": {self.курс: 2}, "последний релиз с целью": {self.курс: 2}}
+		)
+
+	def test_из_нескольких_версий_с_целью_главнее_свежая(self):
+		третий = релиз_двух_целей(self.ключ)
+		третий["lessons"][0]["objectives"][1]["text"] = "Цель вернулась другой"
+		with patch.object(frappe, "enqueue"):
+			релизы.опубликовать(третий, None, "Administrator")
+		frappe.db.set_value(
+			ПРОХОЖДЕНИЕ, {"name": ("in", self.прохождения)}, "release", self.второй, update_modified=False
+		)
+
+		run_objective_texts.заполнить()
+
+		self.assertEqual([т["l-1-D2"] for т in self.тексты()], ["Цель вернулась другой"] * 2)
 
 	def test_заполненный_текст_не_трогается_и_повтор_ничего_не_меняет(self):
 		frappe.db.set_value(
@@ -92,4 +127,4 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 
 		self.assertEqual(после_первого[0], {**ПЕРВЫЕ, "l-1-D1": "Текст сверки"})
 		self.assertEqual(self.тексты(), после_первого)
-		self.assertEqual(повтор, {"релиз прохождения": 0, "действующий релиз": 0})
+		self.assertEqual(повтор, {"релиз прохождения": {}, "последний релиз с целью": {}})

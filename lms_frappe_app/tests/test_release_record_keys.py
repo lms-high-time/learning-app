@@ -200,6 +200,19 @@ class IntegrationTestИндексКлючейПроекции(IntegrationTestCas
 			],
 		)
 
+	def test_индекс_есть_на_сайте(self):
+		"""Индекс в базе сайта: в CI приложение ставится `install-app`, и
+		индекс заводит `after_sync`; на мигрированном сайте — `after_migrate`."""
+		for doctype, поле in projection.ПОЛЕ_КЛЮЧА.items():
+			with self.subTest(doctype=doctype):
+				строки = frappe.db.sql(
+					f"show index from `tab{doctype}` where Key_name = %s", f"course_{поле}", as_dict=True
+				)
+				self.assertEqual(
+					[(с.Column_name, с.Non_unique) for с in sorted(строки, key=lambda с: с.Seq_in_index)],
+					[("course", 0), (поле, 0)],
+				)
+
 	def test_при_установке_индекс_заводит_after_sync(self):
 		"""`install_app` синхронизирует фикстуры после `after_install`, а
 		`after_sync` зовёт следом: поля уже есть."""

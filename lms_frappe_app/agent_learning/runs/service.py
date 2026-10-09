@@ -353,10 +353,10 @@ def следующий_шаг(run, квиз_обязателен: bool) -> dict 
 	return {"kind": "quiz"} if квиз_обязателен else {"kind": "complete"}
 
 
-def карта(run, тексты: dict[str, str]) -> list[dict]:
+def карта(run) -> list[dict]:
 	"""Цели урока по порядку релиза — с текстом, статусом и пунктами; снятые не отдаются.
 
-	`тексты` — ключ цели → текст (`index.тексты_целей`); цель без текста — `None`.
+	Текст — из строки прохождения: его пишет сверка; цель без текста — `None`.
 	"""
 	пункты: dict[str, list[dict]] = {}
 	for п in run.goals:
@@ -373,7 +373,7 @@ def карта(run, тексты: dict[str, str]) -> list[dict]:
 	return [
 		{
 			"key": ц.objective_key,
-			"text": тексты.get(ц.objective_key),
+			"text": ц.text or None,
 			"status": ц.status,
 			"goals": пункты.get(ц.objective_key, []),
 		}

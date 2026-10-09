@@ -285,18 +285,6 @@ def цели_с_пунктами(релиз: str, ключ: str | None = None) -
 	return итог
 
 
-def тексты_целей(релиз: str, ключ: str) -> dict[str, str]:
-	"""Ключ цели урока релиза → её текст."""
-	return dict(
-		frappe.get_all(
-			ЦЕЛЬ,
-			filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ},
-			fields=["objective_key", "text"],
-			as_list=True,
-		)
-	)
-
-
 def название_главы(релиз: str, ключ: str) -> str | None:
 	"""Название главы релиза по ключу; нет главы — `None`."""
 	return frappe.db.get_value(ГЛАВА, {"parenttype": РЕЛИЗ, "parent": релиз, "chapter_key": ключ}, "title")

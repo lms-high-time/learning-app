@@ -425,7 +425,7 @@ def start_lesson(
 		"start": _состояние_старта(
 			ученик, курс, lesson, занятие.name, any(у["objectives_open"] for у in история)
 		),
-		"lesson_map": прохождения.карта(run, index.тексты_целей(релиз, ключ)),
+		"lesson_map": прохождения.карта(run),
 		"next_step": прохождения.следующий_шаг(run, квиз_обязателен),
 		"resume_from": run.resume_from or None,
 		"directive": _текст_пакета(пакет.get("directive")),
