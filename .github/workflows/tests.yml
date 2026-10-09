@@ -10,36 +10,83 @@ on:
 env:
   # Ревизия Frappe образа стенда, двигается вместе с ним.
   FRAPPE_REV: c1f1e8ec3708750d7254f7f99d869ffb9886f19f
+  # Why: версии закреплены — плавающий тег меняет окружение CI без коммита,
+  # а ключ кэша образов по нему не отличил бы одну сборку от другой.
+  REDIS_VERSION: 7.4.11-alpine
+  MARIADB_VERSION: "11.8"
+  # Зеркало официальных образов Docker Hub в ECR Public.
+  IMAGE_MIRROR: public.ecr.aws/docker/library
 
 jobs:
+  # Тесты делятся на части, каждая поднимает своё окружение на отдельной
+  # машине. Why: тесты идут последовательно и занимают бо́льшую часть прогона;
+  # на нескольких машинах стена прогона — подготовка плюс доля тестов.
+  # fail-fast выключен: упавшая часть не обрывает остальные, и один прогон
+  # показывает все падения.
   tests:
-    name: bench run-tests
+    name: bench run-tests ${{ matrix.part }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    services:
-      # Порты нестандартные не для красоты: bench ожидает redis именно на них,
-      # когда конфигурация не генерируется (--skip-redis-config-generation).
-      redis-cache:
-        image: redis:alpine
-        ports: ["13000:6379"]
-      redis-queue:
-        image: redis:alpine
-        ports: ["11000:6379"]
-      redis-socketio:
-        image: redis:alpine
-        ports: ["12000:6379"]
-      mariadb:
-        image: mariadb:11.8
-        ports: ["3306:3306"]
-        env:
-          MARIADB_ROOT_PASSWORD: root
-        options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=5s --health-timeout=5s --health-retries=10
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
 
     steps:
       - uses: actions/checkout@v5
+
+      # Образы redis и MariaDB лежат в кэше GitHub, при промахе скачиваются
+      # с зеркала. Why: анонимный pull с Docker Hub упирается в rate limit —
+      # прогон падает на старте контейнеров с `toomanyrequests`, не дойдя до
+      # тестов. Контейнеры поэтому поднимаются шагами, а не блоком `services:`:
+      # он стартует до шагов и кэша не видит. `v1` в ключе — номер схемы кэша:
+      # поднимать при смене состава архива.
+      - name: Кэш образов сервисов
+        uses: actions/cache@v4
+        with:
+          path: ~/image-cache
+          key: ${{ runner.os }}-images-v1-redis${{ env.REDIS_VERSION }}-mariadb${{ env.MARIADB_VERSION }}
+
+      # Pull с зеркала — с повтором через паузу. Why: анонимный лимит ECR
+      # Public считается в запросах в секунду с IP, а раннеры делят адреса:
+      # на промахе кэша pull ловит `toomanyrequests: Rate exceeded`.
+      - name: Загрузить образы сервисов
+        run: |
+          REDIS_IMAGE="$IMAGE_MIRROR/redis:$REDIS_VERSION"
+          MARIADB_IMAGE="$IMAGE_MIRROR/mariadb:$MARIADB_VERSION"
+          pull() {
+            for attempt in 1 2 3 4 5 6; do
+              docker pull "$1" && return 0
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+          if [ -f ~/image-cache/images.tar ]; then
+            docker load -i ~/image-cache/images.tar
+          else
+            pull "$REDIS_IMAGE"
+            pull "$MARIADB_IMAGE"
+            mkdir -p ~/image-cache
+            docker save -o ~/image-cache/images.tar "$REDIS_IMAGE" "$MARIADB_IMAGE"
+          fi
+
+      # Порты нестандартные не для красоты: bench ожидает redis именно на них,
+      # когда конфигурация не генерируется (--skip-redis-config-generation).
+      # Контейнеры стартуют до подготовки bench, а готовность MariaDB
+      # проверяется перед созданием сайта. Why: инициализация базы идёт
+      # параллельно с установкой bench и не стоит в очереди за ней.
+      - name: Поднять redis и MariaDB
+        run: |
+          REDIS_IMAGE="$IMAGE_MIRROR/redis:$REDIS_VERSION"
+          MARIADB_IMAGE="$IMAGE_MIRROR/mariadb:$MARIADB_VERSION"
+          docker run -d --name redis-cache -p 13000:6379 "$REDIS_IMAGE"
+          docker run -d --name redis-queue -p 11000:6379 "$REDIS_IMAGE"
+          docker run -d --name redis-socketio -p 12000:6379 "$REDIS_IMAGE"
+          docker run -d --name mariadb -p 3306:3306 \
+            -e MARIADB_ROOT_PASSWORD=root \
+            --health-cmd="healthcheck.sh --connect --innodb_initialized" \
+            --health-interval=5s --health-timeout=5s --health-retries=10 \
+            "$MARIADB_IMAGE"
 
       # Строго 3.14: frappe 16 объявляет Python>=3.14,<3.15, и на 3.12
       # установка падает на разрешении зависимостей, а не на тестах.
@@ -98,13 +145,29 @@ jobs:
         run: |
           # payments — не наша прихоть: lms объявляет его в required_apps
           # и без него не устанавливается.
-          bench get-app --branch version-16 https://github.com/frappe/payments
+          # --skip-assets: тесты серверные, собранный фронтенд им не нужен.
+          # Why: сборка ассетов Learning — самая долгая часть шага.
+          bench get-app --skip-assets --branch version-16 https://github.com/frappe/payments
           # Learning — из нашего форка, той же веткой, что стоит на стенде
           # платформы. Why: на upstream `main` тесты шли бы по другой схеме
           # Learning, чем работает стенд, — права, DocType и хуки расходятся
           # с первой же серверной правкой форка или отставанием от upstream.
-          bench get-app --branch high-time https://github.com/lms-high-time/learning-fork
+          bench get-app --skip-assets --branch high-time https://github.com/lms-high-time/learning-fork
           bench get-app lms_frappe_app "$GITHUB_WORKSPACE"
+
+      - name: Дождаться MariaDB
+        run: |
+          for _ in $(seq 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' mariadb)
+            case "$status" in
+              healthy) exit 0 ;;
+              unhealthy) break ;;
+            esac
+            sleep 2
+          done
+          echo "::error::MariaDB не готова: $status"
+          docker logs mariadb
+          exit 1
 
       - name: Создать сайт и установить приложения
         working-directory: /home/runner/frappe-bench
@@ -122,6 +185,23 @@ jobs:
           # сайту она только роняет прогон (learning-services#383).
           bench --site test.local set-config --parse throttle_user_limit 100000
 
+      # Раскладка модулей по частям и почему не `run-parallel-tests` —
+      # в docstring скрипта.
       - name: Прогнать тесты
-        working-directory: /home/runner/frappe-bench
-        run: bench --site test.local run-tests --app lms_frappe_app
+        working-directory: /home/runner/frappe-bench/sites
+        run: >-
+          /home/runner/frappe-bench/env/bin/python "$GITHUB_WORKSPACE/.github/scripts/run_tests_part.py"
+          test.local lms_frappe_app ${{ matrix.part }} ${{ strategy.job-total }}
+
+  # Итог частей под именем обязательной проверки ветки master. Why: правило
+  # защиты ветки требует проверку `bench run-tests`, а у частей матрицы имена
+  # свои. Без `always()` при падении части итог был бы skipped, а skipped
+  # обязательная проверка не блокирует мерж.
+  tests-result:
+    name: bench run-tests
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Все части зелёные
+        run: test "${{ needs.tests.result }}" = success
