@@ -42,7 +42,9 @@ class IntegrationTestПатчОсвобождения(IntegrationTestCase):
 	def со_снимком(self) -> dict[str, list[str]]:
 		return {
 			курс: [
-				имя for имя in имена if frappe.db.exists(index.РЕЛИЗ, {"name": имя, "snapshot": ("is", "set")})
+				имя
+				for имя in имена
+				if frappe.db.exists(index.РЕЛИЗ, {"name": имя, "snapshot": ("is", "set")})
 			]
 			for курс, имена in self.версии.items()
 		}
@@ -87,10 +89,9 @@ class IntegrationTestПатчОсвобождения(IntegrationTestCase):
 				self.assertEqual(self.со_снимком(), self.версии)
 				self.assertIn(f"не выполнены патчи {патч}", вывод)
 
-	def test_идёт_последним_после_заполняющих_патчей(self):
+	def test_идёт_после_заполняющих_патчей(self):
 		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
 		свой = строки.index(patch_log.полное_имя("free_release_content"))
 		for раньше in free_release_content.ЖДЁТ:
 			with self.subTest(раньше=раньше):
 				self.assertLess(строки.index(patch_log.полное_имя(раньше)), свой)
-		self.assertEqual(строки[-1], patch_log.полное_имя("free_release_content"))

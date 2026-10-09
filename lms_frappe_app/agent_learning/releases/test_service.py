@@ -14,7 +14,14 @@ from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index, places, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_урок
+from lms_frappe_app.tests.sample_data import (
+	создать_занятие,
+	создать_куратора,
+	создать_курс,
+	создать_урок,
+	создать_ученика,
+	урок_релиза,
+)
 
 РЕЛИЗ = "Agent Course Release"
 
@@ -34,6 +41,13 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 
 	def курс_по_ключу(self, ключ: str | None = None) -> str | None:
 		return frappe.db.get_value("LMS Course", {"course_key": ключ or self.ключ})
+
+	def занятие(self, курс: str, ключ: str) -> None:
+		"""Занятие ученика по уроку `ключ`: со ссылкой на него снятый урок остаётся."""
+		frappe.set_user("Administrator")
+		ученик = создать_ученика(f"rel-svc-pupil-{frappe.generate_hash(length=6)}@example.com")
+		создать_занятие(ученик, урок_релиза(курс, ключ))
+		frappe.set_user(self.куратор)
 
 	def отказ(self, код: str, *args, **kwargs) -> Отказ:
 		with self.assertRaises(Отказ) as пойман:
@@ -340,7 +354,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual(frappe.db.count("LMS Course", {"course_key": self.ключ}), 1)
 
 	def test_вернувшийся_ключ_в_ответе(self):
-		self.опубликовать()
+		self.занятие(self.опубликовать()["course"], "l-3")
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
@@ -354,6 +368,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 	def test_вернувшийся_ключ_та_же_запись(self):
 		первый = self.опубликовать()
 		урок = index.урок(первый["release"], "l-3")["lesson"]
+		self.занятие(первый["course"], "l-3")
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
@@ -398,11 +413,14 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		"""Снятый урок без ключа — не запись действующего релиза: публикация идёт,
 		а вернись его ключ — получил бы новую запись."""
 		первый = self.опубликовать()
+		self.занятие(первый["course"], "l-3")
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
 		self.опубликовать(без_третьего)
-		frappe.db.set_value("Course Lesson", {"course": первый["course"], "lesson_key": "l-3"}, "lesson_key", None)
+		frappe.db.set_value(
+			"Course Lesson", {"course": первый["course"], "lesson_key": "l-3"}, "lesson_key", None
+		)
 		без_третьего["lessons"][0]["title"] = "Урок первый, исправленный"
 
 		ответ = self.опубликовать(без_третьего)

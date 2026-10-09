@@ -25,7 +25,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
+from lms_frappe_app.tests.release_sample import добавить_главу, пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	курс_из_релиза,
@@ -151,6 +151,12 @@ from lms_frappe_app.testing import сколько_запросов
 	# точки — сверка двух прохождений. Освобождение сбрасывает кэш значений
 	# релизов, и сверка проверяет ссылку прохождения на релиз запросом.
 	"publish_release_attempts": 143,
+	# Новая версия снимает главу с уроком, по которому есть занятие
+	# (learning-services#514): оба остаются. Сверх `publish_release` — порядок
+	# глав курса и снятая глава; на каждую снятую запись — блокировка, чтение
+	# записи и проверка ссылок, по запросу на поле Link сайта, ссылающееся на
+	# её доктайп. Проверяются только записи, снятые этой версией.
+	"publish_release_removed": 145,
 	# Новая попытка квиза (learning-services#514): занятие, релиз и ключ урока,
 	# доступ — четыре выборки; прохождение с блокировкой и сверкой; проверка
 	# занятия и доступ ещё раз; занятие с блокировкой, действующий релиз,
@@ -458,6 +464,39 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 			[frappe.db.get_value("Agent Quiz Attempt", п, "status") for п in попытки],
 			["In Progress", "Cancelled"],
 		)
+
+	def test_бюджет_publish_release_со_снятыми_со_ссылками(self):
+		"""Новая версия курса образца снимает главу с уроком, по которому есть
+		занятие: урок и глава остаются. Прогрев — такая же версия раньше, с
+		другой главой."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbr-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(куратор)
+		релиз = пример_релиза(f"qbr-{frappe.generate_hash(length=8)}")
+		добавить_главу(добавить_главу(релиз, "ch-3", ["l-4"]), "ch-4", ["l-5"])
+		курс = authoring.publish_release(release=релиз)["data"]["course"]
+		уроки = [урок_релиза(курс, ключ) for ключ in ("l-4", "l-5")]
+		frappe.set_user("Administrator")
+		for урок in уроки:
+			создать_занятие(self.ученик, урок)
+		frappe.set_user(куратор)
+		снимаемые = iter(("ch-3", "ch-4"))
+
+		def новая_версия():
+			глава = next(снимаемые)
+			[урок] = next(г for г in релиз["chapters"] if г["key"] == глава)["lessons"]
+			релиз["chapters"] = [г for г in релиз["chapters"] if г["key"] != глава]
+			релиз["lessons"] = [у for у in релиз["lessons"] if у["key"] != урок]
+			del релиз["agent"]["lessons"][урок]
+			ответ = authoring.publish_release(release=релиз)
+			self.assertEqual(
+				(ответ["data"]["chapters"]["removed"], ответ["data"]["lessons"]["removed"]),
+				([глава], [урок]),
+				ответ,
+			)
+
+		self._ворота("publish_release_removed", новая_версия)
+		self.assertEqual([bool(frappe.db.exists("Course Lesson", урок)) for урок in уроки], [True, True])
 
 	# --- механика ворот ---
 

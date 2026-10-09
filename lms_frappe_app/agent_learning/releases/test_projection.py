@@ -1,19 +1,30 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Проекция релиза в главы и уроки Learning (learning-services#500)."""
+"""Проекция релиза в главы и уроки Learning (learning-services#500) и уборка
+снятого из релиза (learning-services#514)."""
 
 import frappe
 from frappe.tests import IntegrationTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
-from lms_frappe_app.agent_learning import structure
+from lms_frappe_app.agent_learning import homework, release_quiz, structure
+from lms_frappe_app.agent_learning.constants import АННУЛИРОВАНА_УРОК_СНЯТ, ПОПЫТКА_АННУЛИРОВАНА
 from lms_frappe_app.agent_learning.doctype.agent_course_release.test_agent_course_release import (
 	вставить_релиз,
 )
-from lms_frappe_app.agent_learning.releases import projection
-from lms_frappe_app.tests.release_sample import пример_релиза
-from lms_frappe_app.tests.sample_data import создать_куратора
+from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
+from lms_frappe_app.agent_learning.releases import projection, service
+from lms_frappe_app.agent_learning.runs import service as прохождения
+from lms_frappe_app.tests.release_sample import добавить_главу, пример_релиза
+from lms_frappe_app.tests.sample_data import (
+	занятие_релиза,
+	зачислить_на_курс,
+	создать_занятие,
+	создать_куратора,
+	создать_ученика,
+	урок_релиза,
+)
 
 ПУСТО = {"chapters": {}, "lessons": {}}
 
@@ -221,3 +232,208 @@ class IntegrationTestПроекция(IntegrationTestCase):
 			structure.уроки_главы(первый.главы["ch-1"]), [первый.уроки["l-2"], первый.уроки["l-1"]]
 		)
 		self.assertEqual(structure.уроков_в_курсах([self.курс]), {self.курс: 3})
+
+
+ДОМАШКА = {"title": "Задание", "description": "Сделайте пример.", "answer_mode": "text", "due_days": None}
+#: Уроки главы `ch-3`: у каждого — свой след ученика или автора, у последнего — никакого.
+СЛЕДЫ = ("l-session", "l-run", "l-attempt", "l-progress", "l-current", "l-block", "l-homework", "l-free")
+
+
+class IntegrationTestУборкаСнятого(IntegrationTestCase):
+	"""Публикация удаляет снятые ею главы и уроки без ссылок, а со ссылками оставляет."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.куратор = создать_куратора(f"rel-prune-{суффикс}@example.com")
+		self.ученик = создать_ученика(f"rel-prune-pupil-{суффикс}@example.com")
+		self.ключ = f"prune-{суффикс}"
+
+	def опубликовать(self, релиз: dict) -> dict:
+		return service.опубликовать(релиз, None, self.куратор)
+
+	def без(self, релиз: dict, *ключи: str) -> dict:
+		"""Релиз без уроков `ключи`; глава, оставшаяся без уроков, уходит тоже."""
+		релиз["lessons"] = [у for у in релиз["lessons"] if у["key"] not in ключи]
+		for глава in релиз["chapters"]:
+			глава["lessons"] = [у for у in глава["lessons"] if у not in ключи]
+		релиз["chapters"] = [г for г in релиз["chapters"] if г["lessons"]]
+		for ключ in ключи:
+			del релиз["agent"]["lessons"][ключ]
+		return релиз
+
+	def есть(self, doctype: str, имя: str) -> bool:
+		return bool(frappe.db.exists(doctype, имя))
+
+	def test_снятые_без_ссылок_удаляются_глава_после_уроков(self):
+		первый = self.опубликовать(пример_релиза(self.ключ))
+		урок, глава = (
+			урок_релиза(первый["course"], "l-3"),
+			frappe.db.get_value("Course Lesson", урок_релиза(первый["course"], "l-3"), "chapter"),
+		)
+
+		ответ = self.опубликовать(self.без(пример_релиза(self.ключ), "l-3"))
+
+		self.assertEqual((ответ["lessons"]["removed"], ответ["chapters"]["removed"]), (["l-3"], ["ch-2"]))
+		self.assertFalse(self.есть("Course Lesson", урок))
+		self.assertFalse(self.есть("Course Chapter", глава))
+		self.assertFalse(frappe.db.exists("Lesson Reference", {"parent": глава}))
+		self.assertFalse(frappe.db.exists("Chapter Reference", {"chapter": глава}))
+		self.assertFalse(
+			frappe.db.exists("Deleted Document", {"deleted_doctype": "Course Lesson", "deleted_name": урок})
+		)
+		self.assertEqual(frappe.db.count("Course Lesson", {"course": первый["course"]}), 2)
+
+	def test_снятые_со_ссылками_остаются_и_ссылки_целы(self):
+		"""У каждого урока главы `ch-3` — свой след; попытка квиза и сдача домашки
+		идут через занятие, остальные следы — единственные у своего урока."""
+		релиз = добавить_главу(пример_релиза(self.ключ), "ch-3", list(СЛЕДЫ))
+		релиз["lessons"][-2]["homework"] = ДОМАШКА
+		курс = self.опубликовать(релиз)["course"]
+		уроки = {ключ: урок_релиза(курс, ключ) for ключ in СЛЕДЫ}
+		глава = frappe.db.get_value("Course Lesson", уроки["l-free"], "chapter")
+		зачислить_на_курс(self.ученик, курс)
+		запись = frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": курс})
+
+		занятие = создать_занятие(self.ученик, уроки["l-session"])
+		прохождение = прохождения.прохождение(self.ученик, курс, "l-run").name
+		попытка = release_quiz.начать(
+			прохождения.прохождение(self.ученик, курс, "l-attempt"),
+			занятие_релиза(self.ученик, курс, "l-attempt"),
+		)["attempt"]
+		прогресс = (
+			frappe.get_doc(
+				{
+					"doctype": "LMS Course Progress",
+					"member": self.ученик,
+					"lesson": уроки["l-progress"],
+					"status": "Complete",
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+		frappe.db.set_value("LMS Enrollment", запись, "current_lesson", уроки["l-current"])
+		схема = (
+			frappe.get_doc(
+				{
+					"doctype": "Agent Course Artifact",
+					"course": курс,
+					"slug": "notebook",
+					"title": "Тетрадь другой версии",
+					"is_active": 0,
+					"blocks": [{"block_key": "log", "title": "Журнал", "lesson": уроки["l-block"]}],
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+		homework.выдать(
+			frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, уроки["l-homework"]))
+		)
+		сдача = frappe.db.get_value(homework.СДАЧА, {"lesson": уроки["l-homework"]})
+		self.assertTrue(сдача)
+
+		ответ = self.опубликовать(self.без(релиз, *СЛЕДЫ))
+
+		self.assertEqual(ответ["lessons"]["removed"], list(СЛЕДЫ))
+		self.assertFalse(self.есть("Course Lesson", уроки["l-free"]))
+		оставлены = [ключ for ключ in СЛЕДЫ if self.есть("Course Lesson", уроки[ключ])]
+		self.assertEqual(оставлены, list(СЛЕДЫ[:-1]))
+		self.assertTrue(self.есть("Course Chapter", глава))
+		self.assertEqual(
+			projection.вне_релиза(курс), {"chapters": [глава], "lessons": [уроки[к] for к in оставлены]}
+		)
+		self.assertNotIn(глава, [г["name"] for г in get_chapters(курс)])
+		self.assertEqual(
+			{урок["name"] for урок in get_lessons(курс)},
+			{урок_релиза(курс, к) for к in ("l-1", "l-2", "l-3")},
+		)
+		self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "lesson"), уроки["l-session"])
+		self.assertEqual(frappe.db.get_value("Agent Lesson Run", прохождение, "lesson"), уроки["l-run"])
+		self.assertEqual(
+			frappe.db.get_value("Agent Quiz Attempt", попытка, ["status", "cancel_reason", "lesson"]),
+			(ПОПЫТКА_АННУЛИРОВАНА, АННУЛИРОВАНА_УРОК_СНЯТ, уроки["l-attempt"]),
+		)
+		self.assertEqual(frappe.db.get_value("LMS Course Progress", прогресс, "lesson"), уроки["l-progress"])
+		self.assertEqual(frappe.db.get_value("LMS Enrollment", запись, "current_lesson"), уроки["l-current"])
+		self.assertEqual(
+			frappe.db.get_value("Agent Artifact Block", {"parent": схема}, "lesson"), уроки["l-block"]
+		)
+		self.assertEqual(frappe.db.get_value(homework.СДАЧА, сдача, "lesson"), уроки["l-homework"])
+		self.assertEqual(frappe.db.get_value(homework.ЗАДАНИЕ, {"lesson": уроки["l-homework"]}, "retired"), 1)
+
+	def test_вернувшийся_ключ_удалённой_записи_получает_новую(self):
+		первый = self.опубликовать(пример_релиза(self.ключ))
+		прежний = урок_релиза(первый["course"], "l-3")
+		self.опубликовать(self.без(пример_релиза(self.ключ), "l-3"))
+
+		ответ = self.опубликовать(пример_релиза(self.ключ))
+
+		новый = урок_релиза(первый["course"], "l-3")
+		self.assertNotEqual(новый, прежний)
+		self.assertFalse(self.есть("Course Lesson", прежний))
+		self.assertEqual(frappe.db.get_value("Course Lesson", новый, "lesson_key"), "l-3")
+		self.assertEqual((ответ["lessons"]["created"], ответ["lessons"]["restored"]), (["l-3"], []))
+		self.assertEqual((ответ["chapters"]["created"], ответ["chapters"]["restored"]), (["ch-2"], []))
+
+	def test_desk_не_удаляет_урок_и_главу_курса_из_релиза(self):
+		"""Уборка удаляет мимо хука `course_guard`; Desk — и оставленную запись
+		вне оглавления — по-прежнему через него."""
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		урок = урок_релиза(курс, "l-3")
+		глава = frappe.db.get_value("Course Lesson", урок, "chapter")
+		создать_занятие(self.ученик, урок)
+		self.опубликовать(self.без(пример_релиза(self.ключ), "l-3"))
+
+		for doctype, имя in (
+			("Course Lesson", урок),
+			("Course Chapter", глава),
+			("Course Lesson", урок_релиза(курс, "l-1")),
+		):
+			with self.subTest(doctype=doctype, имя=имя):
+				with self.assertRaises(Отказ) as пойман:
+					frappe.delete_doc(doctype, имя)
+				self.assertEqual(пойман.exception.код, КУРС_ИЗ_РЕЛИЗА)
+				self.assertTrue(self.есть(doctype, имя))
+
+	def test_запись_в_оглавлении_не_удаляется(self):
+		"""Строки оглавления — ссылки дочерних таблиц: урок в главе и глава в курсе держатся ими."""
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		урок = урок_релиза(курс, "l-1")
+		глава = frappe.db.get_value("Course Lesson", урок, "chapter")
+
+		уборка = projection.убрать({"chapters": [глава], "lessons": [урок]})
+
+		self.assertEqual(уборка.оставлено, {"chapters": [глава], "lessons": [урок]})
+		self.assertEqual(уборка.удалено, {"chapters": [], "lessons": []})
+
+	def test_глава_удаляется_со_строками_уроков_мимо_их_хука(self):
+		"""Строки `Lesson Reference` удаляемой главы уходят запросом: хук `on_trash`
+		строк (`course_guard.проверить_ссылку`) отказал бы — курс из релиза.
+		Строку оставленного урока в снятой главе здесь заводит тест: проекция
+		таких не оставляет."""
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		урок = урок_релиза(курс, "l-3")
+		глава = frappe.db.get_value("Course Lesson", урок, "chapter")
+		создать_занятие(self.ученик, урок)
+		self.опубликовать(self.без(пример_релиза(self.ключ), "l-3"))
+		frappe.db.set_value("Course Lesson", урок, "chapter", None)
+		frappe.get_doc(
+			{
+				"doctype": "Lesson Reference",
+				"parent": глава,
+				"parenttype": "Course Chapter",
+				"parentfield": "lessons",
+				"lesson": урок,
+			}
+		).db_insert()
+
+		уборка = projection.убрать({"chapters": [глава], "lessons": [урок]})
+
+		self.assertEqual(уборка.удалено, {"chapters": [глава], "lessons": []})
+		self.assertEqual(уборка.оставлено, {"chapters": [], "lessons": [урок]})
+		self.assertFalse(self.есть("Course Chapter", глава))
+		self.assertFalse(frappe.db.exists("Lesson Reference", {"parent": глава}))
+		self.assertTrue(self.есть("Course Lesson", урок))

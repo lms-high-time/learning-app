@@ -7,9 +7,10 @@
 (`Course Chapter.chapter_key`, `Course Lesson.lesson_key`, learning-services#514):
 та же глава и тот же урок переживают правку текста, перестановку и перенос
 между главами. Ключ пишется при создании записи и больше не меняется. Снятое
-из релиза не удаляется — уходит из порядка (строк-ссылок Learning): на урок
-ссылаются следы учеников, а вернувшийся ключ получает ту же запись. Материала
-у урока нет: он только агенту (решение владельца, #497).
+из релиза уходит из порядка (строк-ссылок Learning), а затем уборка
+(`убрать`) удаляет запись, на которую ничего не ссылается; запись со ссылками
+остаётся вне оглавления, и вернувшийся ключ получает её же. Материала у урока
+нет: он только агенту (решение владельца, #497).
 
 `Why:` ключ на записи, а не в истории индексов релизов: содержимое прежних
 версий не хранится, а соответствие «ключ → запись» нужно и после них. Тот же
@@ -27,7 +28,9 @@
 from dataclasses import dataclass, field
 
 import frappe
+from frappe.model.delete_doc import check_if_doc_is_dynamically_linked, check_if_doc_is_linked
 
+from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 ГЛАВА = "Course Chapter"
@@ -43,7 +46,8 @@ def _виды() -> dict[str, list[str]]:
 def известные(курс: str) -> dict[str, dict[str, str]]:
 	"""Ключ → запись Learning по ключам на главах и уроках курса — двумя выборками.
 
-	Снятые из релиза записи — тоже: по ним вернувшийся ключ находит ту же запись.
+	Снятые из релиза записи, оставленные уборкой, — тоже: по ним вернувшийся
+	ключ находит ту же запись.
 	"""
 	return {"chapters": _по_ключам(ГЛАВА, курс), "lessons": известные_уроки(курс)}
 
@@ -98,6 +102,8 @@ class Итог:
 	создано: dict[str, list[str]] = field(default_factory=_виды)
 	обновлено: dict[str, list[str]] = field(default_factory=_виды)
 	снято: dict[str, list[str]] = field(default_factory=_виды)
+	#: Записи Learning ключей `снято` — их уборка (`убрать`).
+	снятые_записи: dict[str, list[str]] = field(default_factory=_виды)
 	#: Ключи, которых не было в действующем релизе, а запись с этим ключом нашлась.
 	возвращено: dict[str, list[str]] = field(default_factory=_виды)
 
@@ -144,6 +150,7 @@ def спроецировать(
 	for вид in ("chapters", "lessons"):
 		были = set(прежние.get(вид, []))
 		итог.снято[вид] = [ключ for ключ in прежние.get(вид, []) if ключ not in есть[вид]]
+		итог.снятые_записи[вид] = [известные[вид][ключ] for ключ in итог.снято[вид]]
 		итог.возвращено[вид] = [
 			ключ for ключ in есть[вид] if ключ not in были and ключ not in итог.создано[вид]
 		]
@@ -191,3 +198,98 @@ def _порядок(курс: str, главы: list[str], уроки_глав: d
 			документ.set("lessons", [{"lesson": урок} for урок in нужно])
 			документ.flags[ИЗ_РЕЛИЗА] = True
 			документ.save(ignore_permissions=True)
+
+
+@dataclass
+class Уборка:
+	удалено: dict[str, list[str]] = field(default_factory=_виды)
+	#: Записи, на которые ссылаются: остались вне оглавления.
+	оставлено: dict[str, list[str]] = field(default_factory=_виды)
+
+
+def убрать(записи: dict[str, list[str]]) -> Уборка:
+	"""Снятые из релиза записи Learning: без ссылок — удалить, со ссылками — оставить.
+
+	`записи` — `{"chapters": [имя], "lessons": [имя]}`, записи вне оглавления
+	курса. Уроки — раньше глав: оставленный урок держит свою главу
+	(`Course Lesson.chapter`).
+
+	Ссылки проверяет Frappe (`check_if_doc_is_linked`,
+	`check_if_doc_is_dynamically_linked`) по всем полям Link и Dynamic Link
+	сайта — до удаления и под блокировкой записи. Держат запись следы учеников
+	и автора: занятия, прохождения, попытки квиза (и аннулированные), события
+	квиза, репорты, сдачи и шаблоны домашки со сдачами, блоки схем документа,
+	прогресс и записи на курс Learning. Строки индекса освобождённых версий и
+	шаблоны домашки без сдач уже удалены публикацией раньше уборки.
+
+	`Why:` запись без ссылок ничего не хранит, а копится вне оглавления с
+	каждой версией; запись со ссылками нужна данным учеников. Вернувшийся ключ
+	удалённой записи получает новую — на прежнюю ничего не ссылалось. Тот же
+	приём, что у шаблона домашки (`homework._снять`).
+	"""
+	уборка = Уборка()
+	for вид, doctype in (("lessons", УРОК), ("chapters", ГЛАВА)):
+		for имя in записи[вид]:
+			(уборка.удалено if _удалить(doctype, имя) else уборка.оставлено)[вид].append(имя)
+	return уборка
+
+
+def вне_релиза(курс: str) -> dict[str, list[str]]:
+	"""Главы и уроки курса, которых нет в его действующем релизе, — с ключом и без;
+	у курса без действующего релиза — ничего. По выборке на вид."""
+	записи = _виды()
+	for вид, doctype, строка, поле in (
+		("chapters", ГЛАВА, index.ГЛАВА, "chapter"),
+		("lessons", УРОК, index.УРОК, "lesson"),
+	):
+		записи[вид] = frappe.db.sql_list(
+			f"""
+			select z.name
+			from `tab{doctype}` z
+			join `tabLMS Course` c on c.name = z.course
+			where z.course = %(course)s and c.active_release is not null
+				and not exists (
+					select 1 from `tab{строка}` r
+					where r.parenttype = %(parenttype)s and r.parent = c.active_release
+						and r.`{поле}` = z.name
+				)
+			order by z.creation, z.name
+			""",
+			{"course": курс, "parenttype": index.РЕЛИЗ},
+		)
+	return записи
+
+
+def _удалить(doctype: str, имя: str) -> bool:
+	"""Удаляет запись без ссылок и отдаёт `True`; запись со ссылками не трогает.
+
+	Удаление — без `on_trash`: ссылки уже проверены, а `on_trash` урока
+	Learning (`cleanup_lesson_backreferences`) обнуляет их запросами по таблицам
+	записей на курс, квизов и сдач Learning без индекса по уроку; хук
+	`course_guard` отказал бы — главу и урок курса из релиза удаляет только
+	проекция. `force` — потому что ссылки только что проверены, и `delete_doc`
+	проверил бы их второй раз. Строки дочерней таблицы главы (`Lesson
+	Reference`) `delete_doc` удаляет запросом, мимо их хука `on_trash`; у
+	снятой главы их уже нет — их сняла проекция.
+
+	Цена: `after_delete` урока Learning ставит пересчёт прогресса записанных
+	на курс в очередь сразу, а не после коммита: при откате публикации задача
+	отработает впустую.
+	"""
+	frappe.db.get_value(doctype, имя, "name", for_update=True)
+	документ = frappe.get_doc(doctype, имя)
+	try:
+		check_if_doc_is_linked(документ)
+		check_if_doc_is_dynamically_linked(документ)
+	except frappe.LinkExistsError:
+		frappe.clear_last_message()
+		return False
+	frappe.delete_doc(
+		doctype,
+		имя,
+		force=True,
+		ignore_permissions=True,
+		ignore_on_trash=True,
+		delete_permanently=True,
+	)
+	return True
