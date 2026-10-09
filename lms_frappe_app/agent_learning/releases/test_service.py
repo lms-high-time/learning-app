@@ -231,8 +231,9 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertIsNone(self.курс_по_ключу())
 
 	def test_лишние_ключи_пакета_агента_отказ_до_первой_записи(self):
-		"""Хвост снятого урока, пункт не из целей урока, подсказка к разделу,
-		который урок не заполняет, — отказ; курс и его версии как были."""
+		"""Хвост снятого урока, пункт не из целей урока, запись раздела в срезе
+		не из документа — отказ; курс и его версии как были. Запись раздела
+		документа, который урок не заполняет, публикации не мешает."""
 		первый = self.опубликовать()
 		курс = первый["course"]
 
@@ -247,8 +248,8 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 				"l-1-D1/V9",
 			),
 			"agent.lessons.l-1.sections": (
-				lambda р: р["agent"]["lessons"]["l-1"]["sections"].update({"rules": "Подсказка."}),
-				"rules",
+				lambda р: р["agent"]["lessons"]["l-1"]["sections"].update({"nope": "Запись раздела."}),
+				"nope",
 			),
 		}
 		было = {
@@ -273,6 +274,9 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 			},
 			было,
 		)
+		релиз = пример_релиза(self.ключ)
+		релиз["agent"]["lessons"]["l-1"]["sections"]["rules"] = "Запись раздела в срезе."
+		self.assertEqual(self.опубликовать(релиз)["version"], 2)
 
 	def test_курс_передан(self):
 		frappe.set_user("Administrator")
