@@ -86,7 +86,9 @@
    "fieldname": "questions",
    "fieldtype": "JSON",
    "label": "Вопросы",
-   "read_only": 1
+   "print_hide": 1,
+   "read_only": 1,
+   "report_hide": 1
   },
   {
    "fieldname": "attempt_number",
@@ -153,7 +155,9 @@
    "fieldname": "objective_results",
    "fieldtype": "JSON",
    "label": "Итог по целям",
-   "read_only": 1
+   "print_hide": 1,
+   "read_only": 1,
+   "report_hide": 1
   },
   {
    "fieldname": "sb_time",
@@ -203,7 +207,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-10-09 22:00:00.000000",
+ "modified": "2026-10-09 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",

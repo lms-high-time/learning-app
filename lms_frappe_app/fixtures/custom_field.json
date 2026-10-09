@@ -5,6 +5,9 @@
   "dt": "Course Lesson",
   "fieldname": "lesson_hook",
   "fieldtype": "Small Text",
+  "ignore_xss_filter": 1,
+  "report_hide": 1,
+  "print_hide": 1,
   "label": "Зачин урока",
   "insert_after": "title",
   "module": "Agent Learning",
@@ -16,6 +19,9 @@
   "dt": "LMS Course",
   "fieldname": "course_promise",
   "fieldtype": "Small Text",
+  "ignore_xss_filter": 1,
+  "report_hide": 1,
+  "print_hide": 1,
   "label": "Обещание курса",
   "insert_after": "short_introduction",
   "module": "Agent Learning",
@@ -71,7 +77,9 @@
   "no_copy": 1,
   "description": "Атрибуция из релиза: name, authors, license, url.",
   "insert_after": "active_release",
-  "module": "Agent Learning"
+  "module": "Agent Learning",
+  "report_hide": 1,
+  "print_hide": 1
  },
  {
   "doctype": "Custom Field",
@@ -83,7 +91,9 @@
   "no_copy": 1,
   "description": "Цели курса-анонса, по строке на цель. Задаёт announce_course; у курса из релиза цели — названия глав релиза.",
   "insert_after": "course_attribution",
-  "module": "Agent Learning"
+  "module": "Agent Learning",
+  "report_hide": 1,
+  "print_hide": 1
  },
  {
   "doctype": "Custom Field",
@@ -91,6 +101,9 @@
   "dt": "Course Chapter",
   "fieldname": "chapter_description",
   "fieldtype": "Small Text",
+  "ignore_xss_filter": 1,
+  "report_hide": 1,
+  "print_hide": 1,
   "label": "Описание главы",
   "description": "Одна-две фразы ученику: что изменится в работе после главы. Пишется из релиза.",
   "insert_after": "title",

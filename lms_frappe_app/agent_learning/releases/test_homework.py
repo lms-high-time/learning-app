@@ -186,6 +186,18 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		self.assertTrue(мои["ok"], мои)
 		self.assertEqual([с["title"] for с in мои["data"]["items"]], ["Задание"])
 
+	def test_снятие_шаблона_со_старым_названием_с_угловыми(self):
+		"""Название с `<`, записанное до запрета (learning-services#521), снятию
+		шаблона не мешает: запрет проверяет только новое или изменённое название."""
+		курс = self.опубликовать()["course"]
+		урок = self.урок(курс)
+		self.закрыть_урок(self.ученик(курс, урок), урок)
+		frappe.db.set_value(домашка.ЗАДАНИЕ, self.шаблон(урок).name, "title", "x < 5")
+
+		self.опубликовать(self.релиз(None))
+
+		self.assertEqual((self.шаблон(урок).retired, self.шаблон(урок).title), (1, "x < 5"))
+
 	def test_снятую_домашку_новый_ученик_не_видит_и_не_сдаёт(self):
 		курс = self.опубликовать()["course"]
 		урок = self.урок(курс)

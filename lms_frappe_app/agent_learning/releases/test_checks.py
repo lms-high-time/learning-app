@@ -159,14 +159,30 @@ class TestПроверкиРелиза(unittest.TestCase):
 			],
 		)
 
-	def test_знаки_в_названиях_не_имён_допустимы(self):
-		"""Курс называется слагом, домашка, документ и разделы — не по названию."""
+	def test_знаки_в_названиях_домашки_и_документа(self):
+		"""Название домашки и документа — `title_field` своего доктайпа: `<` и `>` в
+		нём — тоже `title_forbidden_chars`."""
 		р = пример_релиза()
-		р["course"]["title"] = "Курс a < b"
 		р["lessons"][2]["homework"]["title"] = "Задание <1>"
-		р["document"]["title"] = "Тетрадь <черновик>"
+		р["document"]["title"] = "Тетрадь a < b"
+		self.assertEqual(
+			[(п["code"], п["where"], п["chars"]) for п in checks.проблемы(р)[0]],
+			[
+				("title_forbidden_chars", "lessons[l-3].homework.title", ["<", ">"]),
+				("title_forbidden_chars", "document.title", ["<"]),
+			],
+		)
+
+	def test_знаки_в_прочих_названиях_допустимы(self):
+		"""Разделы — блоки схемы, а не записи со своим названием; курс называется
+		слагом, его карточка — предупреждение `course_card_markup`."""
+		р = пример_релиза()
 		р["document"]["sections"][0]["title"] = "Раздел > 1"
-		self.assertEqual(checks.проблемы(р), ([], []))
+		р["course"]["title"] = "Курс a < b"
+		self.assertEqual(
+			checks.проблемы(р),
+			([], [{"code": "course_card_markup", "where": "course.title", "chars": ["<"]}]),
+		)
 
 	def test_пустые_тексты_ученику_предупреждения(self):
 		р = пример_релиза()

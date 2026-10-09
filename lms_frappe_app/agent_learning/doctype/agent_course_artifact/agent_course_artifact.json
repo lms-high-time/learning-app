@@ -47,7 +47,10 @@
    "fieldname": "purpose",
    "fieldtype": "Small Text",
    "label": "Зачем документ",
-   "description": "Одна-две фразы ученику: зачем этот документ. Видны в «Моих документах»."
+   "description": "Одна-две фразы ученику: зачем этот документ. Видны в «Моих документах».",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1
   },
   {
    "default": "sections",
@@ -61,7 +64,9 @@
    "description": "Сетка холста из ключей блоков, подписи ячеек, набросок и сводка (learning-services#351)",
    "fieldname": "canvas",
    "fieldtype": "JSON",
-   "label": "Холст"
+   "label": "Холст",
+   "print_hide": 1,
+   "report_hide": 1
   },
   {
    "description": "Проставляется автоматически: следующий номер для этого курса и ключа",
@@ -94,7 +99,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-09 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Artifact",
