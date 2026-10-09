@@ -361,13 +361,15 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.assertTrue(self.письма_к(self.менеджер), "письмо после сбоя всё равно ушло")
 
 	def test_дайджест_без_повторов_при_нескольких_ролях(self):
-		методист = создать_менеджера(f"hnx-{frappe.generate_hash(length=6)}@example.com", self.организация)
-		frappe.get_doc("User", методист).add_roles("Course Creator")
+		методист = создать_менеджера(
+			f"hnx-{frappe.generate_hash(length=6)}@example.com", self.организация, "Course Creator"
+		)
 		курс = frappe.get_doc("LMS Course", self.курс)
 		курс.append("instructors", {"instructor": методист})
 		курс.save(ignore_permissions=True)
-		модератор = создать_менеджера(f"hny-{frappe.generate_hash(length=6)}@example.com", self.организация)
-		frappe.get_doc("User", модератор).add_roles("Moderator")
+		модератор = создать_менеджера(
+			f"hny-{frappe.generate_hash(length=6)}@example.com", self.организация, "Moderator"
+		)
 		self.сдать(self.организация)
 		письма.разослать()
 		[письмо] = self.письма_к(методист)
