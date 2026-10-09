@@ -1,11 +1,14 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning_session import (
+	AgentLearningSession,
 	закрыть_брошенные_занятия,
 )
 from lms_frappe_app.tests.sample_data import создать_ученика, создать_урок
@@ -112,6 +115,58 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 		self.assertTrue(
 			frappe.db.exists(
 				"Agent Session Event", {"session": занятие.name, "kind": "Session Abandoned"}
+			)
+		)
+
+	def брошенное(self, занятие):
+		frappe.db.set_value(
+			DOCTYPE, занятие.name, "last_activity_at", add_to_date(now_datetime(), hours=-24)
+		)
+		return занятие
+
+	def test_занятие_по_удалённому_уроку_закрывается_и_не_роняет_задачу(self):
+		"""Урок занятия удалён: публикация сняла урок, который ученик начал
+		в ту же минуту (learning-services#519)."""
+		битое = frappe.get_doc({"doctype": DOCTYPE, "student": ПЕРВЫЙ, "lesson": "нет-такого-урока"}).insert(
+			ignore_permissions=True, ignore_links=True
+		)
+		self.брошенное(битое)
+		обычное = self.брошенное(self.занятие(student=ВТОРОЙ))
+
+		закрыть_брошенные_занятия()
+
+		for занятие in (битое, обычное):
+			занятие.reload()
+			self.assertEqual(занятие.status, "Abandoned")
+			self.assertTrue(
+				frappe.db.exists(
+					"Agent Session Event", {"session": занятие.name, "kind": "Session Abandoned"}
+				)
+			)
+
+	def test_сбой_на_одном_занятии_не_останавливает_остальные(self):
+		сбойное = self.брошенное(self.занятие(student=ПЕРВЫЙ))
+		обычное = self.брошенное(self.занятие(student=ВТОРОЙ))
+		записать = AgentLearningSession.записать_событие
+
+		def записать_или_упасть(занятие, *args, **kwargs):
+			if занятие.name == сбойное.name:
+				raise frappe.ValidationError("сбой")
+			return записать(занятие, *args, **kwargs)
+
+		with patch.object(AgentLearningSession, "записать_событие", записать_или_упасть):
+			закрыть_брошенные_занятия()
+
+		обычное.reload()
+		self.assertEqual(обычное.status, "Abandoned")
+		# Закрытие откатано до точки сохранения: статус без события в журнале
+		# разошёлся бы с ним.
+		сбойное.reload()
+		self.assertEqual(сбойное.status, "In Progress")
+		self.assertTrue(
+			frappe.db.exists(
+				"Error Log",
+				{"reference_doctype": DOCTYPE, "reference_name": сбойное.name},
 			)
 		)
 

@@ -1,9 +1,12 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.doctype.course_allocation import course_allocation
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
 	сверить_зачисления,
 )
@@ -85,6 +88,29 @@ class IntegrationTestOrganizationMembership(IntegrationTestCase):
 		сверить_зачисления()
 
 		self.assertTrue(self.записан(НОВИЧОК))
+
+	def test_сбой_одного_зачисления_не_останавливает_сверку(self):
+		self.назначить()
+		третий = создать_ученика(f"tretiy-{frappe.generate_hash(length=6)}@example.com")
+		for участник in (НОВИЧОК, третий):
+			frappe.db.sql(
+				"""insert into `tabOrganization Membership`
+				(name, user, organization, role, creation, modified, owner, modified_by, docstatus, idx)
+				values (%s, %s, %s, 'Member', now(), now(), 'Administrator', 'Administrator', 0, 0)""",
+				(frappe.generate_hash(length=10), участник, self.организация),
+			)
+		записать = course_allocation.записать_зачисление
+
+		def записать_или_упасть(участник, курс):
+			if участник == НОВИЧОК:
+				raise frappe.ValidationError("сбой")
+			записать(участник, курс)
+
+		with patch.object(course_allocation, "записать_зачисление", записать_или_упасть):
+			сверить_зачисления()
+
+		self.assertTrue(self.записан(третий))
+		self.assertFalse(self.записан(НОВИЧОК))
 
 	def test_повторная_сверка_не_плодит_зачисления(self):
 		self.назначить()
