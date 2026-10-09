@@ -9,11 +9,15 @@
 (lms-platform#305).
 """
 
+import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import frappe
+from frappe.handler import execute_cmd
 from frappe.tests import IntegrationTestCase
 from lms.lms.api import mark_lesson_progress
+from lms.lms.doctype.course_lesson import course_lesson
 
 from lms_frappe_app.agent_learning import browser_progress, quiz
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
@@ -48,6 +52,29 @@ class IntegrationTestBrowserProgress(IntegrationTestCase):
 			"lms_frappe_app.agent_learning.browser_progress.save_progress",
 		)
 
+	def test_каждое_имя_метода_learning_подменено(self):
+		"""`Why:` подмена сверяет строку вызова, а не функцию: имя, под которым
+		Learning импортировал `save_progress` в другой модуль, — вход мимо
+		подмены (learning-services#525)."""
+		# Модули Learning с методами урока — загружены и тогда, когда тест идёт первым.
+		import lms.lms.api
+		import lms.lms.doctype.lms_quiz.lms_quiz
+
+		имена = {
+			f"{имя_модуля}.{имя}"
+			for имя_модуля, модуль in list(sys.modules.items())
+			for имя, значение in list(getattr(модуль, "__dict__", {}).items())
+			if значение is course_lesson.save_progress
+		}
+
+		self.assertIn(browser_progress.ПОДМЕНЯЕМЫЙ, имена)
+		for имя in имена:
+			self.assertEqual(
+				frappe.override_whitelisted_method(имя),
+				"lms_frappe_app.agent_learning.browser_progress.save_progress",
+				f"{имя} зовёт метод Learning мимо подмены",
+			)
+
 	def test_просмотр_урока_не_закрывает_урок(self):
 		frappe.set_user(self.ученик)
 
@@ -64,7 +91,7 @@ class IntegrationTestBrowserProgress(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		сведения = {"is_complete": True}
 
-		with patch.object(browser_progress, "save_progress_learning", return_value=100) as learning:
+		with patch.object(course_lesson, "save_progress", return_value=100) as learning:
 			self.assertEqual(self.вызвать(scorm_details=сведения), 100)
 
 		learning.assert_called_once_with(self.урок, self.курс, сведения)
@@ -164,10 +191,28 @@ class IntegrationTestУрокИзРелиза(IntegrationTestCase):
 		self.assertIsNone(self.отметка(второй))
 		self.assertIsNone(frappe.flags.get(browser_progress.ЗАКРЫВАЕТСЯ))
 
+	def test_снятую_отметку_не_закрыть_scorm_под_другим_именем_метода(self):
+		"""Learning правит заведённую отметку SCORM-прогрессом через `db.set_value`,
+		мимо `validate`, — держит только подмена, под любым именем метода."""
+		self.завести(статус="Partially Complete")
+		frappe.set_user(self.ученик)
+		параметры = {"lesson": self.урок, "course": self.курс, "scorm_details": {"is_complete": 1}}
+
+		with (
+			patch.object(frappe.local, "form_dict", frappe._dict(параметры)),
+			patch.object(frappe.local, "request", SimpleNamespace(method="POST"), create=True),
+			self.assertRaises(frappe.ValidationError),
+		):
+			execute_cmd("lms.lms.api.save_progress")
+
+		self.assertEqual(self.отметка(), "Partially Complete")
+
 	def test_администратор_правит_отметку_в_desk(self):
 		"""Прогресс руками правит тот, кому Desk даёт права на отметки, — без занятия."""
-		куратор = создать_куратора(f"release-progress-cc-{frappe.generate_hash(length=6)}@example.com")
-		frappe.set_user(куратор)
+		администратор = создать_куратора(
+			f"release-progress-sm-{frappe.generate_hash(length=6)}@example.com", "System Manager"
+		)
+		frappe.set_user(администратор)
 
 		отметка = self.завести()
 		отметка.status = "Partially Complete"

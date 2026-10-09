@@ -15,11 +15,17 @@
 токеном, минуя страницу. Отказ, а не тихий успех: на успешный ответ страница
 урока ставит зелёную отметку, которая пропадает после перезагрузки.
 
+Подменяется каждое имя, под которым функция видна по HTTP: хук сверяет
+строку вызова, а не функцию, а Learning импортирует `save_progress` и в
+`lms.lms.api`, и в `lms_quiz`. Сторож — тест, который ищет функцию по всем
+загруженным модулям. Здесь она зовётся через модуль, а не своим именем: имя
+в этом модуле было бы ещё одним входом мимо подмены.
+
 Урок курса из релиза закрывает только занятие (`закрытие_урока`), и держится
 это на самой отметке — хук `validate` у `LMS Course Progress`
-(`проверить_отметку`), а не на подмене методов (learning-services#525).
-`Why:` подмена срабатывает только на HTTP-вызов метода, а Learning доходит до
-`save_progress` и прямыми вызовами Python: из `mark_lesson_progress`
+(`проверить_отметку`), а не только на подмене методов (learning-services#525).
+`Why:` подмена срабатывает только на HTTP-вызов под подменённым именем, а
+Learning доходит до `save_progress` и прямыми вызовами Python: из `mark_lesson_progress`
 (браузерный квиз и задание урока), из `submit_quiz` (квиз Learning,
 привязанный к уроку) и из этой подмены — SCORM-прогресс с `scorm_details`.
 Проверки Learning на этих путях — запись на курс и порядок уроков — урок из
@@ -28,8 +34,9 @@
 сертификатом и следующим курсом программы.
 
 Мимо `validate` (`frappe.db.set_value`) Learning правит отметку только на
-SCORM-пути — по уже заведённой незакрытой отметке, — поэтому SCORM-прогресс
-урока из релиза подмена `save_progress` отклоняет сразу.
+SCORM-пути — по уже заведённой незакрытой отметке, например снятой
+администратором, — и хук `validate` его не видит. Поэтому SCORM-прогресс урока
+из релиза подмена `save_progress` отклоняет сразу, под любым именем метода.
 
 Чего не делает: на курсе без релиза браузерный квиз и задание урока
 закрывают урок, как в Learning, — методом `mark_lesson_progress`, — и
@@ -43,8 +50,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import frappe
-from lms.lms.doctype.course_lesson.course_lesson import save_progress as save_progress_learning
+from lms.lms.doctype.course_lesson import course_lesson
 
+#: Имя, которым метод зовёт страница урока; прочие имена той же функции — в `hooks.py`.
 ПОДМЕНЯЕМЫЙ = "lms.lms.doctype.course_lesson.course_lesson.save_progress"
 ОТКАЗ = "Урок закрывается на занятии с агентом — в веб-чате платформы или через вашего агента"
 #: `frappe.flags`: (ученик, урок), отметку которых сейчас пишет занятие (`закрытие_урока`).
@@ -55,7 +63,7 @@ from lms.lms.doctype.course_lesson.course_lesson import save_progress as save_pr
 def save_progress(lesson: str, course: str, scorm_details: dict | None = None):
 	"""Прогресс SCORM — как у Learning, кроме урока курса из релиза; всё остальное — отказ."""
 	if scorm_details and not _из_релиза(lesson):
-		return save_progress_learning(lesson, course, scorm_details)
+		return course_lesson.save_progress(lesson, course, scorm_details)
 	frappe.throw(ОТКАЗ, frappe.ValidationError)
 
 
@@ -90,7 +98,8 @@ def проверить_отметку(отметка, method=None) -> None:
 		return
 	if not _из_релиза(отметка.lesson):
 		return
-	if frappe.has_permission("LMS Course Progress", "create" if отметка.is_new() else "write"):
+	право = "create" if отметка.is_new() else "write"
+	if frappe.has_permission("LMS Course Progress", право, doc=отметка, user=frappe.session.user):
 		return
 	frappe.throw(ОТКАЗ, frappe.ValidationError)
 

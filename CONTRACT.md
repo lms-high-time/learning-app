@@ -2733,12 +2733,15 @@ Learning: ученик всегда на действующем релизе, и
 (`reset_student_progress`).
 
 **Урок закрывает только занятие** — сданная попытка квиза (`submit_answer`)
-или `complete_lesson`. Методы Learning, которые закрывают урок
-(`lms.lms.api.mark_lesson_progress`, `save_progress` — и с `scorm_details`,
-`submit_quiz`), на уроке курса из релиза отказывают, и отметка пройденного
-(`LMS Course Progress`) не появляется. Мимо занятия отметку урока курса из
-релиза заводят и правят только те, кому это даёт Desk по правам DocType
-Learning (`Moderator`, `Course Creator`, `System Manager`). `Why:` по
+или `complete_lesson`. Методы Learning, которые закрывают урок, на уроке
+курса из релиза отказывают — `ValidationError`, HTTP 417, — и отметка
+пройденного (`LMS Course Progress`) не появляется и не меняется:
+`lms.lms.api.mark_lesson_progress`, `save_progress` под любым именем, под
+которым он виден по HTTP (`course_lesson.save_progress`,
+`lms.lms.api.save_progress`, `lms_quiz.save_progress`), и с `scorm_details`
+тоже, а сдача квиза Learning (`submit_quiz`) на таком уроке не сохраняется
+вовсе. Мимо занятия отметку урока курса из релиза заводят и правят только
+те, кому Desk даёт создавать и править отметки (права DocType). `Why:` по
 отметке агент выбирает следующий урок, отчёт руководителя считает
 пройденное, а Learning открывает следующий урок, выдаёт сертификат и
 открывает следующий курс программы. Своим токеном ученик закрывал бы урок

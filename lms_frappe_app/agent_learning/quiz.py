@@ -224,6 +224,8 @@ def отметить_урок_пройденным(запись, подтвер�
 		"LMS Course Progress", {"member": запись.student, "lesson": запись.lesson}
 	)
 	# Урок курса из релиза отметкой закрывает только занятие (learning-services#525).
+	# Ветка заведённой отметки — тоже в блоке: правка её сохранением, а не
+	# `db.set_value`, идёт через `validate` и без пометки получит отказ.
 	with закрытие_урока(запись.student, запись.lesson):
 		if уже:
 			frappe.db.set_value("LMS Course Progress", уже, "status", ПРОЙДЕН)
