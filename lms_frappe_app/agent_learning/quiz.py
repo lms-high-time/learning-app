@@ -225,7 +225,13 @@ def отметить_урок_пройденным(запись, подтвер�
 		"LMS Course Progress", {"member": запись.student, "lesson": запись.lesson}
 	)
 	if уже:
-		frappe.db.set_value("LMS Course Progress", уже, "status", ПРОЙДЕН)
+		# Сохранением, а не `db.set_value`: Learning пересчитывает долю записи на
+		# курс в `on_update` отметки. Отметку, снятую администратором, повторное
+		# прохождение иначе возвращало бы без доли (learning-services#522).
+		отметка = frappe.get_doc("LMS Course Progress", уже)
+		if отметка.status != ПРОЙДЕН:
+			отметка.status = ПРОЙДЕН
+			отметка.save(ignore_permissions=True)
 		return
 	frappe.get_doc(
 		{

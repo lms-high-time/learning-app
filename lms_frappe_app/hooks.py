@@ -328,6 +328,19 @@ doc_events = {
 	"Lesson Reference": {
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
+	# Прогресс курса из релиза — по урокам программы: пройденный урок, снятый
+	# из релиза, Learning засчитывал бы (learning-services#522).
+	"LMS Enrollment": {
+		"on_update": "lms_frappe_app.agent_learning.course_progress.сверить",
+	},
+	# Снятый пройденный урок опускает и долю, достигшую 100: сброс прогресса
+	# даёт 0, а не 100 (learning-services#522).
+	"LMS Course Progress": {
+		"validate": "lms_frappe_app.agent_learning.course_progress.отметить_снятие",
+		"on_trash": "lms_frappe_app.agent_learning.course_progress.отметить_снятие",
+		"on_update": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
+		"after_delete": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
+	},
 }
 
 # Scheduled Tasks
