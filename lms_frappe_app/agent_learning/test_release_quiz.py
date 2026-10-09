@@ -1102,11 +1102,31 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertTrue(ответ["ok"], ответ)
 		self.assertNotIn("previous_attempt_cancelled", ответ["data"])
 
-	def гонка_с_публикацией(self):
+	def test_архивная_аннулированная_после_сброса_не_сообщается(self):
+		"""Сброс прогресса архивирует аннулированную попытку: в новом прохождении
+		урока о ней не сообщается."""
+		from lms_frappe_app.agent_learning.reset import сбросить_прогресс
+
+		занятие, попытка = self.аннулированная_публикацией()
+		курс = frappe.db.get_value(ПОПЫТКА, попытка, "course")
+		урок = frappe.db.get_value("Agent Learning Session", занятие, "lesson")
+		frappe.set_user("Administrator")
+		сбросить_прогресс(self.ученик, курс, "Administrator")
+		зачислить(self.ученик, урок)
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+
+		начало = release_quiz.начать(run, создать_занятие(self.ученик, урок, run=run.name))
+
+		self.assertNotIn("previous_attempt_cancelled", начало)
+		self.assertFalse(self.сообщена(попытка))
+
+	def гонка_с_публикацией(self, run=None, занятие: str | None = None):
 		"""Попытка, заведённая в гонке: старт квиза прочёл прежний релиз, а публикация её не застала.
+		`run` и `занятие` — урок курса из `релиз_двух_целей(self.ключ)`, иначе заводятся.
 		Отдаёт (прохождение по новому релизу, занятие, попытка на прежнем релизе)."""
 		релиз = релиз_двух_целей(self.ключ)
-		run, занятие = self.урок(релиз)
+		if run is None:
+			run, занятие = self.урок(релиз)
 		прежний = run.release
 		релиз["lessons"][0]["title"] = "Новое название"
 		self.опубликовать(релиз)
@@ -1157,6 +1177,34 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertIn("начата на прежней версии курса", str(повтор))
 		новая = self.попытка(данные["attempt"])
 		self.assertEqual((новая.release, новая.attempt_number), (self.действующий(run.course), 1))
+
+	def test_отставшая_аннулирована_стартом_с_отказом_и_сообщается_следующим(self):
+		"""Старт аннулировал отставшую попытку и отказал паузой: отказ флага не несёт,
+		и о попытке сообщает следующий старт."""
+		run, занятие = self.урок(релиз_двух_целей(self.ключ))
+		проваленная = self.сдать(run, занятие, ["V2", "V2"])["attempt"]
+		self.assertEqual(self.попытка(проваленная).status, ПОПЫТКА_НЕ_ЗАЧТЕНА)
+		давно = add_to_date(now_datetime(), days=-1)
+		frappe.db.set_value(ПОПЫТКА, проваленная, "finished_at", давно)
+		_, _, отставшая = self.гонка_с_публикацией(run, занятие)
+		frappe.db.set_value(ПОПЫТКА, проваленная, "finished_at", now_datetime())
+		run = прохождения.прохождение(self.ученик, run.course, "l-1")
+
+		self.отказ(СЛИШКОМ_РАНО, release_quiz.начать, run, занятие)
+		self.assertEqual(
+			(self.попытка(отставшая).status, self.попытка(отставшая).cancel_reason),
+			(ПОПЫТКА_АННУЛИРОВАНА, АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА),
+		)
+		self.assertFalse(self.сообщена(отставшая))
+		frappe.db.set_value(ПОПЫТКА, проваленная, "finished_at", давно)
+
+		начало = release_quiz.начать(run, занятие)
+
+		self.assertEqual(
+			начало["previous_attempt_cancelled"],
+			{"attempt": отставшая, "reason": АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА},
+		)
+		self.assertTrue(self.сообщена(отставшая))
 
 	def test_сброс_прогресса_архивирует_аннулированную(self):
 		from lms_frappe_app.agent_learning.reset import сбросить_прогресс
