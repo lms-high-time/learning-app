@@ -88,14 +88,23 @@ def осталось_уроков(ученик: str, курс: str) -> int:
 	"""Непройденные уроки курса — одним запросом.
 
 	Порядок уроков здесь не нужен, только их число, поэтому без обхода глав
-	`уроки_курса`: тот стоит запроса на каждую главу.
+	`уроки_курса`: тот стоит запроса на каждую главу. Состав — тот же, что у
+	`уроки_курса`: у курса из релиза — только уроки оглавления, снятый урок
+	со следами учеников остаётся записью вне него (learning-services#522).
 	"""
 	return frappe.db.sql(
 		"""
 		select count(*)
 		from `tabCourse Lesson` l
 		join `tabCourse Chapter` c on c.name = l.chapter
-		where c.course = %(course)s and not exists (
+		join `tabLMS Course` k on k.name = c.course
+		where c.course = %(course)s and (
+			ifnull(k.active_release, '') = '' or exists (
+				select 1 from `tabLesson Reference` r
+				join `tabChapter Reference` cr on cr.chapter = r.parent
+				where cr.parent = %(course)s and r.lesson = l.name
+			)
+		) and not exists (
 			select 1 from `tabLMS Course Progress` p
 			where p.member = %(student)s and p.course = %(course)s
 				and p.lesson = l.name and p.status = %(done)s
