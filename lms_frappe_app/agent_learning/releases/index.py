@@ -9,6 +9,10 @@
 сотни). Ответы квиза — только с явным `с_ответами`: ими сервер сверяет
 ответ, к ученику они не уходят (CLAUDE.md §10).
 
+Индекс и снимок есть только у действующей версии курса: прежние публикация
+освобождает (`retention`, learning-services#514). Читатели здесь берут
+действующий релиз; у освобождённого строк нет, а `снимок` — `ValueError`.
+
 Пакет агента раскладывается при записи (learning-services#506): срез урока —
 в строку урока, рамка курса — в запись релиза. Внутри срезов приложение
 читает только ключи «что выяснять»; остальное хранит как есть. `Why:` снимок
@@ -133,28 +137,6 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 	return таблицы
 
 
-def известные(курс: str) -> dict[str, dict[str, str]]:
-	"""Ключ → запись Learning по всей истории релизов курса; свежий релиз главнее."""
-	версии = {
-		р.name: р.version for р in frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=["name", "version"])
-	}
-	итог: dict[str, dict[str, str]] = {"chapters": {}, "lessons": {}}
-	if not версии:
-		return итог
-	for вид, doctype, ключ, запись in (
-		("chapters", ГЛАВА, "chapter_key", "chapter"),
-		("lessons", УРОК, "lesson_key", "lesson"),
-	):
-		найдено = frappe.get_all(
-			doctype,
-			filters={"parenttype": РЕЛИЗ, "parent": ("in", list(версии))},
-			fields=["parent", ключ, запись],
-		)
-		for строка in sorted(найдено, key=lambda с: версии[с.parent]):
-			итог[вид][строка[ключ]] = строка[запись]
-	return итог
-
-
 def ключи(релиз: str | None) -> dict[str, list[str]]:
 	"""Ключи глав и уроков релиза по порядку; нет релиза — пусто."""
 	if not релиз:
@@ -272,24 +254,14 @@ def _урок(релиз: str, отбор: dict) -> dict | None:
 	return найдено[0] if найдено else None
 
 
+def есть_урок(релиз: str, ключ: str) -> bool:
+	"""Есть ли в релизе урок с этим ключом."""
+	return bool(frappe.db.exists(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}))
+
+
 def ключ_урока(релиз: str, lesson: str) -> str | None:
 	"""Ключ урока релиза по записи `Course Lesson` — обратное к `урок`."""
 	return frappe.db.get_value(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson": lesson}, "lesson_key")
-
-
-def ключи_уроков(релизы: list[str]) -> dict[tuple[str, str], str]:
-	"""Ключи уроков нескольких релизов: (релиз, запись `Course Lesson`) → ключ.
-	Одной выборкой на все релизы, а не на урок."""
-	if not релизы:
-		return {}
-	return {
-		(у.parent, у.lesson): у.lesson_key
-		for у in frappe.get_all(
-			УРОК,
-			filters={"parenttype": РЕЛИЗ, "parent": ("in", list(set(релизы)))},
-			fields=["parent", "lesson", "lesson_key"],
-		)
-	}
 
 
 def цели_урока(релиз: str, ключ: str) -> list[dict]:
@@ -322,18 +294,6 @@ def цели_с_пунктами(релиз: str, ключ: str | None = None) -
 	return итог
 
 
-def тексты_целей(релиз: str, ключ: str) -> dict[str, str]:
-	"""Ключ цели урока релиза → её текст."""
-	return dict(
-		frappe.get_all(
-			ЦЕЛЬ,
-			filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ},
-			fields=["objective_key", "text"],
-			as_list=True,
-		)
-	)
-
-
 def название_главы(релиз: str, ключ: str) -> str | None:
 	"""Название главы релиза по ключу; нет главы — `None`."""
 	return frappe.db.get_value(ГЛАВА, {"parenttype": РЕЛИЗ, "parent": релиз, "chapter_key": ключ}, "title")
@@ -347,26 +307,77 @@ def вопросы_урока(релиз: str, ключ: str, *, с_ответа
 def вопросы(релиз: str, ключ: str | None = None, *, с_ответами: bool = False) -> dict[str, list[dict]]:
 	"""Квизы уроков релиза: ключ урока → вопросы по порядку; `ключ` — только этого урока.
 	Верный вариант и пояснение — только с `с_ответами`. Одной выборкой на релиз, не на урок."""
-	поля = ["lesson_key", "question_key", "objective_key", "text", "option_list"] + (
-		["correct", "explanation"] if с_ответами else []
-	)
 	итог: dict[str, list[dict]] = {}
 	for в in frappe.get_all(
 		ВОПРОС,
 		filters={"parenttype": РЕЛИЗ, "parent": релиз, **({} if ключ is None else {"lesson_key": ключ})},
-		fields=поля,
+		fields=_поля_вопроса(с_ответами),
 		order_by="idx asc",
 	):
-		вопрос = {
-			"key": в.question_key,
-			"objective": в.objective_key,
-			"text": в.text,
-			"options": json.loads(в.option_list),
-		}
-		if с_ответами:
-			вопрос.update(correct=в.correct, explanation=в.explanation)
-		итог.setdefault(в.lesson_key, []).append(вопрос)
+		итог.setdefault(в.lesson_key, []).append(_вопрос(в, с_ответами))
 	return итог
+
+
+def вопросы_из_строк(строки: list[dict]) -> dict[str, list[dict]]:
+	"""Квизы уроков из строк вопросов, которые пишет `строки` (`["questions"]`), — в форме
+	`вопросы(..., с_ответами=True)`: ключ урока → вопросы по порядку. Без обращения к базе."""
+	итог: dict[str, list[dict]] = {}
+	for в in строки:
+		итог.setdefault(в["lesson_key"], []).append(_вопрос(frappe._dict(в), с_ответами=True))
+	return итог
+
+
+def вопросы_релизов(пары: set[tuple[str, str]]) -> dict[tuple[str, str], list[dict]]:
+	"""Квизы уроков нескольких релизов с ответами: (релиз, ключ урока) → вопросы по порядку,
+	в форме `вопросы(..., с_ответами=True)`.
+
+	Пара без строк вопросов — нет и ключа; освобождённый релиз (пустой
+	`snapshot`) — тоже, даже если строки остались. Две выборки на все пары:
+	релизы со снимком и вопросы их уроков.
+	"""
+	релизы = {релиз for релиз, _ in пары if релиз}
+	if not релизы:
+		return {}
+	# `is not null`, а не `("is", "set")`: см. `retention`.
+	живые = frappe.db.sql_list(
+		f"select name from `tab{РЕЛИЗ}` where name in %(names)s and snapshot is not null",
+		{"names": tuple(релизы)},
+	)
+	if not живые:
+		return {}
+	итог: dict[tuple[str, str], list[dict]] = {}
+	for в in frappe.get_all(
+		ВОПРОС,
+		filters={
+			"parenttype": РЕЛИЗ,
+			"parent": ("in", живые),
+			"lesson_key": ("in", list({ключ for _, ключ in пары})),
+		},
+		fields=["parent", *_поля_вопроса(с_ответами=True)],
+		order_by="idx asc",
+	):
+		if (в.parent, в.lesson_key) in пары:
+			итог.setdefault((в.parent, в.lesson_key), []).append(_вопрос(в, с_ответами=True))
+	return итог
+
+
+def _поля_вопроса(с_ответами: bool) -> list[str]:
+	return ["lesson_key", "question_key", "objective_key", "text", "option_list"] + (
+		["correct", "explanation"] if с_ответами else []
+	)
+
+
+def _вопрос(строка, с_ответами: bool) -> dict:
+	"""Вопрос из строки индекса: `{key, objective, text, options}`, с ответами — и `correct`, `explanation`."""
+	вопрос = {
+		"key": строка.question_key,
+		"objective": строка.objective_key,
+		"text": строка.text,
+		"options": json.loads(строка.option_list),
+	}
+	if с_ответами:
+		вопрос.update(correct=строка.correct, explanation=строка.explanation)
+	return вопрос
 
 
 def есть_вопросы(релиз: str, ключ: str) -> bool:
@@ -388,7 +399,12 @@ def эталон(релиз: str, ключ_урока: str, ключ_вопро�
 	"""Верный вариант и пояснение вопроса урока: `{correct, explanation}`; нет вопроса — `None`."""
 	найдено = frappe.get_all(
 		ВОПРОС,
-		filters={"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ_урока, "question_key": ключ_вопроса},
+		filters={
+			"parenttype": РЕЛИЗ,
+			"parent": релиз,
+			"lesson_key": ключ_урока,
+			"question_key": ключ_вопроса,
+		},
 		fields=["correct", "explanation"],
 		limit=1,
 	)
@@ -450,11 +466,21 @@ def _ключ(значение) -> bool:
 
 
 #: Поля записи релиза, которые отдают `сведения` и `история`.
-ПОЛЯ_РЕЛИЗА = ["name", "course_key", "version", "published_at", "published_by", "digest", "document_key"]
+ПОЛЯ_РЕЛИЗА = [
+	"name",
+	"course_key",
+	"version",
+	"published_at",
+	"published_by",
+	"digest",
+	"source_commit",
+	"document_key",
+]
 
 
 def сведения(релиз: str):
-	"""Запись релиза без индекса и снимка: версия, кто и когда опубликовал, дайджест, документ."""
+	"""Запись релиза без индекса и снимка: версия, кто и когда опубликовал, дайджест,
+	коммит источника, документ."""
 	return frappe.db.get_value(РЕЛИЗ, релиз, ПОЛЯ_РЕЛИЗА, as_dict=True)
 
 
@@ -464,5 +490,9 @@ def история(курс: str) -> list:
 
 
 def снимок(релиз: str) -> dict:
-	"""Релиз целиком, как опубликован: части `agent` и `map` — как есть."""
-	return json.loads(frappe.db.get_value(РЕЛИЗ, релиз, "snapshot"))
+	"""Релиз целиком, как опубликован: части `agent` и `map` — как есть.
+	Содержимое релиза освобождено (`retention`) — `ValueError`."""
+	значение = frappe.db.get_value(РЕЛИЗ, релиз, "snapshot")
+	if not значение:
+		raise ValueError(f"Содержимое релиза {релиз} освобождено")
+	return json.loads(значение)

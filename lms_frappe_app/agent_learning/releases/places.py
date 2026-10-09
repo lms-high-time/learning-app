@@ -48,8 +48,8 @@ class Места:
 		self._пакеты: dict[str, dict] = {}
 
 	def место(self, разобранный: dict) -> dict:
-		"""`{label, missing, lesson_key, lesson}` места: подпись словами, нет ли его
-		в релизе, ключ урока места и его запись `Course Lesson` (у мест вне урока — `None`)."""
+		"""`{label, missing, lesson_key}` места: подпись словами, нет ли его в
+		релизе и ключ урока места (у мест вне урока — `None`)."""
 		return self.места([разобранный])[0]
 
 	def места(self, адреса: list[dict]) -> list[dict]:
@@ -64,11 +64,11 @@ class Места:
 
 	@cached_property
 	def уроки(self) -> dict[str, dict]:
-		"""Ключ урока → `{number, title, lesson}`; номер — по порядку релиза."""
+		"""Ключ урока → `{number, title}`; номер — по порядку релиза."""
 		if not self.релиз:
 			return {}
 		return {
-			у.lesson_key: {"number": номер, "title": у.title, "lesson": у.lesson}
+			у.lesson_key: {"number": номер, "title": у.title}
 			for номер, у in enumerate(index.уроки(self.релиз), start=1)
 		}
 
@@ -158,13 +158,7 @@ class Места:
 			# Вид не из `ВИД_СЛОВАМИ` — адрес не по ключам релиза: подпись — он сам.
 			слово = ВИД_СЛОВАМИ.get(вид)
 			подпись = (f"{слово} {ключ}" if ключ else слово) if слово else вид
-		запись = self.уроки.get(урок) if урок else None
-		return {
-			"label": подпись,
-			"missing": нет,
-			"lesson_key": урок if запись else None,
-			"lesson": запись["lesson"] if запись else None,
-		}
+		return {"label": подпись, "missing": нет, "lesson_key": урок if урок in self.уроки else None}
 
 	def _урок(self, ключ: str) -> str:
 		урок = self.уроки[ключ]

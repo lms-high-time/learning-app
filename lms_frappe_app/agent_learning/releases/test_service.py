@@ -14,7 +14,14 @@ from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index, places, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_урок
+from lms_frappe_app.tests.sample_data import (
+	создать_занятие,
+	создать_куратора,
+	создать_курс,
+	создать_урок,
+	создать_ученика,
+	урок_релиза,
+)
 
 РЕЛИЗ = "Agent Course Release"
 
@@ -34,6 +41,13 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 
 	def курс_по_ключу(self, ключ: str | None = None) -> str | None:
 		return frappe.db.get_value("LMS Course", {"course_key": ключ or self.ключ})
+
+	def занятие(self, курс: str, ключ: str) -> None:
+		"""Занятие ученика по уроку `ключ`: со ссылкой на него снятый урок остаётся."""
+		frappe.set_user("Administrator")
+		ученик = создать_ученика(f"rel-svc-pupil-{frappe.generate_hash(length=6)}@example.com")
+		создать_занятие(ученик, урок_релиза(курс, ключ))
+		frappe.set_user(self.куратор)
 
 	def отказ(self, код: str, *args, **kwargs) -> Отказ:
 		with self.assertRaises(Отказ) as пойман:
@@ -108,9 +122,10 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 			frappe.db.get_value("LMS Course", ответ["course"], "active_release"), ответ["release"]
 		)
 		self.assertEqual(
-			json.loads(frappe.db.get_value(РЕЛИЗ, первый["release"], "snapshot"))["lessons"][0]["title"],
-			"Урок первый",
+			json.loads(frappe.db.get_value(РЕЛИЗ, ответ["release"], "snapshot"))["lessons"][0]["title"],
+			"Урок первый, исправленный",
 		)
+		self.assertIsNone(frappe.db.get_value(РЕЛИЗ, первый["release"], "snapshot"))
 
 	def test_снятый_урок_в_ответе(self):
 		первый = self.опубликовать()
@@ -339,7 +354,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual(frappe.db.count("LMS Course", {"course_key": self.ключ}), 1)
 
 	def test_вернувшийся_ключ_в_ответе(self):
-		self.опубликовать()
+		self.занятие(self.опубликовать()["course"], "l-3")
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
@@ -350,12 +365,77 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual(ответ["lessons"], {"created": [], "updated": [], "removed": [], "restored": ["l-3"]})
 		self.assertEqual(ответ["chapters"]["restored"], ["ch-2"])
 
-	def test_курс_из_релиза_удаляется_целиком(self):
+	def test_вернувшийся_ключ_та_же_запись(self):
 		первый = self.опубликовать()
+		урок = index.урок(первый["release"], "l-3")["lesson"]
+		self.занятие(первый["course"], "l-3")
+		без_третьего = пример_релиза(self.ключ)
+		без_третьего["chapters"] = без_третьего["chapters"][:1]
+		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		self.опубликовать(без_третьего)
+
+		ответ = self.опубликовать()
+
+		self.assertEqual(index.урок(ответ["release"], "l-3")["lesson"], урок)
+		self.assertEqual(frappe.db.get_value("Course Lesson", урок, "lesson_key"), "l-3")
+		self.assertEqual(frappe.db.count("Course Lesson", {"course": первый["course"]}), 3)
+
+	def test_записи_без_ключа_отказ_до_первой_записи(self):
+		"""Сайт без ключей на записях (патч `release_record_keys` не выполнен):
+		публикация новой версии завела бы записи заново — отказ."""
+		первый = self.опубликовать()
+		курс = первый["course"]
+		урок = index.урок(первый["release"], "l-2")["lesson"]
+		frappe.db.set_value("Course Lesson", урок, "lesson_key", None)
+		frappe.db.set_value("Course Chapter", {"course": курс}, "chapter_key", None)
+		было = {
+			doctype: frappe.get_all(doctype, filters={"course": курс}, fields=["name", "modified"])
+			for doctype in ("Course Lesson", "Course Chapter")
+		}
 		релиз = пример_релиза(self.ключ)
 		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
-		self.опубликовать(релиз)
+
+		отказ = self.отказ(service.КЛЮЧЕЙ_НЕТ, релиз)
+
+		self.assertEqual(отказ.подробности, {"course": курс, "chapters": 2, "lessons": 1})
+		self.assertEqual(frappe.db.count(РЕЛИЗ, {"course": курс}), 1)
+		self.assertEqual(
+			{
+				doctype: frappe.get_all(doctype, filters={"course": курс}, fields=["name", "modified"])
+				for doctype in было
+			},
+			было,
+		)
+		# Тот же релиз — `unchanged`: записей он не заводит, и ключи ему не нужны.
+		self.assertTrue(self.опубликовать()["unchanged"])
+
+	def test_запись_вне_релиза_без_ключа_не_мешает(self):
+		"""Снятый урок без ключа — не запись действующего релиза: публикация идёт,
+		а вернись его ключ — получил бы новую запись."""
+		первый = self.опубликовать()
+		self.занятие(первый["course"], "l-3")
+		без_третьего = пример_релиза(self.ключ)
+		без_третьего["chapters"] = без_третьего["chapters"][:1]
+		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		self.опубликовать(без_третьего)
+		frappe.db.set_value(
+			"Course Lesson", {"course": первый["course"], "lesson_key": "l-3"}, "lesson_key", None
+		)
+		без_третьего["lessons"][0]["title"] = "Урок первый, исправленный"
+
+		ответ = self.опубликовать(без_третьего)
+
+		self.assertEqual((ответ["version"], ответ["lessons"]["updated"]), (3, ["l-1"]))
+
+	def test_курс_из_релиза_удаляется_целиком(self):
+		"""С заметками к обеим версиям: заметка ссылается на свой релиз, и
+		удаление релизов не встаёт на ней."""
+		первый = self.опубликовать()
 		курс = первый["course"]
+		прежняя = authoring.add_note(course=курс, target="course", text="К первой версии")["data"]["id"]
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
+		действующий = self.опубликовать(релиз)["release"]
 		уроки = frappe.get_all("Course Lesson", filters={"course": курс}, pluck="name")
 		заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Пример")["data"]["id"]
 		authoring.reply_note(note=заметка, text="Ответ в нить")
@@ -363,9 +443,9 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc(РЕЛИЗ, первый["release"])
-		дайджест = frappe.db.get_value(РЕЛИЗ, первый["release"], "digest")
-		places.узлы_карты(первый["release"], дайджест)
-		кэш = places.ключ_кэша(первый["release"], дайджест)
+		дайджест = frappe.db.get_value(РЕЛИЗ, действующий, "digest")
+		places.узлы_карты(действующий, дайджест)
+		кэш = places.ключ_кэша(действующий, дайджест)
 		self.assertIsNotNone(frappe.cache.get_value(кэш))
 		service.удалить_курс(курс)
 
@@ -373,7 +453,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists(РЕЛИЗ, {"course": курс}))
 		self.assertFalse(frappe.db.exists("Agent Release Lesson", {"lesson": ("in", уроки)}))
 		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": курс}))
-		self.assertFalse(frappe.db.exists("Agent Author Note", заметка))
+		self.assertFalse(frappe.db.exists("Agent Author Note", {"name": ("in", [прежняя, заметка])}))
 		self.assertFalse(frappe.db.exists("Agent Note Reply", {"parent": заметка}))
 		self.assertFalse(frappe.db.exists("Course Lesson", {"name": ("in", уроки)}))
 		self.assertIsNone(frappe.cache.get_value(кэш))

@@ -11,6 +11,7 @@
   "version",
   "release_format",
   "digest",
+  "source_commit",
   "document_key",
   "published_by",
   "published_at",
@@ -68,6 +69,14 @@
    "reqd": 1,
    "description": "sha256 канонического JSON релиза: тот же релиз ещё раз — без новой версии",
    "read_only": 1
+  },
+  {
+   "fieldname": "source_commit",
+   "fieldtype": "Data",
+   "label": "Коммит источника",
+   "description": "Коммит git, из которого собран релиз; пусто — публикатор его не передал",
+   "read_only": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "document_key",
@@ -157,15 +166,14 @@
    "fieldname": "snapshot",
    "fieldtype": "Long Text",
    "label": "Снимок релиза",
-   "reqd": 1,
    "hidden": 1,
-   "description": "Релиз целиком, как опубликован",
+   "description": "Релиз целиком, как опубликован; пусто — содержимое версии освобождено: сервер его не хранит, у версии с коммитом его восстанавливает git по коммиту, у версии без коммита кандидата из источника проверяет дайджест — при сборке тем же компилятором и с той же нормализацией",
    "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-08 14:00:00.000000",
+ "modified": "2026-10-09 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Release",

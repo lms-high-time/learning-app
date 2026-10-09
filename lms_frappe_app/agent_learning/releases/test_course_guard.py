@@ -66,7 +66,15 @@ class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
 		курс = frappe.get_doc("LMS Course", self.курс)
 		курс.active_release = чужой
 		курс.flags.from_release = True
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaisesRegex(frappe.ValidationError, "релиз другого курса"):
+			курс.save()
+
+		курс = frappe.get_doc("LMS Course", self.курс)
+		курс.active_release = f"REL-нет-{frappe.generate_hash(length=6)}"
+		курс.flags.from_release = True
+		# Обычную правку остановит ещё проверка Link; хук держит и путь мимо неё.
+		курс.flags.ignore_links = True
+		with self.assertRaisesRegex(frappe.ValidationError, "Такого релиза нет"):
 			курс.save()
 
 

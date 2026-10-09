@@ -120,13 +120,12 @@ def выполнить(патч) -> str:
 
 
 class TestPatchOrder(IntegrationTestCase):
-	def test_патчи_идут_после_переноса_целей_и_заметок_в_нужном_порядке(self):
+	def test_патчи_идут_после_переноса_целей_в_нужном_порядке(self):
 		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
 		порядок = [
 			f"lms_frappe_app.patches.v0_1.{имя}"
 			for имя in (
 				"announce_objectives",
-				"note_release_keys",
 				"old_quiz_attempts",
 				"drop_removed_columns",
 				"drop_old_model_doctypes",

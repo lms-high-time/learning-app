@@ -49,8 +49,13 @@ def цели_курса(course: str) -> list[str]:
 
 	У курса из релиза цели — названия его глав по порядку релиза
 	(learning-services#500); поле анонса у него не читается.
+
+	Действующий релиз — из базы, а не из кэша документа курса. `Why:` чтение,
+	начатое до коммита публикации, может положить в кэш прежний релиз уже после
+	того, как публикация его сбросила; содержимое прежнего освобождено
+	(learning-services#514), и цели пришли бы пустыми.
 	"""
-	релиз, цели = frappe.get_cached_value("LMS Course", course, ["active_release", ПОЛЕ_ЦЕЛЕЙ]) or (None, None)
+	релиз, цели = frappe.db.get_value("LMS Course", course, ["active_release", ПОЛЕ_ЦЕЛЕЙ]) or (None, None)
 	if релиз:
 		return frappe.get_all(
 			"Agent Release Chapter",

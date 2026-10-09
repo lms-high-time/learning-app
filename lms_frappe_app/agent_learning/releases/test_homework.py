@@ -269,8 +269,11 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 
 		self.опубликовать(self.без_третьего_урока())
 		self.assertIsNone(self.шаблон(урок))
+		# Урок без сдач и шаблона ни на что не ссылается — уборка его удалила.
+		self.assertFalse(frappe.db.exists("Course Lesson", урок))
 
 		self.опубликовать()
+		урок = self.урок(курс)
 		шаблон = self.шаблон(урок)
 		ученик = self.ученик(курс, урок)
 		self.закрыть_урок(ученик, урок)

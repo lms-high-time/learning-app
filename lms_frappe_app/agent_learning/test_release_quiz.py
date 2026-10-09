@@ -3,6 +3,7 @@
 
 """Квиз урока из релиза: старт, ответ, итог и закрытие урока (learning-services#504)."""
 
+import copy
 import json
 from contextlib import contextmanager
 from datetime import datetime
@@ -15,13 +16,20 @@ from frappe.utils import add_to_date, now_datetime
 from lms_frappe_app.agent_learning import quiz, release_quiz
 from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН, ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА
 from lms_frappe_app.agent_learning.constants import (
+	АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ,
+	АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА,
+	АННУЛИРОВАНА_УРОК_СНЯТ,
 	ЗАНЯТИЕ_БРОШЕНО,
 	ЗАНЯТИЕ_ЖДЁТ_КВИЗ,
 	ЗАНЯТИЕ_ЗАВЕРШЕНО,
+	ПОПЫТКА_АННУЛИРОВАНА,
 	ПОПЫТКА_ЗАЧТЕНА,
+	ПОПЫТКА_ИДЁТ,
 	ПОПЫТКА_НЕ_ЗАЧТЕНА,
 	ПРОВЕРКА_ВОПРОС_ВЫДАН,
 	ПРОВЕРКА_ОТВЕТ_ПРИНЯТ,
+	ПРОВЕРКА_ПОПЫТКА_АННУЛИРОВАНА,
+	ПРОВЕРКА_ПОПЫТКА_ПЕРЕНЕСЕНА,
 )
 from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.quiz import (
@@ -32,7 +40,8 @@ from lms_frappe_app.agent_learning.quiz import (
 	СЛИШКОМ_РАНО,
 	ЧУЖОЙ_ВОПРОС,
 )
-from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.agent_learning.release_quiz import АННУЛИРОВАНА
+from lms_frappe_app.agent_learning.releases import index, retention
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
@@ -183,21 +192,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.отказ("lesson_not_in_release", release_quiz.начать, run, занятие)
 		self.assertFalse(frappe.db.exists(ПОПЫТКА, {"student": self.ученик}))
 
-	def test_открытая_попытка_продолжается_после_снятия_урока(self):
-		run, занятие = self.урок(пример_релиза(self.ключ), "l-2")
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		без_урока = пример_релиза(self.ключ)
-		без_урока["chapters"][0]["lessons"] = ["l-1"]
-		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
-		self.опубликовать(без_урока)
-		run = прохождения.прохождение(self.ученик, run.course, "l-2")
-
-		повтор = release_quiz.начать(run, занятие)
-
-		self.assertEqual(повтор["attempt"], попытка)
-		self.assertEqual(повтор["question"]["id"], self.снимок(попытка)[0]["key"])
-		self.assertTrue(self.ответить(попытка, повтор["question"]["id"], "V1")["verdict"]["correct"])
-
 	def test_без_доступа_к_курсу_не_начать(self):
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))
 		run = прохождения.прохождение(self.ученик, курс, "l-1")
@@ -313,22 +307,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.assertEqual(self.ответить(попытка, С1, "Третий")["verdict"], {"correct": False})
 
-	def test_ответ_сверяется_по_релизу_попытки(self):
-		"""Новый релиз посреди попытки её не ломает: и сверка, и вопросы — из релиза попытки."""
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		новый = релиз_двух_целей(self.ключ)
-		квиз = новый["lessons"][0]["quiz"]
-		квиз["answers"][С1]["correct"] = "V2"
-		квиз["questions"][1]["text"] = "Другой вопрос"
-		self.опубликовать(новый)
-		self.assertNotEqual(frappe.db.get_value("LMS Course", run.course, "active_release"), run.release)
-
-		ответ = self.ответить(попытка, С1, "V1")
-
-		self.assertTrue(ответ["verdict"]["correct"])
-		self.assertEqual(ответ["next_question"]["text"], "Ситуация и вопрос 2")
-
 	def test_журнал_проверки_по_ключам_вопросов(self):
 		run, занятие = self.урок()
 		попытка = release_quiz.начать(run, занятие)["attempt"]
@@ -362,17 +340,19 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, "S9/l-1-D1")
 
-	def test_ответ_в_попытку_без_релиза_отклоняется_без_записей(self):
-		"""Попытка без релиза — эталона нет: отказ, и ни ответа, ни события журнала."""
+	def test_ответ_в_попытку_без_релиза_отклоняется_без_ответа(self):
+		"""Попытка без релиза — не на действующем: аннулируется, ответ не принят и в журнал не идёт."""
 		run, занятие = self.урок()
 		попытка = release_quiz.начать(run, занятие)["attempt"]
 		frappe.db.set_value(ПОПЫТКА, попытка, "release", None)
-		событий = frappe.db.count("Agent Quiz Event", {"attempt": попытка})
 
-		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1)
+		отказ = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
 
+		self.assertEqual(отказ.подробности["reason"], АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
 		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
-		self.assertEqual(frappe.db.count("Agent Quiz Event", {"attempt": попытка}), событий)
+		self.assertFalse(
+			frappe.db.exists("Agent Quiz Event", {"attempt": попытка, "kind": ПРОВЕРКА_ОТВЕТ_ПРИНЯТ})
+		)
 
 	def test_повторный_ответ_на_вопрос_отклоняется(self):
 		run, занятие = self.урок()
@@ -459,7 +439,8 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	def test_лимит_переживает_новый_релиз(self):
 		настроить_квиз(max_attempts=1, retry_delay_minutes=0)
 		run, занятие = self.урок()
-		release_quiz.начать(run, занятие)
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, попытка, {"status": ПОПЫТКА_НЕ_ЗАЧТЕНА, "finished_at": now_datetime()})
 		run = self.новый_релиз_урока(run)
 
 		self.отказ(ПОПЫТКИ_ИСЧЕРПАНЫ, release_quiz.начать, run, создать_занятие(self.ученик, run.lesson))
@@ -750,6 +731,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 				self.assertEqual(итог["passed"], сдан)
 
 	def test_порог_из_релиза_попытки_а_не_нового(self):
+		"""Новый релиз сменил только порог: попытка перенесена и оценивается порогом своего старта."""
 		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=70, вопросов=4))
 		попытка = release_quiz.начать(run, занятие)["attempt"]
 		for вопрос in (С1, С2, "S3/l-1-D1"):
@@ -760,6 +742,10 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		итог = self.ответить(попытка, "S4/l-1-D1", "V2")["result"]
 
 		self.assertEqual((итог["passed"], итог["pass_threshold"]), (True, 0.7))
+		self.assertEqual(
+			frappe.db.get_value(ПОПЫТКА, попытка, "release"),
+			frappe.db.get_value("LMS Course", run.course, "active_release"),
+		)
 
 	def test_повторный_зачёт_не_двигает_прохождение(self):
 		# Политика — своя, а не из общих настроек: их читают через общий кеш, и
@@ -803,6 +789,360 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.assertEqual(self.подтверждены(run), {"l-1-D1": 1, "l-1-D2": 0})
 
+	# --- попытка между релизами (learning-services#514) ---
+
+	def попытка_с_ответом(self, релиз: dict | None = None):
+		"""Попытка урока `l-1` с верным ответом на первый вопрос: (прохождение, занятие, попытка)."""
+		run, занятие = self.урок(релиз or релиз_двух_целей(self.ключ, вопросов=3))
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		self.ответить(попытка, С1)
+		return run, занятие, попытка
+
+	def действующий(self, курс: str) -> str:
+		return frappe.db.get_value("LMS Course", курс, "active_release")
+
+	def попытка(self, имя: str):
+		return frappe.db.get_value(
+			ПОПЫТКА,
+			имя,
+			["status", "cancel_reason", "release", "finished_at", "attempt_number", "pass_percentage"],
+			as_dict=True,
+		)
+
+	def журнал(self, попытка: str) -> list[tuple]:
+		return [
+			(з.kind, з.question_key)
+			for з in frappe.get_all(
+				"Agent Quiz Event",
+				filters={"attempt": попытка},
+				fields=["kind", "question_key"],
+				order_by="creation asc, occurred_at asc",
+			)
+		]
+
+	def test_неизменный_квиз_переносит_попытку_и_она_доходит_до_итога(self):
+		"""Порог новой версии — 90, попытки — 70 со старта: 3 из 4 сдают."""
+		релиз = релиз_двух_целей(self.ключ, вопросов=4)
+		run, _, попытка = self.попытка_с_ответом(релиз)
+		снимок = self.снимок(попытка)
+		релиз["lessons"][0]["title"] = "Урок переименован"
+		релиз["lessons"][0]["quiz"]["pass_percentage"] = 90
+
+		self.опубликовать(релиз)
+
+		новый = self.действующий(run.course)
+		self.assertNotEqual(новый, run.release)
+		состояние = self.попытка(попытка)
+		self.assertEqual((состояние.status, состояние.release), (ПОПЫТКА_ИДЁТ, новый))
+		self.assertFalse(состояние.cancel_reason)
+		self.assertIsNone(состояние.finished_at)
+		self.assertEqual(self.снимок(попытка), снимок)
+		self.assertEqual(frappe.db.count(ОТВЕТ, {"attempt": попытка}), 1)
+		self.assertEqual(self.журнал(попытка)[-1], (ПРОВЕРКА_ПОПЫТКА_ПЕРЕНЕСЕНА, None))
+
+		self.ответить(попытка, С2)
+		self.ответить(попытка, "S3/l-1-D1")
+		итог = self.ответить(попытка, "S4/l-1-D1", "V2")["result"]
+
+		self.assertEqual((итог["passed"], итог["correct"], итог["pass_threshold"]), (True, 3, 0.7))
+
+	def test_правка_только_пояснения_переносит_попытку(self):
+		релиз = релиз_двух_целей(self.ключ, вопросов=3)
+		run, _, попытка = self.попытка_с_ответом(релиз)
+		релиз["lessons"][0]["quiz"]["answers"][С2]["explanation"] = "Пояснение новой версии."
+
+		self.опубликовать(релиз)
+
+		self.assertEqual(self.попытка(попытка).release, self.действующий(run.course))
+		вердикт = self.ответить(попытка, С2)["verdict"]
+		self.assertEqual(вердикт, {"correct": True, "explanation": "Пояснение новой версии."})
+
+	def test_угловые_скобки_в_тексте_вопроса_не_аннулируют_попытку(self):
+		"""Текст вопроса с `<role>`: база хранит его очищенным от HTML, и новая
+		сторона сравнения — тоже из записанных строк, а не из сырого релиза."""
+		релиз = релиз_двух_целей(self.ключ, вопросов=3)
+		релиз["lessons"][0]["quiz"]["questions"][1]["text"] = "Где тег <role> в промпте?"
+		run, _, попытка = self.попытка_с_ответом(релиз)
+		релиз["lessons"][0]["title"] = "Урок переименован"
+
+		self.опубликовать(релиз)
+
+		состояние = self.попытка(попытка)
+		self.assertEqual((состояние.status, состояние.release), (ПОПЫТКА_ИДЁТ, self.действующий(run.course)))
+
+	def test_изменённый_квиз_аннулирует_попытку(self):
+		"""Любая правка того, что решает проверку, — `quiz_changed`; ответы и журнал на месте."""
+
+		def вопрос(квиз, номер):
+			return квиз["questions"][номер]
+
+		def убрать_третий(квиз):
+			квиз["answers"].pop(квиз["questions"].pop()["key"])
+
+		def добавить_вопрос(квиз):
+			квиз["questions"].append({**copy.deepcopy(вопрос(квиз, 1)), "key": "S4/l-1-D1"})
+			квиз["answers"]["S4/l-1-D1"] = {"correct": "V1", "explanation": ПОЯСНЕНИЕ}
+
+		правки = {
+			"текст вопроса": lambda к: вопрос(к, 1).update(text="Другая ситуация"),
+			"текст варианта": lambda к: вопрос(к, 1)["options"][1].update(text="Иной"),
+			"ключ варианта": lambda к: (
+				вопрос(к, 1)["options"][1].update(key="V9"),
+				к["answers"][С2].update(correct="V1"),
+			),
+			"новый вариант": lambda к: вопрос(к, 1)["options"].append({"key": "V3", "text": "Третий"}),
+			"порядок вариантов": lambda к: вопрос(к, 1)["options"].reverse(),
+			"верный вариант": lambda к: к["answers"][С2].update(correct="V2"),
+			"цель вопроса": lambda к: вопрос(к, 1).update(objective="l-1-D2"),
+			"порядок вопросов": lambda к: к["questions"].insert(1, к["questions"].pop(2)),
+			"вопрос убран": убрать_третий,
+			"вопрос добавлен": добавить_вопрос,
+		}
+		for номер, (что, правка) in enumerate(правки.items()):
+			with self.subTest(что=что):
+				релиз = релиз_двух_целей(f"{self.ключ}-{номер}", вопросов=3)
+				run, _, попытка = self.попытка_с_ответом(релиз)
+				правка(релиз["lessons"][0]["quiz"])
+
+				self.опубликовать(релиз)
+
+				состояние = self.попытка(попытка)
+				self.assertEqual(
+					(состояние.status, состояние.cancel_reason, состояние.release),
+					(ПОПЫТКА_АННУЛИРОВАНА, АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ, run.release),
+				)
+				self.assertIsNotNone(состояние.finished_at)
+				self.assertEqual(frappe.db.count(ОТВЕТ, {"attempt": попытка}), 1)
+				self.assertEqual(
+					self.журнал(попытка),
+					[
+						(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
+						(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С1),
+						(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+						(ПРОВЕРКА_ПОПЫТКА_АННУЛИРОВАНА, None),
+					],
+				)
+
+	def test_снятый_урок_аннулирует_попытку(self):
+		run, занятие = self.урок(пример_релиза(self.ключ), "l-2")
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		без_урока = пример_релиза(self.ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+
+		self.опубликовать(без_урока)
+
+		состояние = self.попытка(попытка)
+		self.assertEqual(
+			(состояние.status, состояние.cancel_reason), (ПОПЫТКА_АННУЛИРОВАНА, АННУЛИРОВАНА_УРОК_СНЯТ)
+		)
+		отказ = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, "S1/l-2-D1")
+		self.assertEqual(
+			отказ.подробности, {"attempt": попытка, "session": занятие, "reason": АННУЛИРОВАНА_УРОК_СНЯТ}
+		)
+		self.assertNotIn("request_quiz", отказ.сообщение)
+		run = прохождения.прохождение(self.ученик, run.course, "l-2")
+		self.отказ("lesson_not_in_release", release_quiz.начать, run, занятие)
+
+	def test_попытка_на_освобождённом_релизе_аннулируется_без_сравнения(self):
+		"""Попытка на v1 при действующем v2, публикуется v3 с тем же квизом: v1 освобождён —
+		аннулирование; не освобождён — перенос по сравнению."""
+
+		def снимок_пуст(релиз):
+			frappe.db.set_value(index.РЕЛИЗ, релиз, "snapshot", None, update_modified=False)
+
+		def строк_нет(релиз):
+			frappe.db.delete(index.ВОПРОС, {"parenttype": index.РЕЛИЗ, "parent": релиз})
+
+		варианты = (
+			("снимок пуст", снимок_пуст, ПОПЫТКА_АННУЛИРОВАНА),
+			("строк вопросов нет", строк_нет, ПОПЫТКА_АННУЛИРОВАНА),
+			("не освобождён", lambda _: None, ПОПЫТКА_ИДЁТ),
+		)
+		for номер, (как, освободить, статус) in enumerate(варианты):
+			with self.subTest(как=как):
+				релиз = релиз_двух_целей(f"{self.ключ}-{номер}", вопросов=3)
+				run, _, попытка = self.попытка_с_ответом(релиз)
+				v1 = run.release
+				релиз["lessons"][0]["title"] = "Версия 2"
+				# v1 освобождает здесь сам вариант, а не публикация v2.
+				with patch.object(retention, "освободить_прежние"):
+					self.опубликовать(релиз)
+				frappe.db.set_value(ПОПЫТКА, попытка, "release", v1)
+				освободить(v1)
+				релиз["lessons"][0]["title"] = "Версия 3"
+
+				self.опубликовать(релиз)
+
+				состояние = self.попытка(попытка)
+				self.assertEqual(состояние.status, статус)
+				if статус == ПОПЫТКА_АННУЛИРОВАНА:
+					self.assertEqual(состояние.cancel_reason, АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ)
+				else:
+					self.assertEqual(состояние.release, self.действующий(run.course))
+
+	def test_аннулированная_не_в_счёт_лимита_и_паузы(self):
+		"""Лимит в одну попытку и сутки паузы: после аннулирования новая попытка — сразу и с тем же номером."""
+		настроить_квиз(max_attempts=1, retry_delay_minutes=1440)
+		релиз = релиз_двух_целей(self.ключ, вопросов=3)
+		run, занятие, попытка = self.попытка_с_ответом(релиз)
+		релиз["lessons"][0]["quiz"]["questions"][0]["text"] = "Другая ситуация"
+		self.опубликовать(релиз)
+		run = прохождения.прохождение(self.ученик, run.course, "l-1")
+
+		начало = release_quiz.начать(run, занятие)
+
+		self.assertNotEqual(начало["attempt"], попытка)
+		self.assertNotIn("previous_attempt_cancelled", начало)
+		новая = self.попытка(начало["attempt"])
+		self.assertEqual(
+			(новая.status, новая.release, новая.attempt_number),
+			(ПОПЫТКА_ИДЁТ, self.действующий(run.course), 1),
+		)
+		self.assertEqual(начало["question"]["text"], "Другая ситуация")
+
+	def test_submit_answer_в_аннулированную_попытку(self):
+		релиз = релиз_двух_целей(self.ключ)
+		run, занятие = self.урок(релиз)
+		отметить_все_пункты(run.name)
+		frappe.set_user(self.ученик)
+		попытка = student.request_quiz(занятие)["data"]["attempt"]
+		frappe.set_user(self.куратор)
+		релиз["lessons"][0]["quiz"]["answers"][С1]["correct"] = "V2"
+		self.опубликовать(релиз)
+		frappe.set_user(self.ученик)
+
+		ответ = student.submit_answer(попытка, С1, "V1", "слова ученика")
+
+		self.assertFalse(ответ["ok"])
+		ошибка = ответ["error"]
+		self.assertEqual(
+			(ошибка["code"], ошибка["reason"], ошибка["session"], ошибка["attempt"]),
+			(АННУЛИРОВАНА, АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ, занятие, попытка),
+		)
+		self.assertIn("request_quiz", ошибка["message"])
+		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
+
+	def гонка_с_публикацией(self):
+		"""Попытка, заведённая в гонке: старт квиза прочёл прежний релиз, а публикация её не застала.
+		Отдаёт (прохождение по новому релизу, занятие, попытка на прежнем релизе)."""
+		релиз = релиз_двух_целей(self.ключ)
+		run, занятие = self.урок(релиз)
+		прежний = run.release
+		релиз["lessons"][0]["title"] = "Новое название"
+		self.опубликовать(релиз)
+		run = прохождения.прохождение(self.ученик, run.course, "l-1")
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		frappe.db.set_value(ПОПЫТКА, попытка, "release", прежний)
+		return run, занятие, попытка
+
+	def test_попытка_из_гонки_аннулируется_при_ответе(self):
+		_, занятие, попытка = self.гонка_с_публикацией()
+
+		отказ = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
+
+		self.assertEqual(
+			отказ.подробности,
+			{"attempt": попытка, "session": занятие, "reason": АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА},
+		)
+		self.assertIn("начата на прежней версии курса", str(отказ))
+		self.assertEqual(self.попытка(попытка).cancel_reason, АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
+		self.assertEqual(self.попытка(попытка).status, ПОПЫТКА_АННУЛИРОВАНА)
+		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
+		self.assertEqual(self.журнал(попытка)[-1], (ПРОВЕРКА_ПОПЫТКА_АННУЛИРОВАНА, None))
+		# Повтор — тот же отказ по сохранённой причине: квиз не назван изменившимся.
+		повтор = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
+		self.assertEqual(повтор.подробности["reason"], АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
+		self.assertIn("начата на прежней версии курса", str(повтор))
+
+	def test_попытка_из_гонки_аннулируется_при_старте_и_даёт_новую(self):
+		run, занятие, попытка = self.гонка_с_публикацией()
+		отметить_все_пункты(run.name)
+		frappe.set_user(self.ученик)
+
+		ответ = student.request_quiz(занятие)
+
+		self.assertTrue(ответ["ok"], ответ)
+		данные = ответ["data"]
+		self.assertNotEqual(данные["attempt"], попытка)
+		self.assertEqual(
+			данные["previous_attempt_cancelled"],
+			{"attempt": попытка, "reason": АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА},
+		)
+		self.assertEqual(
+			(self.попытка(попытка).status, self.попытка(попытка).cancel_reason),
+			(ПОПЫТКА_АННУЛИРОВАНА, АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА),
+		)
+		повтор = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
+		self.assertIn("начата на прежней версии курса", str(повтор))
+		новая = self.попытка(данные["attempt"])
+		self.assertEqual((новая.release, новая.attempt_number), (self.действующий(run.course), 1))
+
+	def test_сброс_прогресса_архивирует_аннулированную(self):
+		from lms_frappe_app.agent_learning.reset import сбросить_прогресс
+
+		релиз = релиз_двух_целей(self.ключ, вопросов=3)
+		run, _, попытка = self.попытка_с_ответом(релиз)
+		релиз["lessons"][0]["quiz"]["questions"][0]["text"] = "Другая ситуация"
+		self.опубликовать(релиз)
+		frappe.set_user("Administrator")
+
+		сбросить_прогресс(self.ученик, run.course, "Administrator")
+
+		архив = frappe.db.get_value(ПОПЫТКА, попытка, ["student", "archived_student", "status"], as_dict=True)
+		self.assertEqual(
+			(архив.student, архив.archived_student, архив.status),
+			(None, self.ученик, ПОПЫТКА_АННУЛИРОВАНА),
+		)
+
+	def test_порог_снимается_в_попытку_на_старте(self):
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=55.5))
+
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+
+		self.assertEqual(self.попытка(попытка).pass_percentage, 55.5)
+
+	def test_порог_ноль_зачитывает_попытку_без_верных(self):
+		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=0))
+
+		итог = self.сдать(run, занятие, ["V2", "V2"])["result"]
+
+		self.assertEqual((итог["passed"], итог["correct"], итог["pass_threshold"]), (True, 0, 0))
+
+	def test_publish_release_при_взаимоблокировке_и_таймауте_busy(self):
+		"""Попытку под публикацией изменил или держит ответ ученика: откат целиком и `busy`."""
+		from lms_frappe_app.api import authoring
+
+		релиз = релиз_двух_целей(self.ключ)
+		self.опубликовать(релиз)
+
+		for ошибка in (frappe.QueryDeadlockError("1213"), frappe.QueryTimeoutError("1205")):
+			# Откат подменён, и записанное первым проходом остаётся: каждому — своя версия.
+			релиз["lessons"][0]["title"] = f"Новое название, {type(ошибка).__name__}"
+			with (
+				self.subTest(ошибка=type(ошибка).__name__),
+				patch.object(release_quiz, "перенести_попытки", side_effect=ошибка),
+				patch.object(frappe.db, "rollback") as откат,
+			):
+				ответ = authoring.publish_release(release=релиз)
+
+				self.assertEqual(ответ["error"]["code"], "busy")
+				откат.assert_called_once_with()
+
+	def test_сравнение_квиза_без_пояснений(self):
+		"""Чистая функция: пояснение не в счёт, остальное — в счёт, пустой квиз ни с чем не совпадает."""
+		вопрос = {
+			"key": С1,
+			"objective": "l-1-D1",
+			"text": "Т",
+			"options": [{"key": "V1", "text": "А"}, {"key": "V2", "text": "Б"}],
+			"correct": "V1",
+			"explanation": "П",
+		}
+		self.assertTrue(release_quiz.квиз_тот_же([вопрос], [{**вопрос, "explanation": "Другое"}]))
+		self.assertFalse(release_quiz.квиз_тот_же([вопрос], [{**вопрос, "correct": "V2"}]))
+		self.assertFalse(release_quiz.квиз_тот_же([], []))
+
 	# --- гонка за прохождение в методах контракта ---
 
 	@contextmanager
@@ -845,3 +1185,69 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		frappe.db.set_value(прохождения.ПРОХОЖДЕНИЕ, run.name, "student", None)
 
 		self.отказ(ПРОХОЖДЕНИЕ_В_АРХИВЕ, release_quiz.начать, frappe.get_doc(прохождения.ПРОХОЖДЕНИЕ, run.name), занятие)
+
+
+class IntegrationTestПубликацияИЧужиеПопытки(IntegrationTestCase):
+	"""Публикация блокирует открытые попытки только своего курса (learning-services#514).
+
+	Отдельный класс — отдельная транзакция: `IntegrationTestCase` откатывает
+	базу в конце класса, и блокировки промежутков индекса попыток, взятые
+	публикациями соседних тестов, мешали бы второму соединению.
+	"""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.куратор = создать_куратора(f"rqx-{суффикс}@example.com")
+		self.ученик = создать_ученика(f"rqx-pupil-{суффикс}@example.com")
+		self.ключ = f"rqx-{суффикс}"
+		frappe.set_user(self.куратор)
+
+	def второе_соединение(self):
+		"""Своё соединение с базой сайта — другая транзакция; откатывается и закрывается после теста.
+
+		`Why:` не `secondary_connection` Frappe: тот зовёт `frappe.connect`, и
+		состояние запроса основного соединения после него другое."""
+		from frappe.database import get_db
+
+		соединение = get_db(
+			socket=frappe.conf.db_socket,
+			host=frappe.conf.db_host,
+			port=frappe.conf.db_port,
+			user=frappe.conf.db_user or frappe.conf.db_name,
+			password=frappe.conf.db_password,
+			cur_db_name=frappe.conf.db_name,
+		)
+		соединение.connect()
+		self.addCleanup(соединение.close)
+		self.addCleanup(соединение.rollback)
+		соединение.sql("set session innodb_lock_wait_timeout = 2")
+		return соединение
+
+	def test_публикация_не_ждёт_попытку_другого_курса(self):
+		"""Другая транзакция держит незафиксированную попытку чужого курса — публикация
+		её не ждёт: открытые попытки отбираются по индексу `(course, status)`, а не
+		блокировкой всей таблицы."""
+		релиз = релиз_двух_целей(self.ключ)
+		курс = релизы.опубликовать(релиз, None, self.куратор)["course"]
+		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		зачислить(self.ученик, run.lesson)
+		попытка = release_quiz.начать(run, создать_занятие(self.ученик, run.lesson))["attempt"]
+		соседняя = self.второе_соединение()
+		соседняя.sql(
+			"""insert into `tabAgent Quiz Attempt`
+			(name, creation, modified, course, status, session, student, lesson_key)
+			values (%s, now(), now(), %s, %s, 'other-session', 'other@example.com', 'l-1')""",
+			(frappe.generate_hash(length=10), f"other-{frappe.generate_hash(length=8)}", ПОПЫТКА_ИДЁТ),
+		)
+		[(прежнее_ожидание,)] = frappe.db.sql("select @@session.innodb_lock_wait_timeout")
+		frappe.db.sql("set session innodb_lock_wait_timeout = 2")
+		self.addCleanup(frappe.db.sql, f"set session innodb_lock_wait_timeout = {int(прежнее_ожидание)}")
+		релиз["lessons"][0]["title"] = "Новое название"
+
+		релизы.опубликовать(релиз, None, self.куратор)
+
+		self.assertEqual(
+			frappe.db.get_value(ПОПЫТКА, попытка, "release"),
+			frappe.db.get_value("LMS Course", курс, "active_release"),
+		)

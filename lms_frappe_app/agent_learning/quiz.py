@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 import frappe
 from frappe.utils import add_to_date, get_system_timezone, now_datetime
 
-from lms_frappe_app.agent_learning.constants import ПОПЫТКА_ИДЁТ, ПРОЙДЕН
+from lms_frappe_app.agent_learning.constants import ПОПЫТКА_АННУЛИРОВАНА, ПОПЫТКА_ИДЁТ, ПРОЙДЕН
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -48,12 +48,22 @@ from lms_frappe_app.agent_learning.runs import service as прохождения
 
 
 def попытки_урока(student: str, course: str, lesson_key: str) -> dict:
-	"""Отбор попыток урока, которые идут в лимит и паузу: ученик, курс, ключ урока.
+	"""Отбор попыток урока, которые идут в лимит и паузу: ученик, курс, ключ урока, кроме аннулированных.
 
 	`Why:` ключ урока стабилен между релизами: новый релиз не обнуляет ни
 	лимит, ни паузу.
+
+	`Why:` аннулированная (`Cancelled`) не в счёт: аннуляция — следствие
+	публикации автора, а не действия ученика; лимит и пауза защищают от
+	перебора, которого здесь нет. Поэтому и номер следующей попытки — тот же,
+	что у аннулированной.
 	"""
-	return {"student": student, "course": course, "lesson_key": lesson_key}
+	return {
+		"student": student,
+		"course": course,
+		"lesson_key": lesson_key,
+		"status": ("!=", ПОПЫТКА_АННУЛИРОВАНА),
+	}
 
 
 def проверить_право_на_попытку(отбор: dict, политика: dict) -> None:
@@ -68,9 +78,10 @@ def проверить_право_на_попытку(отбор: dict, поли
 			ПОПЫТКИ_ИСЧЕРПАНЫ, f"Использованы все попытки ({лимит})", attempts_used=прошлых
 		)
 
+	# Пауза — от последней завершённой: не открытой и не аннулированной.
 	последняя = frappe.get_all(
 		"Agent Quiz Attempt",
-		filters={**отбор, "status": ("!=", ПОПЫТКА_ИДЁТ)},
+		filters={**отбор, "status": ("not in", (ПОПЫТКА_ИДЁТ, ПОПЫТКА_АННУЛИРОВАНА))},
 		fields=["finished_at"],
 		order_by="finished_at desc",
 		limit=1,
@@ -135,12 +146,13 @@ def пересдача(отбор: dict, политика: dict, законче�
 
 
 def прошлых_попыток(отбор: dict) -> int:
-	"""Сколько попыток ученик уже израсходовал.
+	"""Сколько попыток ученик уже израсходовал: `отбор` — `попытки_урока`.
 
-	Считаются **все**, включая открытые. `Why:` иначе брошенная попытка не
-	стоит ничего: ученик отвечает наугад, видит вердикт, бросает и начинает
-	заново — перебором до верного варианта. Лимит попыток и пауза перед
-	повтором при этом остаются на бумаге.
+	Считаются **все**, включая открытые, кроме аннулированных публикацией
+	(`попытки_урока`). `Why:` иначе брошенная попытка не стоит ничего: ученик
+	отвечает наугад, видит вердикт, бросает и начинает заново — перебором до
+	верного варианта. Лимит попыток и пауза перед повтором при этом остаются на
+	бумаге.
 	"""
 	return frappe.db.count("Agent Quiz Attempt", отбор)
 

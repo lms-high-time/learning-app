@@ -6,7 +6,8 @@
 Поведение публикации проверяет `agent_learning/releases/test_service.py`;
 здесь — что оно дошло до метода: кто может звать, что релиз принимается и
 объектом, и строкой JSON, что отказ едет кодом контракта; инструкторы курса
-по списку (learning-services#512), список курсов с релизом и открытие курса.
+по списку (learning-services#512), коммит источника (learning-services#514),
+список курсов с релизом и открытие курса.
 """
 
 import json
@@ -258,6 +259,110 @@ class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
 		self.assertEqual(ответ.get("error", {}).get("code"), "instructor_not_found", ответ)
 		self.assertEqual(ответ["error"]["users"], [отключённый])
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
+
+
+class IntegrationTestКоммитРелиза(IntegrationTestCase):
+	"""`publish_release(…, commit)`: коммит источника пишется в новую версию
+	(learning-services#514)."""
+
+	#: SHA-1 и SHA-256 — git знает оба формата хеша.
+	КОММИТ = "0123456789abcdef0123456789abcdef01234567"
+	ДРУГОЙ = "fedcba9876543210" * 4
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		frappe.set_user(создать_куратора(f"rel-commit-{суффикс}@example.com"))
+		self.ключ = f"commit-{суффикс}"
+
+	def опубликовать(self, релиз: dict | None = None, **аргументы) -> dict:
+		return authoring.publish_release(release=релиз or пример_релиза(self.ключ), **аргументы)
+
+	def другой_релиз(self) -> dict:
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, второе издание"
+		return релиз
+
+	def коммиты(self, курс: str) -> list[tuple[int, str | None]]:
+		return [
+			(р.version, р.source_commit)
+			for р in frappe.get_all(
+				"Agent Course Release",
+				filters={"course": курс},
+				fields=["version", "source_commit"],
+				order_by="version asc",
+			)
+		]
+
+	def test_коммит_пишется_в_новую_версию(self):
+		данные = self.опубликовать(commit=self.КОММИТ)["data"]
+
+		self.assertEqual((данные["version"], данные["commit"]), (1, self.КОММИТ))
+
+		данные = self.опубликовать(self.другой_релиз(), commit=self.ДРУГОЙ)["data"]
+
+		self.assertEqual((данные["version"], данные["commit"]), (2, self.ДРУГОЙ))
+		self.assertEqual(self.коммиты(данные["course"]), [(1, self.КОММИТ), (2, self.ДРУГОЙ)])
+		история = authoring.course_releases(course=данные["course"])["data"]["releases"]
+		self.assertEqual([(р["version"], р["commit"]) for р in история], [(2, self.ДРУГОЙ), (1, self.КОММИТ)])
+
+	def test_на_unchanged_коммит_первой_публикации(self):
+		"""Тот же релиз из другого коммита — `unchanged`: коммит в дайджест не
+		входит, а запись версии неизменяема."""
+		курс = self.опубликовать(commit=self.КОММИТ)["data"]["course"]
+
+		for коммит in (self.ДРУГОЙ, None):
+			with self.subTest(коммит=коммит):
+				данные = self.опубликовать(commit=коммит)["data"]
+
+				self.assertTrue(данные["unchanged"])
+				self.assertEqual((данные["version"], данные["commit"]), (1, self.КОММИТ))
+		self.assertEqual(self.коммиты(курс), [(1, self.КОММИТ)])
+
+	def test_без_параметра_коммита_нет(self):
+		данные = self.опубликовать()["data"]
+
+		self.assertIn("commit", данные)
+		self.assertIsNone(данные["commit"])
+		self.assertEqual(self.коммиты(данные["course"]), [(1, None)])
+		[версия] = authoring.course_releases(course=данные["course"])["data"]["releases"]
+		self.assertIsNone(версия["commit"])
+
+	def test_версия_без_коммита_его_не_получает(self):
+		"""Версия, впервые опубликованная без коммита, так и остаётся без него."""
+		курс = self.опубликовать()["data"]["course"]
+
+		данные = self.опубликовать(commit=self.КОММИТ)["data"]
+
+		self.assertTrue(данные["unchanged"])
+		self.assertIsNone(данные["commit"])
+		self.assertEqual(self.коммиты(курс), [(1, None)])
+
+	def test_неверный_коммит_отказ_до_первой_записи(self):
+		курс = self.опубликовать(commit=self.КОММИТ)["data"]["course"]
+		for коммит in (
+			"",
+			self.КОММИТ[:7],
+			self.КОММИТ.upper(),
+			self.КОММИТ + "8",
+			f" {self.КОММИТ}",
+			f"{self.КОММИТ}\n",
+			"g" * 40,
+			self.ДРУГОЙ[:63],
+			40,
+			[self.КОММИТ],
+		):
+			for релиз in (self.другой_релиз(), пример_релиза(f"new-{self.ключ}")):
+				with (
+					self.subTest(коммит=коммит, ключ=релиз["course"]["key"]),
+					mock.patch.object(service, "_разобрать") as разобрать,
+				):
+					ответ = self.опубликовать(релиз, commit=коммит)
+
+					self.assertEqual(ответ.get("error", {}).get("code"), "invalid_commit", ответ)
+					разобрать.assert_not_called()
+		self.assertEqual(self.коммиты(курс), [(1, self.КОММИТ)])
+		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": f"new-{self.ключ}"}))
 
 
 class IntegrationTestКурсыИОткрытие(IntegrationTestCase):

@@ -95,5 +95,31 @@
   "description": "Одна-две фразы ученику: что изменится в работе после главы. Пишется из релиза.",
   "insert_after": "title",
   "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Course Chapter-chapter_key",
+  "dt": "Course Chapter",
+  "fieldname": "chapter_key",
+  "fieldtype": "Data",
+  "label": "Ключ главы",
+  "read_only": 1,
+  "no_copy": 1,
+  "description": "Ключ главы из релиза: по нему публикация находит главу. Ставится при создании и не меняется.",
+  "insert_after": "chapter_description",
+  "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "Course Lesson-lesson_key",
+  "dt": "Course Lesson",
+  "fieldname": "lesson_key",
+  "fieldtype": "Data",
+  "label": "Ключ урока",
+  "read_only": 1,
+  "no_copy": 1,
+  "description": "Ключ урока из релиза: по нему публикация находит урок. Ставится при создании и не меняется.",
+  "insert_after": "lesson_hook",
+  "module": "Agent Learning"
  }
 ]

@@ -7,7 +7,9 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
 	курс_из_релиза,
@@ -188,6 +190,32 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		)
 		self.assertEqual(сессии[self.курс]["objectives"], [])
 		self.assertNotIn("Свидетельство агента", json.dumps(сессии, ensure_ascii=False, default=str))
+
+	def test_подробности_по_снятому_уроку_без_индекса_его_релиза(self):
+		"""Цели урока, снятого из релиза, — с текстами последней версии, где он был,
+		и без индекса этой версии: тексты держит прохождение."""
+		ключ = f"detail-{frappe.generate_hash(length=6)}"
+		курс, релиз_урока = курс_из_релиза(релиз=пример_релиза(ключ))
+		frappe.get_doc(
+			{"doctype": "Course Allocation", "organization": self.компания_а, "course": курс}
+		).insert(ignore_permissions=True)
+		run = прохождения.прохождение(self.ученик_а, курс, "l-2")
+		занятие = создать_занятие(self.ученик_а, run.lesson, run=run.name)
+		прохождения.отметить(run.name, "term:T1", "done", "Свидетельство агента", занятие=занятие)
+		без_урока = пример_релиза(ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		релизы.опубликовать(без_урока, None, "Administrator")
+		for строки_индекса in ("Agent Release Lesson", "Agent Release Objective"):
+			frappe.db.delete(строки_индекса, {"parent": релиз_урока})
+
+		frappe.set_user(self.менеджер)
+		сессии = {с["course"]: с for с in manager.student_detail(self.ученик_а)["data"]["sessions"]}
+
+		self.assertEqual(
+			сессии[курс]["objectives"],
+			[{"key": "l-2-D1", "text": "Цель урока «Урок второй»", "status": "touched"}],
+		)
 
 	def test_подробности_несут_итог_попытки_квиза_из_релиза(self):
 		"""Попытка — урок, номер, статус, доля, зачёт и время; ни вопросов, ни ответов."""

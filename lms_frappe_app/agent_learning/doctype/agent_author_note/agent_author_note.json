@@ -8,7 +8,7 @@
  "field_order": [
   "course",
   "release",
-  "lesson",
+  "lesson_key",
   "target",
   "status",
   "via",
@@ -35,12 +35,11 @@
    "description": "Релиз курса, к которому написана заметка: по его ключам задано место."
   },
   {
-   "fieldname": "lesson",
-   "fieldtype": "Link",
-   "label": "Урок",
-   "options": "Course Lesson",
+   "fieldname": "lesson_key",
+   "fieldtype": "Data",
+   "label": "Ключ урока",
    "read_only": 1,
-   "description": "Урок места — запись урока курса по ключу из места."
+   "description": "Ключ урока места заметки по её релизу. Пуст у мест вне урока и у старых заметок, урок которых при переносе (патч note_lesson_keys) не нашёлся ни по записи урока, ни по адресу в релизе заметки, — например, у архивных заметок курсов без релиза."
   },
   {
    "fieldname": "target",
@@ -91,7 +90,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-08 22:00:00.000000",
+ "modified": "2026-10-09 18:30:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Author Note",

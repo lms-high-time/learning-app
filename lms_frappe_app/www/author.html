@@ -448,7 +448,7 @@
 		<p class="intro">Курс правится только новым релизом. Действующий — тот, что видят ученики и по ключам которого пишутся заметки.</p>
 		<div class="scroll">
 		<table class="history">
-			<thead><tr><th>Версия</th><th>Опубликован</th><th>Кем</th><th>Документ</th><th>Дайджест</th></tr></thead>
+			<thead><tr><th>Версия</th><th>Опубликован</th><th>Кем</th><th>Документ</th><th>Коммит</th><th>Дайджест</th></tr></thead>
 			<tbody>
 			{% for р in history %}
 			<tr>
@@ -456,6 +456,7 @@
 				<td>{{ дата(р.published_at) }}</td>
 				<td>{{ (р.published_by_name or р.published_by or "—") | e }}</td>
 				<td>{% if р.document_key %}<code>{{ р.document_key | e }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
+				<td>{% if р.commit %}<code title="{{ р.commit | e }}">{{ р.commit[:8] | e }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
 				<td><code title="{{ р.digest | e }}">{{ (р.digest or "")[:12] | e }}</code></td>
 			</tr>
 			{% endfor %}

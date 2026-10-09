@@ -430,7 +430,8 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 	def test_история_релизов(self):
 		второй = пример_релиза(self.ключ)
 		второй["course"]["summary"] = "Вторая версия"
-		authoring.publish_release(release=второй)
+		коммит = "0123456789abcdef0123456789abcdef01234567"
+		authoring.publish_release(release=второй, commit=коммит)
 
 		с = сведения_для(self.куратор, course=self.курс, view="history")
 
@@ -441,6 +442,10 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		html = страница(self.куратор, course=self.курс, view="history")
 		self.assertIn("История релизов", html)
 		self.assertIn(с["history"][1]["digest"][:12], html)
+		# Колонка «Коммит»: короткий хеш, полный — в подсказке; у v1 коммита нет.
+		self.assertEqual([р["commit"] for р in с["history"]], [коммит, None])
+		self.assertIn("<th>Коммит</th>", html)
+		self.assertIn(f'<code title="{коммит}">{коммит[:8]}</code>', html)
 
 	# --- заметки ---
 
@@ -578,7 +583,8 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.заметка("course")
 		второй = пример_релиза(self.ключ)
 		второй["course"]["summary"] = "Вторая версия"
-		authoring.publish_release(release=второй)
+		коммит = "0123456789abcdef0123456789abcdef01234567"
+		authoring.publish_release(release=второй, commit=коммит)
 		с = сведения_для(self.куратор, course=self.курс)
 		self.assertNotEqual(с["course"]["revision"], отметки["revision"])
 		self.assertIsNotNone(с["course"]["notes_revision"])

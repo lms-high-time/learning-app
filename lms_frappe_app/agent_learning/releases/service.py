@@ -4,8 +4,13 @@
 """Публикация релиза курса (learning-services#500).
 
 Порядок: разобрать → схема → проверки сервера → курс → без изменений? →
-записи под точкой сохранения: проекция глав и уроков, шаблоны домашек,
-документ, релиз с индексом, карточка курса, инструкторы и действующий релиз.
+ключи на записях действующего релиза → блокировка открытых попыток квиза
+курса → записи под точкой сохранения: проекция глав и уроков, шаблоны
+домашек, документ, релиз с индексом, карточка курса, инструкторы и
+действующий релиз, перенос или аннулирование открытых попыток
+(`release_quiz.перенести_попытки`), освобождение содержимого прежних версий
+(`retention.освободить_прежние`), уборка снятых глав и уроков
+(`projection.убрать`).
 Признак «опубликован» не трогается: новый курс выходит черновиком, новый релиз
 опубликованного курса действует сразу (решение владельца, #497).
 
@@ -22,7 +27,7 @@ import math
 import frappe
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning import structure
+from lms_frappe_app.agent_learning import release_quiz, structure
 from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import (
@@ -32,6 +37,7 @@ from lms_frappe_app.agent_learning.releases import (
 	index,
 	places,
 	projection,
+	retention,
 	schema,
 )
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
@@ -46,14 +52,40 @@ from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗ�
 КЛЮЧ_ЗАНЯТ = "course_key_taken"
 У_КУРСА_ЕСТЬ_УРОКИ = "course_has_content"
 КУРС_С_ПРОХОЖДЕНИЯМИ = "course_has_lesson_runs"
+КЛЮЧЕЙ_НЕТ = "course_keys_missing"
 
 
-def опубликовать(релиз, course: str | None, автор: str, инструкторы: list[str] | None = None) -> dict:
+def опубликовать(
+	релиз,
+	course: str | None,
+	автор: str,
+	инструкторы: list[str] | None = None,
+	коммит: str | None = None,
+) -> dict:
 	"""Релиз — новой версией курса; тот же релиз ещё раз — `unchanged`, без записей релиза.
 
 	`инструкторы` — проверенные имена пользователей: заменяют инструкторов
 	курса, и на `unchanged` тоже — в дайджест они не входят. `None` — не
 	трогать; новый курс тогда получает инструктором `автор`.
+
+	`коммит` — проверенный хеш коммита git, из которого собран релиз:
+	пишется в новую версию (`source_commit`). На `unchanged` не пишется —
+	запись релиза неизменяема, и у версии остаётся коммит её первой
+	публикации. `Why:` в дайджест коммит не входит — тот же релиз из другого
+	коммита перестал бы быть `unchanged`.
+
+	Открытые попытки квиза курса блокируются только на пути с записью — тот
+	же релиз ещё раз попыток не трогает — и переносятся или аннулируются
+	после смены действующего релиза: сравнению нужен индекс их релиза.
+	Содержимое прежних версий освобождается после попыток, в той же точке
+	сохранения: откат публикации откатывает и его. Последней идёт уборка
+	снятых этой версией глав и уроков: их держат строки индекса прежней
+	версии и шаблоны домашки, и удалить запись без ссылок можно только после
+	освобождения и проекции домашки. Ссылки проверяются только у снятых этой
+	версией записей; накопленные раньше снимает патч `prune_projection`.
+	Взаимоблокировку с ответом агента (`frappe.QueryDeadlockError`) и таймаут
+	ожидания блокировки (`frappe.QueryTimeoutError`: строку курса, попытки,
+	главы или урока держит другой запрос) метод контракта отдаёт как `busy`.
 	"""
 	релиз = _разобрать(релиз)
 	предупреждения = _проверить(релиз)
@@ -71,6 +103,9 @@ def опубликовать(релиз, course: str | None, автор: str, и
 					документ.flags[ИЗ_РЕЛИЗА] = True
 					документ.save()
 			return _ответ(курс, действующий, None, None, предупреждения, создан=False, без_изменений=True)
+		if действующий:
+			_проверить_ключи(курс, действующий)
+	попытки = release_quiz.заблокировать_открытые(курс) if курс else []
 
 	frappe.db.savepoint(ТОЧКА)
 	try:
@@ -79,13 +114,23 @@ def опубликовать(релиз, course: str | None, автор: str, и
 			курс = _завести_курс(релиз["course"], инструкторы or [автор], ключ)
 		прежний = frappe.db.get_value("LMS Course", курс, "active_release")
 		прежний_документ = frappe.db.get_value(РЕЛИЗ, прежний, "document_key") if прежний else None
-		итог = projection.спроецировать(курс, релиз, index.известные(курс), index.ключи(прежний))
+		итог = projection.спроецировать(курс, релиз, projection.известные(курс), index.ключи(прежний))
 		homework.спроецировать(курс, {итог.уроки[у["key"]]: у["homework"] for у in релиз["lessons"]})
 		схема_документа = document.спроецировать(
 			курс, релиз["document"], релиз["lessons"], итог.уроки, прежний_документ
 		)
-		запись = _записать_релиз(курс, релиз, дайджест, итог, автор)
+		строки = index.строки(релиз, итог.главы, итог.уроки)
+		запись = _записать_релиз(курс, релиз, дайджест, строки, автор, коммит)
 		_карточка(курс, релиз["course"], запись.name, инструкторы)
+		# Why: квиз нового релиза — каким его записала база: при вставке Frappe
+		# чистит HTML в текстах (`<role>` в вопросе пропадает), а прежняя сторона
+		# сравнения читается из базы. Сырые строки релиза ложно аннулировали бы
+		# попытку по квизу с угловыми скобками.
+		записанные = {"lessons": строки["lessons"], "questions": [в.as_dict() for в in запись.questions]}
+		release_quiz.перенести_попытки(попытки, запись.name, записанные)
+		if прежний:
+			retention.освободить_прежние(курс)
+		projection.убрать(итог.снятые_записи)
 	except Отказ:
 		frappe.db.rollback(save_point=ТОЧКА)
 		raise
@@ -95,6 +140,40 @@ def опубликовать(релиз, course: str | None, автор: str, и
 	return _ответ(
 		курс, запись.name, итог, схема_документа, предупреждения, создан=создан, без_изменений=False
 	)
+
+
+def _проверить_ключи(курс: str, действующий: str) -> None:
+	"""Отказ `course_keys_missing`, если у глав или уроков действующего релиза
+	курса нет ключа на записи Learning. Одна выборка.
+
+	`Why:` проекция находит запись Learning только по ключу на ней
+	(`projection.известные`). Без ключей — сайт не прошёл патч
+	`release_record_keys` — публикация завела бы новые записи под все ключи
+	релиза, и следы учеников остались бы у прежних. Смотрятся только записи
+	действующего релиза: патч пишет ключ по свежей версии, и они получают его
+	всегда, а запись курса вне релиза может остаться без ключа и после патча
+	(глава анонса; запись, чей ключ в свежей версии вёл уже к другой) — отказ
+	из-за неё был бы вечным.
+	"""
+	части = [
+		f"""(select count(*) from `tab{строка}` r join `tab{doctype}` z on z.name = r.`{ссылка}`
+		where r.parenttype = %(parenttype)s and r.parent = %(release)s
+		and ifnull(z.`{projection.ПОЛЕ_КЛЮЧА[doctype]}`, '') = '')"""
+		for строка, ссылка, doctype in (
+			(index.ГЛАВА, "chapter", projection.ГЛАВА),
+			(index.УРОК, "lesson", projection.УРОК),
+		)
+	]
+	запрос = "select " + ", ".join(части)
+	[(главы, уроки)] = frappe.db.sql(запрос, {"parenttype": РЕЛИЗ, "release": действующий})
+	if главы or уроки:
+		raise Отказ(
+			КЛЮЧЕЙ_НЕТ,
+			"У глав или уроков курса нет ключей релиза: сайту нужна миграция с патчем release_record_keys",
+			course=курс,
+			chapters=главы,
+			lessons=уроки,
+		)
 
 
 def _сверить_прохождения(курс: str) -> None:
@@ -264,7 +343,9 @@ def _завести_курс(данные: dict, инструкторы: list[st
 		) from причина
 
 
-def _записать_релиз(курс: str, релиз: dict, дайджест: str, итог, автор: str):
+def _записать_релиз(курс: str, релиз: dict, дайджест: str, строки: dict, автор: str, коммит: str | None):
+	"""Запись релиза новой версией; `строки` — его индекс (`index.строки`),
+	`коммит` — коммит источника или `None`."""
 	последняя = frappe.db.sql("select max(version) from `tabAgent Course Release` where course=%s", курс)[0][
 		0
 	]
@@ -278,11 +359,12 @@ def _записать_релиз(курс: str, релиз: dict, дайджес
 			"version": (последняя or 0) + 1,
 			"release_format": schema.ФОРМАТ,
 			"digest": дайджест,
+			"source_commit": коммит,
 			"document_key": (релиз["document"] or {}).get("key"),
 			"published_by": автор,
 			"published_at": now_datetime(),
 			"snapshot": json.dumps(релиз, ensure_ascii=False, allow_nan=False),
-			**index.строки(релиз, итог.главы, итог.уроки),
+			**строки,
 		}
 	).insert(ignore_permissions=True)
 
@@ -344,11 +426,13 @@ def _ответ(курс, релиз, итог, схема_документа, �
 		)
 		схема_документа = {"artifact": ключ_документа, "version": версия} if ключ_документа else None
 	сведения = frappe.db.get_value("LMS Course", курс, ["course_key", "published"], as_dict=True)
+	запись = frappe.db.get_value(РЕЛИЗ, релиз, ["version", "source_commit"], as_dict=True)
 	return {
 		"course": курс,
 		"course_key": сведения.course_key,
 		"release": релиз,
-		"version": frappe.db.get_value(РЕЛИЗ, релиз, "version"),
+		"version": запись.version,
+		"commit": запись.source_commit or None,
 		"unchanged": без_изменений,
 		"course_created": создан,
 		"published": bool(сведения.published),
@@ -366,7 +450,7 @@ def _ответ(курс, релиз, итог, схема_документа, �
 
 
 def удалить_курс(курс: str) -> None:
-	"""Курс из релиза целиком: релизы с кэшем узлов карты, заметки автора, схемы документа,
+	"""Курс из релиза целиком: заметки автора, релизы с кэшем узлов карты, схемы документа,
 	домашки, главы, уроки и сам курс.
 
 	Для курсов, по которым учиться больше не будут (решение владельца: старые
@@ -394,11 +478,12 @@ def удалить_курс(курс: str) -> None:
 	# удаляются только вместе с курсом (`course_guard`).
 	frappe.flags[УДАЛЯЕТСЯ_КУРС] = курс
 	try:
+		# Заметки ссылаются на релиз, к которому написаны, — уходят раньше релизов.
+		for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
+			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
 		for релиз in frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=["name", "digest"]):
 			frappe.delete_doc(РЕЛИЗ, релиз.name, ignore_permissions=True)
 			frappe.cache.delete_value(places.ключ_кэша(релиз.name, релиз.digest))
-		for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
-			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
 		for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
 			frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
 		homework.удалить_шаблоны(курс)

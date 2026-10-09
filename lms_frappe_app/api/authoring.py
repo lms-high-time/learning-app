@@ -13,6 +13,7 @@
 """
 
 import json
+import re
 
 import frappe
 
@@ -26,6 +27,7 @@ from lms_frappe_app.agent_learning import (
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import index as releases_index
 from lms_frappe_app.agent_learning.releases import places
+from lms_frappe_app.agent_learning.releases import projection as releases_projection
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -38,6 +40,7 @@ from lms_frappe_app.agent_learning.constants import (
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
+	ЗАНЯТО,
 	КУРС_ИЗ_РЕЛИЗА,
 	КУРС_НЕ_В_РЕЛИЗЕ,
 	КУРС_НЕ_НАЙДЕН,
@@ -58,6 +61,10 @@ from lms_frappe_app.api import контракт, текущий_пользова
 ИНСТРУКТОРОВ_НЕТ = "instructors_empty"
 ИНСТРУКТОР_НЕ_НАЙДЕН = "instructor_not_found"
 ИНСТРУКТОР_НЕ_АВТОР = "instructor_not_author"
+КОММИТ_НЕВЕРЕН = "invalid_commit"
+#: Полный хеш коммита git: SHA-1 или SHA-256, в нижнем регистре — как его
+#: печатает `git rev-parse HEAD`.
+ХЕШ_КОММИТА = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def _автор() -> str:
@@ -230,7 +237,7 @@ def add_note(
 	принял» не шла через пересказ в чате.
 
 	`target` — место по ключам действующего релиза (`notes.ФОРМЫ_АДРЕСА`);
-	заметка помнит этот релиз. `quote` — выделенный текст. `via` — кто
+	заметка помнит этот релиз и ключ урока места. `quote` — выделенный текст. `via` — кто
 	пишет: `author` из кабинета, `agent` — агент куратора через MCP; заметка
 	агента — вопрос автору.
 	"""
@@ -255,7 +262,7 @@ def add_note(
 			"doctype": "Agent Author Note",
 			"course": course,
 			"release": релиз,
-			"lesson": место["lesson"],
+			"lesson_key": место["lesson_key"],
 			"target": notes.адрес(адрес),
 			"status": "open",
 			"via": via,
@@ -284,7 +291,8 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 
 	Место подписано словами по действующему релизу курса; `missing` — ключа
 	места в действующем релизе нет. `lesson` — ключ урока: заметки мест этого
-	урока. `waiting_on` — чей ход.
+	урока по ключу, который заметка хранит, — и урока, снятого из релиза.
+	`waiting_on` — чей ход.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
@@ -293,14 +301,9 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 		if status not in notes.СТАТУСЫ:
 			raise Отказ(НЕВЕРНОЕ_ЗАМЕЧАНИЕ, "Статус: open, done или accepted", where="status")
 		фильтры["status"] = status
-	известные = None
 	if lesson:
-		известные = releases_index.известные(course)
-		запись = известные["lessons"].get(lesson)
-		if not запись:
-			return {"course": course, "notes": []}
-		фильтры["lesson"] = запись
-	return {"course": course, "notes": _замечания(course, фильтры, известные)}
+		фильтры["lesson_key"] = lesson
+	return {"course": course, "notes": _замечания(course, фильтры)}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -370,12 +373,11 @@ def _состояние_замечания(документ) -> dict:
 	}
 
 
-def _замечания(course: str, фильтры: dict, известные: dict | None = None) -> list[dict]:
+def _замечания(course: str, фильтры: dict) -> list[dict]:
 	"""Заметки по фильтрам с нитями, подписями мест и версиями релизов.
 
-	Число выборок не растёт с числом заметок: ответы, релизы курса, ключи
-	уроков и каждая нужная часть индекса действующего релиза — по выборке на
-	всю выдачу.
+	Число выборок не растёт с числом заметок: ответы, релизы курса и каждая
+	нужная часть индекса действующего релиза — по выборке на всю выдачу.
 	"""
 	записи = frappe.get_all(
 		"Agent Author Note",
@@ -383,7 +385,7 @@ def _замечания(course: str, фильтры: dict, известные: d
 		fields=[
 			"name",
 			"release",
-			"lesson",
+			"lesson_key",
 			"target",
 			"quote",
 			"text",
@@ -414,9 +416,6 @@ def _замечания(course: str, фильтры: dict, известные: d
 			}
 		)
 	версии = {р.name: р.version for р in releases_index.история(course)}
-	if any(запись.lesson for запись in записи):
-		известные = известные or releases_index.известные(course)
-	ключи_уроков = {запись: ключ for ключ, запись in (известные or {"lessons": {}})["lessons"].items()}
 	места = places.Места(frappe.db.get_value("LMS Course", course, "active_release"))
 	адреса = [_адрес_или_нет(запись) for запись in записи]
 	подписи = iter(места.места([адрес for адрес in адреса if адрес]))
@@ -430,7 +429,7 @@ def _замечания(course: str, фильтры: dict, известные: d
 				"target": запись.target,
 				"release": запись.release or None,
 				"version": версии.get(запись.release),
-				"lesson_key": ключи_уроков.get(запись.lesson),
+				"lesson_key": запись.lesson_key or None,
 				"label": место["label"],
 				"missing": место["missing"],
 				"quote": запись.quote or "",
@@ -476,7 +475,7 @@ def ревизия_замечаний(course: str) -> str | None:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def publish_release(release, course: str | None = None, instructors=None) -> dict:
+def publish_release(release, course: str | None = None, instructors=None, commit=None) -> dict:
 	"""Публикует релиз курса целиком — новой версией.
 
 	`release` — релиз от компилятора курса (объект или строка JSON), формат —
@@ -492,10 +491,38 @@ def publish_release(release, course: str | None = None, instructors=None) -> dic
 	становится; не передан — инструкторы не трогаются (новый курс получает
 	вызвавшего). Применяется и к неизменному релизу: в дайджест релиза
 	инструкторы не входят.
+
+	`commit` — коммит git, из которого собран релиз (`_коммит`): пишется в
+	новую версию, ответ отдаёт коммит версии — и на `unchanged`, где это
+	коммит её первой публикации. Необязателен: у публикатора git может не
+	быть.
+
+	Открытые попытки квиза курса публикация переносит на новый релиз или
+	аннулирует. Попытку, которую в этот момент меняет ответ ученика, MariaDB
+	стенда (`innodb_snapshot_isolation`) отдаёт взаимоблокировкой, а занятую
+	строку — таймаутом ожидания блокировки: откат целиком и отказ `busy`,
+	повтор безопасен.
 	"""
 	автор = _автор()
+	коммит = None if commit is None else _коммит(commit)
 	инструкторы = None if instructors is None else _инструкторы(instructors)
-	return releases.опубликовать(release, course or None, автор, инструкторы)
+	try:
+		return releases.опубликовать(release, course or None, автор, инструкторы, коммит)
+	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+		frappe.db.rollback()
+		raise Отказ(ЗАНЯТО, "Курс сейчас меняет другой запрос: публикация откатилась — повторите") from None
+
+
+def _коммит(значение) -> str:
+	"""Хеш коммита источника — или отказ `invalid_commit` до первой записи.
+
+	`Why:` хеш не приводится к нижнему регистру и не обрезается: `git
+	rev-parse` печатает его ровно так, и иное значение — признак, что
+	публикатор передал не то.
+	"""
+	if isinstance(значение, str) and ХЕШ_КОММИТА.fullmatch(значение):
+		return значение
+	raise Отказ(КОММИТ_НЕВЕРЕН, "Коммит — полный хеш git: 40 или 64 знака 0-9a-f в нижнем регистре")
 
 
 def _инструкторы(значение) -> list[str]:
@@ -911,10 +938,10 @@ def course_reports(
 	"""Репорты агентов по курсу: что мешает курсу работать.
 
 	`status` — статус наружу или `open`: всё, что ждёт разбора. `lesson` —
-	ключ урока: он ищется по всей истории релизов курса, так что находятся и
-	репорты урока, снятого из релиза. Ключ урока в репорте не хранится:
-	`lesson_key` выводится по релизу репорта и его уроку одной выборкой на
-	всю страницу.
+	ключ урока: урок ищется по ключу на записи Learning
+	(`projection.известные_уроки`), так что находятся и репорты урока, снятого из
+	релиза. Ключ урока в репорте не хранится: `lesson_key` — ключ на записи
+	урока репорта, соединением в той же выборке.
 
 	`Why:` без чтения механизм разомкнут — `report_issue` умел только
 	записывать, и обратная связь о курсе, который не работает, лежала мёртвым
@@ -942,7 +969,7 @@ def course_reports(
 	if status:
 		фильтры["status"] = ("in", _статусы_фильтра(status))
 	if lesson:
-		запись = releases_index.известные(course)["lessons"].get(lesson)
+		запись = releases_projection.известные_уроки(course).get(lesson)
 		if not запись:
 			return {"course": course, "reports": []}
 		фильтры["lesson"] = запись
@@ -954,6 +981,7 @@ def course_reports(
 			"name",
 			"kind",
 			"lesson",
+			"lesson.lesson_key as lesson_key",
 			"objective",
 			"question_key",
 			"text",
@@ -966,8 +994,6 @@ def course_reports(
 		order_by="creation desc",
 		limit=min(int(limit or РЕПОРТОВ_ЗА_РАЗ), РЕПОРТОВ_ЗА_РАЗ),
 	)
-	ключи_уроков = releases_index.ключи_уроков([з.release for з in записи if з.release])
-
 	return {
 		"course": course,
 		"reports": [
@@ -975,7 +1001,7 @@ def course_reports(
 				"id": з.name,
 				"kind": ИМЯ_ВИДА_РЕПОРТА.get(з.kind, з.kind),
 				"lesson": з.lesson,
-				"lesson_key": ключи_уроков.get((з.release, з.lesson)),
+				"lesson_key": з.lesson_key or None,
 				"objective": з.objective or None,
 				"question_key": з.question_key or None,
 				"text": з.text,

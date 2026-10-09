@@ -4,7 +4,6 @@
 """Индекс релиза по ключам: запись и чтение (learning-services#500)."""
 
 import json
-from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -14,7 +13,6 @@ from lms_frappe_app.agent_learning.releases import index, projection
 
 # Модулем, а не именами: класс тестов проекции в этом модуле прогнался бы второй раз.
 from lms_frappe_app.agent_learning.releases import test_projection as проекция
-from lms_frappe_app.patches.v0_1 import release_agent_slices
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора
 
@@ -92,19 +90,6 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		self.assertIsNone(index.эталон(self.релиз, "l-2", "S1/l-1-D1"))
 		self.assertIsNone(index.эталон(self.релиз, "l-1", "S9/l-1-D1"))
 
-	def test_известные_помнят_снятый_ключ(self):
-		релиз = пример_релиза()
-		релиз["chapters"] = релиз["chapters"][:1]
-		релиз["lessons"] = релиз["lessons"][:2]
-		frappe.set_user(self.куратор)
-		итог = projection.спроецировать(self.курс, релиз, index.известные(self.курс), index.ключи(self.релиз))
-		frappe.set_user("Administrator")
-		self.вставить(релиз, итог, 2)
-
-		известные = index.известные(self.курс)
-		self.assertEqual(известные["lessons"]["l-3"], self.итог.уроки["l-3"])
-		self.assertEqual(известные["chapters"]["ch-2"], self.итог.главы["ch-2"])
-
 	def test_разделы_документа(self):
 		строки = frappe.get_all(
 			index.РАЗДЕЛ,
@@ -161,46 +146,3 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 
 	def test_урок_не_отдаёт_пакет_агента(self):
 		self.assertNotIn("agent", index.урок(self.релиз, "l-1"))
-
-	def test_патч_раскладывает_пакет_старых_релизов(self):
-		frappe.db.set_value(index.РЕЛИЗ, self.релиз, "agent_frame", None, update_modified=False)
-		for строка in frappe.get_all(index.УРОК, filters={"parent": self.релиз}, pluck="name"):
-			frappe.db.set_value(index.УРОК, строка, "agent", None, update_modified=False)
-		self.assertEqual(index.рамка(self.релиз), {})
-
-		release_agent_slices.execute()
-
-		пакет = пример_релиза()["agent"]
-		self.assertEqual(index.пакет_урока(self.релиз, "l-2"), пакет["lessons"]["l-2"])
-		self.assertEqual(index.рамка(self.релиз)["frame"], пакет["frame"])
-		with patch.object(frappe.db, "set_value") as запись:
-			release_agent_slices.execute()
-		запись.assert_not_called()
-
-	def test_патч_не_раскладывает_пакет_с_ответами(self):
-		"""Пакет старого релиза с ответами квиза — пустые срезы и запись в журнале ошибок."""
-		снимок = пример_релиза()
-		снимок["agent"]["lessons"]["l-1"]["answers"] = {"S1/l-1-D1": "V1"}
-		frappe.db.set_value(index.РЕЛИЗ, self.релиз, "snapshot", json.dumps(снимок), update_modified=False)
-		for строка in frappe.get_all(index.УРОК, filters={"parent": self.релиз}, pluck="name"):
-			frappe.db.set_value(index.УРОК, строка, "agent", None, update_modified=False)
-		# Журнал ошибок переживает откат теста, а имя релиза (`REL-#####`)
-		# откат возвращает: записи прошлых прогонов с тем же релизом — не наши.
-		начало = now_datetime()
-
-		release_agent_slices.execute()
-
-		self.assertEqual(index.пакет_урока(self.релиз, "l-1"), {})
-		self.assertEqual(index.пакет_урока(self.релиз, "l-2"), {})
-		self.assertEqual(index.рамка(self.релиз), {})
-		журнал = frappe.get_all(
-			"Error Log",
-			filters={
-				"reference_doctype": index.РЕЛИЗ,
-				"reference_name": self.релиз,
-				"creation": (">=", начало),
-			},
-			pluck="error",
-		)
-		self.assertEqual(len(журнал), 1)
-		self.assertIn("agent.lessons.l-1.answers", журнал[0])

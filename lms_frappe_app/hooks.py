@@ -168,6 +168,7 @@ fixtures = [
 	# запись, второго основания доступа нет (learning-services#393).
 	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
 	# (learning-services#500). Цели анонса — у курса без релиза (learning-services#512).
+	# Ключи глав и уроков из релиза — на самих записях (learning-services#514).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -183,6 +184,8 @@ fixtures = [
 					"LMS Course-course_attribution",
 					"LMS Course-announce_objectives",
 					"Course Chapter-chapter_description",
+					"Course Chapter-chapter_key",
+					"Course Lesson-lesson_key",
 				],
 			]
 		],
@@ -220,6 +223,9 @@ scheduler_events = {
 # Проверка каталога документов — последней: сломанный каталог валит
 # `bench migrate`, и выкатка останавливается до переключения (#377).
 after_install = "lms_frappe_app.install.after_install"
+# Индексы по полям фикстур: при установке фикстуры синхронизируются после
+# `after_install`, а `after_sync` — следом за ними.
+after_sync = "lms_frappe_app.install.after_sync"
 after_migrate = [
 	"lms_frappe_app.install.after_migrate",
 	"lms_frappe_app.agent_learning.artifacts.catalog.после_миграции",
@@ -294,14 +300,21 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
-	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512).
+	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512);
+	# пустой ключ релиза на записи — NULL (learning-services#514).
 	"Course Chapter": {
-		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"validate": [
+			"lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+			"lms_frappe_app.agent_learning.releases.projection.ключ_только_из_релиза",
+		],
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
 	"Course Lesson": {
-		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"validate": [
+			"lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+			"lms_frappe_app.agent_learning.releases.projection.ключ_только_из_релиза",
+		],
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
@@ -389,12 +402,7 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# Замечания кабинета автора — не содержание курса: удалению урока они не
-# мешают, замечание остаётся с пометкой «места больше нет». `Why:` урок курса
-# из релиза удаляется только вместе с курсом, и его замечания уходят раньше
-# (`releases.service.удалить_курс`); урок курса без релиза удаляют в
-# редакторе Learning, а замечание со ссылкой на него остановило бы удаление.
-ignore_links_on_delete = ["Agent Author Note"]
+# ignore_links_on_delete = ["Communication", "ToDo"]
 
 # Request Events
 # ----------------
