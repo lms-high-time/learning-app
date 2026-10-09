@@ -246,7 +246,9 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 
 	def test_мимо_релиза_отказ_при_сохранении(self):
 		frappe.set_user(self.куратор)
-		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		ответ = authoring.publish_release(release=пример_релиза(self.ключ))
+		self.assertTrue(ответ["ok"], ответ)
+		курс = ответ["data"]["course"]
 		frappe.set_user("Administrator")
 		шаблон = frappe.get_doc(ЗАДАНИЕ, {"lesson": урок_релиза(курс, "l-3")})
 		шаблон.title = "</title><script>alert(1)</script>"
@@ -265,7 +267,9 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 		сохранять запись по другим полям: запрет проверяет только новое или
 		изменённое название. Снятие шаблона домашки — `releases.test_homework`."""
 		frappe.set_user(self.куратор)
-		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		ответ = authoring.publish_release(release=пример_релиза(self.ключ))
+		self.assertTrue(ответ["ok"], ответ)
+		курс = ответ["data"]["course"]
 		frappe.set_user("Administrator")
 		имя = frappe.db.get_value(
 			"Agent Course Artifact", {"course": курс, "slug": "notebook", "is_active": 1}

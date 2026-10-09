@@ -21,6 +21,7 @@ Frappe пропускает: JSON и незакрытый тег.
 """
 
 import json
+import time
 from pathlib import Path
 
 import frappe
@@ -214,6 +215,8 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 			('"<img src=x onerror=a()>"', '"<img src="x">"'),
 			("<b>жирно</b> и x<y & z", "<b>жирно</b> и x&lt;y &amp; z"),
 			("<img src=x onerror=a()//<br>хвост", "&lt;img src=x onerror=a()//<br>хвост"),
+			("<!-- <img src=x onerror=a()> -->", '&lt;!-- <img src="x"> --&gt;'),
+			("<!--x-->текст", "&lt;!--x-->текст"),
 		):
 			with self.subTest(значение):
 				документ = frappe.new_doc("Agent Student Note")
@@ -223,6 +226,20 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 					документ._sanitize_content()
 					self.assertEqual(документ.text, ожидаемое)
 				self.assertEqual(html_text.очищенный(значение), ожидаемое)
+
+	def test_разбор_линейный(self):
+		"""Мегабайт из повторяющихся начал тега и комментария приводится за
+		секунды, а не минуты: хук работает до записи, а длина ответа домашки и
+		блока документа не ограничена — квадратичный разбор занимал бы воркер
+		(поиск конца комментария тратил 20 с уже на 128 КБ). Порог — с запасом
+		над линейным временем: на последней нагрузке около секунды берёт сама
+		очистка Frappe (`nh3`) — 2,6 МБ текста с `&lt;`."""
+		for голова, кусок in (("", "<!--"), ("", "<!--<a "), ("", "<a "), ("<b>x</b>", "<a")):
+			текст = голова + кусок * (2**20 // len(кусок))
+			with self.subTest(голова + кусок):
+				начало = time.perf_counter()
+				html_text.очищенный(текст)
+				self.assertLess(time.perf_counter() - начало, 2)
 
 	def test_markdown_не_в_таблице_формы(self):
 		"""Таблица формы экранирует Data и простой текст, а Markdown Editor
