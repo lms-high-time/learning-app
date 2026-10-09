@@ -55,7 +55,8 @@
    "fieldtype": "Data",
    "ignore_xss_filter": 1,
    "label": "Пункт",
-   "read_only": 1
+   "read_only": 1,
+   "report_hide": 1
   }
  ],
  "istable": 1,

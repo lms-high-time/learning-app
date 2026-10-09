@@ -42,7 +42,9 @@
    "fieldtype": "Small Text",
    "ignore_xss_filter": 1,
    "label": "Вопрос",
-   "read_only": 1
+   "print_hide": 1,
+   "read_only": 1,
+   "report_hide": 1
   },
   {
    "fieldname": "option_list",
@@ -63,7 +65,9 @@
    "label": "Пояснение",
    "description": "Ученику — после ответа",
    "read_only": 1,
-   "ignore_xss_filter": 1
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1
   }
  ],
  "istable": 1,

@@ -8,6 +8,8 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.api import authoring, student
 from lms_frappe_app.tests.release_sample import пример_релиза
@@ -15,6 +17,7 @@ from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
 	создать_куратора,
 	создать_ученика,
+	схема_документа,
 	урок_релиза,
 )
 from lms_frappe_app.tests.test_author_page import страница
@@ -28,9 +31,11 @@ from lms_frappe_app.tests.test_author_page import страница
 def релиз_с_тегами(ключ: str) -> dict:
 	"""Образец релиза, где тексты для ученика и автора несут `ТЕГ` или `СКОБКИ`.
 
-	Названий глав и уроков здесь нет: `<` и `>` в них релиз не пускает
-	(`title_forbidden_chars`)."""
+	Названий глав, уроков, домашки и документа здесь нет: `<` и `>` в них
+	релиз не пускает (`title_forbidden_chars`). Карточка курса — с тегом: его
+	Frappe вырежет, а проверка предупредит."""
 	р = пример_релиза(ключ)
+	р["course"]["summary"] = f"Карточка {ТЕГ}"
 	р["course"]["promise"] = f"Обещание: {ТЕГ}"
 	р["chapters"][0]["description"] = f"Глава про {ТЕГ}"
 	у = р["lessons"][0]
@@ -43,10 +48,9 @@ def релиз_с_тегами(ключ: str) -> dict:
 	вопрос["options"][0]["text"] = f"Задаёт роль: {ТЕГ}"
 	у["quiz"]["answers"][вопрос["key"]]["explanation"] = f"Тег {ТЕГ} задаёт роль, а {СКОБКИ}."
 	домашка = р["lessons"][2]["homework"]
-	домашка["title"], домашка["description"] = f"Задание {ТЕГ}", f"Опишите `{ТЕГ}` и {СКОБКИ}."
-	документ = р["document"]
-	документ["title"], документ["purpose"] = f"Тетрадь {ТЕГ}", f"Зачем {СКОБКИ}"
-	раздел = документ["sections"][0]
+	домашка["description"] = f"Опишите `{ТЕГ}` и {СКОБКИ}."
+	р["document"]["purpose"] = f"Зачем {СКОБКИ}"
+	раздел = р["document"]["sections"][0]
 	раздел["title"], раздел["description"] = f"Журнал {ТЕГ}", f"Что пишут: {СКОБКИ}"
 	return р
 
@@ -112,8 +116,8 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 			frappe.db.get_value("Course Chapter", глава, "chapter_description"), f"Глава про {ТЕГ}"
 		)
 		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "course_promise"), f"Обещание: {ТЕГ}")
-		self.assertEqual(домашка, (f"Задание {ТЕГ}", f"Опишите `{ТЕГ}` и {СКОБКИ}."))
-		self.assertEqual((документ.title, документ.purpose), (f"Тетрадь {ТЕГ}", f"Зачем {СКОБКИ}"))
+		self.assertEqual(домашка, ("Задание", f"Опишите `{ТЕГ}` и {СКОБКИ}."))
+		self.assertEqual((документ.title, документ.purpose), ("Тетрадь", f"Зачем {СКОБКИ}"))
 		self.assertEqual(
 			(документ.blocks[0].title, документ.blocks[0].description),
 			(f"Журнал {ТЕГ}", f"Что пишут: {СКОБКИ}"),
@@ -173,7 +177,7 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 		self.assertEqual(целиком["chapters"][0]["description"], f"Глава про {ТЕГ}")
 		self.assertEqual(
 			(целиком["document"]["title"], целиком["document"]["purpose"]),
-			(f"Тетрадь {ТЕГ}", f"Зачем {СКОБКИ}"),
+			("Тетрадь", f"Зачем {СКОБКИ}"),
 		)
 		self.assertEqual(целиком["document"]["sections"][0]["title"], f"Журнал {ТЕГ}")
 
@@ -186,3 +190,69 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 		self.assertIn("a&lt;b and c&gt;d", html)
 		self.assertNotIn(ТЕГ, html)
 		self.assertNotIn("<b and c>", html)
+
+	def test_карточка_курса_очищается_с_предупреждением(self):
+		self.assertIn(
+			{"code": "course_card_markup", "where": "course.summary", "chars": ["<", ">"]},
+			self.первая["warnings"],
+		)
+		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "short_introduction"), "Карточка ")
+
+	def test_подсказка_блока_хранится_как_есть(self):
+		frappe.set_user("Administrator")
+		ответ = схема_документа(
+			self.курс, "hints", "Подсказки", [{"key": "note", "title": "Заметка", "hint": f"Ждём {ТЕГ}"}]
+		)
+		self.assertTrue(ответ["ok"], ответ)
+
+		self.assertEqual(
+			frappe.db.get_value("Agent Artifact Block", {"parent": ответ["data"]["id"]}, "hint"),
+			f"Ждём {ТЕГ}",
+		)
+
+
+class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
+	"""Названия домашки и документа — `title_field` своих доктайпов: Desk выводит
+	их без экранирования (Report view, список ссылки), а название домашки ещё и
+	в `<title>` письма (`homework_notices`). `<` и `>` в них нет ни на каком пути
+	записи."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.куратор = создать_куратора(f"titles-{суффикс}@example.com")
+		self.ключ = f"titles-{суффикс}"
+
+	def test_релиз_с_угловыми_в_названиях_отказ(self):
+		р = пример_релиза(self.ключ)
+		р["lessons"][2]["homework"]["title"] = f"Задание {ТЕГ}"
+		р["document"]["title"] = "Тетрадь a<b"
+		frappe.set_user(self.куратор)
+
+		ответ = authoring.publish_release(release=р)
+
+		self.assertEqual(ответ["error"]["code"], "release_inconsistent", ответ)
+		self.assertEqual(
+			[(п["code"], п["where"], п["chars"]) for п in ответ["error"]["problems"]],
+			[
+				("title_forbidden_chars", "lessons[l-3].homework.title", ["<", ">"]),
+				("title_forbidden_chars", "document.title", ["<"]),
+			],
+		)
+		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
+
+	def test_мимо_релиза_отказ_при_сохранении(self):
+		frappe.set_user(self.куратор)
+		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		frappe.set_user("Administrator")
+		шаблон = frappe.get_doc(ЗАДАНИЕ, {"lesson": урок_релиза(курс, "l-3")})
+		шаблон.title = "</title><script>alert(1)</script>"
+
+		with self.assertRaises(Отказ) as отказ:
+			шаблон.save()
+		self.assertEqual(
+			(отказ.exception.код, отказ.exception.подробности["where"]), ("title_forbidden_chars", "title")
+		)
+
+		ответ = схема_документа(курс, "notebook", "Тетрадь <b>", [{"key": "log", "title": "Журнал"}])
+		self.assertEqual(ответ["error"]["code"], "title_forbidden_chars", ответ)

@@ -39,7 +39,6 @@
   {
    "fieldname": "title",
    "fieldtype": "Data",
-   "ignore_xss_filter": 1,
    "in_list_view": 1,
    "label": "Название",
    "reqd": 1
@@ -49,7 +48,9 @@
    "fieldtype": "Small Text",
    "label": "Зачем документ",
    "description": "Одна-две фразы ученику: зачем этот документ. Видны в «Моих документах».",
-   "ignore_xss_filter": 1
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1
   },
   {
    "default": "sections",

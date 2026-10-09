@@ -51,7 +51,8 @@
    "ignore_xss_filter": 1,
    "in_list_view": 1,
    "label": "Пункт",
-   "read_only": 1
+   "read_only": 1,
+   "report_hide": 1
   },
   {
    "default": "open",

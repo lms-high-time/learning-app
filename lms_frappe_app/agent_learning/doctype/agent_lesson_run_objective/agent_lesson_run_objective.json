@@ -25,7 +25,9 @@
    "fieldtype": "Small Text",
    "ignore_xss_filter": 1,
    "label": "Цель",
-   "read_only": 1
+   "print_hide": 1,
+   "read_only": 1,
+   "report_hide": 1
   },
   {
    "default": "not_started",

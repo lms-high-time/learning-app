@@ -31,6 +31,7 @@
    "ignore_xss_filter": 1,
    "in_list_view": 1,
    "label": "Заголовок",
+   "report_hide": 1,
    "reqd": 1
   },
   {
@@ -38,7 +39,9 @@
    "fieldname": "description",
    "fieldtype": "Small Text",
    "ignore_xss_filter": 1,
-   "label": "Описание для ученика"
+   "label": "Описание для ученика",
+   "print_hide": 1,
+   "report_hide": 1
   },
   {
    "default": "text",
@@ -77,7 +80,9 @@
    "fieldname": "hint",
    "fieldtype": "Small Text",
    "ignore_xss_filter": 1,
-   "label": "Подсказка"
+   "label": "Подсказка",
+   "print_hide": 1,
+   "report_hide": 1
   },
   {
    "fieldname": "spec",
