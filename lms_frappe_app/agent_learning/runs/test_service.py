@@ -11,7 +11,7 @@ from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import service as релизы
-from lms_frappe_app.agent_learning.runs import service
+from lms_frappe_app.agent_learning.runs import service, view
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import создать_занятие, создать_куратора, создать_ученика
 
@@ -69,6 +69,9 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 
 	def цели(self, run) -> dict[str, tuple]:
 		return {ц.objective_key: (ц.status, ц.removed) for ц in run.objectives}
+
+	def тексты(self, run) -> dict[str, str]:
+		return {ц.objective_key: ц.text for ц in run.objectives}
 
 	def отметить(
 		self, run, ключ: str, статус: str = "done", свидетельство: str | None = "Ученик объяснил сам"
@@ -213,6 +216,71 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		run = service.прохождение(self.ученик, курс, "l-1")
 		self.assertEqual(self.цели(run)["l-1-D2"], ("covered", 0))
 		self.assertEqual(self.пункты(run)["return:R1"]["removed"], 0)
+
+	def test_сверка_пишет_тексты_целей(self):
+		"""Текст цели — из релиза при каждой сверке; снятая цель хранит последний."""
+		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		run = service.прохождение(self.ученик, курс, "l-1")
+		self.assertEqual(
+			self.тексты(run),
+			{"l-1-D1": "Цель с обязательными пунктами", "l-1-D2": "Цель без обязательных пунктов"},
+		)
+
+		второй = релиз_двух_целей(self.ключ)
+		второй["lessons"][0]["objectives"][0]["text"] = "Цель, переписанная автором"
+		второй["lessons"][0]["objectives"].pop()
+		self.опубликовать(второй)
+		run = service.прохождение(self.ученик, курс, "l-1")
+
+		self.assertEqual(
+			self.тексты(run),
+			{"l-1-D1": "Цель, переписанная автором", "l-1-D2": "Цель без обязательных пунктов"},
+		)
+		self.assertEqual(self.цели(run)["l-1-D2"][1], 1)
+
+	def test_снятый_урок_подписан_последним_названием(self):
+		"""История и прохождения автору подписывают снятый урок названием и текстами целей
+		последней версии, где он был, — и без индекса этой версии."""
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		run = self.отметить(service.прохождение(self.ученик, курс, "l-2"), "term:T1")
+		последний = пример_релиза(self.ключ)
+		[урок] = [у for у in последний["lessons"] if у["key"] == "l-2"]
+		урок["title"] = "Урок второй, последний"
+		урок["objectives"][0]["text"] = "Цель второго урока, последняя"
+		релиз_урока = self.опубликовать(последний)["release"]
+		без_урока = пример_релиза(self.ключ)
+		без_урока["chapters"][0]["lessons"] = ["l-1"]
+		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		self.опубликовать(без_урока)
+		self.assertEqual(self.перечитать(run).release, релиз_урока)
+		for строки_индекса in ("Agent Release Lesson", "Agent Release Objective"):
+			frappe.db.delete(строки_индекса, {"parent": релиз_урока})
+
+		self.assertEqual(
+			service.история(self.ученик, курс, "l-1", 5),
+			[
+				{
+					"key": "l-2",
+					"title": "Урок второй, последний",
+					"status": "in_progress",
+					"objectives_open": [
+						{"key": "l-2-D1", "text": "Цель второго урока, последняя", "status": "touched"}
+					],
+				}
+			],
+		)
+		[строка], _ = view.страница(курс, "l-2", 0, 20)
+		self.assertEqual(строка["lesson"], {"key": "l-2", "title": "Урок второй, последний"})
+
+	def test_прохождение_без_записи_урока_без_названия(self):
+		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		run = self.отметить(service.прохождение(self.ученик, курс, "l-2"), "term:T1")
+		frappe.db.set_value(ПРОХОЖДЕНИЕ, run.name, "lesson", None, update_modified=False)
+
+		[урок] = service.история(self.ученик, курс, "l-1", 5)
+		[строка], _ = view.страница(курс, "l-2", 0, 20)
+
+		self.assertEqual((урок["title"], строка["lesson"]), (None, {"key": "l-2", "title": None}))
 
 	def test_публикация_сверяет_прохождения_курса(self):
 		"""Новый обязательный пункт: разобранная цель снова в работе, урок не разобран."""

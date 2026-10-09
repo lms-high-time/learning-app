@@ -4,11 +4,13 @@
 """Прохождения уроков курса для автора — только чтение (learning-services#512).
 
 Прохождения читаются как сохранены: без блокировки и сверки с действующим
-релизом (см. `service.прогресс_глав`). Урок подписан названием из релиза
-самого прохождения, а не действующего: урок, снятый из релиза, и
-прохождение, которое фоновая сверка ещё не догнала, подписаны тем
-релизом, по которому ученик их проходил. Название пункта — из строки
-прохождения: сверка пишет его из релиза, а снятый пункт хранит последнее.
+релизом (см. `service.прогресс_глав`). Урок подписан названием записи урока
+прохождения (`Course Lesson.title`): проекция держит его равным действующему
+релизу, а у урока, снятого из релиза, — последнему, где урок был. Название
+пункта — из строки прохождения: сверка пишет его из релиза, а снятый пункт
+хранит последнее. Индекс релиза прохождения не читается: прохождение снятого
+урока остаётся на прежней версии, а она содержимого не хранит
+(learning-services#514).
 
 Свидетельства здесь отдаются: страницу читают только авторские методы, и
 доступ к курсу проверяет вызывающий.
@@ -16,7 +18,6 @@
 
 import frappe
 
-from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs.service import ПРОХОЖДЕНИЕ
 
 ЦЕЛЬ = "Agent Lesson Run Objective"
@@ -34,32 +35,23 @@ def страница(курс: str, ключ_урока: str | None, начал�
 	прохождения, снятые — в конце.
 
 	`Why:` три выборки на страницу при любом её размере и любом числе
-	релизов: прохождения вместе с именами учеников и названиями уроков из
-	индекса их релизов — одной, цели и пункты всех прохождений страницы — по
-	одной. Строка сверх `предел` говорит, есть ли следующая страница, без
+	релизов: прохождения вместе с именами учеников и названиями уроков —
+	одной, цели и пункты всех прохождений страницы — по одной. Строка сверх `предел` говорит, есть ли следующая страница, без
 	отдельного счёта.
 	"""
 	отбор = "and r.lesson_key = %(lesson)s" if ключ_урока else ""
 	строки = frappe.db.sql(
 		f"""
-		select r.name, r.student, u.full_name, r.lesson_key, rl.title as lesson_title,
+		select r.name, r.student, u.full_name, r.lesson_key, l.title as lesson_title,
 			r.status, r.accepted_at, r.started_at, r.passed_at, r.resume_from
 		from `tab{ПРОХОЖДЕНИЕ}` r
 		left join `tabUser` u on u.name = r.student
-		left join `tab{index.УРОК}` rl
-			on rl.parenttype = %(release_doctype)s and rl.parent = r.release
-			and rl.lesson_key = r.lesson_key
+		left join `tabCourse Lesson` l on l.name = r.lesson
 		where r.course = %(course)s and r.archived_at is null and r.student is not null {отбор}
 		order by r.started_at is null, r.started_at desc, r.creation desc, r.name desc
 		limit %(limit)s offset %(start)s
 		""",
-		{
-			"course": курс,
-			"lesson": ключ_урока,
-			"release_doctype": index.РЕЛИЗ,
-			"limit": предел + 1,
-			"start": начало,
-		},
+		{"course": курс, "lesson": ключ_урока, "limit": предел + 1, "start": начало},
 		as_dict=True,
 	)
 	ещё = len(строки) > предел

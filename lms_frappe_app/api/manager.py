@@ -349,8 +349,9 @@ def _цели_прохождений(ученик: str, занятия: list) ->
 	"""Цели урока каждого занятия со статусом из прохождения: занятие → `[{key, text, status}]`.
 
 	Прохождение занятия — его `run`, у занятия без него — живое прохождение
-	ученика по уроку занятия. Тексты — из релиза прохождения; снятые новым
-	релизом цели не отдаются. Занятие курса без релиза — пусто.
+	ученика по уроку занятия. Тексты — из строк прохождения (их пишет сверка
+	из релиза); снятые новым релизом цели не отдаются. Занятие курса без
+	релиза — пусто.
 
 	`Why:` занятий здесь до полусотни, и запрос на каждое превратил бы
 	открытие карточки сотрудника в полсотни обходов базы: прохождения ученика
@@ -373,12 +374,8 @@ def _цели_прохождений(ученик: str, занятия: list) ->
 	цели: dict[str, list[dict]] = {}
 	for с in frappe.db.sql(
 		"""
-		select o.parent, o.objective_key, o.status, t.text
+		select o.parent, o.objective_key, o.status, o.text
 		from `tabAgent Lesson Run Objective` o
-		join `tabAgent Lesson Run` r on r.name = o.parent
-		left join `tabAgent Release Objective` t
-			on t.parenttype = 'Agent Course Release' and t.parent = r.release
-			and t.lesson_key = r.lesson_key and t.objective_key = o.objective_key
 		where o.parenttype = 'Agent Lesson Run' and o.parent in %(runs)s and o.removed = 0
 		order by o.idx
 		""",

@@ -249,7 +249,7 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 
 	# --- релизы ---
 
-	def test_снятые_цели_и_пункты_и_название_урока_из_релиза_прохождения(self):
+	def test_снятые_цели_и_пункты_и_название_записи_урока(self):
 		ключ = f"goal-runs-two-{self.суффикс}"
 		курс = self.опубликовать(релиз_двух_целей(ключ))
 		self.пройти(self.ученик, "l-1", ("exec:E1", "planned", "Сделает дома"), курс=курс)
@@ -264,9 +264,10 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 		with patch.object(frappe, "enqueue"):
 			self.опубликовать(новый)
 
-		# Прохождение ещё на прошлом релизе: и название урока — его.
+		# Прохождение ещё на прошлом релизе: пункты — его, название — записи урока,
+		# которую проекция уже переименовала.
 		[run] = self.прохождения(course=курс)["runs"]
-		self.assertEqual(run["lesson"]["title"], "Урок с двумя целями")
+		self.assertEqual(run["lesson"]["title"], "Урок с одной целью")
 		self.assertFalse(any(п["removed"] for п in run["goals"]))
 
 		прохождения.сверить_курс(курс)

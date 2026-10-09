@@ -385,23 +385,26 @@ def карта(run, тексты: dict[str, str]) -> list[dict]:
 def история(ученик: str, курс: str, кроме: str, глубина: int) -> list[dict]:
 	"""Прошлые уроки ученика по курсу — `глубина` последних начатых или пройденных, кроме урока `кроме`.
 
-	Урок — `{key, title, status, objectives_open}`: название и тексты
-	незакрытых целей (не `covered`, по порядку) — из релиза прохождения. Последний — по
+	Урок — `{key, title, status, objectives_open}`: название — записи урока
+	прохождения (`Course Lesson.title`, нет записи — `None`), тексты незакрытых
+	целей (не `covered`, по порядку) — из строк прохождения. Последний — по
 	последней отметке пункта, началу или зачёту, что позже. Ничего не пишет и
 	прохождений не сверяет: читает сохранённые статусы.
 
-	`Why:` одна выборка уроков и одна целей с текстами на всю глубину — старт
-	урока платит за историю постоянное число запросов.
+	`Why:` одна выборка уроков и одна целей на всю глубину — старт урока платит
+	за историю постоянное число запросов. Индекс релиза прохождения не
+	читается: прохождение снятого урока остаётся на прежней версии, а она
+	содержимого не хранит (learning-services#514). Название записи урока
+	проекция держит равным действующему релизу, у снятого — последнему, где
+	урок был.
 	"""
 	if глубина <= 0:
 		return []
 	уроки = frappe.db.sql(
 		"""
-		select r.name, r.lesson_key, rl.title, r.status
+		select r.name, r.lesson_key, l.title, r.status
 		from `tabAgent Lesson Run` r
-		left join `tabAgent Release Lesson` rl
-			on rl.parenttype = 'Agent Course Release' and rl.parent = r.release
-			and rl.lesson_key = r.lesson_key
+		left join `tabCourse Lesson` l on l.name = r.lesson
 		where r.student = %(student)s and r.course = %(course)s
 			and r.lesson_key != %(except)s and r.status != 'not_started'
 		order by greatest(
@@ -424,12 +427,8 @@ def история(ученик: str, курс: str, кроме: str, глуби
 		return []
 	цели = frappe.db.sql(
 		"""
-		select o.parent, o.objective_key, o.status, t.text
+		select o.parent, o.objective_key, o.status, o.text
 		from `tabAgent Lesson Run Objective` o
-		join `tabAgent Lesson Run` r on r.name = o.parent
-		left join `tabAgent Release Objective` t
-			on t.parenttype = 'Agent Course Release' and t.parent = r.release
-			and t.lesson_key = r.lesson_key and t.objective_key = o.objective_key
 		where o.parenttype = 'Agent Lesson Run' and o.parent in %(runs)s
 			and o.removed = 0 and o.status != 'covered'
 		order by o.idx
@@ -781,13 +780,21 @@ def _сверить_пункты(run, цели: list[dict]) -> None:
 
 
 def _сверить_цели(run, цели: list[dict]) -> None:
+	"""Цели прохождения — по релизу: текст у каждой, снятые помечены и хранят последний текст.
+
+	`Why:` текст — копия в прохождении, как название пункта: читатели
+	прохождения (`история`, `view.страница`, `manager._цели_прохождений`) не
+	ходят в индекс его релиза — прежняя версия содержимого не хранит.
+	"""
 	прежние = {ц.objective_key: ц for ц in run.objectives}
 	порядок = {ц["key"]: номер for номер, ц in enumerate(цели)}
-	for ключ in порядок:
-		if строка := прежние.get(ключ):
-			строка.removed = 0
+	for цель in цели:
+		if строка := прежние.get(цель["key"]):
+			строка.update({"text": цель["text"], "removed": 0})
 		else:
-			run.append("objectives", {"objective_key": ключ, "status": НЕ_НАЧАТО})
+			run.append(
+				"objectives", {"objective_key": цель["key"], "text": цель["text"], "status": НЕ_НАЧАТО}
+			)
 	for строка in run.objectives:
 		if строка.objective_key not in порядок:
 			строка.removed = 1
