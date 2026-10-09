@@ -142,6 +142,22 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 		)
 		self.assertEqual(sorted(напоминания), sorted([self.сотрудник, self.руководитель]))
 
+	def test_сбой_одного_напоминания_не_останавливает_рассылку(self):
+		self.назначить(deadline=add_days(nowdate(), 2))
+
+		def письмо(recipients, **_):
+			if self.сотрудник in recipients:
+				raise frappe.ValidationError("сбой")
+
+		self.письма.side_effect = письмо
+		notices.напомнить_о_сроках()
+
+		напоминания = self.письма_о("deadline")
+		self.assertIn(self.коллега, напоминания)
+		self.assertIn(self.руководитель, напоминания)
+		# Запись журнала откатана вместе с письмом: завтра напоминание уйдёт снова.
+		self.assertNotIn(self.сотрудник, напоминания)
+
 	def test_ноль_дней_не_напоминает(self):
 		"""`deadline_reminder_days = 0` — «не напоминать», как обещает описание
 		поля, а не запасные три дня (learning-services#452)."""

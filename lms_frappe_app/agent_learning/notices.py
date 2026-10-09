@@ -19,6 +19,8 @@ from __future__ import annotations
 import frappe
 from frappe.utils import add_days, cint, get_url, getdate, nowdate
 
+from lms_frappe_app.agent_learning.jobs import по_одной
+
 НАЗНАЧЕН = "assigned"
 СРОК = "deadline"
 
@@ -69,7 +71,8 @@ def напомнить_о_сроках() -> int:
 		)
 		for адресат in адресаты[назначение.name]:
 			if адресат not in прошли:
-				отправлено += _отправить(назначение, адресат, СРОК)
+				with по_одной("Напоминание о сроке не отправлено", "Course Allocation", назначение.name):
+					отправлено += _отправить(назначение, адресат, СРОК)
 	return отправлено
 
 

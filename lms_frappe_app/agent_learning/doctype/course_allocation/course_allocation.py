@@ -15,6 +15,7 @@ from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organi
 )
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
+from lms_frappe_app.agent_learning.jobs import по_одной
 
 ВСЕ_РОЛИ_УЧАСТНИКОВ = ("Member", "Manager", "Org Admin")
 
@@ -300,9 +301,11 @@ def сверить_зачисления() -> int:
 		for участник in адресаты[назначение.name]:
 			if (участник, назначение.course) in записаны:
 				continue
-			записать_зачисление(участник, назначение.course)
-			записаны.add((участник, назначение.course))
-			создано += 1
+			with по_одной("Зачисление по назначению не выдано", "Course Allocation", назначение.name) as итог:
+				записать_зачисление(участник, назначение.course)
+			if итог.удалась:
+				записаны.add((участник, назначение.course))
+				создано += 1
 	return создано
 
 
