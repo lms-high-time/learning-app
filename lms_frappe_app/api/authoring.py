@@ -13,6 +13,7 @@
 """
 
 import json
+import re
 
 import frappe
 
@@ -60,6 +61,10 @@ from lms_frappe_app.api import контракт, текущий_пользова
 ИНСТРУКТОРОВ_НЕТ = "instructors_empty"
 ИНСТРУКТОР_НЕ_НАЙДЕН = "instructor_not_found"
 ИНСТРУКТОР_НЕ_АВТОР = "instructor_not_author"
+КОММИТ_НЕВЕРЕН = "invalid_commit"
+#: Полный хеш коммита git: SHA-1 или SHA-256, в нижнем регистре — как его
+#: печатает `git rev-parse HEAD`.
+ХЕШ_КОММИТА = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def _автор() -> str:
@@ -470,7 +475,7 @@ def ревизия_замечаний(course: str) -> str | None:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def publish_release(release, course: str | None = None, instructors=None) -> dict:
+def publish_release(release, course: str | None = None, instructors=None, commit=None) -> dict:
 	"""Публикует релиз курса целиком — новой версией.
 
 	`release` — релиз от компилятора курса (объект или строка JSON), формат —
@@ -487,18 +492,36 @@ def publish_release(release, course: str | None = None, instructors=None) -> dic
 	вызвавшего). Применяется и к неизменному релизу: в дайджест релиза
 	инструкторы не входят.
 
+	`commit` — коммит git, из которого собран релиз (`_коммит`): пишется в
+	новую версию, ответ отдаёт коммит версии — и на `unchanged`, где это
+	коммит её первой публикации. Необязателен: у публикатора git может не
+	быть.
+
 	Открытые попытки квиза курса публикация переносит на новый релиз или
 	аннулирует. Попытку, которую в этот момент меняет ответ ученика, MariaDB
 	стенда (`innodb_snapshot_isolation`) отдаёт взаимоблокировкой: откат
 	целиком и отказ `busy`, повтор безопасен.
 	"""
 	автор = _автор()
+	коммит = None if commit is None else _коммит(commit)
 	инструкторы = None if instructors is None else _инструкторы(instructors)
 	try:
-		return releases.опубликовать(release, course or None, автор, инструкторы)
+		return releases.опубликовать(release, course or None, автор, инструкторы, коммит)
 	except frappe.QueryDeadlockError:
 		frappe.db.rollback()
 		raise Отказ(ЗАНЯТО, "Курс сейчас меняет другой запрос: публикация откатилась — повторите") from None
+
+
+def _коммит(значение) -> str:
+	"""Хеш коммита источника — или отказ `invalid_commit` до первой записи.
+
+	`Why:` хеш не приводится к нижнему регистру и не обрезается: `git
+	rev-parse` печатает его ровно так, и иное значение — признак, что
+	публикатор передал не то.
+	"""
+	if isinstance(значение, str) and ХЕШ_КОММИТА.fullmatch(значение):
+		return значение
+	raise Отказ(КОММИТ_НЕВЕРЕН, "Коммит — полный хеш git: 40 или 64 знака 0-9a-f в нижнем регистре")
 
 
 def _инструкторы(значение) -> list[str]:

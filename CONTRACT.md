@@ -2595,8 +2595,9 @@ Settings`, по умолчанию 3; `0` — не напоминать) тем,
 `lms-release/1` (learning-services#500). Собирает его компилятор курса вне
 платформы; приложение проверяет релиз, хранит снимок новой версией и строит
 по нему курс Frappe Learning. Публикует релиз `publish_release` — с
-инструкторами курса (`instructors`) или без них. Предел размера релиза — в
-разделе метода (`max_file_size`).
+инструкторами курса (`instructors`) или без них, с коммитом источника
+(`commit`) или без него. Предел размера релиза — в разделе метода
+(`max_file_size`).
 
 Схема публичной и серверной части —
 `lms_frappe_app/agent_learning/releases/release.public.schema.json`
@@ -3058,17 +3059,21 @@ Learning правятся без этого запрета. Курс из
   { "release": "REL-00007", "version": 3,
     "published_at": "2026-10-08T12:20:00.118204",
     "published_by": "curator-a@example.com",
-    "digest": "9f2c…64 hex", "document_key": "notebook", "active": true },
+    "digest": "9f2c…64 hex", "commit": "3e7a1c0d…40 hex",
+    "document_key": "notebook", "active": true },
   { "release": "REL-00005", "version": 2,
     "published_at": "2026-10-01T09:00:00.000000",
     "published_by": "curator-b@example.com",
-    "digest": "1ab4…", "document_key": "notebook", "active": false } ] } }
+    "digest": "1ab4…", "commit": null,
+    "document_key": "notebook", "active": false } ] } }
 ```
 
 Свежие вперёд — по версии. `digest` — sha256 канонического JSON релиза: тот
-же файл — тот же дайджест. `document_key` — ключ документа релиза, `null` —
-документа нет. `active` — действующий релиз курса. У курса без релиза
-`releases` пуст.
+же файл — тот же дайджест. `commit` — коммит git, из которого версия впервые
+опубликована (`publish_release`, `commit`); `null` — публикатор его не
+передал. Содержимое прежней версии — в git по этому коммиту. `document_key` —
+ключ документа релиза, `null` — документа нет. `active` — действующий релиз
+курса. У курса без релиза `releases` пуст.
 
 **Отказы:** `course_not_found`.
 
@@ -3295,15 +3300,29 @@ Learning — `null`. Статусы и поля урока, целей и пун
 - применяется и к неизменному релизу (`unchanged`): в дайджест релиза
   инструкторы не входят, смена кураторов новой версии не требует.
 
+`commit` (необязательно) — коммит git, из которого собран релиз: полный хеш,
+40 или 64 знака `0-9a-f` в нижнем регистре, как его печатает `git rev-parse
+HEAD`:
+
+- пишется в новую версию; иное значение — отказ `invalid_commit` до первой
+  записи;
+- в дайджест релиза не входит: тот же релиз из другого коммита —
+  `unchanged`, и у версии остаётся коммит её первой публикации;
+- версия, впервые опубликованная без `commit`, так и остаётся без него:
+  запись релиза неизменяема, и повтор с `commit` её не дополняет;
+- не передан — версия без коммита: у публикатора git может не быть.
+
 ```json
 { "release": { "format": "lms-release/1", "course": { "key": "sample-course", "…": "…" }, "…": "…" },
-  "instructors": [ "curator-a@example.com", "curator-b@example.com" ] }
+  "instructors": [ "curator-a@example.com", "curator-b@example.com" ],
+  "commit": "3e7a1c0d9b2f4e6a8c1d3f5b7e9a0c2d4f6b8e1a" }
 ```
 
 ```json
 { "ok": true, "data": { "course": "primer-kursa", "course_key": "sample-course",
-  "release": "REL-00007", "version": 3, "unchanged": false, "course_created": false,
-  "published": true,
+  "release": "REL-00007", "version": 3,
+  "commit": "3e7a1c0d9b2f4e6a8c1d3f5b7e9a0c2d4f6b8e1a",
+  "unchanged": false, "course_created": false, "published": true,
   "chapters": { "created": [], "updated": ["ch-1"], "removed": [], "restored": [] },
   "lessons": { "created": ["l-4"], "updated": ["l-1"], "removed": ["l-3"], "restored": ["l-2"] },
   "document": { "artifact": "notebook", "version": 4 },
@@ -3314,8 +3333,10 @@ Learning — `null`. Статусы и поля урока, целей и пун
 `chapters` и `lessons` — ключи созданных, изменённых и снятых из программы
 узлов; `restored` — вернувшихся в программу: их не было в прежнем релизе, и
 они получили свою прежнюю запись (могут быть и в `updated`). `document` — ключ и версия действующей схемы документа курса; у
-релиза без документа — `null`. `instructors` — инструкторы курса после
-публикации, и при `unchanged` тоже. `warnings` — то, что публикации не мешает:
+релиза без документа — `null`. `commit` — коммит версии `version`: при
+`unchanged` — коммит её первой публикации, а не переданный; `null` — версия
+опубликована без коммита. Ключ есть в каждом ответе. `instructors` —
+инструкторы курса после публикации, и при `unchanged` тоже. `warnings` — то, что публикации не мешает:
 `public_text_empty` (пустой текст ученику; на месте пустой карточки курса —
 его название), `explanation_missing`, `required_condition_ignored` (условие
 обязательности у поля раздела «один раз» теряется).
@@ -3349,7 +3370,8 @@ Learning — `null`. Статусы и поля урока, целей и пун
 прошёл миграцию, и публикация завела бы их заново (`course`; `chapters`,
 `lessons` — сколько таких записей), проверяется после `unchanged`;
 `instructors_empty`; `instructor_not_found`, `instructor_not_author`
-(`users` — кто не прошёл); `busy` — попытку квиза курса в этот момент
+(`users` — кто не прошёл); `invalid_commit` — `commit` не полный хеш git в
+нижнем регистре; `busy` — попытку квиза курса в этот момент
 меняет ответ ученика: публикация откатилась целиком, повторите вызов.
 
 Тело запроса больше `max_file_size` сайта Frappe (по умолчанию 25 МБ)

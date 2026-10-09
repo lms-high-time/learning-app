@@ -305,9 +305,10 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		frappe.set_user(self.куратор)
 		релиз = пример_релиза(f"contract-{self.суффикс}")
 		курс = self.сверить(
-			"authoring.publish_release", authoring.publish_release(release=релиз, instructors=[self.куратор])
+			"authoring.publish_release",
+			authoring.publish_release(release=релиз, instructors=[self.куратор], commit="ab" * 20),
 		)["course"]
-		# Повтор отвечает теми же ключами, что и публикация.
+		# Повтор отвечает теми же ключами, что и публикация, и `commit` в нём есть.
 		self.сверить("authoring.publish_release", authoring.publish_release(release=релиз))
 		self.сверить("authoring.course_release", authoring.course_release(course=курс))
 		self.сверить("authoring.course_release", authoring.course_release(course=курс, lesson="l-1"))

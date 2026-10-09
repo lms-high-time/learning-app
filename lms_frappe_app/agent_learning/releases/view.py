@@ -72,7 +72,8 @@ def урок_релиза(курс: dict, релиз: str, ключ: str) -> dic
 
 
 def история(курс: str, действующий: str | None) -> list[dict]:
-	"""Релизы курса, свежие вперёд: версия, кто и когда опубликовал, дайджест, документ."""
+	"""Релизы курса, свежие вперёд: версия, кто и когда опубликовал, дайджест,
+	коммит источника (`None` — публикатор его не передал), документ."""
 	return [
 		{
 			"release": р.name,
@@ -80,6 +81,7 @@ def история(курс: str, действующий: str | None) -> list[di
 			"published_at": _дата(р.published_at),
 			"published_by": р.published_by,
 			"digest": р.digest,
+			"commit": р.source_commit or None,
 			"document_key": р.document_key,
 			"active": р.name == действующий,
 		}
