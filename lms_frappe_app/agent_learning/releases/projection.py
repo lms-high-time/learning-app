@@ -45,27 +45,44 @@ def известные(курс: str) -> dict[str, dict[str, str]]:
 
 	Снятые из релиза записи — тоже: по ним вернувшийся ключ находит ту же запись.
 	"""
-	return {
-		вид: dict(
-			frappe.get_all(
-				doctype,
-				filters={"course": курс, ПОЛЕ_КЛЮЧА[doctype]: ("is", "set")},
-				fields=[ПОЛЕ_КЛЮЧА[doctype], "name"],
-				as_list=True,
-			)
+	return {"chapters": _по_ключам(ГЛАВА, курс), "lessons": известные_уроки(курс)}
+
+
+def известные_уроки(курс: str) -> dict[str, str]:
+	"""Ключ урока → запись урока курса (`известные`, только уроки) — одной выборкой."""
+	return _по_ключам(УРОК, курс)
+
+
+def _по_ключам(doctype: str, курс: str) -> dict[str, str]:
+	поле = ПОЛЕ_КЛЮЧА[doctype]
+	return dict(
+		frappe.get_all(
+			doctype, filters={"course": курс, поле: ("is", "set")}, fields=[поле, "name"], as_list=True
 		)
-		for вид, doctype in (("chapters", ГЛАВА), ("lessons", УРОК))
-	}
+	)
 
 
-def без_пустого_ключа(doc, method=None) -> None:
-	"""Хук `validate` у `Course Chapter` и `Course Lesson`: пустой ключ — NULL.
+def ключ_только_из_релиза(doc, method=None) -> None:
+	"""Хук `validate` у `Course Chapter` и `Course Lesson`: ключ меняет только проекция.
 
-	`Why:` уникальный индекс `(course, ключ)` (`install.обеспечить_индекс_ключей_проекции`)
+	Без флага `ИЗ_РЕЛИЗА` ключ остаётся прежним (у новой записи — `None`), что
+	бы ни прислал клиент: импорт курса в Learning переносит поля записи через
+	`doc.update`, а `frappe.client.insert` и `save` пишут любые поля записи
+	курса без релиза. Пустой ключ — NULL. Ключ пишут только `insert` и `save`
+	проекции и разовый патч `release_record_keys`; иных `db.set_value` и
+	`db_set` ключа мимо хука в коде нет.
+
+	`Why:` соответствие «ключ → запись» держит только ключ на записи
+	(`известные`): ключ, поставленный мимо публикации, — ложное соответствие,
+	и публикация в этот курс взяла бы под ключ запись, которую не заводила.
+	Уникальный индекс `(course, ключ)` (`install.обеспечить_индекс_ключей_проекции`)
 	различает NULL-ы, но не `''`: вторая запись без ключа в одном курсе упала
-	бы на индексе. Пустую строку может прислать любой клиент `frappe.client`.
+	бы на индексе.
 	"""
 	поле = ПОЛЕ_КЛЮЧА[doc.doctype]
+	if not doc.flags.get(ИЗ_РЕЛИЗА):
+		прежний = doc.get_doc_before_save()
+		doc.set(поле, прежний.get(поле) if прежний else None)
 	if not (doc.get(поле) or "").strip():
 		doc.set(поле, None)
 

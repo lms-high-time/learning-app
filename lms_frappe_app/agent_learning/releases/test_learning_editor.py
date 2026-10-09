@@ -10,7 +10,7 @@ from frappe.tests import IntegrationTestCase
 from lms.lms import api as learning
 
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
-from lms_frappe_app.agent_learning.releases import learning_editor
+from lms_frappe_app.agent_learning.releases import learning_editor, projection
 from lms_frappe_app.tests.sample_data import курс_из_релиза, создать_урок, урок_релиза
 
 
@@ -128,3 +128,50 @@ class IntegrationTestРедакторLearning(IntegrationTestCase):
 			with self.subTest(doctype=doctype):
 				self.assertGreaterEqual(len(ключи), 2)
 				self.assertEqual(ключи, [None] * len(ключи))
+
+	def ключ(self, doctype: str, имя: str) -> str | None:
+		return frappe.db.get_value(doctype, имя, projection.ПОЛЕ_КЛЮЧА[doctype])
+
+	def test_импорт_курса_ключей_не_переносит(self):
+		"""Импорт курса Learning заводит записи через `doc.update` со всеми полями
+		выгрузки — ключ выгруженной записи на новую не переходит."""
+		глава = frappe.new_doc("Course Chapter")
+		глава.update({"title": "Импортированная", "course": self.свободный_курс, "chapter_key": "ch-1"})
+		глава.insert(ignore_permissions=True)
+		урок = frappe.new_doc("Course Lesson")
+		урок.update(
+			{
+				"title": "Импортированный",
+				"chapter": глава.name,
+				"course": self.свободный_курс,
+				"lesson_key": "l-1",
+			}
+		)
+		урок.insert(ignore_permissions=True)
+
+		self.assertEqual(
+			(self.ключ("Course Chapter", глава.name), self.ключ("Course Lesson", урок.name)), (None, None)
+		)
+
+	def test_клиент_ключ_не_ставит_и_не_меняет(self):
+		"""`frappe.client.insert` и `save` в курсе без релиза: ключ новой записи —
+		`None`, у прежней — прежний."""
+		новый = frappe.client.insert(
+			{
+				"doctype": "Course Lesson",
+				"title": "Урок клиента",
+				"chapter": self.свободная_глава,
+				"course": self.свободный_курс,
+				"lesson_key": "l-1",
+			}
+		)
+		self.assertIsNone(self.ключ("Course Lesson", новый["name"]))
+
+		frappe.db.set_value("Course Lesson", self.свободный_урок, "lesson_key", "l-7", update_modified=False)
+		урок = frappe.get_doc("Course Lesson", self.свободный_урок).as_dict()
+		frappe.client.save({**урок, "lesson_key": "l-8", "title": "Урок, правленный клиентом"})
+
+		self.assertEqual(
+			frappe.db.get_value("Course Lesson", self.свободный_урок, ["lesson_key", "title"]),
+			("l-7", "Урок, правленный клиентом"),
+		)

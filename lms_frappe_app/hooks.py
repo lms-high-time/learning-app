@@ -223,6 +223,9 @@ scheduler_events = {
 # Проверка каталога документов — последней: сломанный каталог валит
 # `bench migrate`, и выкатка останавливается до переключения (#377).
 after_install = "lms_frappe_app.install.after_install"
+# Индексы по полям фикстур: при установке фикстуры синхронизируются после
+# `after_install`, а `after_sync` — следом за ними.
+after_sync = "lms_frappe_app.install.after_sync"
 after_migrate = [
 	"lms_frappe_app.install.after_migrate",
 	"lms_frappe_app.agent_learning.artifacts.catalog.после_миграции",
@@ -302,7 +305,7 @@ doc_events = {
 	"Course Chapter": {
 		"validate": [
 			"lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
-			"lms_frappe_app.agent_learning.releases.projection.без_пустого_ключа",
+			"lms_frappe_app.agent_learning.releases.projection.ключ_только_из_релиза",
 		],
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
@@ -310,7 +313,7 @@ doc_events = {
 	"Course Lesson": {
 		"validate": [
 			"lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
-			"lms_frappe_app.agent_learning.releases.projection.без_пустого_ключа",
+			"lms_frappe_app.agent_learning.releases.projection.ключ_только_из_релиза",
 		],
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",

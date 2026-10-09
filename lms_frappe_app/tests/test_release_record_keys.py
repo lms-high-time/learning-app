@@ -200,8 +200,18 @@ class IntegrationTestИндексКлючейПроекции(IntegrationTestCas
 			],
 		)
 
+	def test_при_установке_индекс_заводит_after_sync(self):
+		"""`install_app` синхронизирует фикстуры после `after_install`, а
+		`after_sync` зовёт следом: поля уже есть."""
+		self.assertIn(
+			"lms_frappe_app.install.after_sync", frappe.get_hooks("after_sync", app_name="lms_frappe_app")
+		)
+		with patch.object(install, "обеспечить_индекс_ключей_проекции") as индекс:
+			install.after_sync()
+
+		индекс.assert_called_once_with()
+
 	def test_без_поля_индекс_не_заводится(self):
-		"""`after_install` идёт раньше синхронизации фикстур: полей ещё нет."""
 		with (
 			patch.object(frappe.db, "has_column", return_value=False),
 			patch.object(frappe.db, "sql_ddl") as ddl,

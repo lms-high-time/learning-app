@@ -294,14 +294,14 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 		if status not in notes.СТАТУСЫ:
 			raise Отказ(НЕВЕРНОЕ_ЗАМЕЧАНИЕ, "Статус: open, done или accepted", where="status")
 		фильтры["status"] = status
-	известные = None
+	уроки = None
 	if lesson:
-		известные = releases_projection.известные(course)
-		запись = известные["lessons"].get(lesson)
+		уроки = releases_projection.известные_уроки(course)
+		запись = уроки.get(lesson)
 		if not запись:
 			return {"course": course, "notes": []}
 		фильтры["lesson"] = запись
-	return {"course": course, "notes": _замечания(course, фильтры, известные)}
+	return {"course": course, "notes": _замечания(course, фильтры, уроки)}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -371,8 +371,10 @@ def _состояние_замечания(документ) -> dict:
 	}
 
 
-def _замечания(course: str, фильтры: dict, известные: dict | None = None) -> list[dict]:
+def _замечания(course: str, фильтры: dict, уроки: dict[str, str] | None = None) -> list[dict]:
 	"""Заметки по фильтрам с нитями, подписями мест и версиями релизов.
+
+	`уроки` — ключ урока → запись (`projection.известные_уроки`), если уже прочитаны.
 
 	Число выборок не растёт с числом заметок: ответы, релизы курса, ключи
 	уроков и каждая нужная часть индекса действующего релиза — по выборке на
@@ -415,9 +417,9 @@ def _замечания(course: str, фильтры: dict, известные: d
 			}
 		)
 	версии = {р.name: р.version for р in releases_index.история(course)}
-	if any(запись.lesson for запись in записи):
-		известные = известные or releases_projection.известные(course)
-	ключи_уроков = {запись: ключ for ключ, запись in (известные or {"lessons": {}})["lessons"].items()}
+	if уроки is None and any(запись.lesson for запись in записи):
+		уроки = releases_projection.известные_уроки(course)
+	ключи_уроков = {запись: ключ for ключ, запись in (уроки or {}).items()}
 	места = places.Места(frappe.db.get_value("LMS Course", course, "active_release"))
 	адреса = [_адрес_или_нет(запись) for запись in записи]
 	подписи = iter(места.места([адрес for адрес in адреса if адрес]))
@@ -913,7 +915,7 @@ def course_reports(
 
 	`status` — статус наружу или `open`: всё, что ждёт разбора. `lesson` —
 	ключ урока: урок ищется по ключу на записи Learning
-	(`projection.известные`), так что находятся и репорты урока, снятого из
+	(`projection.известные_уроки`), так что находятся и репорты урока, снятого из
 	релиза. Ключ урока в репорте не хранится: `lesson_key` выводится по
 	релизу репорта и его уроку одной выборкой на всю страницу.
 
@@ -943,7 +945,7 @@ def course_reports(
 	if status:
 		фильтры["status"] = ("in", _статусы_фильтра(status))
 	if lesson:
-		запись = releases_projection.известные(course)["lessons"].get(lesson)
+		запись = releases_projection.известные_уроки(course).get(lesson)
 		if not запись:
 			return {"course": course, "reports": []}
 		фильтры["lesson"] = запись
