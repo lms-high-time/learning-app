@@ -20,6 +20,7 @@ from lms_frappe_app.tests.release_sample import добавить_главу, п�
 from lms_frappe_app.tests.sample_data import (
 	занятие_релиза,
 	зачислить_на_курс,
+	как_из_релиза,
 	создать_занятие,
 	создать_куратора,
 	создать_ученика,
@@ -316,15 +317,17 @@ class IntegrationTestУборкаСнятого(IntegrationTestCase):
 		)
 		frappe.db.set_value("LMS Enrollment", запись, "current_lesson", уроки["l-current"])
 		схема = (
-			frappe.get_doc(
-				{
-					"doctype": "Agent Course Artifact",
-					"course": курс,
-					"slug": "notebook",
-					"title": "Тетрадь другой версии",
-					"is_active": 0,
-					"blocks": [{"block_key": "log", "title": "Журнал", "lesson": уроки["l-block"]}],
-				}
+			как_из_релиза(
+				frappe.get_doc(
+					{
+						"doctype": "Agent Course Artifact",
+						"course": курс,
+						"slug": "notebook",
+						"title": "Тетрадь другой версии",
+						"is_active": 0,
+						"blocks": [{"block_key": "log", "title": "Журнал", "lesson": уроки["l-block"]}],
+					}
+				)
 			)
 			.insert(ignore_permissions=True)
 			.name

@@ -171,16 +171,31 @@ def создать_занятие(student: str, lesson: str, run: str | None = N
 	).insert(ignore_permissions=True).name
 
 
+def как_из_релиза(документ):
+	"""Документ, помеченный как запись публикации (`course_guard.ИЗ_РЕЛИЗА`).
+
+	Домашку и схему документа курса из релиза пишет только публикация
+	(learning-services#526), а тестам нужны и такие, каких образец релиза не даёт.
+	"""
+	from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
+
+	документ.flags[ИЗ_РЕЛИЗА] = True
+	return документ
+
+
 def создать_домашку(lesson: str, **поля):
-	"""Домашнее задание урока (learning-services#439); поля по умолчанию — без срока."""
-	return frappe.get_doc(
-		{
-			"doctype": "Agent Lesson Homework",
-			"lesson": lesson,
-			"title": "Встреча со спонсором",
-			"description": "Проведите встречу и опишите итог.",
-			**поля,
-		}
+	"""Домашнее задание урока (learning-services#439); поля по умолчанию — без срока.
+	Урок может быть и уроком курса из релиза: задание пишется как публикацией."""
+	return как_из_релиза(
+		frappe.get_doc(
+			{
+				"doctype": "Agent Lesson Homework",
+				"lesson": lesson,
+				"title": "Встреча со спонсором",
+				"description": "Проведите встречу и опишите итог.",
+				**поля,
+			}
+		)
 	).insert(ignore_permissions=True)
 
 

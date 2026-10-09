@@ -325,6 +325,20 @@ doc_events = {
 	"Lesson Reference": {
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
+	# Домашки уроков и схему документа курса из релиза пишет только публикация
+	# (learning-services#526).
+	"Agent Lesson Homework": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_домашку",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_домашку",
+	},
+	"Agent Course Artifact": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_документ",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_документ",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	"Agent Artifact Block": {
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
+	},
 }
 
 # Scheduled Tasks

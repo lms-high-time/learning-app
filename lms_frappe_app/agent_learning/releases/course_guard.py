@@ -20,6 +20,12 @@
 редактора Learning — в `learning_editor`. Карточка курса (название, описание,
 публикация) правится как раньше.
 
+Домашки уроков и схема документа курса из релиза — проекции релиза, как главы
+и уроки (learning-services#526): хуки `validate` и `on_trash` у
+`Agent Lesson Homework` и `Agent Course Artifact` (`проверить_домашку`,
+`проверить_документ`), `on_trash` у строк схемы (`проверить_блок`),
+`before_rename` у схемы.
+
 `Why:` правка по кусочку разошлась бы с действующим релизом: индекс релиза, по
 которому учат агент и квиз, её не увидел бы, а следующая публикация молча
 переписала бы. Курс из релиза — курс с ключом, а не с действующим релизом:
@@ -33,7 +39,10 @@ from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_rel
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 
 РЕЛИЗ = "Agent Course Release"
-#: Флаг документа курса, главы или урока, которым сервис публикации помечает свою запись.
+ДОМАШКА = "Agent Lesson Homework"
+ДОКУМЕНТ = "Agent Course Artifact"
+#: Флаг записи курса, главы, урока, домашки или схемы документа, которым сервис
+#: публикации помечает свою запись.
 ИЗ_РЕЛИЗА = "from_release"
 ПОЛЯ_РЕЛИЗА = ("course_key", "active_release")
 
@@ -102,8 +111,47 @@ def проверить_ссылку(doc, method=None) -> None:
 	запретить_правку(курс)
 
 
+def проверить_домашку(doc, method=None) -> None:
+	"""Хук `validate` и `on_trash` у `Agent Lesson Homework`: домашку урока курса
+	из релиза пишет только публикация (`releases.homework`).
+
+	Курс домашки — курс её урока; домашка, сменившая урок, проверяется по обоим
+	курсам, как глава и урок в `проверить_структуру`.
+	"""
+	if doc.flags.get(ИЗ_РЕЛИЗА):
+		return
+	прежний = doc.get_doc_before_save()
+	уроки = dict.fromkeys(filter(None, [doc.get("lesson"), прежний.get("lesson") if прежний else None]))
+	курсы = [frappe.db.get_value("Course Lesson", урок, "course") for урок in уроки]
+	запретить_правку(*курсы, текст=_текст_проекции())
+
+
+def проверить_документ(doc, method=None) -> None:
+	"""Хук `validate` и `on_trash` у `Agent Course Artifact`: схему документа курса
+	из релиза пишет только публикация (`releases.document`)."""
+	if doc.flags.get(ИЗ_РЕЛИЗА):
+		return
+	прежний = doc.get_doc_before_save()
+	курсы = [doc.get("course"), прежний.get("course") if прежний else None]
+	запретить_правку(*курсы, текст=_текст_проекции())
+
+
+def проверить_блок(doc, method=None) -> None:
+	"""Хук `on_trash` у `Agent Artifact Block`: строку схемы документа курса из
+	релиза не удалить саму по себе.
+
+	`Why:` то же, что у строк оглавления (`проверить_ссылку`): `delete_items` Desk
+	удаляет строку `frappe.delete_doc` с проверкой права на схеме, а оно у
+	Moderator есть. Строки, которые снимает сохранение схемы, проверяет
+	`validate` схемы.
+	"""
+	if doc.parenttype == ДОКУМЕНТ:
+		запретить_правку(frappe.db.get_value(ДОКУМЕНТ, doc.parent, "course"), текст=_текст_проекции())
+
+
 def проверить_переименование(doc, method=None, old=None, new=None, merge=False) -> None:
-	"""Хук `before_rename` у `LMS Course`, `Course Chapter` и `Course Lesson`.
+	"""Хук `before_rename` у `LMS Course`, `Course Chapter`, `Course Lesson` и
+	`Agent Course Artifact`.
 
 	`Why:` `rename_doc` идёт мимо `validate` и `on_trash`, а `merge` урока
 	курса из релиза с другим уроком перевёл бы на тот урок строку индекса
@@ -115,10 +163,10 @@ def проверить_переименование(doc, method=None, old=None, 
 		курсы = [doc.name, new if merge else None]
 	else:
 		курсы = [doc.get("course"), frappe.db.get_value(doc.doctype, new, "course") if merge else None]
-	запретить_правку(*курсы)
+	запретить_правку(*курсы, текст=_текст_проекции() if doc.doctype == ДОКУМЕНТ else None)
 
 
-def запретить_правку(*курсы: str | None) -> None:
+def запретить_правку(*курсы: str | None, текст: str | None = None) -> None:
 	"""Отказ, если среди курсов есть курс из релиза.
 
 	Отказ — `Отказ` через `frappe.throw`: desk и редактор Learning показывают
@@ -126,10 +174,15 @@ def запретить_правку(*курсы: str | None) -> None:
 	"""
 	for курс in dict.fromkeys(filter(None, курсы)):
 		if _из_релиза(курс):
-			текст = frappe._("Курс собран из релиза: главы и уроки правит новый релиз")
+			текст = текст or frappe._("Курс собран из релиза: главы и уроки правит новый релиз")
 			frappe.throw(
 				текст, exc=Отказ(КУРС_ИЗ_РЕЛИЗА, текст, course=курс), title=frappe._("Курс из релиза")
 			)
+
+
+def _текст_проекции() -> str:
+	"""Текст отказа для домашек и схемы документа; у курса, глав и уроков — свой."""
+	return frappe._("Курс собран из релиза: домашки и документ курса правит новый релиз")
 
 
 def _из_релиза(курс: str) -> bool:

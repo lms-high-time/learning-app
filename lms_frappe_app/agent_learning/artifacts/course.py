@@ -25,6 +25,7 @@ from lms_frappe_app.agent_learning.doctype.agent_course_artifact.agent_course_ar
 	нормализовать_ключ,
 )
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 
 def _схемы_курса(course: str) -> list:
@@ -188,6 +189,10 @@ def записать_схему(
 	назван — остаётся у прежней версии (learning-services#462). Пустая строка
 	его убирает. Прежнюю версию снимает с действия контроллер, из базы она не
 	уходит.
+
+	Пишет публикация релиза: без проверки прав и с флагом `ИЗ_РЕЛИЗА`. `Why:` у
+	Course Creator на схемы только чтение, а мимо публикации схему курса из
+	релиза не правит никто (`course_guard.проверить_документ`, learning-services#526).
 	"""
 	строки, холст = проверить_схему(блоки, canvas)
 	ключ = нормализовать_ключ(artifact)
@@ -207,5 +212,7 @@ def записать_схему(
 			"blocks": строки,
 			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
 		}
-	).insert()
+	)
+	документ.flags[ИЗ_РЕЛИЗА] = True
+	документ.insert(ignore_permissions=True)
 	return {"id": документ.name, "course": course, "slug": ключ, "version": документ.version}
