@@ -12,9 +12,11 @@
 ученик сдаёт и куратор проверяет. Вернулась — тот же шаблон (`lesson`
 уникален) снова действует.
 
-Права: проекция пишет шаблоны с правами публикующего, как `projection.py` —
-главы и уроки; `удалить_шаблоны` (удаление курса, путь администратора) — с
-`ignore_permissions`.
+Права: проекция пишет шаблоны без проверки прав и с флагом `ИЗ_РЕЛИЗА`, как
+`projection.py` — главы и уроки. `Why:` у Course Creator на шаблоны только
+чтение, а мимо публикации шаблон курса из релиза не правит никто
+(`course_guard.проверить_домашку`, learning-services#526). `удалить_шаблоны`
+(удаление курса, путь администратора) — тоже без проверки прав.
 """
 
 import json
@@ -23,6 +25,7 @@ import frappe
 
 from lms_frappe_app.agent_learning import homework
 from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 ЗАДАНИЕ = homework.ЗАДАНИЕ
 
@@ -88,12 +91,17 @@ def _поля(домашка: dict) -> dict:
 def _записать(урок: str, домашка: dict, шаблон: frappe._dict | None) -> None:
 	поля = _поля(домашка)
 	if not шаблон:
-		frappe.get_doc({"doctype": ЗАДАНИЕ, "lesson": урок, **поля}).insert()
+		_сохранить(frappe.get_doc({"doctype": ЗАДАНИЕ, "lesson": урок, **поля}))
 		return
 	if any((шаблон.get(поле) or None) != (значение or None) for поле, значение in поля.items()):
 		документ = frappe.get_doc(ЗАДАНИЕ, шаблон.name)
 		документ.update(поля)
-		документ.save()
+		_сохранить(документ)
+
+
+def _сохранить(документ) -> None:
+	документ.flags[ИЗ_РЕЛИЗА] = True
+	документ.save(ignore_permissions=True)
 
 
 def _снять(шаблон: frappe._dict, есть_сдачи: bool) -> None:
@@ -119,10 +127,10 @@ def _снять(шаблон: frappe._dict, есть_сдачи: bool) -> None:
 		if not шаблон.retired:
 			документ = frappe.get_doc(ЗАДАНИЕ, шаблон.name)
 			документ.retired = 1
-			документ.save()
+			_сохранить(документ)
 		return
 	homework.снять_сроки_назначений(шаблон.name)
-	frappe.delete_doc(ЗАДАНИЕ, шаблон.name)
+	frappe.delete_doc(ЗАДАНИЕ, шаблон.name, ignore_permissions=True, flags={ИЗ_РЕЛИЗА: True})
 
 
 def удалить_шаблоны(курс: str) -> None:

@@ -321,11 +321,14 @@ doc_events = {
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
-	# Строки оглавления удаляются и сами по себе — Desk и `delete_documents` Learning.
+	# Строки оглавления вставляются и удаляются и сами по себе — `/api/resource`,
+	# Desk и `delete_documents` Learning.
 	"Chapter Reference": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
 	"Lesson Reference": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
 	# Прогресс курса из релиза — по урокам программы: пройденный урок, снятый
@@ -347,6 +350,21 @@ doc_events = {
 		"on_trash": "lms_frappe_app.agent_learning.course_progress.отметить_снятие",
 		"on_update": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
 		"after_delete": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
+	},
+	# Домашки уроков и схему документа курса из релиза пишет только публикация
+	# (learning-services#526).
+	"Agent Lesson Homework": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_домашку",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_домашку",
+	},
+	"Agent Course Artifact": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_документ",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_документ",
+		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
+	},
+	"Agent Artifact Block": {
+		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
+		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 	},
 }
 

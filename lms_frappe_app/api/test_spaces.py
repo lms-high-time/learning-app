@@ -19,25 +19,28 @@ from lms_frappe_app.patches.v0_1 import document_spaces
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
+	как_из_релиза,
+	курс_из_релиза,
 	создать_курс,
 	создать_менеджера,
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
-	курс_из_релиза,
 	урок_релиза,
 )
 
 
 def завести_схему(курс: str) -> None:
-	frappe.get_doc(
-		{
-			"doctype": "Agent Course Artifact",
-			"course": курс,
-			"slug": "summary",
-			"title": "Резюме проекта",
-			"blocks": [{"block_key": "goal", "title": "Цель"}],
-		}
+	как_из_релиза(
+		frappe.get_doc(
+			{
+				"doctype": "Agent Course Artifact",
+				"course": курс,
+				"slug": "summary",
+				"title": "Резюме проекта",
+				"blocks": [{"block_key": "goal", "title": "Цель"}],
+			}
+		)
 	).insert(ignore_permissions=True)
 
 
