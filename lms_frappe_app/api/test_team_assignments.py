@@ -154,6 +154,7 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 
 		напоминания = self.письма_о("deadline")
 		self.assertIn(self.коллега, напоминания)
+		self.assertIn(self.руководитель, напоминания)
 		# Запись журнала откатана вместе с письмом: завтра напоминание уйдёт снова.
 		self.assertNotIn(self.сотрудник, напоминания)
 

@@ -144,9 +144,21 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 				)
 			)
 
+	def три_брошенных(self):
+		"""Три брошенных занятия; среднее — второе по порядку обхода.
+
+		`creation` задан явно: задача обходит занятия от новых к старым, и
+		сбойное занятие должно быть не последним — иначе остановку обхода
+		после сбоя тест не отличил бы от продолжения.
+		"""
+		занятия = [self.брошенное(self.занятие(student=ученик)) for ученик in (ПЕРВЫЙ, ВТОРОЙ, ПЕРВЫЙ)]
+		for часов, занятие in zip((-3, -2, -1), занятия, strict=True):
+			когда = add_to_date(now_datetime(), hours=часов)
+			frappe.db.set_value(DOCTYPE, занятие.name, "creation", когда, update_modified=False)
+		return занятия
+
 	def test_сбой_на_одном_занятии_не_останавливает_остальные(self):
-		сбойное = self.брошенное(self.занятие(student=ПЕРВЫЙ))
-		обычное = self.брошенное(self.занятие(student=ВТОРОЙ))
+		старое, сбойное, новое = self.три_брошенных()
 		записать = AgentLearningSession.записать_событие
 
 		def записать_или_упасть(занятие, *args, **kwargs):
@@ -157,8 +169,9 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 		with patch.object(AgentLearningSession, "записать_событие", записать_или_упасть):
 			закрыть_брошенные_занятия()
 
-		обычное.reload()
-		self.assertEqual(обычное.status, "Abandoned")
+		for занятие in (старое, новое):
+			занятие.reload()
+			self.assertEqual(занятие.status, "Abandoned")
 		# Закрытие откатано до точки сохранения: статус без события в журнале
 		# разошёлся бы с ним.
 		сбойное.reload()
@@ -169,6 +182,21 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 				{"reference_doctype": DOCTYPE, "reference_name": сбойное.name},
 			)
 		)
+
+	def test_взаимоблокировка_уходит_наружу(self):
+		"""После взаимоблокировки точки сохранения нет: задача падает, а не
+		откатывается к ней."""
+		_, сбойное, _ = self.три_брошенных()
+		записать = AgentLearningSession.записать_событие
+
+		def записать_или_упасть(занятие, *args, **kwargs):
+			if занятие.name == сбойное.name:
+				raise frappe.QueryDeadlockError("взаимоблокировка")
+			return записать(занятие, *args, **kwargs)
+
+		with patch.object(AgentLearningSession, "записать_событие", записать_или_упасть):
+			with self.assertRaises(frappe.QueryDeadlockError):
+				закрыть_брошенные_занятия()
 
 	def test_свежее_занятие_не_трогается(self):
 		занятие = self.занятие()

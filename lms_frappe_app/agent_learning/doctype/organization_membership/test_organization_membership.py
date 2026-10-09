@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning.doctype.course_allocation import course_allocation
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
@@ -92,25 +93,42 @@ class IntegrationTestOrganizationMembership(IntegrationTestCase):
 	def test_сбой_одного_зачисления_не_останавливает_сверку(self):
 		self.назначить()
 		третий = создать_ученика(f"tretiy-{frappe.generate_hash(length=6)}@example.com")
-		for участник in (НОВИЧОК, третий):
+		# Сбойный участник — новее: сверка идёт по составу от новых к старым,
+		# и третий обрабатывается после сбоя.
+		for участник, часов in ((НОВИЧОК, 0), (третий, -1)):
 			frappe.db.sql(
 				"""insert into `tabOrganization Membership`
 				(name, user, organization, role, creation, modified, owner, modified_by, docstatus, idx)
-				values (%s, %s, %s, 'Member', now(), now(), 'Administrator', 'Administrator', 0, 0)""",
-				(frappe.generate_hash(length=10), участник, self.организация),
+				values (%s, %s, %s, 'Member', %s, %s, 'Administrator', 'Administrator', 0, 0)""",
+				(
+					frappe.generate_hash(length=10),
+					участник,
+					self.организация,
+					add_to_date(now_datetime(), hours=часов),
+					add_to_date(now_datetime(), hours=часов),
+				),
 			)
 		записать = course_allocation.записать_зачисление
 
-		def записать_или_упасть(участник, курс):
-			if участник == НОВИЧОК:
-				raise frappe.ValidationError("сбой")
+		def записать_и_упасть(участник, курс):
 			записать(участник, курс)
+			if участник == НОВИЧОК:
+				raise frappe.ValidationError("сбой после записи")
 
-		with patch.object(course_allocation, "записать_зачисление", записать_или_упасть):
+		with patch.object(course_allocation, "записать_зачисление", записать_и_упасть):
 			сверить_зачисления()
 
 		self.assertTrue(self.записан(третий))
+		# Зачисление сбойного откатано до точки сохранения.
 		self.assertFalse(self.записан(НОВИЧОК))
+		назначения = frappe.get_all(
+			"Course Allocation", filters={"organization": self.организация}, pluck="name"
+		)
+		self.assertTrue(
+			frappe.db.exists(
+				"Error Log", {"reference_doctype": "Course Allocation", "reference_name": ("in", назначения)}
+			)
+		)
 
 	def test_повторная_сверка_не_плодит_зачисления(self):
 		self.назначить()

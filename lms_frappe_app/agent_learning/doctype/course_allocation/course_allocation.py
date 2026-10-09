@@ -15,6 +15,7 @@ from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organi
 )
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
+from lms_frappe_app.agent_learning.jobs import по_одной
 
 ВСЕ_РОЛИ_УЧАСТНИКОВ = ("Member", "Manager", "Org Admin")
 
@@ -300,34 +301,12 @@ def сверить_зачисления() -> int:
 		for участник in адресаты[назначение.name]:
 			if (участник, назначение.course) in записаны:
 				continue
-			if _записать_при_сверке(участник, назначение):
+			with по_одной("Зачисление по назначению не выдано", "Course Allocation", назначение.name) as итог:
+				записать_зачисление(участник, назначение.course)
+			if итог.удалась:
 				записаны.add((участник, назначение.course))
 				создано += 1
 	return создано
-
-
-ТОЧКА_СВЕРКИ = "allocation_sync"
-
-
-def _записать_при_сверке(участник: str, назначение) -> bool:
-	"""Зачисление сверки под своей точкой сохранения; сбой — в лог, сверка дальше.
-
-	`Why:` одно незаписанное зачисление иначе откатывало бы всю сверку, и
-	курс не получал бы никто на платформе — сутки за сутками.
-	"""
-	frappe.db.savepoint(ТОЧКА_СВЕРКИ)
-	try:
-		записать_зачисление(участник, назначение.course)
-	except Exception:
-		frappe.db.rollback(save_point=ТОЧКА_СВЕРКИ)
-		frappe.log_error(
-			title="Зачисление по назначению не выдано",
-			reference_doctype="Course Allocation",
-			reference_name=назначение.name,
-		)
-		return False
-	frappe.db.release_savepoint(ТОЧКА_СВЕРКИ)
-	return True
 
 
 def назначения_пользователя(user: str, course: str | None = None) -> list[dict]:
