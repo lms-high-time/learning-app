@@ -325,6 +325,11 @@ doc_events = {
 	"Lesson Reference": {
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
+	# Урок курса из релиза закрывает только занятие: Learning пишет отметку и
+	# прямыми вызовами Python, мимо подмены методов (learning-services#525).
+	"LMS Course Progress": {
+		"validate": "lms_frappe_app.agent_learning.browser_progress.проверить_отметку",
+	},
 }
 
 # Scheduled Tasks

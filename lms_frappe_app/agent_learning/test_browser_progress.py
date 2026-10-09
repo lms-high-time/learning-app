@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Просмотр урока в браузере не закрывает урок.
+"""Просмотр урока в браузере не закрывает урок, а урок курса из релиза — и методы Learning.
 
 `Why:` запись `LMS Course Progress` со статусом `Complete` — единственный
 признак пройденного урока для агента и отчёта руководителя. Пока её ставил
@@ -13,9 +13,19 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from lms.lms.api import mark_lesson_progress
 
-from lms_frappe_app.agent_learning import browser_progress
-from lms_frappe_app.tests.sample_data import зачислить, создать_урок, создать_ученика
+from lms_frappe_app.agent_learning import browser_progress, quiz
+from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
+from lms_frappe_app.tests.sample_data import (
+	занятие_релиза,
+	зачислить,
+	курс_из_релиза,
+	создать_куратора,
+	создать_урок,
+	создать_ученика,
+	урок_релиза,
+)
 
 
 class IntegrationTestBrowserProgress(IntegrationTestCase):
@@ -58,3 +68,119 @@ class IntegrationTestBrowserProgress(IntegrationTestCase):
 			self.assertEqual(self.вызвать(scorm_details=сведения), 100)
 
 		learning.assert_called_once_with(self.урок, self.курс, сведения)
+
+
+class IntegrationTestУрокИзРелиза(IntegrationTestCase):
+	"""Урок курса из релиза закрывает только занятие (learning-services#525).
+
+	`Why:` Learning закрывает урок и прямыми вызовами Python, мимо подмены
+	методов: ученик своим токеном закрыл бы весь курс без занятий и квиза — с
+	сертификатом и следующим курсом программы.
+	"""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		self.ученик = создать_ученика(f"release-progress-{frappe.generate_hash(length=6)}@example.com")
+		self.курс, _ = курс_из_релиза()
+		self.урок = урок_релиза(self.курс, "l-1")
+		зачислить(self.ученик, self.урок)
+
+	def отметка(self, урок: str | None = None) -> str | None:
+		return frappe.db.get_value(
+			"LMS Course Progress", {"member": self.ученик, "lesson": урок or self.урок}, "status"
+		)
+
+	def завести(self, урок: str | None = None, статус: str = ПРОЙДЕН, **флаги):
+		"""Отметка пройденного — вставкой записи, как её пишет любой путь Python."""
+		return frappe.get_doc(
+			{
+				"doctype": "LMS Course Progress",
+				"member": self.ученик,
+				"lesson": урок or self.урок,
+				"status": статус,
+			}
+		).insert(**флаги)
+
+	def номер(self, урок: str) -> tuple[int, int]:
+		"""Номер главы и урока в оглавлении — так урок называет `mark_lesson_progress`."""
+		глава, номер_урока = frappe.db.get_value("Lesson Reference", {"lesson": урок}, ["parent", "idx"])
+		return frappe.db.get_value("Chapter Reference", {"chapter": глава}, "idx"), номер_урока
+
+	def test_mark_lesson_progress_урок_не_закрывает(self):
+		"""Браузерный квиз и задание Learning зовут его, а он — `save_progress` напрямую."""
+		глава, урок = self.номер(self.урок)
+		frappe.set_user(self.ученик)
+
+		with self.assertRaises(frappe.ValidationError):
+			mark_lesson_progress(self.курс, глава, урок)
+
+		self.assertIsNone(self.отметка())
+
+	def test_прогресс_scorm_урок_не_закрывает(self):
+		"""Пройденным SCORM-прогресс Learning отмечает и урок без пакета."""
+		frappe.set_user(self.ученик)
+		метод = frappe.override_whitelisted_method(browser_progress.ПОДМЕНЯЕМЫЙ)
+
+		with self.assertRaises(frappe.ValidationError):
+			frappe.call(метод, lesson=self.урок, course=self.курс, scorm_details={"is_complete": True})
+
+		self.assertIsNone(self.отметка())
+
+	def test_отметку_не_завести_никаким_путём_python(self):
+		"""Правило на самой отметке: так отметку пишет любой путь Learning, в том числе `submit_quiz`."""
+		frappe.set_user(self.ученик)
+
+		with self.assertRaises(frappe.ValidationError):
+			self.завести(ignore_permissions=True)
+
+		self.assertIsNone(self.отметка())
+
+	def test_занятие_закрывает_урок(self):
+		занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, self.курс, "l-1"))
+		frappe.set_user(self.ученик)
+
+		quiz.отметить_урок_пройденным(занятие)
+
+		self.assertEqual(self.отметка(), ПРОЙДЕН)
+
+	def test_занятие_закрывает_урок_и_поверх_снятой_отметки(self):
+		"""Отметку, снятую администратором, повторное прохождение возвращает."""
+		self.завести(статус="Partially Complete")
+		занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, self.курс, "l-1"))
+		frappe.set_user(self.ученик)
+
+		quiz.отметить_урок_пройденным(занятие)
+
+		self.assertEqual(self.отметка(), ПРОЙДЕН)
+
+	def test_пометка_занятия_только_для_своего_урока(self):
+		второй = урок_релиза(self.курс, "l-2")
+		frappe.set_user(self.ученик)
+
+		with browser_progress.закрытие_урока(self.ученик, self.урок):
+			with self.assertRaises(frappe.ValidationError):
+				self.завести(второй, ignore_permissions=True)
+
+		self.assertIsNone(self.отметка(второй))
+		self.assertIsNone(frappe.flags.get(browser_progress.ЗАКРЫВАЕТСЯ))
+
+	def test_администратор_правит_отметку_в_desk(self):
+		"""Прогресс руками правит тот, кому Desk даёт права на отметки, — без занятия."""
+		куратор = создать_куратора(f"release-progress-cc-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(куратор)
+
+		отметка = self.завести()
+		отметка.status = "Partially Complete"
+		отметка.save()
+
+		self.assertEqual(self.отметка(), "Partially Complete")
+
+	def test_на_курсе_без_релиза_mark_lesson_progress_закрывает_урок(self):
+		урок = создать_урок("Урок с квизом Learning")
+		курс = зачислить(self.ученик, урок)
+		глава, номер = self.номер(урок)
+		frappe.set_user(self.ученик)
+
+		mark_lesson_progress(курс, глава, номер)
+
+		self.assertEqual(self.отметка(урок), ПРОЙДЕН)
