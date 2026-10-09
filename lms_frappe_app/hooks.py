@@ -168,6 +168,7 @@ fixtures = [
 	# запись, второго основания доступа нет (learning-services#393).
 	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
 	# (learning-services#500). Цели анонса — у курса без релиза (learning-services#512).
+	# Ключи глав и уроков из релиза — на самих записях (learning-services#514).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -183,6 +184,8 @@ fixtures = [
 					"LMS Course-course_attribution",
 					"LMS Course-announce_objectives",
 					"Course Chapter-chapter_description",
+					"Course Chapter-chapter_key",
+					"Course Lesson-lesson_key",
 				],
 			]
 		],
@@ -294,14 +297,21 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_курс",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
-	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512).
+	# Главы и уроки курса из релиза правит только новый релиз (learning-services#512);
+	# пустой ключ релиза на записи — NULL (learning-services#514).
 	"Course Chapter": {
-		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"validate": [
+			"lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+			"lms_frappe_app.agent_learning.releases.projection.без_пустого_ключа",
+		],
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},
 	"Course Lesson": {
-		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+		"validate": [
+			"lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
+			"lms_frappe_app.agent_learning.releases.projection.без_пустого_ключа",
+		],
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_структуру",
 		"before_rename": "lms_frappe_app.agent_learning.releases.course_guard.проверить_переименование",
 	},

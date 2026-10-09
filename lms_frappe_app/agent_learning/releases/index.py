@@ -133,28 +133,6 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 	return таблицы
 
 
-def известные(курс: str) -> dict[str, dict[str, str]]:
-	"""Ключ → запись Learning по всей истории релизов курса; свежий релиз главнее."""
-	версии = {
-		р.name: р.version for р in frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=["name", "version"])
-	}
-	итог: dict[str, dict[str, str]] = {"chapters": {}, "lessons": {}}
-	if not версии:
-		return итог
-	for вид, doctype, ключ, запись in (
-		("chapters", ГЛАВА, "chapter_key", "chapter"),
-		("lessons", УРОК, "lesson_key", "lesson"),
-	):
-		найдено = frappe.get_all(
-			doctype,
-			filters={"parenttype": РЕЛИЗ, "parent": ("in", list(версии))},
-			fields=["parent", ключ, запись],
-		)
-		for строка in sorted(найдено, key=lambda с: версии[с.parent]):
-			итог[вид][строка[ключ]] = строка[запись]
-	return итог
-
-
 def ключи(релиз: str | None) -> dict[str, list[str]]:
 	"""Ключи глав и уроков релиза по порядку; нет релиза — пусто."""
 	if not релиз:

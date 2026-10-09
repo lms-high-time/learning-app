@@ -35,10 +35,6 @@ def курс_куратора(куратор: str) -> str:
 	)
 
 
-def известные(итог) -> dict:
-	return {"chapters": dict(итог.главы), "lessons": dict(итог.уроки)}
-
-
 def прежние(итог) -> dict:
 	return {"chapters": list(итог.главы), "lessons": list(итог.уроки)}
 
@@ -68,13 +64,47 @@ class IntegrationTestПроекция(IntegrationTestCase):
 			"Что изменится после первой главы.",
 		)
 		self.assertEqual(итог.создано, {"chapters": ["ch-1", "ch-2"], "lessons": ["l-1", "l-2", "l-3"]})
+		self.assertEqual(projection.известные(self.курс), {"chapters": итог.главы, "lessons": итог.уроки})
+
+	def test_ключ_пишется_при_создании_и_не_меняется_при_правке(self):
+		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
+		self.assertEqual(frappe.db.get_value("Course Lesson", первый.уроки["l-2"], "lesson_key"), "l-2")
+		self.assertEqual(frappe.db.get_value("Course Chapter", первый.главы["ch-2"], "chapter_key"), "ch-2")
+		релиз = пример_релиза()
+		релиз["lessons"][1].update(chapter="ch-2", title="Урок второй, перенесённый")
+		релиз["chapters"][0]["lessons"] = ["l-1"]
+		релиз["chapters"][1].update(title="Глава вторая, исправленная", lessons=["l-2", "l-3"])
+
+		итог = projection.спроецировать(self.курс, релиз, projection.известные(self.курс), прежние(первый))
+
+		self.assertEqual(итог.обновлено, {"chapters": ["ch-2"], "lessons": ["l-2"]})
+		self.assertEqual(
+			frappe.db.get_value("Course Lesson", первый.уроки["l-2"], ["lesson_key", "title"]),
+			("l-2", "Урок второй, перенесённый"),
+		)
+		self.assertEqual(frappe.db.get_value("Course Chapter", первый.главы["ch-2"], "chapter_key"), "ch-2")
+		self.assertEqual(projection.известные(self.курс), {"chapters": первый.главы, "lessons": первый.уроки})
+
+	def test_известные_только_записи_курса_с_ключом(self):
+		"""Глава и урок курса без ключа — не из релиза: им ключ не сопоставляется."""
+		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
+		глава = frappe.get_doc(
+			{"doctype": "Course Chapter", "title": "Своя глава", "course": self.курс}
+		).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{"doctype": "Course Lesson", "title": "Свой урок", "course": self.курс, "chapter": глава.name}
+		).insert(ignore_permissions=True)
+		другой = курс_куратора(self.куратор)
+		projection.спроецировать(другой, пример_релиза(), ПУСТО, {})
+
+		self.assertEqual(projection.известные(self.курс), {"chapters": первый.главы, "lessons": первый.уроки})
 
 	def test_правка_названия_меняет_ту_же_запись(self):
 		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
 		релиз = пример_релиза()
 		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
 
-		итог = projection.спроецировать(self.курс, релиз, известные(первый), прежние(первый))
+		итог = projection.спроецировать(self.курс, релиз, projection.известные(self.курс), прежние(первый))
 
 		self.assertEqual(итог.уроки["l-1"], первый.уроки["l-1"])
 		self.assertEqual(
@@ -90,7 +120,7 @@ class IntegrationTestПроекция(IntegrationTestCase):
 		релиз["chapters"][0]["lessons"] = ["l-1"]
 		релиз["chapters"][1]["lessons"] = ["l-2", "l-3"]
 
-		итог = projection.спроецировать(self.курс, релиз, известные(первый), прежние(первый))
+		итог = projection.спроецировать(self.курс, релиз, projection.известные(self.курс), прежние(первый))
 
 		self.assertEqual(итог.уроки["l-2"], первый.уроки["l-2"])
 		self.assertEqual(
@@ -108,7 +138,7 @@ class IntegrationTestПроекция(IntegrationTestCase):
 		релиз["chapters"] = релиз["chapters"][:1]
 		релиз["lessons"] = релиз["lessons"][:2]
 
-		итог = projection.спроецировать(self.курс, релиз, известные(первый), прежние(первый))
+		итог = projection.спроецировать(self.курс, релиз, projection.известные(self.курс), прежние(первый))
 
 		self.assertEqual(итог.снято, {"chapters": ["ch-2"], "lessons": ["l-3"]})
 		self.assertTrue(frappe.db.exists("Course Lesson", первый.уроки["l-3"]))
@@ -117,21 +147,25 @@ class IntegrationTestПроекция(IntegrationTestCase):
 		self.assertFalse(frappe.get_all("Lesson Reference", filters={"parent": первый.главы["ch-2"]}))
 
 	def test_вернувшийся_ключ_получает_ту_же_запись(self):
+		"""Ключ снятой записи остаётся на ней: вернувшийся ключ находит её без
+		истории релизов — релизов в этом тесте нет вовсе."""
 		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
 		релиз = пример_релиза()
 		релиз["chapters"] = релиз["chapters"][:1]
 		релиз["lessons"] = релиз["lessons"][:2]
-		второй = projection.спроецировать(self.курс, релиз, известные(первый), прежние(первый))
-		вся_история = {
-			"chapters": {**первый.главы, **второй.главы},
-			"lessons": {**первый.уроки, **второй.уроки},
-		}
+		второй = projection.спроецировать(self.курс, релиз, projection.известные(self.курс), прежние(первый))
+		self.assertEqual(projection.известные(self.курс)["lessons"]["l-3"], первый.уроки["l-3"])
+		self.assertEqual(projection.известные(self.курс)["chapters"]["ch-2"], первый.главы["ch-2"])
+		self.assertFalse(frappe.db.exists("Agent Course Release", {"course": self.курс}))
 
-		итог = projection.спроецировать(self.курс, пример_релиза(), вся_история, прежние(второй))
+		итог = projection.спроецировать(
+			self.курс, пример_релиза(), projection.известные(self.курс), прежние(второй)
+		)
 
 		self.assertEqual(итог.уроки["l-3"], первый.уроки["l-3"])
 		self.assertEqual(итог.главы["ch-2"], первый.главы["ch-2"])
 		self.assertEqual(итог.создано, {"chapters": [], "lessons": []})
+		self.assertEqual(итог.возвращено, {"chapters": ["ch-2"], "lessons": ["l-3"]})
 		self.assertEqual(self.уроки(), [первый.уроки[к] for к in ("l-1", "l-2", "l-3")])
 
 	def test_без_изменений_ничего_не_сохраняет(self):
@@ -139,7 +173,9 @@ class IntegrationTestПроекция(IntegrationTestCase):
 		было = {имя: frappe.db.get_value("Course Lesson", имя, "modified") for имя in первый.уроки.values()}
 		курс_был = frappe.db.get_value("LMS Course", self.курс, "modified")
 
-		итог = projection.спроецировать(self.курс, пример_релиза(), известные(первый), прежние(первый))
+		итог = projection.спроецировать(
+			self.курс, пример_релиза(), projection.известные(self.курс), прежние(первый)
+		)
 
 		пусто = {"chapters": [], "lessons": []}
 		self.assertEqual((итог.создано, итог.обновлено, итог.снято), (пусто, пусто, пусто))
@@ -150,14 +186,16 @@ class IntegrationTestПроекция(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "modified"), курс_был)
 
 	def test_запись_чужого_курса_не_берётся(self):
-		"""Карта «ключ → запись» по истории курса; запись другого курса — не наша."""
+		"""Те же ключи в другом курсе — свои записи: ключ ищется среди записей курса."""
 		первый = projection.спроецировать(self.курс, пример_релиза(), ПУСТО, {})
 		другой = курс_куратора(self.куратор)
 
-		итог = projection.спроецировать(другой, пример_релиза(), известные(первый), {})
+		итог = projection.спроецировать(другой, пример_релиза(), projection.известные(другой), {})
 
 		self.assertNotEqual(итог.уроки["l-1"], первый.уроки["l-1"])
 		self.assertEqual(итог.создано["lessons"], ["l-1", "l-2", "l-3"])
+		self.assertEqual(frappe.db.get_value("Course Lesson", итог.уроки["l-1"], "lesson_key"), "l-1")
+		self.assertEqual(projection.известные(self.курс)["lessons"], первый.уроки)
 
 	def test_снятый_урок_не_возвращается_в_программу(self):
 		"""Курс с действующим релизом: состав — только строки-ссылки, без запасного пути."""
@@ -167,7 +205,7 @@ class IntegrationTestПроекция(IntegrationTestCase):
 		релиз["chapters"] = релиз["chapters"][:1]
 		релиз["lessons"] = релиз["lessons"][:2]
 
-		projection.спроецировать(self.курс, релиз, известные(первый), прежние(первый))
+		projection.спроецировать(self.курс, релиз, projection.известные(self.курс), прежние(первый))
 
 		self.assertEqual(structure.уроки_курса(self.курс), [первый.уроки["l-1"], первый.уроки["l-2"]])
 		self.assertEqual(structure.уроков_в_курсах([self.курс]), {self.курс: 2})

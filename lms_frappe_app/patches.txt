@@ -24,3 +24,4 @@ lms_frappe_app.patches.v0_1.old_quiz_attempts
 lms_frappe_app.patches.v0_1.drop_removed_columns
 lms_frappe_app.patches.v0_1.drop_old_model_doctypes
 lms_frappe_app.patches.v0_1.drop_removed_settings
+lms_frappe_app.patches.v0_1.release_record_keys

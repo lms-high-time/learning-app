@@ -102,3 +102,29 @@ class IntegrationTestРедакторLearning(IntegrationTestCase):
 		)
 		вызвать("delete_lesson", lesson=урок, chapter=self.свободная_глава)
 		self.assertFalse(frappe.db.exists("Course Lesson", урок))
+
+	def test_записи_редактора_без_ключа_пишутся_null(self):
+		"""Глава и урок, заведённые редактором Learning в курсе без релиза, — без
+		ключа, и пустой ключ в базе — NULL, а не `''`: уникальный индекс
+		`(course, ключ)` различает только NULL-ы. Пустую строку от клиента
+		`frappe.client` хук `validate` тоже приводит к NULL."""
+		вызвать("create_lesson", chapter=self.свободная_глава)
+		вызвать("create_lesson", chapter=self.свободная_глава)
+		вызвать("upsert_chapter", title="Вторая", course=self.свободный_курс, is_scorm_package=False)
+		frappe.get_doc(
+			{
+				"doctype": "Course Lesson",
+				"title": "Урок с пустым ключом",
+				"chapter": self.свободная_глава,
+				"course": self.свободный_курс,
+				"lesson_key": "",
+			}
+		).insert()
+
+		for doctype, поле in (("Course Lesson", "lesson_key"), ("Course Chapter", "chapter_key")):
+			ключи = frappe.db.sql(
+				f"select `{поле}` from `tab{doctype}` where course = %s", self.свободный_курс, pluck=True
+			)
+			with self.subTest(doctype=doctype):
+				self.assertGreaterEqual(len(ключи), 2)
+				self.assertEqual(ключи, [None] * len(ключи))

@@ -92,19 +92,6 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		self.assertIsNone(index.эталон(self.релиз, "l-2", "S1/l-1-D1"))
 		self.assertIsNone(index.эталон(self.релиз, "l-1", "S9/l-1-D1"))
 
-	def test_известные_помнят_снятый_ключ(self):
-		релиз = пример_релиза()
-		релиз["chapters"] = релиз["chapters"][:1]
-		релиз["lessons"] = релиз["lessons"][:2]
-		frappe.set_user(self.куратор)
-		итог = projection.спроецировать(self.курс, релиз, index.известные(self.курс), index.ключи(self.релиз))
-		frappe.set_user("Administrator")
-		self.вставить(релиз, итог, 2)
-
-		известные = index.известные(self.курс)
-		self.assertEqual(известные["lessons"]["l-3"], self.итог.уроки["l-3"])
-		self.assertEqual(известные["chapters"]["ch-2"], self.итог.главы["ch-2"])
-
 	def test_разделы_документа(self):
 		строки = frappe.get_all(
 			index.РАЗДЕЛ,

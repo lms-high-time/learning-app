@@ -26,6 +26,7 @@ from lms_frappe_app.agent_learning import (
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import index as releases_index
 from lms_frappe_app.agent_learning.releases import places
+from lms_frappe_app.agent_learning.releases import projection as releases_projection
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -295,7 +296,7 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 		фильтры["status"] = status
 	известные = None
 	if lesson:
-		известные = releases_index.известные(course)
+		известные = releases_projection.известные(course)
 		запись = известные["lessons"].get(lesson)
 		if not запись:
 			return {"course": course, "notes": []}
@@ -415,7 +416,7 @@ def _замечания(course: str, фильтры: dict, известные: d
 		)
 	версии = {р.name: р.version for р in releases_index.история(course)}
 	if any(запись.lesson for запись in записи):
-		известные = известные or releases_index.известные(course)
+		известные = известные or releases_projection.известные(course)
 	ключи_уроков = {запись: ключ for ключ, запись in (известные or {"lessons": {}})["lessons"].items()}
 	места = places.Места(frappe.db.get_value("LMS Course", course, "active_release"))
 	адреса = [_адрес_или_нет(запись) for запись in записи]
@@ -911,10 +912,10 @@ def course_reports(
 	"""Репорты агентов по курсу: что мешает курсу работать.
 
 	`status` — статус наружу или `open`: всё, что ждёт разбора. `lesson` —
-	ключ урока: он ищется по всей истории релизов курса, так что находятся и
-	репорты урока, снятого из релиза. Ключ урока в репорте не хранится:
-	`lesson_key` выводится по релизу репорта и его уроку одной выборкой на
-	всю страницу.
+	ключ урока: урок ищется по ключу на записи Learning
+	(`projection.известные`), так что находятся и репорты урока, снятого из
+	релиза. Ключ урока в репорте не хранится: `lesson_key` выводится по
+	релизу репорта и его уроку одной выборкой на всю страницу.
 
 	`Why:` без чтения механизм разомкнут — `report_issue` умел только
 	записывать, и обратная связь о курсе, который не работает, лежала мёртвым
@@ -942,7 +943,7 @@ def course_reports(
 	if status:
 		фильтры["status"] = ("in", _статусы_фильтра(status))
 	if lesson:
-		запись = releases_index.известные(course)["lessons"].get(lesson)
+		запись = releases_projection.известные(course)["lessons"].get(lesson)
 		if not запись:
 			return {"course": course, "reports": []}
 		фильтры["lesson"] = запись
