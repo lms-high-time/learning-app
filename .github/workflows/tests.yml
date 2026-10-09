@@ -18,10 +18,19 @@ env:
   IMAGE_MIRROR: public.ecr.aws/docker/library
 
 jobs:
+  # Тесты делятся на части, каждая поднимает своё окружение на отдельной
+  # машине. Why: тесты идут последовательно и занимают бо́льшую часть прогона;
+  # на нескольких машинах стена прогона — подготовка плюс доля тестов.
+  # fail-fast выключен: упавшая часть не обрывает остальные, и один прогон
+  # показывает все падения.
   tests:
-    name: bench run-tests
+    name: bench run-tests ${{ matrix.part }}/${{ strategy.job-total }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
 
     steps:
       - uses: actions/checkout@v5
@@ -176,6 +185,23 @@ jobs:
           # сайту она только роняет прогон (learning-services#383).
           bench --site test.local set-config --parse throttle_user_limit 100000
 
+      # Раскладка модулей по частям и почему не `run-parallel-tests` —
+      # в docstring скрипта.
       - name: Прогнать тесты
-        working-directory: /home/runner/frappe-bench
-        run: bench --site test.local run-tests --app lms_frappe_app
+        working-directory: /home/runner/frappe-bench/sites
+        run: >-
+          ../env/bin/python "$GITHUB_WORKSPACE/.github/scripts/run_tests_part.py"
+          test.local lms_frappe_app ${{ matrix.part }} ${{ strategy.job-total }}
+
+  # Итог частей под именем обязательной проверки ветки master. Why: правило
+  # защиты ветки требует проверку `bench run-tests`, а у частей матрицы имена
+  # свои. Без `always()` при падении части итог был бы skipped, а skipped
+  # обязательная проверка не блокирует мерж.
+  tests-result:
+    name: bench run-tests
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Все части зелёные
+        run: test "${{ needs.tests.result }}" = success
