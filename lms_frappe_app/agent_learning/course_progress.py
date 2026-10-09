@@ -138,19 +138,44 @@ def сверить(запись, method=None) -> None:
 def отметить_снятие(прогресс, method=None) -> None:
 	"""`on_trash` и `validate` отметки пройденного: снимается ли пройденный урок.
 
-	Отметка держится, пока пересчёт Learning (`after_delete`, `on_update`
-	отметки) пишет долю, и снимается следом (`снять_отметку`).
+	Снятием считается удаление отметки `Complete` и переход из `Complete` в
+	другой статус: только они уменьшают число пройденных. Пометка держится,
+	пока пересчёт Learning (`after_delete`, `on_update` отметки) пишет долю, и
+	снимается следом (`снять_отметку`).
 	"""
 	if method == "validate":
 		до = прогресс.get_doc_before_save()
 		if not до or до.status != ПРОЙДЕН or прогресс.status == ПРОЙДЕН:
 			return
+	elif прогресс.status != ПРОЙДЕН:
+		return
 	frappe.flags.setdefault(СНИМАЕТСЯ, set()).add((прогресс.member, прогресс.course))
 
 
 def снять_отметку(прогресс, method=None) -> None:
-	"""`after_delete` и `on_update` отметки пройденного — после пересчёта Learning."""
-	(frappe.flags.get(СНИМАЕТСЯ) or set()).discard((прогресс.member, прогресс.course))
+	"""`after_delete` и `on_update` отметки пройденного — после пересчёта Learning.
+
+	При поднятой пометке запись на курс сверяется здесь же: доля Learning
+	могла совпасть с записанной, и тогда `update_enrollment` записи не пишет и
+	`on_update` записи на курс не вызывает — удержанные 100 остались бы.
+	Пометка снимается и при сбое сверки.
+
+	Внутри `batched_enrollment_updates` Learning пишет запись на курс на выходе
+	из блока, уже без пометки; отметок внутри блока он не снимает — там только
+	`save_progress`.
+	"""
+	ключ = (прогресс.member, прогресс.course)
+	пометки = frappe.flags.get(СНИМАЕТСЯ) or set()
+	if ключ not in пометки:
+		return
+	try:
+		if not frappe.get_cached_value("LMS Course", прогресс.course, "active_release"):
+			return
+		for имя, (записано, по_программе) in доли(прогресс.course, прогресс.member).items():
+			if записано != по_программе:
+				update_enrollment(имя, {"progress": по_программе})
+	finally:
+		пометки.discard(ключ)
 
 
 def пересчитать_курс(курс: str) -> int:

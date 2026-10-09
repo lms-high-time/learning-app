@@ -9,12 +9,13 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from lms.lms.utils import recalculate_course_progress
 
-from lms_frappe_app.agent_learning import course_progress, reset, signals
+from lms_frappe_app.agent_learning import course_progress, quiz, reset, signals
 from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.patches.v0_1 import release_course_progress
 from lms_frappe_app.tests.release_sample import добавить_главу, пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
+	создать_занятие,
 	создать_куратора,
 	создать_урок,
 	создать_ученика,
@@ -153,6 +154,50 @@ class IntegrationTestПрогрессКурса(IntegrationTestCase):
 		frappe.delete_doc("LMS Course Progress", отметка, ignore_permissions=True, force=True)
 
 		self.assertAlmostEqual(self.прогресс(), 66.667)
+		self.assertFalse(frappe.flags.get(course_progress.СНИМАЕТСЯ))
+
+	def test_снятый_статус_опускает_100(self):
+		"""Переход отметки из `Complete` в другой статус — через `validate`."""
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+		отметка = frappe.get_doc("LMS Course Progress", {"member": self.ученик, "lesson": self.уроки["l-3"]})
+
+		отметка.status = "Incomplete"
+		отметка.save(ignore_permissions=True)
+
+		self.assertAlmostEqual(self.прогресс(), 66.667)
+		self.assertFalse(frappe.flags.get(course_progress.СНИМАЕТСЯ))
+
+	def test_повторное_прохождение_возвращает_долю(self):
+		"""Отметку снял администратор, урок закрыт агентом снова."""
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+		отметка = frappe.get_doc("LMS Course Progress", {"member": self.ученик, "lesson": self.уроки["l-3"]})
+		отметка.status = "Incomplete"
+		отметка.save(ignore_permissions=True)
+
+		quiz.отметить_урок_пройденным(
+			frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, self.уроки["l-3"]))
+		)
+
+		self.assertEqual(frappe.db.get_value("LMS Course Progress", отметка.name, "status"), "Complete")
+		self.assertEqual(self.прогресс(), 100)
+
+	def test_снятая_отметка_опускает_100_при_совпавшей_доле_learning(self):
+		"""Доля Learning после снятия совпала с удержанными 100 — записи на курс
+		Learning не пишет, и сверяет её снятие отметки."""
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+		self.опубликовать(без(пример_релиза(self.ключ), "l-2", "l-3"))
+		self.опубликовать(добавить_главу(без(пример_релиза(self.ключ), "l-2", "l-3"), "ch-3", ["l-4"]))
+		self.assertEqual(self.прогресс(), 100)
+		отметка = frappe.db.get_value(
+			"LMS Course Progress", {"member": self.ученик, "lesson": self.уроки["l-1"]}
+		)
+
+		frappe.delete_doc("LMS Course Progress", отметка, ignore_permissions=True, force=True)
+
+		self.assertEqual(self.прогресс(), 0)
 		self.assertFalse(frappe.flags.get(course_progress.СНИМАЕТСЯ))
 
 	def test_сброс_даёт_0(self):
