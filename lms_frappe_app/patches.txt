@@ -26,3 +26,4 @@ lms_frappe_app.patches.v0_1.drop_removed_settings
 lms_frappe_app.patches.v0_1.release_record_keys
 lms_frappe_app.patches.v0_1.run_objective_texts
 lms_frappe_app.patches.v0_1.note_lesson_keys
+lms_frappe_app.patches.v0_1.stale_quiz_attempts

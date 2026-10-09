@@ -16,8 +16,10 @@
   "lesson_key",
   "questions",
   "attempt_number",
+  "pass_percentage",
   "sb_result",
   "status",
+  "cancel_reason",
   "score",
   "passed",
   "objective_results",
@@ -92,6 +94,13 @@
    "read_only": 1
   },
   {
+   "description": "Порог зачёта урока в процентах — снят с релиза на старте попытки: им попытка и оценивается.",
+   "fieldname": "pass_percentage",
+   "fieldtype": "Float",
+   "label": "Порог зачёта, %",
+   "read_only": 1
+  },
+  {
    "fieldname": "sb_result",
    "fieldtype": "Section Break",
    "label": "Итог"
@@ -102,8 +111,17 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Статус",
-   "options": "In Progress\nPassed\nFailed\nAbandoned",
+   "options": "In Progress\nPassed\nFailed\nAbandoned\nCancelled",
    "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.status=='Cancelled'",
+   "description": "Почему попытка аннулирована публикацией новой версии курса: квиз урока изменился или урок снят.",
+   "fieldname": "cancel_reason",
+   "fieldtype": "Select",
+   "label": "Причина аннулирования",
+   "options": "\nquiz_changed\nlesson_removed",
+   "read_only": 1
   },
   {
    "fieldname": "score",
@@ -174,7 +192,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",

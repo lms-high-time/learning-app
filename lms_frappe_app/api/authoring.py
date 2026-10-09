@@ -39,6 +39,7 @@ from lms_frappe_app.agent_learning.constants import (
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
+	ЗАНЯТО,
 	КУРС_ИЗ_РЕЛИЗА,
 	КУРС_НЕ_В_РЕЛИЗЕ,
 	КУРС_НЕ_НАЙДЕН,
@@ -485,10 +486,19 @@ def publish_release(release, course: str | None = None, instructors=None) -> dic
 	становится; не передан — инструкторы не трогаются (новый курс получает
 	вызвавшего). Применяется и к неизменному релизу: в дайджест релиза
 	инструкторы не входят.
+
+	Открытые попытки квиза курса публикация переносит на новый релиз или
+	аннулирует. Попытку, которую в этот момент меняет ответ ученика, MariaDB
+	стенда (`innodb_snapshot_isolation`) отдаёт взаимоблокировкой: откат
+	целиком и отказ `busy`, повтор безопасен.
 	"""
 	автор = _автор()
 	инструкторы = None if instructors is None else _инструкторы(instructors)
-	return releases.опубликовать(release, course or None, автор, инструкторы)
+	try:
+		return releases.опубликовать(release, course or None, автор, инструкторы)
+	except frappe.QueryDeadlockError:
+		frappe.db.rollback()
+		raise Отказ(ЗАНЯТО, "Курс сейчас меняет другой запрос: публикация откатилась — повторите") from None
 
 
 def _инструкторы(значение) -> list[str]:

@@ -45,6 +45,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_урок,
 	создать_ученика,
 )
+from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import authoring, manager, review, student, team
 from lms_frappe_app.testing import сколько_запросов
@@ -67,10 +68,11 @@ from lms_frappe_app.testing import сколько_запросов
 	"start_lesson": 50,
 	# Квиз урока из релиза (learning-services#506), ответ посреди попытки:
 	# владелец, релиз и курс попытки; попытка с блокировкой; доступ к курсу —
-	# четыре выборки; отвечен ли вопрос, эталон из релиза; вставка ответа в
-	# точке сохранения (три); журнал проверки — об ответе и о выданном следом
-	# вопросе; отвеченные с блокировкой.
-	"submit_answer": 14,
+	# четыре выборки; действующий релиз курса — попытка не из гонки с
+	# публикацией (learning-services#514); отвечен ли вопрос, эталон из
+	# релиза; вставка ответа в точке сохранения (три); журнал проверки — об
+	# ответе и о выданном следом вопросе; отвеченные с блокировкой.
+	"submit_answer": 15,
 	# Обычная отметка пункта (learning-services#506): занятие, релиз и ключ
 	# урока; доступ к курсу — четыре выборки; есть ли вопросы и
 	# политика квиза — четыре; прохождение с блокировкой и двумя таблицами
@@ -135,8 +137,23 @@ from lms_frappe_app.testing import сколько_запросов
 	# прежнего релиза (две); проекция — главы с их порядком, правленый урок,
 	# курс с таблицами строк; шаблоны домашек, схема документа; номер версии,
 	# серия, вставка релиза и строк индекса — по вставке на строку; карточка
-	# курса; после точки — сверка прохождений и ответ.
-	"publish_release": 87,
+	# курса; после точки — сверка прохождений и ответ. Открытые попытки курса с
+	# блокировкой — одна выборка и при их отсутствии (learning-services#514).
+	"publish_release": 88,
+	# Та же публикация при двух открытых попытках (learning-services#514), одна
+	# переносится, другая аннулируется: сверх `publish_release` — релизы
+	# попыток со снимком и их вопросы (по выборке на все попытки), запись
+	# переноса и запись аннулирования (по одной на вид, а не на попытку),
+	# событие журнала на попытку (вставка и две проверки ссылок), а после
+	# точки — сверка двух прохождений.
+	"publish_release_attempts": 134,
+	# Новая попытка квиза (learning-services#514): занятие, релиз и ключ урока,
+	# доступ — четыре выборки; прохождение с блокировкой и сверкой; проверка
+	# занятия и доступ ещё раз; занятие с блокировкой, действующий релиз,
+	# открытая попытка занятия; урок и вопросы релиза; лимит и пауза (политика
+	# — три, счёт, последняя завершённая, номер); вставка попытки с порогом;
+	# занятие в «ждёт квиз», событие занятия; выданный вопрос в журнал проверки.
+	"request_quiz": 38,
 }
 
 
@@ -215,6 +232,19 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		self._ворота(
 			"submit_answer",
 			lambda: student.submit_answer(попытка, "S2/l-1-D1", "V1", "слова ученика"),
+			прогреть=False,
+		)
+
+	def test_бюджет_request_quiz(self):
+		"""Новая попытка по свежему занятию. Прогрев — попытка по соседнему занятию
+		того же урока: продолжение открытой попытки — другой путь."""
+		попытка = self._попытка()
+		курс = frappe.db.get_value("Agent Quiz Attempt", попытка, "course")
+		frappe.set_user(self.ученик)
+		занятие = занятие_релиза(self.ученик, курс, "l-1")
+		self._ворота(
+			"request_quiz",
+			lambda: self.assertTrue(student.request_quiz(занятие)["ok"]),
 			прогреть=False,
 		)
 
@@ -389,6 +419,41 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		self._ворота("publish_release", новая_версия)
 		действующий = frappe.db.get_value("LMS Course", курс, "active_release")
 		self.assertEqual(frappe.db.get_value("Agent Course Release", действующий, "version"), 3)
+
+	def test_бюджет_publish_release_с_открытыми_попытками(self):
+		"""Новая версия курса образца при двух открытых попытках: квиз `l-1` тот же —
+		перенос, у `l-2` правлен вопрос — аннулирование. Прогрев — версия, которая
+		переносит обе."""
+		frappe.set_user("Administrator")
+		куратор = создать_куратора(f"qbq-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(куратор)
+		релиз = пример_релиза(f"qbq-{frappe.generate_hash(length=8)}")
+		курс = authoring.publish_release(release=релиз)["data"]["course"]
+		frappe.set_user("Administrator")
+		зачислить_на_курс(self.ученик, курс)
+		попытки = []
+		for ключ in ("l-1", "l-2"):
+			занятие = занятие_релиза(self.ученик, курс, ключ)
+			run = frappe.get_doc(
+				прохождения.ПРОХОЖДЕНИЕ, frappe.db.get_value("Agent Learning Session", занятие, "run")
+			)
+			попытки.append(release_quiz.начать(run, занятие)["attempt"])
+		frappe.set_user(куратор)
+		издания = iter(range(2, 4))
+
+		def новая_версия():
+			издание = next(издания)
+			релиз["lessons"][0]["title"] = f"Урок первый, издание {издание}"
+			if издание == 3:
+				релиз["lessons"][1]["quiz"]["questions"][0]["text"] = "Другая ситуация"
+			ответ = authoring.publish_release(release=релиз)
+			self.assertTrue(ответ["ok"], ответ)
+
+		self._ворота("publish_release_attempts", новая_версия)
+		self.assertEqual(
+			[frappe.db.get_value("Agent Quiz Attempt", п, "status") for п in попытки],
+			["In Progress", "Cancelled"],
+		)
 
 	# --- механика ворот ---
 

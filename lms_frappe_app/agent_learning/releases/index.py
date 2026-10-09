@@ -250,6 +250,11 @@ def _урок(релиз: str, отбор: dict) -> dict | None:
 	return найдено[0] if найдено else None
 
 
+def есть_урок(релиз: str, ключ: str) -> bool:
+	"""Есть ли в релизе урок с этим ключом."""
+	return bool(frappe.db.exists(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}))
+
+
 def ключ_урока(релиз: str, lesson: str) -> str | None:
 	"""Ключ урока релиза по записи `Course Lesson` — обратное к `урок`."""
 	return frappe.db.get_value(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson": lesson}, "lesson_key")
@@ -298,26 +303,75 @@ def вопросы_урока(релиз: str, ключ: str, *, с_ответа
 def вопросы(релиз: str, ключ: str | None = None, *, с_ответами: bool = False) -> dict[str, list[dict]]:
 	"""Квизы уроков релиза: ключ урока → вопросы по порядку; `ключ` — только этого урока.
 	Верный вариант и пояснение — только с `с_ответами`. Одной выборкой на релиз, не на урок."""
-	поля = ["lesson_key", "question_key", "objective_key", "text", "option_list"] + (
-		["correct", "explanation"] if с_ответами else []
-	)
 	итог: dict[str, list[dict]] = {}
 	for в in frappe.get_all(
 		ВОПРОС,
 		filters={"parenttype": РЕЛИЗ, "parent": релиз, **({} if ключ is None else {"lesson_key": ключ})},
-		fields=поля,
+		fields=_поля_вопроса(с_ответами),
 		order_by="idx asc",
 	):
-		вопрос = {
-			"key": в.question_key,
-			"objective": в.objective_key,
-			"text": в.text,
-			"options": json.loads(в.option_list),
-		}
-		if с_ответами:
-			вопрос.update(correct=в.correct, explanation=в.explanation)
-		итог.setdefault(в.lesson_key, []).append(вопрос)
+		итог.setdefault(в.lesson_key, []).append(_вопрос(в, с_ответами))
 	return итог
+
+
+def вопросы_из_строк(строки: list[dict]) -> dict[str, list[dict]]:
+	"""Квизы уроков из строк вопросов, которые пишет `строки` (`["questions"]`), — в форме
+	`вопросы(..., с_ответами=True)`: ключ урока → вопросы по порядку. Без обращения к базе."""
+	итог: dict[str, list[dict]] = {}
+	for в in строки:
+		итог.setdefault(в["lesson_key"], []).append(_вопрос(frappe._dict(в), с_ответами=True))
+	return итог
+
+
+def вопросы_релизов(пары: set[tuple[str, str]]) -> dict[tuple[str, str], list[dict]]:
+	"""Квизы уроков нескольких релизов с ответами: (релиз, ключ урока) → вопросы по порядку,
+	в форме `вопросы(..., с_ответами=True)`.
+
+	Пара без строк вопросов — нет и ключа; освобождённый релиз (пустой
+	`snapshot`) — тоже, даже если строки остались. Две выборки на все пары:
+	релизы со снимком и вопросы их уроков.
+	"""
+	релизы = {релиз for релиз, _ in пары if релиз}
+	if not релизы:
+		return {}
+	живые = frappe.get_all(
+		РЕЛИЗ, filters={"name": ("in", list(релизы)), "snapshot": ("is", "set")}, pluck="name"
+	)
+	if not живые:
+		return {}
+	итог: dict[tuple[str, str], list[dict]] = {}
+	for в in frappe.get_all(
+		ВОПРОС,
+		filters={
+			"parenttype": РЕЛИЗ,
+			"parent": ("in", живые),
+			"lesson_key": ("in", list({ключ for _, ключ in пары})),
+		},
+		fields=["parent", *_поля_вопроса(с_ответами=True)],
+		order_by="idx asc",
+	):
+		if (в.parent, в.lesson_key) in пары:
+			итог.setdefault((в.parent, в.lesson_key), []).append(_вопрос(в, с_ответами=True))
+	return итог
+
+
+def _поля_вопроса(с_ответами: bool) -> list[str]:
+	return ["lesson_key", "question_key", "objective_key", "text", "option_list"] + (
+		["correct", "explanation"] if с_ответами else []
+	)
+
+
+def _вопрос(строка, с_ответами: bool) -> dict:
+	"""Вопрос из строки индекса: `{key, objective, text, options}`, с ответами — и `correct`, `explanation`."""
+	вопрос = {
+		"key": строка.question_key,
+		"objective": строка.objective_key,
+		"text": строка.text,
+		"options": json.loads(строка.option_list),
+	}
+	if с_ответами:
+		вопрос.update(correct=строка.correct, explanation=строка.explanation)
+	return вопрос
 
 
 def есть_вопросы(релиз: str, ключ: str) -> bool:

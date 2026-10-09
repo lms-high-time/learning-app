@@ -26,7 +26,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Событие",
-   "options": "Question Issued\nAnswer Submitted",
+   "options": "Question Issued\nAnswer Submitted\nAttempt Moved\nAttempt Cancelled",
    "read_only": 1,
    "reqd": 1
   },
@@ -120,7 +120,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Event",
