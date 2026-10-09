@@ -25,10 +25,11 @@
 структуры курса из релиза мимо публикации отклоняет `course_guard`.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 import frappe
-from frappe.model.delete_doc import check_if_doc_is_dynamically_linked, check_if_doc_is_linked
+from frappe.model.delete_doc import get_dynamic_linked_docs, get_linked_docs
 
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
@@ -205,6 +206,9 @@ class Уборка:
 	удалено: dict[str, list[str]] = field(default_factory=_виды)
 	#: Записи, на которые ссылаются: остались вне оглавления.
 	оставлено: dict[str, list[str]] = field(default_factory=_виды)
+	#: Оставленная запись → чем держится: доктайп ссылающихся записей → их число;
+	#: ссылки Dynamic Link — только у записи без ссылок Link.
+	держат: dict[str, dict[str, int]] = field(default_factory=dict)
 
 
 def убрать(записи: dict[str, list[str]]) -> Уборка:
@@ -214,9 +218,12 @@ def убрать(записи: dict[str, list[str]]) -> Уборка:
 	курса. Уроки — раньше глав: оставленный урок держит свою главу
 	(`Course Lesson.chapter`).
 
-	Ссылки проверяет Frappe (`check_if_doc_is_linked`,
-	`check_if_doc_is_dynamically_linked`) по всем полям Link и Dynamic Link
-	сайта — до удаления и под блокировкой записи. Держат запись следы учеников
+	Ссылки ищет Frappe (`get_linked_docs`, `get_dynamic_linked_docs` — их же
+	зовут `check_if_doc_is_linked` и `check_if_doc_is_dynamically_linked`) по
+	всем полям Link и Dynamic Link сайта, включая дочерние таблицы, — до
+	удаления, в снимке транзакции публикации. Блокировка записи защищает
+	только от правки самой записи, а не от новой ссылки на неё — см.
+	«Принято» у `_удалить`. Держат запись следы учеников
 	и автора: занятия, прохождения, попытки квиза (и аннулированные), события
 	квиза, репорты, сдачи и шаблоны домашки со сдачами, блоки схем документа,
 	прогресс и записи на курс Learning. Строки индекса освобождённых версий и
@@ -230,7 +237,11 @@ def убрать(записи: dict[str, list[str]]) -> Уборка:
 	уборка = Уборка()
 	for вид, doctype in (("lessons", УРОК), ("chapters", ГЛАВА)):
 		for имя in записи[вид]:
-			(уборка.удалено if _удалить(doctype, имя) else уборка.оставлено)[вид].append(имя)
+			if держат := _удалить(doctype, имя):
+				уборка.оставлено[вид].append(имя)
+				уборка.держат[имя] = держат
+			else:
+				уборка.удалено[вид].append(имя)
 	return уборка
 
 
@@ -260,8 +271,9 @@ def вне_релиза(курс: str) -> dict[str, list[str]]:
 	return записи
 
 
-def _удалить(doctype: str, имя: str) -> bool:
-	"""Удаляет запись без ссылок и отдаёт `True`; запись со ссылками не трогает.
+def _удалить(doctype: str, имя: str) -> dict[str, int]:
+	"""Удаляет запись без ссылок и отдаёт `{}`; запись со ссылками не трогает и
+	отдаёт, чем она держится: доктайп ссылающихся записей → их число.
 
 	Удаление — без `on_trash`: ссылки уже проверены, а `on_trash` урока
 	Learning (`cleanup_lesson_backreferences`) обнуляет их запросами по таблицам
@@ -273,17 +285,24 @@ def _удалить(doctype: str, имя: str) -> bool:
 	снятой главы их уже нет — их сняла проекция.
 
 	Цена: `after_delete` урока Learning ставит пересчёт прогресса записанных
-	на курс в очередь сразу, а не после коммита: при откате публикации задача
-	отработает впустую.
+	на курс в очередь сразу, а не после коммита. Задача может начаться раньше
+	коммита публикации и посчитать прогресс по прежнему составу курса — и при
+	успешной публикации, а при откате она отработает впустую.
+
+	Принято: ссылку, которую другой запрос вставил и зафиксировал, пока шла
+	публикация, проверка не видит — она читает снимок транзакции публикации.
+	Так бывает при первом касании снимаемого урока во время публикации:
+	ученик начинает урок по прежней версии, и его занятие (прохождение,
+	попытка) ссылается на урок, который публикация удаляет. Следствие —
+	висячая ссылка: такое занятие роняет `закрыть_брошенные_занятия` на
+	`save()` (проверка Link). Блокировка записи здесь не помогает: вставка
+	ссылки строку урока не блокирует.
 	"""
 	frappe.db.get_value(doctype, имя, "name", for_update=True)
 	документ = frappe.get_doc(doctype, имя)
-	try:
-		check_if_doc_is_linked(документ)
-		check_if_doc_is_dynamically_linked(документ)
-	except frappe.LinkExistsError:
-		frappe.clear_last_message()
-		return False
+	# Динамические — только без обычных: как `delete_doc`, который до них не доходит.
+	if ссылки := get_linked_docs(документ) or get_dynamic_linked_docs(документ):
+		return dict(Counter(с["reference_doctype"] for с in ссылки))
 	frappe.delete_doc(
 		doctype,
 		имя,
@@ -292,4 +311,4 @@ def _удалить(doctype: str, имя: str) -> bool:
 		ignore_on_trash=True,
 		delete_permanently=True,
 	)
-	return True
+	return {}

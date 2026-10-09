@@ -73,6 +73,16 @@ class IntegrationTestПатчУборки(IntegrationTestCase):
 			"со ссылками осталось глав: 1, уроков: 1",
 			вывод,
 		)
+		префикс = f"prune_projection: {self.курс} — "
+		for строка in (
+			f"урок {self.уроки['l-3']} «Урок третий», ключ нет: удалена",
+			f"урок {self.уроки['l-5']} «Урок l-5», ключ l-5: удалена",
+			f"глава {self.главы['ch-2']} «Глава вторая», ключ ch-2: удалена",
+			f"урок {self.уроки['l-4']} «Урок l-4», ключ l-4: оставлена, держат Agent Learning Session — 1",
+			f"глава {self.главы['ch-3']} «Глава ch-3», ключ ch-3: оставлена, держат Course Lesson — 1",
+		):
+			with self.subTest(строка=строка):
+				self.assertIn(префикс + строка, вывод)
 		self.assertTrue(frappe.db.exists("Course Lesson", self.чужой))
 		self.assertEqual(
 			frappe.db.get_value("Agent Learning Session", self.занятие, "lesson"), self.уроки["l-4"]
@@ -101,10 +111,10 @@ class IntegrationTestПатчУборки(IntegrationTestCase):
 				self.assertEqual(self.есть(), dict.fromkeys(self.есть(), True))
 				self.assertIn(f"не выполнены патчи {патч}", вывод)
 
-	def test_идёт_последним_после_освобождения(self):
+	def test_идёт_после_освобождения_и_его_патчей(self):
 		self.assertEqual(prune_projection.ЖДЁТ[-1], "free_release_content")
 		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
+		свой = строки.index(patch_log.полное_имя("prune_projection"))
 		for раньше in prune_projection.ЖДЁТ:
 			with self.subTest(раньше=раньше):
-				self.assertLess(строки.index(patch_log.полное_имя(раньше)), len(строки) - 1)
-		self.assertEqual(строки[-1], patch_log.полное_имя("prune_projection"))
+				self.assertLess(строки.index(patch_log.полное_имя(раньше)), свой)

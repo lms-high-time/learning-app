@@ -408,6 +408,11 @@ class IntegrationTestУборкаСнятого(IntegrationTestCase):
 
 		self.assertEqual(уборка.оставлено, {"chapters": [глава], "lessons": [урок]})
 		self.assertEqual(уборка.удалено, {"chapters": [], "lessons": []})
+		# Строка дочерней таблицы держит запись от имени родителя.
+		self.assertLessEqual(
+			{"Course Chapter": 1, "Agent Course Release": 1}.items(), уборка.держат[урок].items()
+		)
+		self.assertLessEqual({"LMS Course": 1, "Course Lesson": 2}.items(), уборка.держат[глава].items())
 
 	def test_глава_удаляется_со_строками_уроков_мимо_их_хука(self):
 		"""Строки `Lesson Reference` удаляемой главы уходят запросом: хук `on_trash`
