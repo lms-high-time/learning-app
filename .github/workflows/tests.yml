@@ -38,15 +38,25 @@ jobs:
           path: ~/image-cache
           key: ${{ runner.os }}-images-v1-redis${{ env.REDIS_VERSION }}-mariadb${{ env.MARIADB_VERSION }}
 
+      # Pull с зеркала — с повтором через паузу. Why: анонимный лимит ECR
+      # Public считается в запросах в секунду с IP, а раннеры делят адреса:
+      # на промахе кэша pull ловит `toomanyrequests: Rate exceeded`.
       - name: Загрузить образы сервисов
         run: |
           REDIS_IMAGE="$IMAGE_MIRROR/redis:$REDIS_VERSION"
           MARIADB_IMAGE="$IMAGE_MIRROR/mariadb:$MARIADB_VERSION"
+          pull() {
+            for attempt in 1 2 3 4 5 6; do
+              docker pull "$1" && return 0
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
           if [ -f ~/image-cache/images.tar ]; then
             docker load -i ~/image-cache/images.tar
           else
-            docker pull "$REDIS_IMAGE"
-            docker pull "$MARIADB_IMAGE"
+            pull "$REDIS_IMAGE"
+            pull "$MARIADB_IMAGE"
             mkdir -p ~/image-cache
             docker save -o ~/image-cache/images.tar "$REDIS_IMAGE" "$MARIADB_IMAGE"
           fi
