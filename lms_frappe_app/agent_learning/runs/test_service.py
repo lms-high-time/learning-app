@@ -338,7 +338,15 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 			patch.object(frappe, "log_error") as журнал,
 		):
 			ответ = self.опубликовать(второй)
-		журнал.assert_called_once()
+		# Две задачи после публикации — сверка прохождений (#504) и пересчёт
+		# прогресса (#522): сбой каждой — своя запись в журнал.
+		self.assertEqual(
+			[вызов.kwargs["title"] for вызов in журнал.call_args_list],
+			[
+				"Сверка прохождений не поставлена в очередь (learning-services#504)",
+				"Пересчёт прогресса не поставлен в очередь (learning-services#522)",
+			],
+		)
 		self.assertEqual(ответ["version"], 2)
 
 	def test_в_тестах_ошибка_сверки_не_прячется(self):

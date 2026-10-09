@@ -11,6 +11,7 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.homework import ЗАДАНИЕ
 from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 from lms_frappe_app.api import authoring, student
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -269,6 +270,9 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 		)
 		frappe.db.set_value("Agent Course Artifact", имя, "title", "x < 5")
 		схема = frappe.get_doc("Agent Course Artifact", имя)
+		# Схему курса из релиза пишет только публикация (learning-services#526) —
+		# с её флагом, как `releases.document`.
+		схема.flags[ИЗ_РЕЛИЗА] = True
 
 		схема.purpose = "Новое назначение"
 		схема.is_active = 0
@@ -279,5 +283,6 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 			("x < 5", "Новое назначение", 0),
 		)
 		схема.title = "y < 6"
-		with self.assertRaises(Отказ):
+		with self.assertRaises(Отказ) as отказ:
 			схема.save()
+		self.assertEqual(отказ.exception.код, "title_forbidden_chars")
