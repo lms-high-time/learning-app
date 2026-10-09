@@ -40,7 +40,7 @@ from lms_frappe_app.agent_learning.quiz import (
 	ЧУЖОЙ_ВОПРОС,
 )
 from lms_frappe_app.agent_learning.release_quiz import АННУЛИРОВАНА
-from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.agent_learning.releases import index, retention
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
@@ -951,7 +951,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 				run, _, попытка = self.попытка_с_ответом(релиз)
 				v1 = run.release
 				релиз["lessons"][0]["title"] = "Версия 2"
-				self.опубликовать(релиз)
+				# v1 освобождает здесь сам вариант, а не публикация v2.
+				with patch.object(retention, "освободить_прежние"):
+					self.опубликовать(релиз)
 				frappe.db.set_value(ПОПЫТКА, попытка, "release", v1)
 				освободить(v1)
 				релиз["lessons"][0]["title"] = "Версия 3"

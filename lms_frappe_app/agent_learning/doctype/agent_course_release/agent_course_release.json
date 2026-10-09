@@ -166,15 +166,14 @@
    "fieldname": "snapshot",
    "fieldtype": "Long Text",
    "label": "Снимок релиза",
-   "reqd": 1,
    "hidden": 1,
-   "description": "Релиз целиком, как опубликован",
+   "description": "Релиз целиком, как опубликован; пусто — содержимое версии освобождено, оно в git по коммиту",
    "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Release",

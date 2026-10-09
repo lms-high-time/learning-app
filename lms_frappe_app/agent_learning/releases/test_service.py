@@ -108,9 +108,10 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 			frappe.db.get_value("LMS Course", ответ["course"], "active_release"), ответ["release"]
 		)
 		self.assertEqual(
-			json.loads(frappe.db.get_value(РЕЛИЗ, первый["release"], "snapshot"))["lessons"][0]["title"],
-			"Урок первый",
+			json.loads(frappe.db.get_value(РЕЛИЗ, ответ["release"], "snapshot"))["lessons"][0]["title"],
+			"Урок первый, исправленный",
 		)
+		self.assertIsNone(frappe.db.get_value(РЕЛИЗ, первый["release"], "snapshot"))
 
 	def test_снятый_урок_в_ответе(self):
 		первый = self.опубликовать()
@@ -401,8 +402,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
 		self.опубликовать(без_третьего)
-		снятый = index.урок(первый["release"], "l-3")["lesson"]
-		frappe.db.set_value("Course Lesson", снятый, "lesson_key", None)
+		frappe.db.set_value("Course Lesson", {"course": первый["course"], "lesson_key": "l-3"}, "lesson_key", None)
 		без_третьего["lessons"][0]["title"] = "Урок первый, исправленный"
 
 		ответ = self.опубликовать(без_третьего)
@@ -417,7 +417,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		прежняя = authoring.add_note(course=курс, target="course", text="К первой версии")["data"]["id"]
 		релиз = пример_релиза(self.ключ)
 		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
-		self.опубликовать(релиз)
+		действующий = self.опубликовать(релиз)["release"]
 		уроки = frappe.get_all("Course Lesson", filters={"course": курс}, pluck="name")
 		заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Пример")["data"]["id"]
 		authoring.reply_note(note=заметка, text="Ответ в нить")
@@ -425,9 +425,9 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc(РЕЛИЗ, первый["release"])
-		дайджест = frappe.db.get_value(РЕЛИЗ, первый["release"], "digest")
-		places.узлы_карты(первый["release"], дайджест)
-		кэш = places.ключ_кэша(первый["release"], дайджест)
+		дайджест = frappe.db.get_value(РЕЛИЗ, действующий, "digest")
+		places.узлы_карты(действующий, дайджест)
+		кэш = places.ключ_кэша(действующий, дайджест)
 		self.assertIsNotNone(frappe.cache.get_value(кэш))
 		service.удалить_курс(курс)
 

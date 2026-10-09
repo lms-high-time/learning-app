@@ -105,8 +105,11 @@ def _по_адресу(заметка, места: dict) -> str | None:
 	"""Ключ урока места заметки по индексу её релиза — как его записал бы `add_note`; нет — `None`.
 
 	Места — одни на релиз: индекс релиза читается один раз на все его заметки.
+	Релиз освобождён (`retention`) — индекса и снимка нет, ключ не найти: `None`.
 	"""
-	if not заметка.release or not frappe.db.exists("Agent Course Release", заметка.release):
+	if not заметка.release or not frappe.db.exists(
+		"Agent Course Release", {"name": заметка.release, "snapshot": ("is", "set")}
+	):
 		return None
 	try:
 		адрес = notes.разобрать_адрес(заметка.target)

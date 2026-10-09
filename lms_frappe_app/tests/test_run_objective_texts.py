@@ -11,6 +11,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import now_datetime
 
+from lms_frappe_app.agent_learning.releases import retention
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.patches.v0_1 import run_objective_texts
@@ -48,9 +49,10 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 		второй = релиз_двух_целей(ключ)
 		второй["lessons"][0]["objectives"][0]["text"] = "Цель, переписанная автором"
 		второй["lessons"][0]["objectives"].pop()
-		with patch.object(frappe, "enqueue"):
+		# Сайт до патча: публикация не освобождала прежнюю версию, а текстов в
+		# строках прохождений нет.
+		with patch.object(frappe, "enqueue"), patch.object(retention, "освободить_прежние"):
 			self.второй = релизы.опубликовать(второй, None, "Administrator")["release"]
-		# Сайт до патча: текстов в строках прохождений нет.
 		frappe.db.set_value(ЦЕЛЬ, {"parent": ("in", self.прохождения)}, "text", None, update_modified=False)
 
 	def тексты(self) -> list[dict[str, str | None]]:
@@ -102,7 +104,7 @@ class IntegrationTestТекстыЦелейПрохождений(IntegrationTes
 	def test_из_нескольких_версий_с_целью_главнее_свежая(self):
 		третий = релиз_двух_целей(self.ключ)
 		третий["lessons"][0]["objectives"][1]["text"] = "Цель вернулась другой"
-		with patch.object(frappe, "enqueue"):
+		with patch.object(frappe, "enqueue"), patch.object(retention, "освободить_прежние"):
 			релизы.опубликовать(третий, None, "Administrator")
 		frappe.db.set_value(
 			ПРОХОЖДЕНИЕ, {"name": ("in", self.прохождения)}, "release", self.второй, update_modified=False

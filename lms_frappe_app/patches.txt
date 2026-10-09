@@ -16,7 +16,6 @@ lms_frappe_app.patches.v0_1.org_roles_without_desk
 lms_frappe_app.patches.v0_1.assistant_sidebar_title
 lms_frappe_app.patches.v0_1.drop_authoring_guide_tool
 lms_frappe_app.patches.v0_1.release_homework
-lms_frappe_app.patches.v0_1.release_agent_slices
 lms_frappe_app.patches.v0_1.drop_objective_outcomes
 lms_frappe_app.patches.v0_1.announce_objectives
 lms_frappe_app.patches.v0_1.old_quiz_attempts
@@ -27,3 +26,4 @@ lms_frappe_app.patches.v0_1.release_record_keys
 lms_frappe_app.patches.v0_1.run_objective_texts
 lms_frappe_app.patches.v0_1.note_lesson_keys
 lms_frappe_app.patches.v0_1.stale_quiz_attempts
+lms_frappe_app.patches.v0_1.free_release_content

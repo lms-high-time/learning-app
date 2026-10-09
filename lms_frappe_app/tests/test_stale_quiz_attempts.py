@@ -6,6 +6,7 @@
 import io
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -18,6 +19,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ПРОВЕРКА_ПОПЫТКА_АННУЛИРОВАНА,
 	ПРОВЕРКА_ПОПЫТКА_ПЕРЕНЕСЕНА,
 )
+from lms_frappe_app.agent_learning.releases import retention
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.patches.v0_1 import patch_log, stale_quiz_attempts
@@ -56,8 +58,10 @@ class IntegrationTestПатчОткрытыхПопыток(IntegrationTestCase)
 			релиз["lessons"][0]["title"] = "Вторая версия"
 			if вид == "другой":
 				релиз["lessons"][0]["quiz"]["questions"][0]["text"] = "Другая ситуация"
-			релизы.опубликовать(релиз, None, "Administrator")
-			# До выкатки: попытка осталась на первой версии и без порога.
+			# До выкатки: публикация не освобождала прежнюю версию, попытка
+			# осталась на ней и без порога.
+			with patch.object(retention, "освободить_прежние"):
+				релизы.опубликовать(релиз, None, "Administrator")
 			frappe.db.set_value(
 				ПОПЫТКА,
 				self.попытки[вид],
@@ -131,10 +135,10 @@ class IntegrationTestПатчОткрытыхПопыток(IntegrationTestCase)
 		)
 		self.assertNotIn(self.курсы["другой"], повтор.getvalue())
 
-	def test_идёт_последним_после_заполняющих_патчей(self):
+	def test_идёт_после_заполняющих_и_до_освобождения(self):
 		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
 		свой = строки.index(patch_log.полное_имя("stale_quiz_attempts"))
 		for раньше in ("release_record_keys", "run_objective_texts", "note_lesson_keys"):
 			with self.subTest(раньше=раньше):
 				self.assertLess(строки.index(patch_log.полное_имя(раньше)), свой)
-		self.assertEqual(строки[-1], patch_log.полное_имя("stale_quiz_attempts"))
+		self.assertLess(свой, строки.index(patch_log.полное_имя("free_release_content")))
