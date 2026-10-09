@@ -231,7 +231,7 @@ def add_note(
 	принял» не шла через пересказ в чате.
 
 	`target` — место по ключам действующего релиза (`notes.ФОРМЫ_АДРЕСА`);
-	заметка помнит этот релиз. `quote` — выделенный текст. `via` — кто
+	заметка помнит этот релиз и ключ урока места. `quote` — выделенный текст. `via` — кто
 	пишет: `author` из кабинета, `agent` — агент куратора через MCP; заметка
 	агента — вопрос автору.
 	"""
@@ -256,7 +256,7 @@ def add_note(
 			"doctype": "Agent Author Note",
 			"course": course,
 			"release": релиз,
-			"lesson": место["lesson"],
+			"lesson_key": место["lesson_key"],
 			"target": notes.адрес(адрес),
 			"status": "open",
 			"via": via,
@@ -285,7 +285,8 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 
 	Место подписано словами по действующему релизу курса; `missing` — ключа
 	места в действующем релизе нет. `lesson` — ключ урока: заметки мест этого
-	урока. `waiting_on` — чей ход.
+	урока по ключу, который заметка хранит, — и урока, снятого из релиза.
+	`waiting_on` — чей ход.
 	"""
 	_автор()
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
@@ -294,14 +295,9 @@ def list_notes(course: str, status: str | None = None, lesson: str | None = None
 		if status not in notes.СТАТУСЫ:
 			raise Отказ(НЕВЕРНОЕ_ЗАМЕЧАНИЕ, "Статус: open, done или accepted", where="status")
 		фильтры["status"] = status
-	уроки = None
 	if lesson:
-		уроки = releases_projection.известные_уроки(course)
-		запись = уроки.get(lesson)
-		if not запись:
-			return {"course": course, "notes": []}
-		фильтры["lesson"] = запись
-	return {"course": course, "notes": _замечания(course, фильтры, уроки)}
+		фильтры["lesson_key"] = lesson
+	return {"course": course, "notes": _замечания(course, фильтры)}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -371,14 +367,11 @@ def _состояние_замечания(документ) -> dict:
 	}
 
 
-def _замечания(course: str, фильтры: dict, уроки: dict[str, str] | None = None) -> list[dict]:
+def _замечания(course: str, фильтры: dict) -> list[dict]:
 	"""Заметки по фильтрам с нитями, подписями мест и версиями релизов.
 
-	`уроки` — ключ урока → запись (`projection.известные_уроки`), если уже прочитаны.
-
-	Число выборок не растёт с числом заметок: ответы, релизы курса, ключи
-	уроков и каждая нужная часть индекса действующего релиза — по выборке на
-	всю выдачу.
+	Число выборок не растёт с числом заметок: ответы, релизы курса и каждая
+	нужная часть индекса действующего релиза — по выборке на всю выдачу.
 	"""
 	записи = frappe.get_all(
 		"Agent Author Note",
@@ -386,7 +379,7 @@ def _замечания(course: str, фильтры: dict, уроки: dict[str,
 		fields=[
 			"name",
 			"release",
-			"lesson",
+			"lesson_key",
 			"target",
 			"quote",
 			"text",
@@ -417,9 +410,6 @@ def _замечания(course: str, фильтры: dict, уроки: dict[str,
 			}
 		)
 	версии = {р.name: р.version for р in releases_index.история(course)}
-	if уроки is None and any(запись.lesson for запись in записи):
-		уроки = releases_projection.известные_уроки(course)
-	ключи_уроков = {запись: ключ for ключ, запись in (уроки or {}).items()}
 	места = places.Места(frappe.db.get_value("LMS Course", course, "active_release"))
 	адреса = [_адрес_или_нет(запись) for запись in записи]
 	подписи = iter(места.места([адрес for адрес in адреса if адрес]))
@@ -433,7 +423,7 @@ def _замечания(course: str, фильтры: dict, уроки: dict[str,
 				"target": запись.target,
 				"release": запись.release or None,
 				"version": версии.get(запись.release),
-				"lesson_key": ключи_уроков.get(запись.lesson),
+				"lesson_key": запись.lesson_key or None,
 				"label": место["label"],
 				"missing": место["missing"],
 				"quote": запись.quote or "",
@@ -916,8 +906,8 @@ def course_reports(
 	`status` — статус наружу или `open`: всё, что ждёт разбора. `lesson` —
 	ключ урока: урок ищется по ключу на записи Learning
 	(`projection.известные_уроки`), так что находятся и репорты урока, снятого из
-	релиза. Ключ урока в репорте не хранится: `lesson_key` выводится по
-	релизу репорта и его уроку одной выборкой на всю страницу.
+	релиза. Ключ урока в репорте не хранится: `lesson_key` — ключ на записи
+	урока репорта, соединением в той же выборке.
 
 	`Why:` без чтения механизм разомкнут — `report_issue` умел только
 	записывать, и обратная связь о курсе, который не работает, лежала мёртвым
@@ -957,6 +947,7 @@ def course_reports(
 			"name",
 			"kind",
 			"lesson",
+			"lesson.lesson_key as lesson_key",
 			"objective",
 			"question_key",
 			"text",
@@ -969,8 +960,6 @@ def course_reports(
 		order_by="creation desc",
 		limit=min(int(limit or РЕПОРТОВ_ЗА_РАЗ), РЕПОРТОВ_ЗА_РАЗ),
 	)
-	ключи_уроков = releases_index.ключи_уроков([з.release for з in записи if з.release])
-
 	return {
 		"course": course,
 		"reports": [
@@ -978,7 +967,7 @@ def course_reports(
 				"id": з.name,
 				"kind": ИМЯ_ВИДА_РЕПОРТА.get(з.kind, з.kind),
 				"lesson": з.lesson,
-				"lesson_key": ключи_уроков.get((з.release, з.lesson)),
+				"lesson_key": з.lesson_key or None,
 				"objective": з.objective or None,
 				"question_key": з.question_key or None,
 				"text": з.text,

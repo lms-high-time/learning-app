@@ -402,12 +402,7 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# Замечания кабинета автора — не содержание курса: удалению урока они не
-# мешают, замечание остаётся с пометкой «места больше нет». `Why:` урок курса
-# из релиза удаляется только вместе с курсом, и его замечания уходят раньше
-# (`releases.service.удалить_курс`); урок курса без релиза удаляют в
-# редакторе Learning, а замечание со ссылкой на него остановило бы удаление.
-ignore_links_on_delete = ["Agent Author Note"]
+# ignore_links_on_delete = ["Communication", "ToDo"]
 
 # Request Events
 # ----------------

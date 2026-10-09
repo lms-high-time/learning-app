@@ -410,11 +410,14 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual((ответ["version"], ответ["lessons"]["updated"]), (3, ["l-1"]))
 
 	def test_курс_из_релиза_удаляется_целиком(self):
+		"""С заметками к обеим версиям: заметка ссылается на свой релиз, и
+		удаление релизов не встаёт на ней."""
 		первый = self.опубликовать()
+		курс = первый["course"]
+		прежняя = authoring.add_note(course=курс, target="course", text="К первой версии")["data"]["id"]
 		релиз = пример_релиза(self.ключ)
 		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
 		self.опубликовать(релиз)
-		курс = первый["course"]
 		уроки = frappe.get_all("Course Lesson", filters={"course": курс}, pluck="name")
 		заметка = authoring.add_note(course=курс, target="lesson.l-1", text="Пример")["data"]["id"]
 		authoring.reply_note(note=заметка, text="Ответ в нить")
@@ -432,7 +435,7 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists(РЕЛИЗ, {"course": курс}))
 		self.assertFalse(frappe.db.exists("Agent Release Lesson", {"lesson": ("in", уроки)}))
 		self.assertFalse(frappe.db.exists("Agent Course Artifact", {"course": курс}))
-		self.assertFalse(frappe.db.exists("Agent Author Note", заметка))
+		self.assertFalse(frappe.db.exists("Agent Author Note", {"name": ("in", [прежняя, заметка])}))
 		self.assertFalse(frappe.db.exists("Agent Note Reply", {"parent": заметка}))
 		self.assertFalse(frappe.db.exists("Course Lesson", {"name": ("in", уроки)}))
 		self.assertIsNone(frappe.cache.get_value(кэш))

@@ -7,8 +7,8 @@
 
 - `Agent Course Report.lesson_directive`, `.question` — ссылки на директиву
   урока и на вопрос `LMS Question`; репорт ссылается на релиз и ключ вопроса;
-- `Agent Author Note.baseline` — снимок места заметки; заметки перенесены на
-  ключи релиза патчем `note_release_keys`, он идёт раньше;
+- `Agent Author Note.baseline` — снимок места заметки; место заметки — адрес
+  по ключам релиза;
 - `Agent Quiz Attempt.quiz`, `.submission`, `Agent Quiz Answer.question`,
   `Agent Quiz Event.question` — квиз по `LMS Quiz`; сдачи Learning удаляет
   раньше патч `old_quiz_attempts`;
@@ -24,8 +24,7 @@ EXISTS` — только те, что есть в базе сайта. Коло�
 сдачи Learning, сделанные приложением. Миграция с `--skip-failing`
 продолжает после упавшего патча, и без этой проверки колонка ушла бы
 раньше сдач; пока `old_quiz_attempts` не выполнен (`patch_log.выполнен`),
-колонка остаётся, и патч печатает почему. `baseline` заметки не ждёт
-`note_release_keys`: перенос заметок её не читает.
+колонка остаётся, и патч печатает почему.
 """
 
 import frappe

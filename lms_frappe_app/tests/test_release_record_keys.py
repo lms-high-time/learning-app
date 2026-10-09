@@ -222,8 +222,8 @@ class IntegrationTestИндексКлючейПроекции(IntegrationTestCas
 
 	def test_патч_идёт_до_индекса_в_той_же_миграции(self):
 		"""Патчи `post_model_sync` идут раньше `after_migrate`: индекс встаёт на
-		заполненные патчем ключи. Патч — в `post_model_sync`, после переноса заметок,
-		который читает ту же историю."""
+		заполненные патчем ключи. Патч — в `post_model_sync`, до ключей заметок:
+		`note_lesson_keys` берёт ключ с записи урока."""
 		строки = (
 			(Path(release_record_keys.__file__).parents[2] / "patches.txt")
 			.read_text(encoding="utf-8")
@@ -231,7 +231,7 @@ class IntegrationTestИндексКлючейПроекции(IntegrationTestCas
 		)
 		патч = "lms_frappe_app.patches.v0_1.release_record_keys"
 		self.assertGreater(строки.index(патч), строки.index("[post_model_sync]"))
-		self.assertGreater(строки.index(патч), строки.index("lms_frappe_app.patches.v0_1.note_release_keys"))
+		self.assertLess(строки.index(патч), строки.index("lms_frappe_app.patches.v0_1.note_lesson_keys"))
 		self.assertIn(
 			"lms_frappe_app.install.after_migrate",
 			frappe.get_hooks("after_migrate", app_name="lms_frappe_app"),

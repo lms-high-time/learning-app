@@ -9,8 +9,6 @@
 ключа нет в действующем релизе.
 """
 
-import io
-from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import frappe
@@ -19,7 +17,7 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.releases import index, places
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_курс, создать_ученика, урок_релиза
+from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 
 #: Карта релиза в тестах — заглушка: узлы на разной глубине, в том числе в списке.
 КАРТА = {
@@ -257,12 +255,16 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		self.assertEqual((self.код(ответ), ответ["error"]["where"]), ("invalid_note", "status"))
 
 	def test_фильтр_по_уроку_снятому_из_релиза(self):
+		"""Ключ урока — в самой заметке: заметка находится, даже когда записи
+		урока с этим ключом в курсе больше нет."""
 		ид = self.записать("objective.l-3-D1")
 		self.опубликовать(self.урезанный())
+		frappe.db.set_value("Course Lesson", {"course": self.курс, "lesson_key": "l-3"}, "lesson_key", None)
 
 		(з,) = self.очередь(lesson="l-3")
 
 		self.assertEqual((з["id"], з["missing"], з["lesson_key"]), (ид, True, "l-3"))
+		self.assertEqual(frappe.db.get_value("Agent Author Note", ид, "lesson_key"), "l-3")
 
 	# --- цикл ---
 
@@ -354,7 +356,7 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 	# --- заметки без места ---
 
 	def вставить(self, target: str, release: str | None) -> str:
-		"""Заметка, какой её оставил патч переноса или ручная правка: мимо `add_note`."""
+		"""Заметка мимо `add_note`: архивная — без релиза — или после ручной правки."""
 		return (
 			frappe.get_doc(
 				{
@@ -410,183 +412,3 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 				"F1": "Поле в списке",
 			},
 		)
-
-
-class IntegrationTestПереносЗаметок(IntegrationTestCase):
-	"""Патч `note_release_keys`: старые места заметок — на ключи релиза (learning-services#512)."""
-
-	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
-		frappe.set_user("Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		ответ = authoring.publish_release(release=пример_релиза(f"mv-notes-{суффикс}"))["data"]
-		self.курс, self.релиз = ответ["course"], ответ["release"]
-		self.первый, self.второй = урок_релиза(self.курс, "l-1"), урок_релиза(self.курс, "l-2")
-		self.без_релиза = создать_курс(f"Без релиза {суффикс}")
-		self.удалённый = f"удалённый-курс-{суффикс}"
-
-	def старая(self, курс: str, target: str, lesson: str | None = None, status: str = "open", ответов: int = 0) -> str:
-		"""Заметка со старым местом — как её оставила прежняя версия приложения."""
-		документ = frappe.get_doc(
-			{
-				"doctype": "Agent Author Note",
-				"course": курс,
-				"lesson": lesson,
-				"target": target,
-				"status": status,
-				"via": "author",
-				"text": "Старая заметка",
-				"replies": [
-					{"via": "agent", "author": "Administrator", "text": f"Ответ {номер}"} for номер in range(ответов)
-				],
-			}
-		)
-		документ.insert(ignore_links=True, ignore_permissions=True)
-		return документ.name
-
-	def запись(self, имя: str) -> dict | None:
-		запись = frappe.db.get_value(
-			"Agent Author Note", имя, ["target", "lesson", "release", "status"], as_dict=True
-		)
-		if запись:
-			запись["replies"] = frappe.get_all(
-				"Agent Note Reply", filters={"parent": имя}, fields=["via", "text"], order_by="idx asc"
-			)
-		return запись
-
-	def выполнить(self) -> str:
-		from lms_frappe_app.patches.v0_1 import note_release_keys
-
-		вывод = io.StringIO()
-		with redirect_stdout(вывод):
-			note_release_keys.execute()
-		return вывод.getvalue()
-
-	def test_старые_места_переносятся_архивируются_и_удаляются(self):
-		from lms_frappe_app.patches.v0_1.note_release_keys import ОТВЕТ_АРХИВА
-
-		перенос = {
-			self.старая(self.курс, "course"): ("course", None),
-			self.старая(self.курс, "lesson", self.второй, ответов=1): ("lesson.l-2", self.второй),
-			self.старая(self.курс, "block.notebook/log", self.первый): ("section.log", None),
-		}
-		архив = [
-			self.старая(self.курс, "block.register/risks"),
-			self.старая(self.курс, "material", self.первый),
-			self.старая(self.курс, "directive.teaching_directive", self.первый, ответов=2),
-			self.старая(self.курс, "course_directive.glossary"),
-			self.старая(self.курс, "question.QTS-00001", self.первый),
-			self.старая(self.курс, "map.T1"),
-			self.старая(self.курс, "material", self.первый, status="done"),
-			self.старая(self.без_релиза, "lesson", создать_урок_без_релиза(self.без_релиза)),
-			self.старая(self.без_релиза, "course"),
-		]
-		принятая = self.старая(self.курс, "material", self.первый, status="accepted", ответов=1)
-		удалить = [self.старая(self.удалённый, "course", ответов=1), self.старая(self.удалённый, "lesson")]
-
-		вывод = self.выполнить()
-		повтор = self.выполнить()
-
-		for имя, (место, урок) in перенос.items():
-			with self.subTest(место=место):
-				запись = self.запись(имя)
-				self.assertEqual(
-					(запись["target"], запись["lesson"], запись["release"]), (место, урок, self.релиз)
-				)
-				self.assertNotIn(ОТВЕТ_АРХИВА, [о.text for о in запись["replies"]])
-		for имя in архив:
-			запись = self.запись(имя)
-			with self.subTest(место=запись["target"]):
-				self.assertEqual((запись["status"], запись["release"]), ("accepted", None))
-				self.assertEqual([(о.via, о.text) for о in запись["replies"]][-1], ("agent", ОТВЕТ_АРХИВА))
-				self.assertEqual([о.text for о in запись["replies"]].count(ОТВЕТ_АРХИВА), 1)
-		self.assertEqual(self.запись(принятая)["replies"], [{"via": "agent", "text": "Ответ 0"}])
-		for имя in удалить:
-			self.assertIsNone(self.запись(имя))
-			self.assertFalse(frappe.db.exists("Agent Note Reply", {"parent": имя}))
-		self.assertIn(f"note_release_keys: {self.курс} — перенесено 3, в архиве 7, удалено 0", вывод)
-		self.assertIn(f"note_release_keys: {self.без_релиза} — перенесено 0, в архиве 2, удалено 0", вывод)
-		self.assertIn(f"note_release_keys: {self.удалённый} — перенесено 0, в архиве 0, удалено 2", вывод)
-		self.assertIn(f"note_release_keys: {self.курс} — перенесено 0, в архиве 0, удалено 0", повтор)
-		# Перенесённая заметка читается по ключам: место есть в релизе.
-		заметки = {з["id"]: з for з in authoring.list_notes(course=self.курс)["data"]["notes"]}
-		урок = заметки[next(имя for имя, (место, _) in перенос.items() if место == "lesson.l-2")]
-		self.assertEqual(
-			(урок["label"], урок["missing"], урок["lesson_key"], урок["version"]),
-			("Урок 2 «Урок второй»", False, "l-2", 1),
-		)
-		# Архивная — прежнее место без релиза: ключом релиза не читается, даже похожая на него.
-		карта = заметки[архив[5]]
-		self.assertEqual(
-			(карта["target"], карта["label"], карта["missing"], карта["release"], карта["version"]),
-			("map.T1", "map.T1", True, None, None),
-		)
-
-	def test_без_таблицы_заметок_ничего_не_делает(self):
-		with patch.object(frappe.db, "table_exists", return_value=False):
-			вывод = self.выполнить()
-
-		self.assertIn("note_release_keys: заметок нет", вывод)
-
-	def test_без_колонки_урока_и_таблицы_ответов(self):
-		"""Колонки `lesson` нет — место «урок» не переносится, а уходит в архив;
-		таблицы ответов нет — архив без ответа, удаление без нитей."""
-		from lms_frappe_app.patches.v0_1 import note_release_keys
-
-		урок = self.старая(self.курс, "lesson", self.второй)
-		блок = self.старая(self.курс, "block.notebook/log")
-		удалить = self.старая(self.удалённый, "course")
-		колонки = frappe.db.get_table_columns
-		таблица = frappe.db.table_exists
-		записать = frappe.db.set_value
-
-		def записать_без_урока(doctype, name, поля=None, *args, **kwargs):
-			"""Колонки `lesson` «нет» — запись в неё упала бы на настоящей базе."""
-			if doctype == note_release_keys.ЗАМЕТКА and isinstance(поля, dict):
-				self.assertNotIn("lesson", поля)
-			return записать(doctype, name, поля, *args, **kwargs)
-
-		with (
-			patch.object(frappe.db, "set_value", side_effect=записать_без_урока),
-			patch.object(
-				frappe.db,
-				"get_table_columns",
-				side_effect=lambda doctype: [
-					к for к in колонки(doctype) if not (doctype == note_release_keys.ЗАМЕТКА and к == "lesson")
-				],
-			),
-			patch.object(
-				frappe.db,
-				"table_exists",
-				side_effect=lambda doctype, cached=True: doctype != note_release_keys.ОТВЕТ and таблица(doctype, cached),
-			),
-		):
-			self.выполнить()
-
-		self.assertEqual((self.запись(урок)["status"], self.запись(урок)["replies"]), ("accepted", []))
-		self.assertEqual(self.запись(блок)["target"], "section.log")
-		self.assertIsNone(self.запись(удалить))
-
-	def test_битая_ссылка_на_релиз_не_останавливает_перенос(self):
-		курс = создать_курс(f"Битый релиз {frappe.generate_hash(length=6)}")
-		frappe.db.set_value("LMS Course", курс, "active_release", "REL-нет-такого")
-		блок = self.старая(курс, "block.notebook/log")
-		место = self.старая(курс, "course")
-
-		вывод = self.выполнить()
-
-		self.assertEqual(self.запись(блок)["status"], "accepted")
-		self.assertEqual(
-			(self.запись(место)["target"], self.запись(место)["release"]), ("course", "REL-нет-такого")
-		)
-		self.assertIn(f"note_release_keys: {курс} — перенесено 1, в архиве 1, удалено 0", вывод)
-
-
-def создать_урок_без_релиза(курс: str) -> str:
-	"""Урок курса без релиза — главой и уроком Learning."""
-	глава = frappe.get_doc({"doctype": "Course Chapter", "title": "Глава", "course": курс}).insert(
-		ignore_permissions=True
-	)
-	return frappe.get_doc(
-		{"doctype": "Course Lesson", "title": "Урок", "chapter": глава.name, "course": курс}
-	).insert(ignore_permissions=True).name

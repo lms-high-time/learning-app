@@ -404,7 +404,7 @@ def _ответ(курс, релиз, итог, схема_документа, �
 
 
 def удалить_курс(курс: str) -> None:
-	"""Курс из релиза целиком: релизы с кэшем узлов карты, заметки автора, схемы документа,
+	"""Курс из релиза целиком: заметки автора, релизы с кэшем узлов карты, схемы документа,
 	домашки, главы, уроки и сам курс.
 
 	Для курсов, по которым учиться больше не будут (решение владельца: старые
@@ -432,11 +432,12 @@ def удалить_курс(курс: str) -> None:
 	# удаляются только вместе с курсом (`course_guard`).
 	frappe.flags[УДАЛЯЕТСЯ_КУРС] = курс
 	try:
+		# Заметки ссылаются на релиз, к которому написаны, — уходят раньше релизов.
+		for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
+			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
 		for релиз in frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=["name", "digest"]):
 			frappe.delete_doc(РЕЛИЗ, релиз.name, ignore_permissions=True)
 			frappe.cache.delete_value(places.ключ_кэша(релиз.name, релиз.digest))
-		for имя in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
-			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
 		for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
 			frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
 		homework.удалить_шаблоны(курс)

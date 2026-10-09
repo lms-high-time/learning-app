@@ -255,21 +255,6 @@ def ключ_урока(релиз: str, lesson: str) -> str | None:
 	return frappe.db.get_value(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson": lesson}, "lesson_key")
 
 
-def ключи_уроков(релизы: list[str]) -> dict[tuple[str, str], str]:
-	"""Ключи уроков нескольких релизов: (релиз, запись `Course Lesson`) → ключ.
-	Одной выборкой на все релизы, а не на урок."""
-	if not релизы:
-		return {}
-	return {
-		(у.parent, у.lesson): у.lesson_key
-		for у in frappe.get_all(
-			УРОК,
-			filters={"parenttype": РЕЛИЗ, "parent": ("in", list(set(релизы)))},
-			fields=["parent", "lesson", "lesson_key"],
-		)
-	}
-
-
 def цели_урока(релиз: str, ключ: str) -> list[dict]:
 	"""Цели урока с пунктами целей агента — по порядку релиза."""
 	return цели_с_пунктами(релиз, ключ).get(ключ, [])

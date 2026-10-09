@@ -373,9 +373,10 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		)
 		self.assertEqual(запись, {"question_key": None, "release": релиз})
 
-	def test_ключ_урока_по_релизу_репорта(self):
-		"""Ключ урока выводится по релизу, на котором жаловались: и у урока,
-		снятого из действующего релиза; фильтр по ключу находит и его."""
+	def test_ключ_урока_по_записи_урока(self):
+		"""Ключ урока — с записи урока репорта, а не из индекса релиза, на
+		котором жаловались: и у урока, снятого из действующего релиза; фильтр
+		по ключу находит и его."""
 		frappe.set_user("Administrator")
 		ключ = f"rep-keys-{frappe.generate_hash(length=6)}"
 		курс, первый = курс_из_релиза(релиз=пример_релиза(ключ))
@@ -391,6 +392,7 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		занятие = создать_занятие(self.ученик, урок_релиза(курс, "l-2"))
 		frappe.set_user(self.ученик)
 		student.report_issue(session=занятие, kind="material_issue", text="Про второй")
+		frappe.db.delete("Agent Release Lesson", {"parenttype": "Agent Course Release", "parent": первый})
 		frappe.set_user(self.куратор)
 
 		репорты = authoring.course_reports(course=курс)["data"]["reports"]
