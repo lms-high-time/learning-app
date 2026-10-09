@@ -856,6 +856,19 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		вердикт = self.ответить(попытка, С2)["verdict"]
 		self.assertEqual(вердикт, {"correct": True, "explanation": "Пояснение новой версии."})
 
+	def test_угловые_скобки_в_тексте_вопроса_не_аннулируют_попытку(self):
+		"""Текст вопроса с `<role>`: база хранит его очищенным от HTML, и новая
+		сторона сравнения — тоже из записанных строк, а не из сырого релиза."""
+		релиз = релиз_двух_целей(self.ключ, вопросов=3)
+		релиз["lessons"][0]["quiz"]["questions"][1]["text"] = "Где тег <role> в промпте?"
+		run, _, попытка = self.попытка_с_ответом(релиз)
+		релиз["lessons"][0]["title"] = "Урок переименован"
+
+		self.опубликовать(релиз)
+
+		состояние = self.попытка(попытка)
+		self.assertEqual((состояние.status, состояние.release), (ПОПЫТКА_ИДЁТ, self.действующий(run.course)))
+
 	def test_изменённый_квиз_аннулирует_попытку(self):
 		"""Любая правка того, что решает проверку, — `quiz_changed`; ответы и журнал на месте."""
 
@@ -1031,6 +1044,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			отказ.подробности,
 			{"attempt": попытка, "session": занятие, "reason": АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ},
 		)
+		self.assertIn("начата на прежней версии курса", str(отказ))
 		self.assertEqual(self.попытка(попытка).status, ПОПЫТКА_АННУЛИРОВАНА)
 		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
 		self.assertEqual(self.журнал(попытка)[-1], (ПРОВЕРКА_ПОПЫТКА_АННУЛИРОВАНА, None))
@@ -1086,22 +1100,25 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.assertEqual((итог["passed"], итог["correct"], итог["pass_threshold"]), (True, 0, 0))
 
-	def test_publish_release_при_взаимоблокировке_busy(self):
-		"""Попытку под публикацией изменил ответ ученика: откат целиком и `busy`."""
+	def test_publish_release_при_взаимоблокировке_и_таймауте_busy(self):
+		"""Попытку под публикацией изменил или держит ответ ученика: откат целиком и `busy`."""
 		from lms_frappe_app.api import authoring
 
 		релиз = релиз_двух_целей(self.ключ)
 		self.опубликовать(релиз)
-		релиз["lessons"][0]["title"] = "Новое название"
 
-		with (
-			patch.object(release_quiz, "перенести_попытки", side_effect=frappe.QueryDeadlockError("1213")),
-			patch.object(frappe.db, "rollback") as откат,
-		):
-			ответ = authoring.publish_release(release=релиз)
+		for ошибка in (frappe.QueryDeadlockError("1213"), frappe.QueryTimeoutError("1205")):
+			# Откат подменён, и записанное первым проходом остаётся: каждому — своя версия.
+			релиз["lessons"][0]["title"] = f"Новое название, {type(ошибка).__name__}"
+			with (
+				self.subTest(ошибка=type(ошибка).__name__),
+				patch.object(release_quiz, "перенести_попытки", side_effect=ошибка),
+				patch.object(frappe.db, "rollback") as откат,
+			):
+				ответ = authoring.publish_release(release=релиз)
 
-		self.assertEqual(ответ["error"]["code"], "busy")
-		откат.assert_called_once_with()
+				self.assertEqual(ответ["error"]["code"], "busy")
+				откат.assert_called_once_with()
 
 	def test_сравнение_квиза_без_пояснений(self):
 		"""Чистая функция: пояснение не в счёт, остальное — в счёт, пустой квиз ни с чем не совпадает."""

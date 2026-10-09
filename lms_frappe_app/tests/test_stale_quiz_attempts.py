@@ -129,11 +129,27 @@ class IntegrationTestПатчОткрытыхПопыток(IntegrationTestCase)
 		self.assertEqual({имя: self.попытка(имя) for имя in было}, было)
 		self.assertEqual(self.события(self.попытки["тот же"]), [ПРОВЕРКА_ПОПЫТКА_ПЕРЕНЕСЕНА])
 		self.assertIn(
-			f"stale_quiz_attempts: {self.курсы['тот же']} — порог записан открытым попыткам: 2; "
+			f"stale_quiz_attempts: {self.курсы['тот же']} — порог записан открытым попыткам: 1; "
 			"перенесено 0, аннулировано 0",
 			повтор.getvalue(),
 		)
 		self.assertNotIn(self.курсы["другой"], повтор.getvalue())
+
+	def test_порог_перенесённой_не_переписывается_порогом_нового_релиза(self):
+		"""Попытка начата на версии с порогом 60, публикация версии с порогом 80 её
+		перенесла: патч оставляет 60."""
+		релиз = релиз_двух_целей(f"stale-moved-{frappe.generate_hash(length=6)}", порог=60)
+		курс = релизы.опубликовать(релиз, None, "Administrator")["course"]
+		попытка = self.начать(курс)
+		релиз["lessons"][0]["quiz"]["pass_percentage"] = 80
+		релизы.опубликовать(релиз, None, "Administrator")
+		действующий = frappe.db.get_value("LMS Course", курс, "active_release")
+		self.assertEqual(self.попытка(попытка).release, действующий)
+
+		with redirect_stdout(io.StringIO()):
+			stale_quiz_attempts.execute()
+
+		self.assertEqual(self.попытка(попытка).pass_percentage, 60)
 
 	def test_идёт_после_заполняющих_и_до_освобождения(self):
 		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()

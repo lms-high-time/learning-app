@@ -30,6 +30,7 @@ from frappe.tests import IntegrationTestCase
 
 import lms_frappe_app.api
 from lms_frappe_app.agent_learning.releases import schema as схема_релиза
+from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.api import authoring, manager, public, review, student
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -218,14 +219,17 @@ class IntegrationTestContractTransport(IntegrationTestCase):
 		)
 
 
-def примеры_ответов() -> dict[str, list[frozenset]]:
-	"""Ключи `data` из примеров успешного ответа — по методам.
+def примеры_ответов(успех: bool = True) -> dict[str, list[frozenset]]:
+	"""Ключи `data` из примеров успешного ответа — по методам; с `успех=False` —
+	ключи `error` из примеров отказа.
 
-	Примером считается блок ```json с `"ok": true`: в разделах есть и блоки
-	параметров (`questions`, `blocks`), и их сверять не с чем. Примеров у
-	метода бывает несколько — `artifact` отвечает по-разному на перечень и на
-	один документ, `submit_answer` — на ход и на конец попытки; подходит любой.
+	Примером считается блок ```json с `"ok": true` (`"ok": false`): в разделах
+	есть и блоки параметров (`questions`, `blocks`), и их сверять не с чем.
+	Примеров у метода бывает несколько — `artifact` отвечает по-разному на
+	перечень и на один документ, `submit_answer` — на ход и на конец попытки;
+	подходит любой.
 	"""
+	признак, часть = ('"ok": true', "data") if успех else ('"ok": false', "error")
 	строки = КОНТРАКТ.read_text(encoding="utf-8").splitlines()
 	примеры: dict[str, list[frozenset]] = {}
 	метод = None
@@ -241,8 +245,8 @@ def примеры_ответов() -> dict[str, list[frozenset]]:
 				конец += 1
 			блок = "\n".join(строки[номер + 1 : конец])
 			номер = конец
-			if '"ok": true' in блок:
-				данные = json.loads(блок).get("data")
+			if признак in блок:
+				данные = json.loads(блок).get(часть)
 				if isinstance(данные, dict):
 					примеры.setdefault(метод, []).append(frozenset(данные))
 		номер += 1
@@ -265,6 +269,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		политика_по_умолчанию()
 		self.примеры = примеры_ответов()
+		self.примеры_отказов = примеры_ответов(успех=False)
 		суффикс = frappe.generate_hash(length=6)
 		self.куратор = создать_куратора(f"contract-{суффикс}@example.com")
 		self.ученик = создать_ученика(f"contract-pupil-{суффикс}@example.com")
@@ -288,6 +293,17 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			f"Ключи ответа {метод} разошлись с примером в CONTRACT.md.\n"
 			f"  нет в контракте: {sorted(настоящие - ближний) or '—'}\n"
 			f"  нет в ответе:    {sorted(ближний - настоящие) or '—'}"
+		)
+
+	def сверить_отказ(self, метод: str, ответ: dict, код: str) -> None:
+		"""Отказ с кодом `код` и ключи `error` против примера отказа в разделе метода."""
+		self.assertFalse(ответ["ok"], f"{метод} не отказал: {ответ}")
+		self.assertEqual(ответ["error"]["code"], код, ответ)
+		ожидаемые = self.примеры_отказов.get(f"lms_frappe_app.api.{метод}", [])
+		self.assertIn(
+			frozenset(ответ["error"]),
+			ожидаемые,
+			f"Ключи отказа {метод} разошлись с примером в CONTRACT.md: {sorted(ответ['error'])}",
 		)
 
 	def test_ключи_ответов_совпадают_с_примерами_контракта(self):
@@ -497,7 +513,17 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		занятие = старт["session"]
 		self.сверить("student.lesson_item", student.lesson_item(session=занятие, goal="term:T1"))
 		self._отметить_обязательные(занятие, старт["lesson_map"])
+		прежняя = self.сверить("student.request_quiz", student.request_quiz(session=занятие))["attempt"]
+		self._гонка_с_публикацией(курс, прежняя)
 		попытка = self.сверить("student.request_quiz", student.request_quiz(session=занятие))
+		self.assertEqual(попытка["previous_attempt_cancelled"]["attempt"], прежняя)
+		self.сверить_отказ(
+			"student.submit_answer",
+			student.submit_answer(
+				attempt=прежняя, question=попытка["question"]["id"], answer="V1", student_words="Первый"
+			),
+			"quiz_attempt_cancelled",
+		)
 		вопрос = попытка["question"]
 		while вопрос is not None:
 			ответ = self.сверить(
@@ -517,6 +543,17 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self._отметить_обязательные(старт["session"], старт["lesson_map"])
 		self.сверить("student.complete_lesson", student.complete_lesson(session=старт["session"]))
 		return занятие
+
+	def _гонка_с_публикацией(self, курс: str, попытка: str) -> None:
+		"""Попытка — как заведённая в гонке с публикацией: на версии курса,
+		которую уже сменила новая (`release_quiz._аннулировать_отставшую`)."""
+		frappe.set_user("Administrator")
+		прежний = frappe.db.get_value("LMS Course", курс, "active_release")
+		релиз = пример_релиза(f"contract-{self.суффикс}")
+		релиз["course"]["title"] = "Пример курса, второе издание"
+		релизы.опубликовать(релиз, None, "Administrator")
+		frappe.db.set_value("Agent Quiz Attempt", попытка, "release", прежний)
+		frappe.set_user(self.ученик)
 
 	def _отметить_обязательные(self, занятие: str, карта: list[dict]) -> None:
 		for цель in карта:

@@ -7,11 +7,13 @@
 (`release_quiz.перенести_попытки`). Попытки, открытые до выкатки, ни того ни
 другого не получили. Патч:
 
-- пишет порог **всем** попыткам `In Progress` — из урока их релиза, без
-  условия. `Why:` у поля Float нет «не записано» (столбец `NOT NULL DEFAULT
-  0`), а попытку, начатую прежним кодом в окне выкатки, отличить не по чему:
-  после переключения кода патч прогоняется ещё раз (`bench execute`), и
-  повтор пишет те же значения;
+- пишет порог попыткам `In Progress` — из урока их релиза, всем, кроме
+  перенесённых (событие `Attempt Moved` в журнале проверки). `Why:` у поля
+  Float нет «не записано» (столбец `NOT NULL DEFAULT 100`), а попытку,
+  начатую прежним кодом в окне выкатки, отличить не по чему: после
+  переключения кода патч прогоняется ещё раз (`bench execute`), и повтор
+  пишет те же значения. Перенесённая попытка оценивается порогом релиза, с
+  которым начата, а её релиз уже новый: его порог переписал бы её;
 - переносит или аннулирует открытые попытки не на действующем релизе курса
   тем же правилом, что публикация, — сравнением с квизом урока в действующем
   релизе. У курса без действующего релиза урока нет нигде — аннулирование
@@ -19,7 +21,8 @@
 
 Порог пишется раньше переноса: перенесённая попытка оценивается порогом
 релиза, с которым начата. Повторный запуск ничего не меняет, кроме того же
-порога: перенесённые и аннулированные на действующем релизе или закрыты.
+порога у неперенесённых: перенесённые и аннулированные на действующем релизе
+или закрыты.
 Итог — по курсу. Идёт до `free_release_content`: сравнению нужен индекс
 релиза попытки.
 """
@@ -27,10 +30,11 @@
 import frappe
 
 from lms_frappe_app.agent_learning import release_quiz
-from lms_frappe_app.agent_learning.constants import ПОПЫТКА_ИДЁТ
+from lms_frappe_app.agent_learning.constants import ПОПЫТКА_ИДЁТ, ПРОВЕРКА_ПОПЫТКА_ПЕРЕНЕСЕНА
 from lms_frappe_app.agent_learning.releases import index
 
 ПОПЫТКА = "Agent Quiz Attempt"
+СОБЫТИЕ = "Agent Quiz Event"
 
 
 def execute():
@@ -46,17 +50,28 @@ def execute():
 		print("stale_quiz_attempts: открытых попыток нет")
 
 
+#: Открытая попытка, которую ещё не переносили: условие на `a` — попытку.
+НЕ_ПЕРЕНЕСЕНА = f"""
+	a.status = %(open)s
+	and not exists (
+		select 1 from `tab{СОБЫТИЕ}` e where e.attempt = a.name and e.kind = %(moved)s
+	)
+"""
+
+
 def записать_пороги() -> dict[str, int]:
-	"""Порог урока релиза попытки — всем открытым попыткам; курс → у скольких попыток порог из урока."""
+	"""Порог урока релиза попытки — открытым неперенесённым попыткам; курс → у скольких
+	попыток порог из урока."""
+	параметры = {"release_doctype": index.РЕЛИЗ, "open": ПОПЫТКА_ИДЁТ, "moved": ПРОВЕРКА_ПОПЫТКА_ПЕРЕНЕСЕНА}
 	frappe.db.sql(
 		f"""
 		update `tab{ПОПЫТКА}` a
 		join `tab{index.УРОК}` l
 			on l.parenttype = %(release_doctype)s and l.parent = a.release and l.lesson_key = a.lesson_key
 		set a.pass_percentage = l.pass_percentage
-		where a.status = %(open)s
+		where {НЕ_ПЕРЕНЕСЕНА}
 		""",
-		{"release_doctype": index.РЕЛИЗ, "open": ПОПЫТКА_ИДЁТ},
+		параметры,
 	)
 	return dict(
 		frappe.db.sql(
@@ -65,10 +80,10 @@ def записать_пороги() -> dict[str, int]:
 			from `tab{ПОПЫТКА}` a
 			join `tab{index.УРОК}` l
 				on l.parenttype = %(release_doctype)s and l.parent = a.release and l.lesson_key = a.lesson_key
-			where a.status = %(open)s
+			where {НЕ_ПЕРЕНЕСЕНА}
 			group by a.course
 			""",
-			{"release_doctype": index.РЕЛИЗ, "open": ПОПЫТКА_ИДЁТ},
+			параметры,
 		)
 	)
 

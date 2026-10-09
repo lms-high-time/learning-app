@@ -499,15 +499,16 @@ def publish_release(release, course: str | None = None, instructors=None, commit
 
 	Открытые попытки квиза курса публикация переносит на новый релиз или
 	аннулирует. Попытку, которую в этот момент меняет ответ ученика, MariaDB
-	стенда (`innodb_snapshot_isolation`) отдаёт взаимоблокировкой: откат
-	целиком и отказ `busy`, повтор безопасен.
+	стенда (`innodb_snapshot_isolation`) отдаёт взаимоблокировкой, а занятую
+	строку — таймаутом ожидания блокировки: откат целиком и отказ `busy`,
+	повтор безопасен.
 	"""
 	автор = _автор()
 	коммит = None if commit is None else _коммит(commit)
 	инструкторы = None if instructors is None else _инструкторы(instructors)
 	try:
 		return releases.опубликовать(release, course or None, автор, инструкторы, коммит)
-	except frappe.QueryDeadlockError:
+	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
 		frappe.db.rollback()
 		raise Отказ(ЗАНЯТО, "Курс сейчас меняет другой запрос: публикация откатилась — повторите") from None
 

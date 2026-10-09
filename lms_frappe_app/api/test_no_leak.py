@@ -25,6 +25,7 @@ from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
+	отметить_все_пункты,
 	создать_домашку,
 	создать_занятие,
 	создать_менеджера,
@@ -290,6 +291,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		релиз["agent"] = {"lessons": {"l-1": {"directive": ПАКЕТ_АГЕНТА, "items": {"term:T1": ТЕКСТ_ПУНКТА}}}}
 		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
 		frappe.set_user("Administrator")
+		self.релиз = релиз
 		данные = релизы.опубликовать(релиз, None, "Administrator")
 		self.курс = данные["course"]
 		self.урок = frappe.db.get_value("Course Lesson", {"course": self.курс, "title": "Урок первый"})
@@ -473,6 +475,29 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПОЯСНЕНИЕ_РЕЛИЗА),
 			кроме=("explanation",),
 		)
+
+	def test_аннулированная_в_гонке_попытка_без_эталона(self):
+		"""Попытка, заведённая в гонке с публикацией: новый `request_quiz` с
+		`previous_attempt_cancelled` и ответ в аннулированную — без верного
+		варианта и пояснений."""
+		занятие = создать_занятие(self.ученик, self.урок, run=self.run.name)
+		отметить_все_пункты(self.run.name, занятие)
+		frappe.set_user(self.ученик)
+		прежняя = student.request_quiz(занятие)["data"]["attempt"]
+		frappe.set_user("Administrator")
+		действовал = frappe.db.get_value("LMS Course", self.курс, "active_release")
+		self.релиз["course"]["title"] = "Курс, второе издание"
+		релизы.опубликовать(self.релиз, None, "Administrator")
+		frappe.db.set_value(ПОПЫТКА, прежняя, "release", действовал)
+		frappe.set_user(self.ученик)
+
+		новая = student.request_quiz(занятие)
+		отказ = student.submit_answer(прежняя, ВОПРОС_1, "V1", СЛОВА_УЧЕНИКА)
+
+		self.assertEqual(новая["data"]["previous_attempt_cancelled"]["attempt"], прежняя)
+		self.assertNotIn("correct", self.проверить("request_quiz после гонки", новая))
+		self.assertEqual(отказ["error"]["code"], "quiz_attempt_cancelled")
+		self.проверить("ответ в аннулированную попытку", отказ, СЛОВА_УЧЕНИКА)
 
 	def test_прохождение_не_читают_ученик_и_руководитель(self):
 		for кто in (self.ученик, self.менеджер):

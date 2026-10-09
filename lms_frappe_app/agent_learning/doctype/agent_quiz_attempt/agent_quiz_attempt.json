@@ -94,7 +94,8 @@
    "read_only": 1
   },
   {
-   "description": "Порог зачёта урока в процентах — снят с релиза на старте попытки: им попытка и оценивается.",
+   "default": "100",
+   "description": "Порог зачёта урока в процентах — снят с релиза на старте попытки: им попытка и оценивается. По умолчанию 100: попытка, которой порог не записали, без всех верных не сдана.",
    "fieldname": "pass_percentage",
    "fieldtype": "Float",
    "label": "Порог зачёта, %",
@@ -192,7 +193,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-10-09 18:00:00.000000",
+ "modified": "2026-10-09 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",
