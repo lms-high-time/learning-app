@@ -54,7 +54,11 @@ def проверить_курс(doc, method=None) -> None:
 	if not релиз:
 		return
 	# Снимок — в условии, а не в выборке: его мегабайты в ответ не идут.
-	курс_релиза = frappe.db.get_value(РЕЛИЗ, {"name": релиз, "snapshot": ("is", "set")}, "course")
+	# `is not null`, а не `("is", "set")`: см. `retention`.
+	курсы = frappe.db.sql_list(
+		f"select course from `tab{РЕЛИЗ}` where name = %s and snapshot is not null", релиз
+	)
+	курс_релиза = курсы[0] if курсы else None
 	if not курс_релиза:
 		frappe.throw(
 			frappe._("Содержимое этой версии освобождено: откат — публикация прежнего коммита новой версией"),

@@ -68,10 +68,16 @@ class IntegrationTestПатчОсвобождения(IntegrationTestCase):
 			with self.subTest(курс=курс):
 				self.assertEqual([self.строк_индекса(имя) for имя in имена[:2]], [0, 0])
 				self.assertTrue(self.строк_индекса(имена[-1]))
-				self.assertIn(
-					f"free_release_content: {курс} — освобождено версий: 2 ({', '.join(sorted(имена[:2]))})",
-					вывод,
-				)
+				self.assertIn(f"free_release_content: {курс} — освобождено версий: 2", вывод)
+				for имя in имена[:2]:
+					запись = frappe.db.get_value(
+						index.РЕЛИЗ, имя, ["version", "digest", "published_at"], as_dict=True
+					)
+					self.assertIn(
+						f"free_release_content: {курс} — {имя}: версия {запись.version}, "
+						f"digest {запись.digest}, опубликована {запись.published_at}, коммит нет",
+						вывод,
+					)
 
 		with patch.object(retention, "_освободить") as освободить:
 			повтор = self.выполнить()
@@ -89,9 +95,10 @@ class IntegrationTestПатчОсвобождения(IntegrationTestCase):
 				self.assertEqual(self.со_снимком(), self.версии)
 				self.assertIn(f"не выполнены патчи {патч}", вывод)
 
-	def test_идёт_после_заполняющих_патчей(self):
+	def test_идёт_после_заполняющих_патчей_и_до_уборки(self):
 		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
 		свой = строки.index(patch_log.полное_имя("free_release_content"))
 		for раньше in free_release_content.ЖДЁТ:
 			with self.subTest(раньше=раньше):
 				self.assertLess(строки.index(patch_log.полное_имя(раньше)), свой)
+		self.assertLess(свой, строки.index(patch_log.полное_имя("prune_projection")))

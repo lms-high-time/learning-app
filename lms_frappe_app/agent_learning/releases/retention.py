@@ -7,8 +7,16 @@
 (`agent_frame`), удалить строки всех таблиц индекса (`ТАБЛИЦЫ_ИНДЕКСА`) и кэш
 узлов карты (`places.ключ_кэша`). Остаётся запись релиза: курс, ключ курса,
 версия, формат, дайджест, ключ документа, кто и когда опубликовал, коммит.
-Признак освобождённой версии — пустой `snapshot`. Содержимое прежней версии —
-в git по коммиту её записи.
+Признак освобождённой версии — `snapshot` NULL: освобождение пишет NULL, а
+публикация пустой строки не пишет. Отбор версий со снимком — сырым условием
+`snapshot is not null`. `Why:` фильтр Frappe `("is", "set")` сравнивает с
+`''` и читает LONGTEXT снимка целиком.
+
+Содержимое прежней версии сервер не хранит. У версии с коммитом
+(`source_commit`) его восстанавливает git по коммиту; у версии без коммита —
+нет: кандидата из истории источника проверяет дайджест — собранный из него
+релиз даёт тот же `digest`. Номер, дайджест, дату и коммит освобождённых
+версий печатает патч `free_release_content` — они остаются в логе миграции.
 
 Освобождает публикация — сразу, в своей точке сохранения после переноса
 попыток (`service.опубликовать`): откат публикации откатывает и освобождение.
@@ -32,38 +40,31 @@ from lms_frappe_app.agent_learning.releases import index, places
 ТАБЛИЦЫ_ИНДЕКСА = (index.ГЛАВА, index.УРОК, index.ЦЕЛЬ, index.ПУНКТ, index.ВОПРОС, index.РАЗДЕЛ)
 
 
-def освободить(релиз: str) -> None:
-	"""Освобождает версию `релиз`; действующий релиз своего курса — отказ, уже освобождённый — ничего."""
-	сведения = frappe.db.get_value(index.РЕЛИЗ, релиз, ["course", "digest"], as_dict=True)
-	if frappe.db.get_value("LMS Course", сведения.course, "active_release") == релиз:
-		frappe.throw(frappe._("Действующий релиз курса не освобождается"), title=frappe._("Релиз действует"))
-	if frappe.db.exists(index.РЕЛИЗ, {"name": релиз, "snapshot": ("is", "set")}):
-		_освободить({релиз: сведения.digest})
-
-
-def освободить_прежние(курс: str) -> list[str]:
-	"""Освобождает все неосвобождённые версии курса, кроме действующей; отдаёт их имена.
+def освободить_прежние(курс: str) -> list[dict]:
+	"""Освобождает все неосвобождённые версии курса, кроме действующей, и отдаёт
+	их по возрастанию версии: `name`, `version`, `digest`, `published_at`,
+	`source_commit`.
 
 	Курс без действующего релиза ничего не освобождает: такой курс только
 	удаляется целиком (`service.удалить_курс`). Отбор — одна выборка; дальше
 	одна запись в релизы и по удалению на таблицу индекса — на все версии
 	разом, а не на каждую.
 	"""
-	прежние = dict(
-		frappe.db.sql(
-			f"""
-			select r.name, r.digest
-			from `tab{index.РЕЛИЗ}` r
-			join `tabLMS Course` c on c.name = r.course
-			where r.course = %s and c.active_release is not null and r.name != c.active_release
-				and ifnull(r.snapshot, '') != ''
-			""",
-			курс,
-		)
+	прежние = frappe.db.sql(
+		f"""
+		select r.name, r.version, r.digest, r.published_at, r.source_commit
+		from `tab{index.РЕЛИЗ}` r
+		join `tabLMS Course` c on c.name = r.course
+		where r.course = %s and ifnull(c.active_release, '') != '' and r.name != c.active_release
+			and r.snapshot is not null
+		order by r.version
+		""",
+		курс,
+		as_dict=True,
 	)
 	if прежние:
-		_освободить(прежние)
-	return sorted(прежние)
+		_освободить({р.name: р.digest for р in прежние})
+	return прежние
 
 
 def _освободить(релизы: dict[str, str]) -> None:

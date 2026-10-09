@@ -5,7 +5,10 @@
 Публикация освобождает прежние версии курса сама (`retention.освободить_прежние`);
 патч освобождает накопленное до неё: у каждого курса с действующим релизом —
 все версии, кроме действующей, с непустым снимком. Освобождённые не
-выбираются: повторный запуск ничего не меняет. Итог — по курсу.
+выбираются: повторный запуск ничего не меняет. Итог — по курсу и по каждой
+освобождённой версии: номер, дайджест, дата публикации и коммит. `Why:`
+содержимого версии на сервере больше нет, и у версии без коммита лог
+миграции — то, по чему кандидата из истории источника сверяют с дайджестом.
 
 Освобождение необратимо, а заполняющие патчи этапа читают индекс прежних
 версий — `release_record_keys` (ключи на записях Learning),
@@ -39,15 +42,19 @@ def execute():
 		select distinct r.course
 		from `tab{index.РЕЛИЗ}` r
 		join `tabLMS Course` c on c.name = r.course
-		where c.active_release is not null and r.name != c.active_release
-			and ifnull(r.snapshot, '') != ''
+		where ifnull(c.active_release, '') != '' and r.name != c.active_release
+			and r.snapshot is not null
 		order by r.course
 		"""
 	)
 	for курс in курсы:
 		освобождены = retention.освободить_прежние(курс)
-		print(
-			f"free_release_content: {курс} — освобождено версий: {len(освобождены)} ({', '.join(освобождены)})"
-		)
+		print(f"free_release_content: {курс} — освобождено версий: {len(освобождены)}")
+		for версия in освобождены:
+			print(
+				f"free_release_content: {курс} — {версия.name}: версия {версия.version}, "
+				f"digest {версия.digest}, опубликована {версия.published_at}, "
+				f"коммит {версия.source_commit or 'нет'}"
+			)
 	if not курсы:
 		print("free_release_content: освобождать нечего")

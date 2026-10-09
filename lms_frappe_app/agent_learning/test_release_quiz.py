@@ -17,6 +17,7 @@ from lms_frappe_app.agent_learning import quiz, release_quiz
 from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН, ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА
 from lms_frappe_app.agent_learning.constants import (
 	АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ,
+	АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА,
 	АННУЛИРОВАНА_УРОК_СНЯТ,
 	ЗАНЯТИЕ_БРОШЕНО,
 	ЗАНЯТИЕ_ЖДЁТ_КВИЗ,
@@ -347,7 +348,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		отказ = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
 
-		self.assertEqual(отказ.подробности["reason"], АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ)
+		self.assertEqual(отказ.подробности["reason"], АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
 		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
 		self.assertFalse(
 			frappe.db.exists("Agent Quiz Event", {"attempt": попытка, "kind": ПРОВЕРКА_ОТВЕТ_ПРИНЯТ})
@@ -1042,14 +1043,17 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.assertEqual(
 			отказ.подробности,
-			{"attempt": попытка, "session": занятие, "reason": АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ},
+			{"attempt": попытка, "session": занятие, "reason": АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА},
 		)
 		self.assertIn("начата на прежней версии курса", str(отказ))
+		self.assertEqual(self.попытка(попытка).cancel_reason, АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
 		self.assertEqual(self.попытка(попытка).status, ПОПЫТКА_АННУЛИРОВАНА)
 		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
 		self.assertEqual(self.журнал(попытка)[-1], (ПРОВЕРКА_ПОПЫТКА_АННУЛИРОВАНА, None))
-		# Повтор — тот же отказ по сохранённой причине.
-		self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
+		# Повтор — тот же отказ по сохранённой причине: квиз не назван изменившимся.
+		повтор = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
+		self.assertEqual(повтор.подробности["reason"], АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
+		self.assertIn("начата на прежней версии курса", str(повтор))
 
 	def test_попытка_из_гонки_аннулируется_при_старте_и_даёт_новую(self):
 		run, занятие, попытка = self.гонка_с_публикацией()
@@ -1063,9 +1067,14 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertNotEqual(данные["attempt"], попытка)
 		self.assertEqual(
 			данные["previous_attempt_cancelled"],
-			{"attempt": попытка, "reason": АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ},
+			{"attempt": попытка, "reason": АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА},
 		)
-		self.assertEqual(self.попытка(попытка).status, ПОПЫТКА_АННУЛИРОВАНА)
+		self.assertEqual(
+			(self.попытка(попытка).status, self.попытка(попытка).cancel_reason),
+			(ПОПЫТКА_АННУЛИРОВАНА, АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА),
+		)
+		повтор = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
+		self.assertIn("начата на прежней версии курса", str(повтор))
 		новая = self.попытка(данные["attempt"])
 		self.assertEqual((новая.release, новая.attempt_number), (self.действующий(run.course), 1))
 

@@ -34,6 +34,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_ученика,
 	урок_релиза,
 )
+from lms_frappe_app.tests.test_author_page import страница
 
 ПОПЫТКА = "Agent Quiz Attempt"
 КОММИТ = "3e7a1c0d9b2f4e6a8c1d3f5b7e9a0c2d4f6b8e1a"
@@ -110,15 +111,24 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 
 	def test_действующий_не_освобождается_освобождённый_повторно_ничего(self):
 		первый = self.опубликовать()
-		with self.assertRaises(frappe.ValidationError):
-			retention.освободить(первый["release"])
+		self.assertEqual(retention.освободить_прежние(первый["course"]), [])
 		self.цел(первый["release"])
 
 		релиз = пример_релиза(self.ключ)
 		релиз["course"]["title"] = "Пример курса, второе издание"
-		второй = self.опубликовать(релиз)
-		retention.освободить(первый["release"])
+		with patch.object(retention, "освободить_прежние"):
+			второй = self.опубликовать(релиз)
+		self.цел(первый["release"])
 
+		освобождены = retention.освободить_прежние(первый["course"])
+
+		запись = frappe.db.get_value(
+			index.РЕЛИЗ, первый["release"], ["version", "digest", "published_at"], as_dict=True
+		)
+		self.assertEqual(
+			освобождены,
+			[{"name": первый["release"], **запись, "source_commit": None}],
+		)
 		self.освобождён(первый["release"])
 		self.цел(второй["release"])
 		self.assertEqual(retention.освободить_прежние(первый["course"]), [])
@@ -204,6 +214,7 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 		frappe.set_user(self.куратор)
 		заметка = authoring.add_note(course=курс, target="objective.l-1-D1", text="Цель расплывчата")
 		self.assertTrue(заметка["ok"], заметка)
+		self.заметка = заметка["data"]["id"]
 		frappe.set_user("Administrator")
 
 		v2 = self.опубликовать(без_урока(self.ключ, "l-1"))
@@ -273,5 +284,17 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 			self.assertTrue(репорты["ok"], репорты)
 			[репорт] = репорты["data"]["reports"]
 			self.assertEqual(репорт["lesson_key"], "l-1")
+
+			версии = authoring.course_releases(course=курс)
+			self.assertTrue(версии["ok"], версии)
+			история = версии["data"]["releases"]
+			self.assertEqual([р["active"] for р in история], [True] + [False] * (len(история) - 1))
+			self.assertTrue(all(р["digest"] for р in история))
+			# Кабинет автора: «История» и «Заметки» курса с освобождёнными версиями.
+			html = страница(self.куратор, course=курс, view="history")
+			for р in история:
+				self.assertIn(р["digest"][:12], html)
+			html = страница(self.куратор, course=курс, view="notes")
+			self.assertIn(f'id="note-card-{self.заметка}"', html)
 		finally:
 			frappe.set_user("Administrator")

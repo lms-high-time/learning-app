@@ -117,11 +117,11 @@
   },
   {
    "depends_on": "eval:doc.status=='Cancelled'",
-   "description": "Почему попытка аннулирована публикацией новой версии курса: квиз урока изменился или урок снят.",
+   "description": "Почему попытка аннулирована новой версией курса: квиз урока изменился, урок снят или попытка начата на прежней версии и публикация её не застала.",
    "fieldname": "cancel_reason",
    "fieldtype": "Select",
    "label": "Причина аннулирования",
-   "options": "\nquiz_changed\nlesson_removed",
+   "options": "\nquiz_changed\nlesson_removed\nattempt_outdated",
    "read_only": 1
   },
   {
@@ -193,7 +193,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-10-09 19:00:00.000000",
+ "modified": "2026-10-09 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",

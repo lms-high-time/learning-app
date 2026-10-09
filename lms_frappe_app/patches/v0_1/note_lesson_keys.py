@@ -107,8 +107,9 @@ def _по_адресу(заметка, места: dict) -> str | None:
 	Места — одни на релиз: индекс релиза читается один раз на все его заметки.
 	Релиз освобождён (`retention`) — индекса и снимка нет, ключ не найти: `None`.
 	"""
-	if not заметка.release or not frappe.db.exists(
-		"Agent Course Release", {"name": заметка.release, "snapshot": ("is", "set")}
+	# `is not null`, а не `("is", "set")`: см. `retention`.
+	if not заметка.release or not frappe.db.sql(
+		"select 1 from `tabAgent Course Release` where name = %s and snapshot is not null", заметка.release
 	):
 		return None
 	try:

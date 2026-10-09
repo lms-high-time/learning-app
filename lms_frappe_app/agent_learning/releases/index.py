@@ -338,8 +338,10 @@ def вопросы_релизов(пары: set[tuple[str, str]]) -> dict[tuple[
 	релизы = {релиз for релиз, _ in пары if релиз}
 	if not релизы:
 		return {}
-	живые = frappe.get_all(
-		РЕЛИЗ, filters={"name": ("in", list(релизы)), "snapshot": ("is", "set")}, pluck="name"
+	# `is not null`, а не `("is", "set")`: см. `retention`.
+	живые = frappe.db.sql_list(
+		f"select name from `tab{РЕЛИЗ}` where name in %(names)s and snapshot is not null",
+		{"names": tuple(релизы)},
 	)
 	if not живые:
 		return {}

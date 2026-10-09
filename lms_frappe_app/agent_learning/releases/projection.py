@@ -247,7 +247,7 @@ def вне_релиза(курс: str) -> dict[str, list[str]]:
 			select z.name
 			from `tab{doctype}` z
 			join `tabLMS Course` c on c.name = z.course
-			where z.course = %(course)s and c.active_release is not null
+			where z.course = %(course)s and ifnull(c.active_release, '') != ''
 				and not exists (
 					select 1 from `tab{строка}` r
 					where r.parenttype = %(parenttype)s and r.parent = c.active_release
