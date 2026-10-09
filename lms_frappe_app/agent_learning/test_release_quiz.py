@@ -186,6 +186,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		без_урока = пример_релиза(self.ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 		self.опубликовать(без_урока)
 		run = прохождения.прохождение(self.ученик, run.course, "l-2")
 
@@ -929,6 +930,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		без_урока = пример_релиза(self.ключ)
 		без_урока["chapters"][0]["lessons"] = ["l-1"]
 		без_урока["lessons"] = [у for у in без_урока["lessons"] if у["key"] != "l-2"]
+		del без_урока["agent"]["lessons"]["l-2"]
 
 		self.опубликовать(без_урока)
 

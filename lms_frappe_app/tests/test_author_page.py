@@ -1,6 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -384,15 +385,27 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		"""Ключи пакета агента — произвольные строки, тексты релиза и заметки —
 		текст автора: ни один не выходит в HTML тегом или концом атрибута, и
 		`<title>` тоже. В названиях глав и уроков `<` и `>` релиз не пускает
-		(`title_forbidden_chars`) — там нагрузка сущностями и кавычкой."""
+		(`title_forbidden_chars`) — там нагрузка сущностями и кавычкой.
+
+		Ключ пункта среза публикация сверяет с пунктами урока (`broken_ref`),
+		а место его заметки — якорь и атрибуты кабинета. Такой ключ кладётся в
+		срез индекса в обход проверки: так выглядел бы релиз, опубликованный до неё.
+		"""
 		релиз = отравленный_релиз(f"xss-{self.ключ}")
 		пакет = релиз["agent"]["lessons"]["l-1"]
 		пакет[ВРЕД] = "Часть пакета с таким ключом"
 		пакет["extra"] = {ВРЕД: "Запись с таким ключом"}
-		пакет["items"][ВРЕД] = "Пункт пакета с таким ключом"
 		ответ = authoring.publish_release(release=релиз)
 		self.assertTrue(ответ["ok"], ответ)
 		курс = ответ["data"]["course"]
+		строка = {
+			"parenttype": "Agent Course Release",
+			"parent": ответ["data"]["release"],
+			"lesson_key": "l-1",
+		}
+		срез = json.loads(frappe.db.get_value("Agent Release Lesson", строка, "agent"))
+		срез["items"][ВРЕД] = "Пункт пакета с таким ключом"
+		frappe.db.set_value("Agent Release Lesson", строка, "agent", json.dumps(срез, ensure_ascii=False))
 		self.assertTrue(authoring.add_note(course=курс, target="lesson.l-1", text=f"Заметка {ВРЕД}")["ok"])
 		сущности = СУЩНОСТИ.replace("&", "&amp;")
 
@@ -400,6 +413,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 			({}, сущности),
 			({"course": курс}, "Урок второй x&#34; data-x=&#34;1"),
 			({"course": курс, "view": "notes"}, "Заметка x&#34;"),
+			({"course": курс, "lesson": "l-1"}, "Пункт пакета с таким ключом"),
 			({"course": курс, "lesson": "l-1"}, "onerror=alert(1)&gt;"),
 		):
 			with self.subTest(**параметры):
@@ -507,6 +521,7 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		без_третьего = пример_релиза(self.ключ)
 		без_третьего["chapters"] = без_третьего["chapters"][:1]
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
+		del без_третьего["agent"]["lessons"]["l-3"]
 		authoring.publish_release(release=без_третьего)
 
 		с = сведения_для(self.куратор, course=self.курс, view="notes")

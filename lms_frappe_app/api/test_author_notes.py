@@ -180,6 +180,7 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		релиз["chapters"] = релиз["chapters"][:1]
 		релиз["lessons"] = релиз["lessons"][:2]
 		релиз["lessons"][1]["sections"] = ["log"]
+		del релиз["agent"]["lessons"]["l-2"]["sections"]["rules"]
 		релиз["document"]["sections"] = релиз["document"]["sections"][:1]
 		del релиз["agent"]["frame"], релиз["agent"]["learn_about_student"]
 		del релиз["agent"]["lessons"]["l-3"]
