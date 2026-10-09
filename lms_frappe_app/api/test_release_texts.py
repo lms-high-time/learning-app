@@ -34,7 +34,7 @@ def релиз_с_тегами(ключ: str) -> dict:
 
 	Названий глав, уроков, домашки и документа здесь нет: `<` и `>` в них
 	релиз не пускает (`title_forbidden_chars`). Карточка курса — с тегом: его
-	Frappe вырежет, а проверка предупредит."""
+	скобка при записи экранируется (`html_text`), а проверка предупредит."""
 	р = пример_релиза(ключ)
 	р["course"]["summary"] = f"Карточка {ТЕГ}"
 	р["course"]["promise"] = f"Обещание: {ТЕГ}"
@@ -197,7 +197,9 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 			{"code": "course_card_markup", "where": "course.summary", "chars": ["<", ">"]},
 			self.первая["warnings"],
 		)
-		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "short_introduction"), "Карточка ")
+		self.assertEqual(
+			frappe.db.get_value("LMS Course", self.курс, "short_introduction"), "Карточка &lt;role>"
+		)
 
 	def test_подсказка_блока_хранится_как_есть(self):
 		frappe.set_user("Administrator")

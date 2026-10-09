@@ -201,6 +201,29 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 			документ._sanitize_content()
 			self.assertEqual(документ.text, значение)
 
+	def test_скобка_без_тега_экранируется_хвост_цел(self):
+		"""`<`, с которого тег не сложился, становится `&lt;` — в обычном тексте
+		и в JSON; слова после него и переводы строк на месте. Разметка
+		чистится, повторное сохранение значения не меняет."""
+		for значение, ожидаемое in (
+			("если x<y, то z", "если x&lt;y, то z"),
+			("List<String> items", "List&lt;String> items"),
+			("<img src=x onerror=a()//\nx", "&lt;img src=x onerror=a()//\nx"),
+			('"x<y и дальше"', '"x&lt;y и дальше"'),
+			('["List<String> items"]', '["List&lt;String> items"]'),
+			('"<img src=x onerror=a()>"', '"<img src="x">"'),
+			("<b>жирно</b> и x<y & z", "<b>жирно</b> и x&lt;y &amp; z"),
+			("<img src=x onerror=a()//<br>хвост", "&lt;img src=x onerror=a()//<br>хвост"),
+		):
+			with self.subTest(значение):
+				документ = frappe.new_doc("Agent Student Note")
+				документ.text = значение
+				for _ in range(2):
+					html_text.очистить(документ)
+					документ._sanitize_content()
+					self.assertEqual(документ.text, ожидаемое)
+				self.assertEqual(html_text.очищенный(значение), ожидаемое)
+
 	def test_markdown_не_в_таблице_формы(self):
 		"""Таблица формы экранирует Data и простой текст, а Markdown Editor
 		выводит запасным форматтером Data — без экранирования."""
@@ -267,31 +290,35 @@ class IntegrationTestТекстУченикаКакJSON(IntegrationTestCase):
 		self.assertEqual(исполнимое(frappe.get_print(doctype, name)), [])
 
 	def test_блок_документа(self):
-		текст = "Цель: " + нагрузка("Agent Artifact Content", "content", "незакрытый")
+		текст = нагрузка("Agent Artifact Content", "content", "незакрытый")
 		self.assertTrue(student.update_artifact(self.курс, "summary", "goal", текст)["ok"])
 
 		имя = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "artifact": "summary"})
-		self.assertTrue(frappe.db.get_value("Agent Artifact Content", {"parent": имя}, "content"))
+		сохранено = frappe.db.get_value("Agent Artifact Content", {"parent": имя}, "content")
+		self.assertEqual(сохранено, "&lt;" + текст[1:])
 		self.проверить("Agent Student Artifact", имя)
 
 	def test_заметка(self):
 		ключ = нагрузка("Agent Student Note", "note_key")
-		текст = "Роль: " + нагрузка("Agent Student Note", "text", "незакрытый")
+		текст = нагрузка("Agent Student Note", "text", "незакрытый")
 		ответ = student.remember(kind="fact", key=ключ, text=текст)
 
 		self.assertTrue(ответ["ok"], ответ)
-		self.проверить(
-			"Agent Student Note", frappe.db.get_value("Agent Student Note", {"student": self.ученик})
-		)
+		имя = frappe.db.get_value("Agent Student Note", {"student": self.ученик})
+		self.assertEqual(frappe.db.get_value("Agent Student Note", имя, "text"), "&lt;" + текст[1:])
+		self.проверить("Agent Student Note", имя)
 
 	def test_ключ_заметки_со_скобкой_находится(self):
-		"""Ключ без начала тега хранится как передан: повторная запись по нему
-		замещает заметку, а `forget` её находит."""
-		ключ = "цена < 100"
-		student.remember(kind="fact", key=ключ, text="первая")
-		student.remember(kind="fact", key=ключ, text="вторая")
+		"""Повторная запись по ключу со скобкой замещает заметку, а `forget` её
+		находит: ключ запроса приводится так же, как сохранённый."""
+		# `<` с кириллицей тега не начинает — и в браузере тоже: имя тега латинское.
+		for ключ, сохранён in (("цена < 100", "цена < 100"), ("цена<сто", "цена<сто"), ("x<y", "x&lt;y")):
+			with self.subTest(ключ):
+				frappe.set_user(self.ученик)
+				student.remember(kind="fact", key=ключ, text="первая")
+				student.remember(kind="fact", key=ключ, text="вторая")
 
-		записи = frappe.get_all("Agent Student Note", {"student": self.ученик}, ["note_key", "text"])
-		self.assertEqual([(з.note_key, з.text) for з in записи], [(ключ, "вторая")])
-		self.assertTrue(student.forget(key=ключ)["ok"])
-		self.assertFalse(frappe.db.exists("Agent Student Note", {"student": self.ученик}))
+				записи = frappe.get_all("Agent Student Note", {"student": self.ученик}, ["note_key", "text"])
+				self.assertEqual([(з.note_key, з.text) for з in записи], [(сохранён, "вторая")])
+				self.assertTrue(student.forget(key=ключ)["ok"])
+				self.assertFalse(frappe.db.exists("Agent Student Note", {"student": self.ученик}))
