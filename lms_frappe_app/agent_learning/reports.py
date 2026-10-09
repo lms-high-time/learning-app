@@ -11,6 +11,7 @@
 
 import frappe
 
+from lms_frappe_app.agent_learning.constants import ОТКРЫТЫЕ_РЕПОРТЫ, СТАТУСЫ_РЕПОРТОВ
 from lms_frappe_app.agent_learning.errors import Отказ
 
 РЕПОРТ = "Agent Course Report"
@@ -72,3 +73,19 @@ def проверить_оригинал(репорт: str | None, курс: str,
 	if курс_оригинала != курс:
 		raise Отказ(НЕВЕРНЫЙ_ОРИГИНАЛ, "Оригинал — репорт другого курса", duplicate_of=оригинал)
 	return оригинал
+
+
+def снять_прежний_итог(репорт, прежний) -> None:
+	"""Смена статуса пишет итог заново: `duplicate_of` остаётся только у дубля,
+	а открытый репорт теряет ответ, который этим сохранением не переписан.
+
+	`Why:` ученик видит `resolution` в `my_reports` рядом со статусом, и
+	переоткрытый репорт показывал бы прежний итог за действующий. Так делает
+	`resolve_report`, и так же — запись при смене статуса в Desk.
+	"""
+	if прежний is None or репорт.status == прежний.status:
+		return
+	if репорт.status != СТАТУСЫ_РЕПОРТОВ["duplicate"]:
+		репорт.duplicate_of = None
+	if репорт.status in ОТКРЫТЫЕ_РЕПОРТЫ and (репорт.resolution or None) == (прежний.resolution or None):
+		репорт.resolution = None

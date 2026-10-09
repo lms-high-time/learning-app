@@ -7,8 +7,9 @@ from frappe.model.document import Document
 from lms_frappe_app.agent_learning import notes
 from lms_frappe_app.agent_learning.errors import Отказ
 
-#: Поля, которые ставит `add_note`: курс, релиз и место по его ключам и кто
-#: пишет. У существующей заметки они не меняются ни на каком пути записи.
+#: Курс, релиз, место в курсе и кто пишет. Их ставит `add_note`, и у
+#: существующей заметки они не меняются ни на каком пути записи; текст и
+#: цитата правятся.
 ПОЛЯ_ПРИВЯЗКИ = ("course", "release", "lesson_key", "target", "via")
 
 

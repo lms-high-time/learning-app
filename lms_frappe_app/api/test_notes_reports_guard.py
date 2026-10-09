@@ -339,6 +339,15 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		frappe.db.set_value(РЕПОРТ, репорт, {"status": "Fixed", "resolution": "Ответ другого курса", **поля})
 		return репорт
 
+	def репорт_того_же_курса(self) -> str:
+		"""Закрытый репорт соседа по тому же уроку — оригинал для дубля."""
+		frappe.set_user(self.сосед)
+		ответ = student.report_issue(session=self.чужое_занятие, kind="stuck", text="Встал")
+		frappe.set_user("Administrator")
+		репорт = ответ["data"]["report"]
+		frappe.db.set_value(РЕПОРТ, репорт, {"status": "Fixed", "resolution": "Ответ оригинала"})
+		return репорт
+
 	def мои_репорты(self) -> list[dict]:
 		frappe.set_user(self.ученик)
 		репорты = student.my_reports(course=self.курс)["data"]["reports"]
@@ -352,10 +361,36 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		with self.assertRaisesRegex(frappe.ValidationError, "перейти нельзя"):
 			set_value(РЕПОРТ, self.репорт, "status", "Rejected")
 		set_value(РЕПОРТ, self.репорт, "status", "In Progress")
-		set_value(РЕПОРТ, self.репорт, "status", "Rejected")
+		set_value(РЕПОРТ, self.репорт, {"status": "Rejected", "resolution": "Так задумано"})
 
 		frappe.set_user("Administrator")
 		self.assertEqual(frappe.db.get_value(РЕПОРТ, self.репорт, "status"), "Rejected")
+
+	def test_модератор_переоткрывает_без_итога(self):
+		frappe.set_user(self.модератор)
+		сохранить(РЕПОРТ, self.репорт, status="Fixed", resolution="Поправили пример")
+		self.assertEqual([р["resolution"] for р in self.мои_репорты()], ["Поправили пример"])
+		frappe.set_user(self.модератор)
+
+		set_value(РЕПОРТ, self.репорт, "status", "In Progress")
+
+		frappe.set_user("Administrator")
+		self.assertIsNone(frappe.db.get_value(РЕПОРТ, self.репорт, "resolution"))
+		(мой,) = self.мои_репорты()
+		self.assertEqual((мой["status"], мой["resolution"]), ("in_progress", None))
+
+	def test_переоткрытый_дубль_теряет_оригинал(self):
+		оригинал = self.репорт_того_же_курса()
+		frappe.set_user(self.модератор)
+		set_value(РЕПОРТ, self.репорт, {"status": "Duplicate", "duplicate_of": оригинал})
+		self.assertEqual([р["resolution"] for р in self.мои_репорты()], ["Ответ оригинала"])
+		frappe.set_user(self.модератор)
+
+		set_value(РЕПОРТ, self.репорт, "status", "In Progress")
+
+		frappe.set_user("Administrator")
+		self.assertIsNone(frappe.db.get_value(РЕПОРТ, self.репорт, "duplicate_of"))
+		self.assertEqual([р["resolution"] for р in self.мои_репорты()], [None])
 
 	def test_модератор_в_desk_не_закрывает_без_ответа(self):
 		"""Ответ закрытого репорта меняется, а пустым не становится."""

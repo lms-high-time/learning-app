@@ -80,8 +80,10 @@ class IntegrationTestAgentCourseReport(IntegrationTestCase):
 		репорт.status = "In Progress"
 		репорт.save()
 		self.assertIsNone(репорт.resolved_at)
+		self.assertIsNone(репорт.resolution, "переоткрытый репорт не держит прежний итог")
 
 		репорт.status = "Rejected"
+		репорт.resolution = "Так задумано"
 		репорт.save()
 		self.assertTrue(репорт.resolved_at)
 		self.assertIsNone(репорт.student_notified_at)
