@@ -20,6 +20,7 @@
   "sb_result",
   "status",
   "cancel_reason",
+  "cancel_reported",
   "score",
   "passed",
   "objective_results",
@@ -125,6 +126,15 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "depends_on": "eval:doc.status=='Cancelled'",
+   "description": "Агент узнал об аннулировании: отказом на ответ в эту попытку или полем previous_attempt_cancelled новой попытки. Второй раз о ней не сообщается.",
+   "fieldname": "cancel_reported",
+   "fieldtype": "Check",
+   "label": "Агенту сообщено",
+   "read_only": 1
+  },
+  {
    "fieldname": "score",
    "fieldtype": "Float",
    "label": "Доля верных",
@@ -193,7 +203,7 @@
    "link_fieldname": "attempt"
   }
  ],
- "modified": "2026-10-09 21:00:00.000000",
+ "modified": "2026-10-09 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Attempt",
