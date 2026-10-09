@@ -18,12 +18,17 @@ import json
 import frappe
 
 from lms_frappe_app.agent_learning.artifacts.course import записать_схему, проверить_схему
+from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 
 ДОКУМЕНТ = "Agent Course Artifact"
 БЛОК = "Agent Artifact Block"
 #: Поля блока, по которым схема из релиза сверяется с действующей версией.
 ПОЛЯ_БЛОКА = ("block_key", "title", "description", "hint", "lesson", "span", "kind", "accept", "spec")
 РАСКЛАДКА = "sections"
+#: Флаги записи схемы публикацией. `Why:` у Course Creator на схемы только
+#: чтение, а мимо публикации схему курса из релиза не правит никто
+#: (`course_guard.проверить_документ`, learning-services#526).
+ФЛАГИ_ЗАПИСИ = {ИЗ_РЕЛИЗА: True, "ignore_permissions": True}
 
 
 def спроецировать(
@@ -53,7 +58,14 @@ def спроецировать(
 	if действующая and _та_же(действующая, документ, блоки):
 		return {"artifact": документ["key"], "version": действующая.version}
 	версия = записать_схему(
-		курс, документ["key"], документ["title"], блоки, РАСКЛАДКА, None, purpose=документ["purpose"]
+		курс,
+		документ["key"],
+		документ["title"],
+		блоки,
+		РАСКЛАДКА,
+		None,
+		purpose=документ["purpose"],
+		флаги=ФЛАГИ_ЗАПИСИ,
 	)
 	return {"artifact": версия["slug"], "version": версия["version"]}
 

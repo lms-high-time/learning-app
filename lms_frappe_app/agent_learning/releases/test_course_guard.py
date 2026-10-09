@@ -4,7 +4,7 @@
 """Курс из релиза правит только публикация (learning-services#500, #512, #526).
 
 Поля релиза у `LMS Course`, порядок глав курса, хуки `validate` и `on_trash`
-у `Course Chapter` и `Course Lesson`, удаление строк оглавления, переименование;
+у `Course Chapter` и `Course Lesson`, вставка и удаление строк оглавления, переименование;
 домашки и схема документа курса и права Course Creator на них.
 Пути — те, которыми ходят Desk и Learning: `frappe.client`, `frappe.delete_doc`,
 `delete_documents`.
@@ -26,7 +26,7 @@ from lms_frappe_app.agent_learning.doctype.agent_course_release.test_agent_cours
 )
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 from lms_frappe_app.agent_learning.releases import service
-from lms_frappe_app.agent_learning.releases.course_guard import ДОКУМЕНТ, ДОМАШКА
+from lms_frappe_app.agent_learning.releases.course_guard import ДОКУМЕНТ
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	курс_из_релиза,
@@ -38,6 +38,7 @@ from lms_frappe_app.tests.sample_data import (
 	урок_релиза,
 )
 
+ДОМАШКА = "Agent Lesson Homework"
 БЛОК_СХЕМЫ = "Agent Artifact Block"
 БЛОК = {"key": "notes", "title": "Заметки"}
 
@@ -46,8 +47,10 @@ def права_из_файла(тест, *doctypes: str) -> None:
 	"""Права доктайпов на время теста — из их файлов `.json`, а не из базы сайта.
 
 	`Why:` права в базе меняет только `migrate`, а тест проверяет права, с
-	которыми доктайп уходит в приложение. Подмена — в метаданных процесса:
-	базу и общий кэш она не трогает. На свежем сайте права совпадают с файлом.
+	которыми доктайп уходит в приложение. Подменяется список прав в объекте
+	меты доктайпа — он общий для всего процесса тестов, поэтому подмена
+	снимается в конце теста вместе с кэшем прав ролей. Права в базе сайта она
+	не меняет. На свежем сайте права совпадают с файлом.
 	"""
 	тест.addCleanup(setattr, frappe.local, "role_permissions", {})
 	for doctype in doctypes:
@@ -231,6 +234,47 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		frappe.set_user("Administrator")
 		self.assertTrue(frappe.db.exists("Chapter Reference", глава))
 		self.assertTrue(frappe.db.exists("Lesson Reference", урок))
+
+	def test_строку_оглавления_курса_из_релиза_не_вставить(self):
+		"""`POST /api/resource` со строкой вставляет её по праву `create` на родителе,
+		мимо `validate` курса и главы; строку курса без релиза — можно."""
+		куратор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com")
+		вторая = frappe.get_doc(
+			{"doctype": "Course Chapter", "course": self.свободный_курс, "title": "Вторая"}
+		).insert()
+		другой_урок = frappe.get_doc(
+			{"doctype": "Course Lesson", "chapter": self.свободная_глава, "title": "Другой"}
+		).insert()
+
+		def глава(курс: str):
+			return frappe.new_doc(
+				"Chapter Reference",
+				parent=курс,
+				parenttype="LMS Course",
+				parentfield="chapters",
+				chapter=вторая.name,
+			)
+
+		def урок(глава_: str):
+			return frappe.new_doc(
+				"Lesson Reference",
+				parent=глава_,
+				parenttype="Course Chapter",
+				parentfield="lessons",
+				lesson=другой_урок.name,
+			)
+
+		frappe.set_user(куратор)
+		self.отказ(глава(self.курс).insert)
+		self.отказ(урок(self.глава).insert)
+		глава(self.свободный_курс).insert()
+		урок(self.свободная_глава).insert()
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists("Chapter Reference", {"parent": self.курс, "chapter": вторая.name}))
+		self.assertFalse(
+			frappe.db.exists("Lesson Reference", {"parent": self.глава, "lesson": другой_урок.name})
+		)
 
 	def test_строку_оглавления_курса_без_релиза_удалить_можно(self):
 		модератор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com", "Moderator")
@@ -453,6 +497,36 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 		frappe.set_user("Administrator")
 		self.assertTrue(frappe.db.exists(БЛОК_СХЕМЫ, строка))
 		self.assertTrue(frappe.db.exists(ДОКУМЕНТ, self.схема))
+
+	def test_строку_схемы_курса_из_релиза_не_вставить_и_не_править(self):
+		"""`POST /api/resource` и `PUT` строки: вставка и правка строки по праву на
+		схеме, мимо её `validate`; строку схемы курса без релиза — можно."""
+
+		def строка(схема: str):
+			return frappe.new_doc(
+				БЛОК_СХЕМЫ,
+				parent=схема,
+				parenttype=ДОКУМЕНТ,
+				parentfield="blocks",
+				block_key="extra",
+				title="Лишний",
+			)
+
+		прежняя = frappe.get_doc(БЛОК_СХЕМЫ, frappe.db.get_value(БЛОК_СХЕМЫ, {"parent": self.схема}, "name"))
+		for кто in (self.модератор, "Administrator"):
+			frappe.set_user(кто)
+			with self.subTest(кто=кто):
+				self.отказ(строка(self.схема).insert)
+				правка = frappe.get_doc(БЛОК_СХЕМЫ, прежняя.name)
+				правка.title = "Правка мимо релиза"
+				self.отказ(правка.save)
+		frappe.set_user(self.модератор)
+		строка(self.свободная_схема).insert()
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": self.схема, "block_key": "extra"}))
+		self.assertEqual(frappe.db.get_value(БЛОК_СХЕМЫ, прежняя.name, "title"), прежняя.title)
+		self.assertTrue(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": self.свободная_схема, "block_key": "extra"}))
 
 	def test_курс_без_релиза_правят_модератор_и_администратор(self):
 		for кто in (self.модератор, self.админ):

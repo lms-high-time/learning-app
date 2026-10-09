@@ -14,8 +14,8 @@
 курс, чужой релиз подменил бы программу.
 
 Структура курса из релиза — главы, уроки и их порядок — тоже за публикацией:
-хуки `validate` и `on_trash` у `Course Chapter` и `Course Lesson`, `on_trash` у
-строк оглавления (`проверить_ссылку`), `before_rename` у курса, главы и урока
+хуки `validate` и `on_trash` у `Course Chapter` и `Course Lesson` и у строк
+оглавления (`проверить_ссылку`), `before_rename` у курса, главы и урока
 (`проверить_переименование`), порядок глав в `проверить_курс`, методы
 редактора Learning — в `learning_editor`. Карточка курса (название, описание,
 публикация) правится как раньше.
@@ -23,8 +23,9 @@
 Домашки уроков и схема документа курса из релиза — проекции релиза, как главы
 и уроки (learning-services#526): хуки `validate` и `on_trash` у
 `Agent Lesson Homework` и `Agent Course Artifact` (`проверить_домашку`,
-`проверить_документ`), `on_trash` у строк схемы (`проверить_блок`),
-`before_rename` у схемы.
+`проверить_документ`) и у строк схемы (`проверить_блок`), `before_rename` у
+схемы. Сломанную схему курса из релиза выключает новый релиз или консоль
+(`frappe.db.set_value(..., "is_active", 0)`).
 
 `Why:` правка по кусочку разошлась бы с действующим релизом: индекс релиза, по
 которому учат агент и квиз, её не увидел бы, а следующая публикация молча
@@ -39,7 +40,6 @@ from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_rel
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 
 РЕЛИЗ = "Agent Course Release"
-ДОМАШКА = "Agent Lesson Homework"
 ДОКУМЕНТ = "Agent Course Artifact"
 #: Флаг записи курса, главы, урока, домашки или схемы документа, которым сервис
 #: публикации помечает свою запись.
@@ -94,21 +94,28 @@ def проверить_структуру(doc, method=None) -> None:
 
 
 def проверить_ссылку(doc, method=None) -> None:
-	"""Хук `on_trash` у `Chapter Reference` и `Lesson Reference`: строку
-	оглавления курса из релиза не удалить саму по себе.
+	"""Хук `validate` и `on_trash` у `Chapter Reference` и `Lesson Reference`:
+	строку оглавления курса из релиза не вставить, не править и не удалить саму
+	по себе.
 
 	`Why:` Desk (`delete_items`) и `delete_documents` Learning удаляют строку
 	`frappe.delete_doc` с проверкой права `delete` на родителе, а оно у Course
 	Creator есть: глава или урок выпали бы из оглавления мимо `validate` курса
-	и главы. Строки, которые снимает сохранение родителя (проекция релиза), и
-	`frappe.db.delete` (`delete_course` Learning) этот хук не вызывают: первые
-	проверяет `validate` родителя, вторые идут удалением курса целиком.
+	и главы. `POST /api/resource` со строкой (`parent`, `parenttype`,
+	`parentfield`) вставляет её по праву `create` на родителе — тоже мимо его
+	`validate`. Строки, которые пишет и снимает сохранение родителя (проекция
+	релиза), и `frappe.db.delete` (`delete_course` Learning) этот хук не
+	вызывают: первые проверяет `validate` родителя, вторые идут удалением курса
+	целиком.
 	"""
-	if doc.parenttype == "LMS Course":
-		курс = doc.parent
-	else:
-		курс = frappe.db.get_value("Course Chapter", doc.parent, "course")
-	запретить_правку(курс)
+	прежний = doc.get_doc_before_save()
+	запретить_правку(_курс_ссылки(doc), _курс_ссылки(прежний) if прежний else None)
+
+
+def _курс_ссылки(строка) -> str | None:
+	if строка.parenttype == "LMS Course":
+		return строка.parent
+	return frappe.db.get_value("Course Chapter", строка.parent, "course")
 
 
 def проверить_домашку(doc, method=None) -> None:
@@ -137,16 +144,23 @@ def проверить_документ(doc, method=None) -> None:
 
 
 def проверить_блок(doc, method=None) -> None:
-	"""Хук `on_trash` у `Agent Artifact Block`: строку схемы документа курса из
-	релиза не удалить саму по себе.
+	"""Хук `validate` и `on_trash` у `Agent Artifact Block`: строку схемы документа
+	курса из релиза не вставить, не править и не удалить саму по себе.
 
 	`Why:` то же, что у строк оглавления (`проверить_ссылку`): `delete_items` Desk
-	удаляет строку `frappe.delete_doc` с проверкой права на схеме, а оно у
-	Moderator есть. Строки, которые снимает сохранение схемы, проверяет
-	`validate` схемы.
+	удаляет строку, а `POST /api/resource` вставляет её по праву на схеме, а оно
+	у Moderator есть. Строки, которые пишет и снимает сохранение схемы, этот хук
+	не вызывают: их проверяет `validate` схемы. У новой схемы родителя в базе
+	ещё нет — и курса тоже.
 	"""
-	if doc.parenttype == ДОКУМЕНТ:
-		запретить_правку(frappe.db.get_value(ДОКУМЕНТ, doc.parent, "course"), текст=_текст_проекции())
+	прежний = doc.get_doc_before_save()
+	запретить_правку(*(_курс_блока(строка) for строка in (doc, прежний) if строка), текст=_текст_проекции())
+
+
+def _курс_блока(строка) -> str | None:
+	if строка.parenttype != ДОКУМЕНТ:
+		return None
+	return frappe.db.get_value(ДОКУМЕНТ, строка.parent, "course")
 
 
 def проверить_переименование(doc, method=None, old=None, new=None, merge=False) -> None:

@@ -185,8 +185,11 @@ def как_из_релиза(документ):
 
 def создать_домашку(lesson: str, **поля):
 	"""Домашнее задание урока (learning-services#439); поля по умолчанию — без срока.
-	Урок может быть и уроком курса из релиза: задание пишется как публикацией."""
-	return как_из_релиза(
+	Урок может быть и уроком курса из релиза: задание пишется как публикацией,
+	а отданный документ пометки публикации уже не несёт."""
+	from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
+
+	задание = как_из_релиза(
 		frappe.get_doc(
 			{
 				"doctype": "Agent Lesson Homework",
@@ -197,6 +200,8 @@ def создать_домашку(lesson: str, **поля):
 			}
 		)
 	).insert(ignore_permissions=True)
+	задание.flags[ИЗ_РЕЛИЗА] = False
+	return задание
 
 
 def зачислить(ученик: str, lesson: str) -> str:
@@ -283,14 +288,17 @@ def схема_документа(
 
 	Схему документа курса пишет релиз, но его разделы — только текст; файлы,
 	ссылки, формулы и холст движка документов тестам нужны и без него. Пишется
-	тем же `записать_схему`, что и у релиза.
+	тем же `записать_схему` и с теми же флагами, что и у релиза.
 	"""
 	from lms_frappe_app.agent_learning.artifacts.course import записать_схему
+	from lms_frappe_app.agent_learning.releases.document import ФЛАГИ_ЗАПИСИ
 	from lms_frappe_app.api import контракт, список
 
 	@контракт
 	def записать() -> dict:
-		версия = записать_схему(course, artifact, title, список(blocks), layout, canvas, purpose=purpose)
+		версия = записать_схему(
+			course, artifact, title, список(blocks), layout, canvas, purpose=purpose, флаги=ФЛАГИ_ЗАПИСИ
+		)
 		return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
 
 	return записать()
