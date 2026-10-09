@@ -190,7 +190,7 @@ jobs:
       - name: Прогнать тесты
         working-directory: /home/runner/frappe-bench/sites
         run: >-
-          ../env/bin/python "$GITHUB_WORKSPACE/.github/scripts/run_tests_part.py"
+          /home/runner/frappe-bench/env/bin/python "$GITHUB_WORKSPACE/.github/scripts/run_tests_part.py"
           test.local lms_frappe_app ${{ matrix.part }} ${{ strategy.job-total }}
 
   # Итог частей под именем обязательной проверки ветки master. Why: правило

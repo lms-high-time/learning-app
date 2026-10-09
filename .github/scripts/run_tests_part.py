@@ -1,13 +1,15 @@
 """Прогон одной части серверных тестов на машине CI-матрицы.
 
-Запуск из каталога `sites` bench интерпретатором окружения bench:
+Запуск из каталога `sites` интерпретатором окружения bench:
 
-    ../env/bin/python run_tests_part.py <сайт> <приложение> <часть> <всего частей>
+    <bench>/env/bin/python run_tests_part.py <сайт> <приложение> <часть> <всего частей>
 
 Модули с тестами ищутся по тем же правилам, что у `bench run-tests`, и
-раскладываются по частям по числу `def test_` в файле: самый тяжёлый модуль —
-в самую лёгкую часть. Раскладка зависит только от файлов, поэтому каждая
-машина считает её одинаково, и модуль попадает ровно в одну часть.
+раскладываются по весу: самый тяжёлый модуль — в самую лёгкую часть. Вес —
+число `def test_` в модуле с интеграционными тестами, у остальных — единица:
+юнит-тесты идут миллисекунды, время части делают интеграционные. Раскладка
+зависит только от файлов, поэтому каждая машина считает её одинаково, и
+модуль попадает ровно в одну часть.
 
 Why: `bench run-parallel-tests` гоняет тесты другим раннером — без деления на
 unit и integration и без подготовки интеграционных тестов, которую делает
@@ -25,7 +27,7 @@ SKIP_DIRS = {"node_modules", "locals", "public", "__pycache__"}
 
 
 def test_modules(app: str) -> dict[str, int]:
-	"""Модули с тестами приложения и их вес — число `def test_` в файле."""
+	"""Модули с тестами приложения и их вес."""
 	app_path = Path(importlib.import_module(app).__path__[0])
 	modules = {}
 	for path, folders, files in os.walk(app_path):
@@ -36,7 +38,9 @@ def test_modules(app: str) -> dict[str, int]:
 			if filename.startswith("test_") and filename.endswith(".py") and filename != "test_runner.py":
 				file = Path(path, filename)
 				name = ".".join(file.relative_to(app_path.parent).with_suffix("").parts)
-				modules[name] = max(file.read_text().count("def test_"), 1)
+				source = file.read_text()
+				weight = source.count("def test_") if "IntegrationTestCase" in source else 0
+				modules[name] = max(weight, 1)
 	return modules
 
 
