@@ -57,7 +57,7 @@ from lms_frappe_app.agent_learning.releases import index, projection
 )
 
 
-def по_истории(курс: str) -> dict[str, dict[str, str]]:
+def _по_истории(курс: str) -> dict[str, dict[str, str]]:
 	"""Ключ → запись Learning по индексам всех версий курса; свежая версия главнее."""
 	версии = {
 		р.name: р.version
@@ -90,7 +90,7 @@ def execute():
 
 def заполнить(курс: str) -> dict[str, int]:
 	"""Ключи записей курса по истории его релизов; сколько записано по видам."""
-	история = по_истории(курс)
+	история = _по_истории(курс)
 	записано = {}
 	for вид, _, _, _, doctype in ВИДЫ:
 		поле = projection.ПОЛЕ_КЛЮЧА[doctype]

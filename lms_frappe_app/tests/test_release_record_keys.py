@@ -211,6 +211,7 @@ class IntegrationTestИндексКлючейПроекции(IntegrationTestCas
 				self.assertEqual(
 					[(с.Column_name, с.Non_unique) for с in sorted(строки, key=lambda с: с.Seq_in_index)],
 					[("course", 0), (поле, 0)],
+					"индекса нет — bench migrate",
 				)
 
 	def test_при_установке_индекс_заводит_after_sync(self):

@@ -21,7 +21,12 @@ DDL = f"ALTER TABLE `tab{ЗАМЕТКА}` DROP COLUMN IF EXISTS `lesson`"
 
 
 class IntegrationTestКлючиУроковЗаметок(IntegrationTestCase):
-	"""Курс из релиза и заметки, какими их оставила прежняя версия: урок — ссылкой."""
+	"""Курс из релиза и заметки, какими их оставила прежняя версия: урок — ссылкой.
+
+	Запись урока `l-3` без ключа — урок проиграл соответствие в
+	`release_record_keys`: заметка с релизом получает ключ по адресу в индексе
+	релиза, а заметка без релиза (архивная, курса без релиза) остаётся без
+	ключа."""
 
 	def setUp(self):
 		self.курс, self.релиз = курс_из_релиза()
@@ -29,17 +34,23 @@ class IntegrationTestКлючиУроковЗаметок(IntegrationTestCase):
 		frappe.db.set_value("Course Lesson", третий, "lesson_key", None)
 		self.пустая = self.заметка("lesson.l-1", None)
 		self.заполненная = self.заметка("lesson.l-2", "l-2")
-		self.урок_без_ключа = self.заметка("lesson.l-3", None)
+		self.урок_без_ключа = self.заметка("goal.l-3/term:T1", None)
+		self.без_релиза = self.заметка("lesson.l-3", None, релиз=None)
 		self.без_урока = self.заметка("course", None)
-		self.уроки = [(self.пустая, первый), (self.заполненная, первый), (self.урок_без_ключа, третий)]
+		self.уроки = [
+			(self.пустая, первый),
+			(self.заполненная, первый),
+			(self.урок_без_ключа, третий),
+			(self.без_релиза, третий),
+		]
 
-	def заметка(self, target: str, ключ: str | None) -> str:
+	def заметка(self, target: str, ключ: str | None, релиз: str | None = "") -> str:
 		return (
 			frappe.get_doc(
 				{
 					"doctype": ЗАМЕТКА,
 					"course": self.курс,
-					"release": self.релиз,
+					"release": self.релиз if релиз == "" else релиз,
 					"lesson_key": ключ,
 					"target": target,
 					"status": "open",
@@ -75,13 +86,41 @@ class IntegrationTestКлючиУроковЗаметок(IntegrationTestCase):
 
 		self.assertEqual(
 			self.ключи(),
-			{self.пустая: "l-1", self.заполненная: "l-2", self.урок_без_ключа: None, self.без_урока: None},
+			{
+				self.пустая: "l-1",
+				self.заполненная: "l-2",
+				self.урок_без_ключа: "l-3",
+				self.без_релиза: None,
+				self.без_урока: None,
+			},
 		)
 		self.assertEqual(схема.ddl, [DDL])
 		self.assertNotIn("lesson", схема.таблицы[ЗАМЕТКА])
-		self.assertIn(f"note_lesson_keys: {self.курс} — ключей записано 1, урок без ключа у 1", первый)
-		self.assertIn("note_lesson_keys: колонка lesson удалена", первый)
+		итог = (
+			f"note_lesson_keys: {self.курс} — ключей записано 2 (по адресу в релизе заметки 1), "
+			"урок без ключа у 1"
+		)
+		self.assertIn(итог, первый)
+		self.assertLess(первый.index(итог), первый.index("note_lesson_keys: колонка lesson удалена"))
 		self.assertEqual(второй, "note_lesson_keys: колонки lesson нет — заполнять нечего\n")
+
+	def test_запасной_путь_по_адресу_в_релизе_заметки(self):
+		"""Запись урока без ключа: ключ — по адресу в индексе релиза заметки, как у `add_note`;
+		адрес, которого в релизе нет, и неразборчивый адрес ключа не дают."""
+		отметить_патч(note_lesson_keys.ЖДЁТ, "выполнен")
+		третий = урок_релиза(self.курс, "l-3")
+		по_адресу = {
+			self.заметка("question.S1/l-3-D1", None): "l-3",
+			self.заметка("agent.lesson.l-3", None): "l-3",
+			self.заметка("lesson.l-9", None): None,
+			self.заметка("урок 3", None): None,
+		}
+
+		with self.старый_сайт().подменить({ЧТЕНИЕ_УРОКОВ: [(имя, третий) for имя in по_адресу]}):
+			выполнить(note_lesson_keys)
+
+		ключи = self.ключи()
+		self.assertEqual({имя: ключи[имя] for имя in по_адресу}, по_адресу)
 
 	def test_колонка_ждёт_ключей_на_уроках(self):
 		"""`--skip-failing`: `release_record_keys` упал — ключи заметок
@@ -100,7 +139,11 @@ class IntegrationTestКлючиУроковЗаметок(IntegrationTestCase):
 		self.assertIn(
 			"note_lesson_keys: колонка lesson оставлена — патч release_record_keys ещё не выполнен", первый
 		)
-		self.assertIn(f"note_lesson_keys: {self.курс} — ключей записано 0, урок без ключа у 1", повтор)
+		self.assertIn(
+			f"note_lesson_keys: {self.курс} — ключей записано 0 (по адресу в релизе заметки 0), "
+			"урок без ключа у 1",
+			повтор,
+		)
 
 		отметить_патч(note_lesson_keys.ЖДЁТ, "выполнен")
 		with схема.подменить({ЧТЕНИЕ_УРОКОВ: self.уроки}):
