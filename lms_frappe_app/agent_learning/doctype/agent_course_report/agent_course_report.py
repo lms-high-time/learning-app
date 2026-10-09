@@ -5,7 +5,9 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning.constants import ЗАКРЫТЫЕ_РЕПОРТЫ, ИМЯ_СТАТУСА_РЕПОРТА, ПЕРЕХОДЫ_РЕПОРТА
+from lms_frappe_app.agent_learning import reports
+from lms_frappe_app.agent_learning.constants import ЗАКРЫТЫЕ_РЕПОРТЫ, ИМЯ_СТАТУСА_РЕПОРТА
+from lms_frappe_app.agent_learning.errors import Отказ
 
 #: Поля, которые ставит `report_issue` из занятия и жалобы агента. У
 #: существующего репорта они не меняются ни на каком пути записи.
@@ -35,7 +37,10 @@ class AgentCourseReport(Document):
 		прежний = self.get_doc_before_save()
 		if прежний:
 			self._привязка_не_меняется(прежний)
-			self._проверить_переход(прежний)
+		try:
+			self._проверить_разбор(прежний)
+		except Отказ as отказ:
+			frappe.throw(отказ.сообщение, exc=отказ, title=frappe._("Репорт агента"))
 		self._отметить_итог()
 
 	def _привязка_не_меняется(self, прежний):
@@ -55,20 +60,21 @@ class AgentCourseReport(Document):
 					title=frappe._("Репорт агента"),
 				)
 
-	def _проверить_переход(self, прежний):
-		"""Статус меняется по `ПЕРЕХОДЫ_РЕПОРТА` и в Desk: правило то же, что у
-		`resolve_report`, — закрытый репорт только переоткрывают."""
-		if self.status == прежний.status:
-			return
-		было = ИМЯ_СТАТУСА_РЕПОРТА.get(прежний.status)
+	def _проверить_разбор(self, прежний):
+		"""Правила `resolve_report` на любом пути записи (`agent_learning.reports`).
+
+		Статус меняется по переходам, `fixed` и `rejected` не остаются без
+		ответа ученику, а оригинал дубля — репорт того же курса. `Why:` Desk
+		правит статус, ответ и `duplicate_of` по отдельности, и оригинал из
+		чужого курса показал бы ученику в `my_reports` ответ о курсе, которого
+		он не проходил.
+		"""
 		стало = ИМЯ_СТАТУСА_РЕПОРТА.get(self.status)
-		if стало not in ПЕРЕХОДЫ_РЕПОРТА.get(было, ()):
-			frappe.throw(
-				frappe._("Из «{0}» в «{1}» перейти нельзя: закрытый репорт только переоткрывают").format(
-					frappe._(прежний.status), frappe._(self.status)
-				),
-				title=frappe._("Репорт агента"),
-			)
+		if прежний and прежний.status != self.status:
+			reports.проверить_переход(ИМЯ_СТАТУСА_РЕПОРТА.get(прежний.status), стало)
+		reports.проверить_ответ(стало, self.resolution)
+		if стало == "duplicate" or self.duplicate_of:
+			reports.проверить_оригинал(self.name, self.course, self.duplicate_of)
 
 	def _отметить_итог(self):
 		"""Дата итога — при переходе в закрытый статус, сброс — при возврате

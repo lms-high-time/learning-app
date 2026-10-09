@@ -7,6 +7,10 @@ from frappe.model.document import Document
 from lms_frappe_app.agent_learning import notes
 from lms_frappe_app.agent_learning.errors import Отказ
 
+#: Поля, которые ставит `add_note`: курс, релиз и место по его ключам и кто
+#: пишет. У существующей заметки они не меняются ни на каком пути записи.
+ПОЛЯ_ПРИВЯЗКИ = ("course", "release", "lesson_key", "target", "via")
+
 
 class AgentAuthorNote(Document):
 	"""Замечание автора на месте курса и нить ответов к нему.
@@ -15,12 +19,33 @@ class AgentAuthorNote(Document):
 	петля «увидел → агент поправил → принял» не шла через пересказ в чате.
 	Правила адреса и переходов — в `agent_learning/notes.py`; пишут заметку
 	авторские методы. Course Creator её только читает, Moderator и System
-	Manager правят и в Desk — переходы статуса держит `validate`. Ученику
-	недоступно: роль `LMS Student` прав на этот DocType не имеет.
+	Manager правят и в Desk — поля привязки и переходы статуса держит
+	`validate`. Ученику недоступно: роль `LMS Student` прав на этот DocType не
+	имеет.
 	"""
 
 	def validate(self):
+		self._привязка_не_меняется()
 		self._проверить_переход()
+
+	def _привязка_не_меняется(self):
+		"""Отказ, если у существующей заметки сменилось поле привязки.
+
+		`Why:` заметка помнит релиз, к которому написана, и место по его
+		ключам: подменённые, они показывают автору заметку не на том месте или
+		не в том курсе, а подменённый `via` переставляет, чей ход.
+		"""
+		прежний = self.get_doc_before_save()
+		if not прежний:
+			return
+		for поле in ПОЛЯ_ПРИВЯЗКИ:
+			if (self.get(поле) or None) != (прежний.get(поле) or None):
+				frappe.throw(
+					frappe._("Поле «{0}» ставит запись заметки, его не правят").format(
+						self.meta.get_label(поле)
+					),
+					title=frappe._("Заметка автора"),
+				)
 
 	def _проверить_переход(self):
 		"""Статус меняется по `notes.ПЕРЕХОДЫ` на любом пути записи.

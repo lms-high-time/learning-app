@@ -21,6 +21,7 @@ from lms_frappe_app.agent_learning import (
 	announcements,
 	notes,
 	notices,
+	reports,
 	structure,
 	testers,
 )
@@ -37,7 +38,6 @@ from lms_frappe_app.agent_learning.constants import (
 	ИМЯ_ВИДА_РЕПОРТА,
 	ИМЯ_СТАТУСА_РЕПОРТА,
 	ОТКРЫТЫЕ_РЕПОРТЫ,
-	ПЕРЕХОДЫ_РЕПОРТА,
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
@@ -909,17 +909,9 @@ def _не_из_релиза(курс: str) -> None:
 
 РЕПОРТ_НЕ_НАЙДЕН = "report_not_found"
 НЕИЗВЕСТНЫЙ_СТАТУС_РЕПОРТА = "unknown_report_status"
-НЕДОПУСТИМЫЙ_ПЕРЕХОД_РЕПОРТА = "invalid_report_transition"
-НУЖЕН_ОТВЕТ_УЧЕНИКУ = "report_resolution_required"
-НУЖЕН_ОРИГИНАЛ = "duplicate_of_required"
-НЕВЕРНЫЙ_ОРИГИНАЛ = "invalid_duplicate_of"
 
 #: Фильтр `course_reports` по статусу: всё, что ждёт разбора.
 ФИЛЬТР_ОТКРЫТЫХ = "open"
-
-#: Итоги, которые ученику нужно объяснить словами: «исправили» и «не будем»
-#: без ответа — пустой звук. Дубль отвечает ответом оригинала.
-С_ОТВЕТОМ = frozenset({"fixed", "rejected"})
 
 
 @frappe.whitelist()
@@ -1028,7 +1020,8 @@ def resolve_report(
 	действующий. `duplicate_of` — репорт того же курса, дублем которого
 	признан этот; без своего ответа ученик видит ответ оригинала.
 
-	Переходы — `ПЕРЕХОДЫ_РЕПОРТА`; дату итога ставит сама запись.
+	Правила разбора — `agent_learning.reports`; их же держит запись в Desk.
+	Дату итога ставит сама запись.
 	"""
 	_автор()
 	if not frappe.db.exists("Agent Course Report", report):
@@ -1043,17 +1036,12 @@ def resolve_report(
 
 	документ = frappe.get_doc("Agent Course Report", report)
 	было = ИМЯ_СТАТУСА_РЕПОРТА.get(документ.status, документ.status)
-	if стало not in ПЕРЕХОДЫ_РЕПОРТА.get(было, ()):
-		raise Отказ(
-			НЕДОПУСТИМЫЙ_ПЕРЕХОД_РЕПОРТА,
-			f"Из «{было}» в «{стало}» перейти нельзя",
-			status=было,
-			allowed=sorted(ПЕРЕХОДЫ_РЕПОРТА.get(было, ())),
-		)
+	reports.проверить_переход(было, стало)
 	ответ = (resolution or "").strip()
-	if стало in С_ОТВЕТОМ and not ответ:
-		raise Отказ(НУЖЕН_ОТВЕТ_УЧЕНИКУ, "Напишите ученику, что сделали", status=стало)
-	оригинал = _оригинал_дубля(документ, duplicate_of) if стало == "duplicate" else None
+	reports.проверить_ответ(стало, ответ)
+	оригинал = None
+	if стало == "duplicate":
+		оригинал = reports.проверить_оригинал(документ.name, документ.course, duplicate_of)
 
 	документ.status = СТАТУСЫ_РЕПОРТОВ[стало]
 	документ.resolution = ответ or None
@@ -1080,23 +1068,3 @@ def _статусы_фильтра(status: str) -> list[str]:
 			status=status,
 		)
 	return [СТАТУСЫ_РЕПОРТОВ[имя]]
-
-
-def _оригинал_дубля(документ, duplicate_of: str | None) -> str:
-	"""Репорт, дублем которого признан `документ`, — или отказ.
-
-	Оригинал — из того же курса и не сам репорт: ответ оригинала уходит
-	ученику, и ссылка на чужой курс показала бы ему ответ о курсе, которого
-	он не проходил.
-	"""
-	оригинал = (duplicate_of or "").strip()
-	if not оригинал:
-		raise Отказ(НУЖЕН_ОРИГИНАЛ, "Укажите репорт, дублем которого признан этот")
-	if оригинал == документ.name:
-		raise Отказ(НЕВЕРНЫЙ_ОРИГИНАЛ, "Репорт не может быть дублем самого себя", duplicate_of=оригинал)
-	курс = frappe.db.get_value("Agent Course Report", оригинал, "course")
-	if not курс:
-		raise Отказ(НЕВЕРНЫЙ_ОРИГИНАЛ, "Такого репорта нет", duplicate_of=оригинал)
-	if курс != документ.course:
-		raise Отказ(НЕВЕРНЫЙ_ОРИГИНАЛ, "Оригинал — репорт другого курса", duplicate_of=оригинал)
-	return оригинал
