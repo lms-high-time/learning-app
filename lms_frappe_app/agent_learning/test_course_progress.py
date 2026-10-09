@@ -113,12 +113,24 @@ class IntegrationTestПрогрессКурса(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("Course Lesson", self.уроки["l-3"]))
 		self.assertEqual(self.прогресс(), 100)
 
-	def test_патч_приводит_завышенную_долю_к_100(self):
+	def test_патч_пересчитывает_завышенную_долю_по_программе(self):
+		"""Пройден 1 из 3, записано 150: патч не удерживает 100 (решение владельца)."""
 		self.пройти("l-1")
 		запись = frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": self.курс})
 		frappe.db.set_value("LMS Enrollment", запись, "progress", 150)
 
 		release_course_progress.execute()
+
+		self.assertAlmostEqual(self.прогресс(), 33.333)
+		self.assertFalse(frappe.flags.get(course_progress.БЕЗ_УДЕРЖАНИЯ))
+
+	def test_после_патча_удержание_со_следующей_записи(self):
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+		release_course_progress.execute()
+		self.assertEqual(self.прогресс(), 100)
+
+		self.опубликовать(добавить_главу(пример_релиза(self.ключ), "ch-3", ["l-4"]))
 
 		self.assertEqual(self.прогресс(), 100)
 
