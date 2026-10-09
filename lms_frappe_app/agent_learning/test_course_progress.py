@@ -3,13 +3,16 @@
 
 """Прогресс записи на курс из релиза — по урокам программы (learning-services#522)."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
+from lms.lms.utils import recalculate_course_progress
 
-from lms_frappe_app.agent_learning import course_progress, signals
+from lms_frappe_app.agent_learning import course_progress, reset, signals
 from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.patches.v0_1 import release_course_progress
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import добавить_главу, пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
 	создать_куратора,
@@ -109,14 +112,72 @@ class IntegrationTestПрогрессКурса(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("Course Lesson", self.уроки["l-3"]))
 		self.assertEqual(self.прогресс(), 100)
 
-	def test_патч_поправляет_записанную_долю(self):
+	def test_патч_приводит_завышенную_долю_к_100(self):
 		self.пройти("l-1")
 		запись = frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": self.курс})
 		frappe.db.set_value("LMS Enrollment", запись, "progress", 150)
 
 		release_course_progress.execute()
 
+		self.assertEqual(self.прогресс(), 100)
+
+	def test_патч_поправляет_устаревшую_долю(self):
+		self.пройти("l-1")
+		запись = frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+		frappe.db.set_value("LMS Enrollment", запись, "progress", 80)
+
+		release_course_progress.execute()
+
 		self.assertAlmostEqual(self.прогресс(), 33.333)
+
+	def test_добавленный_урок_не_снимает_100(self):
+		"""Ни пересчёт после публикации, ни пересчёт Learning по новому оглавлению."""
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+		self.assertEqual(self.прогресс(), 100)
+
+		self.опубликовать(добавить_главу(пример_релиза(self.ключ), "ch-3", ["l-4"]))
+		self.assertEqual(self.прогресс(), 100)
+		recalculate_course_progress(self.курс, self.ученик)
+
+		self.assertEqual(self.прогресс(), 100)
+		self.assertEqual(signals.осталось_уроков(self.ученик, self.курс), 1)
+
+	def test_снятая_отметка_опускает_100(self):
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+		отметка = frappe.db.get_value(
+			"LMS Course Progress", {"member": self.ученик, "lesson": self.уроки["l-3"]}
+		)
+
+		frappe.delete_doc("LMS Course Progress", отметка, ignore_permissions=True, force=True)
+
+		self.assertAlmostEqual(self.прогресс(), 66.667)
+		self.assertFalse(frappe.flags.get(course_progress.СНИМАЕТСЯ))
+
+	def test_сброс_даёт_0(self):
+		"""Запись на курс сброс снимает; программа сводится по последней доле — 0."""
+		программа = frappe.get_doc(
+			{
+				"doctype": "LMS Program",
+				"title": f"Программа сброса {self.ключ}",
+				"program_courses": [{"course": self.курс}],
+				"program_members": [{"member": self.ученик}],
+			}
+		).insert(ignore_permissions=True)
+		for ключ in ("l-1", "l-2", "l-3"):
+			self.пройти(ключ)
+
+		reset.сбросить_прогресс(self.ученик, self.курс, "Administrator")
+
+		self.assertEqual(
+			frappe.db.get_value(
+				"LMS Program Member", {"parent": программа.name, "member": self.ученик}, "progress"
+			),
+			0,
+		)
+		зачислить_на_курс(self.ученик, self.курс)
+		self.assertEqual(self.прогресс(), 0)
 
 	def test_снятый_урок_не_в_остатке_к_сроку(self):
 		другой = создать_ученика(f"other-{self.ключ}@example.com")
@@ -126,6 +187,27 @@ class IntegrationTestПрогрессКурса(IntegrationTestCase):
 		self.опубликовать(без(пример_релиза(self.ключ), "l-3"))
 
 		self.assertEqual(signals.осталось_уроков(self.ученик, self.курс), 2)
+
+	def test_хук_не_пишет_совпавшую_долю(self):
+		self.пройти("l-1")
+		запись = frappe.get_doc("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+		изменена = frappe.db.get_value("LMS Enrollment", запись.name, "modified")
+
+		with patch.object(course_progress, "update_program_progress") as сводка:
+			course_progress.сверить(запись)
+
+		сводка.assert_not_called()
+		self.assertAlmostEqual(self.прогресс(), 33.333)
+		self.assertEqual(frappe.db.get_value("LMS Enrollment", запись.name, "modified"), изменена)
+
+	def test_пустое_оглавление_курса_из_релиза_даёт_ноль(self):
+		self.пройти("l-1")
+		frappe.db.delete("Chapter Reference", {"parent": self.курс})
+		запись = frappe.get_doc("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+
+		course_progress.сверить(запись)
+
+		self.assertEqual(self.прогресс(), 0)
 
 	def test_курс_без_релиза_считает_learning(self):
 		урок = создать_урок(f"Без релиза {self.ключ}")
