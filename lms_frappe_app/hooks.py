@@ -290,10 +290,15 @@ after_migrate = [
 # ---------------
 # Hook on document methods and events
 
-# OAuth-клиентов агенты регистрируют сами, а Frappe разрешает их только
-# Desk User — ученик без desk-доступа не мог авторизовать агента. Хук идёт
-# после validate Frappe и добавляет роли платформы (#26).
 doc_events = {
+	# Текст, который разбирается как JSON, Frappe не чистит от HTML; хук чистит
+	# его в доктайпах, куда пишут методы приложения (learning-services#527).
+	"*": {
+		"before_save": "lms_frappe_app.agent_learning.json_text.очистить",
+	},
+	# OAuth-клиентов агенты регистрируют сами, а Frappe разрешает их только
+	# Desk User — ученик без desk-доступа не мог авторизовать агента. Хук идёт
+	# после validate Frappe и добавляет роли платформы (#26).
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
 	},
