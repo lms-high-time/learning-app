@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 import frappe
 from frappe.utils import add_to_date, get_system_timezone, now_datetime
 
+from lms_frappe_app.agent_learning.browser_progress import закрытие_урока
 from lms_frappe_app.agent_learning.constants import ПОПЫТКА_АННУЛИРОВАНА, ПОПЫТКА_ИДЁТ, ПРОЙДЕН
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index
@@ -224,25 +225,29 @@ def отметить_урок_пройденным(запись, подтвер�
 	уже = frappe.db.exists(
 		"LMS Course Progress", {"member": запись.student, "lesson": запись.lesson}
 	)
-	if уже:
-		# Сохранением, а не `db.set_value`: Learning пересчитывает долю записи на
-		# курс в `on_update` отметки. Отметку, снятую администратором, повторное
-		# прохождение иначе возвращало бы без доли (learning-services#522).
-		отметка = frappe.get_doc("LMS Course Progress", уже)
-		if отметка.status != ПРОЙДЕН:
-			отметка.status = ПРОЙДЕН
-			отметка.save(ignore_permissions=True)
-		return
-	frappe.get_doc(
-		{
-			"doctype": "LMS Course Progress",
-			"member": запись.student,
-			"lesson": запись.lesson,
-			"chapter": frappe.db.get_value("Course Lesson", запись.lesson, "chapter"),
-			"course": запись.course,
-			"status": ПРОЙДЕН,
-		}
-	).insert(ignore_permissions=True)
+	# Урок курса из релиза отметкой закрывает только занятие (learning-services#525).
+	# Ветка заведённой отметки — тоже в блоке: её правка сохранением идёт через
+	# `validate` и без пометки получит отказ.
+	with закрытие_урока(запись.student, запись.lesson):
+		if уже:
+			# Сохранением, а не `db.set_value`: Learning пересчитывает долю записи на
+			# курс в `on_update` отметки. Отметку, снятую администратором, повторное
+			# прохождение иначе возвращало бы без доли (learning-services#522).
+			отметка = frappe.get_doc("LMS Course Progress", уже)
+			if отметка.status != ПРОЙДЕН:
+				отметка.status = ПРОЙДЕН
+				отметка.save(ignore_permissions=True)
+			return
+		frappe.get_doc(
+			{
+				"doctype": "LMS Course Progress",
+				"member": запись.student,
+				"lesson": запись.lesson,
+				"chapter": frappe.db.get_value("Course Lesson", запись.lesson, "chapter"),
+				"course": запись.course,
+				"status": ПРОЙДЕН,
+			}
+		).insert(ignore_permissions=True)
 
 
 def _ключ_урока_в_релизе(запись) -> str | None:

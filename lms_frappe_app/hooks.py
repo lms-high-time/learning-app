@@ -333,10 +333,17 @@ doc_events = {
 	"LMS Enrollment": {
 		"on_update": "lms_frappe_app.agent_learning.course_progress.сверить",
 	},
-	# Снятый пройденный урок опускает и долю, достигшую 100: сброс прогресса
-	# даёт 0, а не 100 (learning-services#522).
+	# Отметка урока, один ключ на две ишью:
+	# - learning-services#525: урок курса из релиза закрывает только занятие —
+	#   Learning пишет отметку и прямыми вызовами Python, мимо подмены методов.
+	#   `проверить_отметку` — первым: отказ раньше, чем #522 пометит снятие.
+	# - learning-services#522: снятый пройденный урок опускает и долю, достигшую
+	#   100: сброс прогресса даёт 0, а не 100.
 	"LMS Course Progress": {
-		"validate": "lms_frappe_app.agent_learning.course_progress.отметить_снятие",
+		"validate": [
+			"lms_frappe_app.agent_learning.browser_progress.проверить_отметку",
+			"lms_frappe_app.agent_learning.course_progress.отметить_снятие",
+		],
 		"on_trash": "lms_frappe_app.agent_learning.course_progress.отметить_снятие",
 		"on_update": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
 		"after_delete": "lms_frappe_app.agent_learning.course_progress.снять_отметку",
@@ -383,12 +390,16 @@ before_tests = "lms_frappe_app.testing.before_tests"
 
 _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 
+_прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
+
 # Урок закрывает занятие с агентом, а не время на странице урока —
-# обоснование в модуле (lms-platform#305).
+# обоснование в модуле (lms-platform#305). Подмена сверяет строку вызова, а
+# Learning импортирует `save_progress` ещё в два модуля: подменено каждое имя
+# (learning-services#525).
 override_whitelisted_methods = {
-	"lms.lms.doctype.course_lesson.course_lesson.save_progress": (
-		"lms_frappe_app.agent_learning.browser_progress.save_progress"
-	),
+	"lms.lms.doctype.course_lesson.course_lesson.save_progress": _прогресс,
+	"lms.lms.api.save_progress": _прогресс,
+	"lms.lms.doctype.lms_quiz.lms_quiz.save_progress": _прогресс,
 	# Вход по почте (learning-services#460): занятый адрес не тупик, смена
 	# пароля подтверждается письмом — обоснование в `access.py`.
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
