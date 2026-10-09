@@ -2,15 +2,15 @@
 # See license.txt
 
 """Поля, которые Frappe хранит мимо очистки HTML, не выходят туда, где Desk
-выводит значения сырыми (lms-high-time/learning-services#521), а остальные
-текстовые поля чистятся и от значения, которое разбирается как JSON
+выводит значения сырыми (lms-high-time/learning-services#521), а в остальных
+текстовых полях текст с тегом хранится очищенным
 (lms-high-time/learning-services#527).
 
 Мимо очистки идут поля с `ignore_xss_filter`, поля JSON и текстовые поля из
 `ТЕКСТ_МИМО_ОЧИСТКИ`: в них код пишет JSON строкой или пишет текст
 `db.set_value`, мимо `validate`. Прочие текстовые поля доктайпов приложения
-чистит Frappe, а значение, которое `sanitize_html` пропускает как JSON, даже
-строку в кавычках с тегом, — хук `json_text.очистить`.
+чистит хук `html_text.очистить` — и тот текст с тегом, что `sanitize_html`
+Frappe пропускает: JSON и незакрытый тег.
 
 `Why:` Desk выводит часть значений без экранирования: Report view и колонки
 списка, фильтры, печать — всё, кроме Data и Code, — выпадающий список ссылки
@@ -28,7 +28,7 @@ from bs4 import BeautifulSoup
 from frappe.tests import IntegrationTestCase
 from frappe.utils.formatters import format_value
 
-from lms_frappe_app.agent_learning import json_text
+from lms_frappe_app.agent_learning import html_text
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.sample_data import зачислить, создать_урок, создать_ученика
 
@@ -36,10 +36,10 @@ from lms_frappe_app.tests.sample_data import зачислить, создать_
 #: Типы, которые печать выводит экранированными; остальные — сырыми или в обход.
 ПЕЧАТЬ_ЭКРАНИРУЕТ = frozenset({"Data", "Code"})
 #: Текстовые поля (доктайпа приложения или Custom Field), которые не чистятся,
-#: хотя флага у них нет: в них пишется JSON строкой (`json_text.JSON_СТРОКОЙ`)
+#: хотя флага у них нет: в них пишется JSON строкой (`html_text.JSON_СТРОКОЙ`)
 #: или текст `db.set_value` мимо `validate` — цели анонса (`announce_course`,
 #: `api.authoring`).
-ТЕКСТ_МИМО_ОЧИСТКИ = json_text.JSON_СТРОКОЙ | {("LMS Course", "announce_objectives")}
+ТЕКСТ_МИМО_ОЧИСТКИ = html_text.JSON_СТРОКОЙ | {("LMS Course", "announce_objectives")}
 #: Типы полей, в которые пишется текст.
 ТЕКСТОВЫЕ = frozenset(
 	{
@@ -84,14 +84,25 @@ def _текстовое(doctype: str, поле: dict) -> bool:
 	return поле["fieldtype"] in ТЕКСТОВЫЕ
 
 
-def нагрузка(doctype: str, поле: str) -> str:
-	"""Строка JSON с тегом, исполнимым в браузере; метка в `onerror` — чьё поле."""
-	return json.dumps(f"<img src=x onerror={frappe.scrub(doctype)}__{поле}()>")
+#: Текст с тегом, который `sanitize_html` Frappe пропускает без очистки:
+#: JSON — закрытый и незакрытый тег — и незакрытый тег с хвостом на новой строке.
+НАГРУЗКИ = {
+	"json": lambda метка: json.dumps(f"<img src=x onerror={метка}()>"),
+	"json, незакрытый": lambda метка: json.dumps(f"<img src=x onerror={метка}()//"),
+	"незакрытый": lambda метка: f"<img src=x onerror={метка}()//\nx",
+}
+
+
+def нагрузка(doctype: str, поле: str, вид: str = "json") -> str:
+	"""Текст с тегом, исполнимым в браузере; метка в `onerror` — чьё поле."""
+	return НАГРУЗКИ[вид](f"{frappe.scrub(doctype)}__{поле}")
 
 
 def исполнимое(html) -> list[str]:
-	"""Метки `onerror` из разметки: исполнимый тег, а не экранированный текст."""
-	return [тег["onerror"] for тег in BeautifulSoup(str(html or ""), "html.parser").find_all(onerror=True)]
+	"""Метки `onerror` из разметки, разобранной как браузер разбирает ячейку
+	таблицы, — `html5lib`: `html.parser` незакрытого тега не видит."""
+	разметка = f"<table><tr><td>{html or ''}</td></tr></table>"
+	return [тег["onerror"] for тег in BeautifulSoup(разметка, "html5lib").find_all(onerror=True)]
 
 
 def нарушения(поле, title_field: str | None, search_fields: str | None) -> list[str]:
@@ -147,35 +158,48 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 		self.assertEqual(нарушения(поле, "title", "name, text"), ["title_field или search_fields"])
 
 	def test_текстовое_поле_чистится_или_хранится_как_есть(self):
-		"""Текстовое поле приложения либо чистится и от значения-JSON
-		(`json_text.чистится`), либо хранится как есть и скрыто проверками выше:
-		третьего, где тег из JSON дошёл бы до Desk сырым, нет."""
+		"""Текстовое поле приложения либо хранит текст с тегом очищенным
+		(`html_text.чистится`), либо хранит как есть и скрыто проверками выше:
+		третьего, где тег дошёл бы до Desk сырым, нет."""
 		поля = _поля_доктайпов(_текстовое) + _поля_фикстуры(_текстовое)
 		for doctype, имя in поля:
-			поле = frappe.get_meta(doctype).get_field(имя)
+			мета = frappe.get_meta(doctype)
+			поле = мета.get_field(имя)
 			with self.subTest(f"{doctype}.{имя}"):
-				self.assertTrue(json_text.чистится(doctype, поле) or _сырое(doctype, поле.as_dict()))
+				self.assertTrue(html_text.чистится(мета, поле) or _сырое(doctype, поле.as_dict()))
 
 	def test_json_строка_с_тегом_не_исполнима_в_desk(self):
-		"""Каждое текстовое поле охваченных доктайпов и их таблиц получает строку
-		JSON с тегом. После очистки при записи тег не исполним ни в значении, ни
-		в `format_value` — им Desk форматирует печать и выгрузку отчёта, — а
-		печать не выводит его и из полей, что хранятся как есть."""
-		доктайпы = [с["name"] for с in _схемы() if not с.get("istable")] + sorted(json_text.ДОКТАЙПЫ_LEARNING)
-		for doctype in доктайпы:
-			документ = _с_нагрузкой(doctype)
-			json_text.очистить(документ)
-			for запись in (документ, *документ.get_all_children()):
-				запись._sanitize_content()
-				for поле in запись.meta.fields:
-					if поле.fieldtype not in ТЕКСТОВЫЕ or not json_text.чистится(запись.doctype, поле):
-						continue
-					with self.subTest(f"{запись.doctype}.{поле.fieldname}"):
-						значение = запись.get(поле.fieldname)
-						self.assertEqual(исполнимое(значение), [])
-						self.assertEqual(исполнимое(format_value(значение, поле, запись)), [])
-			with self.subTest(f"печать {doctype}"):
-				self.assertEqual(исполнимое(frappe.get_print(doctype, doc=документ)), [])
+		"""Каждое текстовое поле охваченных доктайпов и их таблиц получает текст
+		с тегом каждого вида из `НАГРУЗКИ`. После очистки при записи тег не
+		исполним ни в значении, ни в `format_value` — им Desk форматирует печать
+		и выгрузку отчёта, — а печать не выводит его и из полей, что хранятся
+		как есть."""
+		доктайпы = [с["name"] for с in _схемы() if not с.get("istable")] + sorted(html_text.ДОКТАЙПЫ_LEARNING)
+		for вид in НАГРУЗКИ:
+			for doctype in доктайпы:
+				документ = _с_нагрузкой(doctype, вид)
+				html_text.очистить(документ)
+				for запись in (документ, *документ.get_all_children()):
+					запись._sanitize_content()
+					for поле in запись.meta.fields:
+						if поле.fieldtype not in ТЕКСТОВЫЕ or not html_text.чистится(запись.meta, поле):
+							continue
+						with self.subTest(f"{вид}: {запись.doctype}.{поле.fieldname}"):
+							значение = запись.get(поле.fieldname)
+							self.assertEqual(исполнимое(значение), [])
+							self.assertEqual(исполнимое(format_value(значение, поле, запись)), [])
+				with self.subTest(f"{вид}: печать {doctype}"):
+					self.assertEqual(исполнимое(frappe.get_print(doctype, doc=документ)), [])
+
+	def test_текст_без_тега_не_меняется(self):
+		"""Угловые скобки и `&` без начала тега — сравнение, правило в JSON —
+		хранятся как написаны: Frappe их не трогает, и хук тоже."""
+		for значение in ('"a < b"', '{"rule":"score > 80 & x"}', "a < b & c > d", "5<6"):
+			документ = frappe.new_doc("Agent Student Note")
+			документ.text = значение
+			html_text.очистить(документ)
+			документ._sanitize_content()
+			self.assertEqual(документ.text, значение)
 
 	def test_markdown_не_в_таблице_формы(self):
 		"""Таблица формы экранирует Data и простой текст, а Markdown Editor
@@ -188,32 +212,32 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 							self.assertFalse(поле.in_list_view)
 
 
-def _заполнить(запись) -> None:
+def _заполнить(запись, вид: str) -> None:
 	"""Собственные поля Learning, которые хранятся как есть (содержание урока
 	`content`), — дело Learning: методы приложения в них не пишут."""
 	for поле in запись.meta.fields:
 		if поле.fieldtype in ТЕКСТОВЫЕ and (
-			запись.doctype not in json_text.ДОКТАЙПЫ_LEARNING
+			запись.doctype not in html_text.ДОКТАЙПЫ_LEARNING
 			or поле.get("is_custom_field")
-			or json_text.чистится(запись.doctype, поле)
+			or html_text.чистится(запись.meta, поле)
 		):
-			запись.set(поле.fieldname, нагрузка(запись.doctype, поле.fieldname))
+			запись.set(поле.fieldname, нагрузка(запись.doctype, поле.fieldname, вид))
 
 
-def _с_нагрузкой(doctype: str):
-	"""Несохранённая запись: строка JSON с тегом в каждом текстовом поле — и в
+def _с_нагрузкой(doctype: str, вид: str):
+	"""Несохранённая запись: текст с тегом в каждом текстовом поле — и в
 	строке каждой таблицы, которую чистит хук."""
 	документ = frappe.new_doc(doctype)
-	_заполнить(документ)
+	_заполнить(документ, вид)
 	for таблица in документ.meta.get_table_fields():
-		if json_text.охвачен(таблица.options):
-			_заполнить(документ.append(таблица.fieldname, {}))
+		if html_text.охвачен(frappe.get_meta(таблица.options)):
+			_заполнить(документ.append(таблица.fieldname, {}), вид)
 	return документ
 
 
 class IntegrationTestТекстУченикаКакJSON(IntegrationTestCase):
-	"""Строка JSON с тегом через методы ученика хранится очищенной, и печать
-	записи её не исполняет — путь целиком, с хуком на сохранении."""
+	"""Текст с тегом через методы ученика хранится очищенным, и печать записи
+	его не исполняет — путь целиком, с хуком на сохранении."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -243,7 +267,7 @@ class IntegrationTestТекстУченикаКакJSON(IntegrationTestCase):
 		self.assertEqual(исполнимое(frappe.get_print(doctype, name)), [])
 
 	def test_блок_документа(self):
-		текст = нагрузка("Agent Artifact Content", "content")
+		текст = "Цель: " + нагрузка("Agent Artifact Content", "content", "незакрытый")
 		self.assertTrue(student.update_artifact(self.курс, "summary", "goal", текст)["ok"])
 
 		имя = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "artifact": "summary"})
@@ -251,10 +275,23 @@ class IntegrationTestТекстУченикаКакJSON(IntegrationTestCase):
 		self.проверить("Agent Student Artifact", имя)
 
 	def test_заметка(self):
-		ключ, текст = нагрузка("Agent Student Note", "note_key"), нагрузка("Agent Student Note", "text")
+		ключ = нагрузка("Agent Student Note", "note_key")
+		текст = "Роль: " + нагрузка("Agent Student Note", "text", "незакрытый")
 		ответ = student.remember(kind="fact", key=ключ, text=текст)
 
 		self.assertTrue(ответ["ok"], ответ)
 		self.проверить(
 			"Agent Student Note", frappe.db.get_value("Agent Student Note", {"student": self.ученик})
 		)
+
+	def test_ключ_заметки_со_скобкой_находится(self):
+		"""Ключ без начала тега хранится как передан: повторная запись по нему
+		замещает заметку, а `forget` её находит."""
+		ключ = "цена < 100"
+		student.remember(kind="fact", key=ключ, text="первая")
+		student.remember(kind="fact", key=ключ, text="вторая")
+
+		записи = frappe.get_all("Agent Student Note", {"student": self.ученик}, ["note_key", "text"])
+		self.assertEqual([(з.note_key, з.text) for з in записи], [(ключ, "вторая")])
+		self.assertTrue(student.forget(key=ключ)["ok"])
+		self.assertFalse(frappe.db.exists("Agent Student Note", {"student": self.ученик}))
