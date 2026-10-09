@@ -77,7 +77,9 @@
   "no_copy": 1,
   "description": "Атрибуция из релиза: name, authors, license, url.",
   "insert_after": "active_release",
-  "module": "Agent Learning"
+  "module": "Agent Learning",
+  "report_hide": 1,
+  "print_hide": 1
  },
  {
   "doctype": "Custom Field",
@@ -89,7 +91,9 @@
   "no_copy": 1,
   "description": "Цели курса-анонса, по строке на цель. Задаёт announce_course; у курса из релиза цели — названия глав релиза.",
   "insert_after": "course_attribution",
-  "module": "Agent Learning"
+  "module": "Agent Learning",
+  "report_hide": 1,
+  "print_hide": 1
  },
  {
   "doctype": "Custom Field",

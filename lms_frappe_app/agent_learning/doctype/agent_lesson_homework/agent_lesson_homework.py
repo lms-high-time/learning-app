@@ -24,7 +24,10 @@ class AgentLessonHomework(Document):
 	"""
 
 	def validate(self):
-		запретить_угловые(self.title, "title")
+		if self.is_new() or self.has_value_changed("title"):
+			# Why: название, записанное до запрета, не мешает сохранять запись
+			# по другим полям — снятие шаблона при публикации, правка срока.
+			запретить_угловые(self.title, "title")
 		if self.answer_mode not in ВИДЫ_ОТВЕТА:
 			raise Отказ(НЕВЕРНЫЙ_ВИД_ОТВЕТА, "Вид ответа: text, files или text_and_files", answer_mode=self.answer_mode)
 		self.due_days, self.due_date = проверить_срок(self.due_mode, self.due_days, self.due_date)
