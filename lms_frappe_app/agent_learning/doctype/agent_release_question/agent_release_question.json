@@ -40,6 +40,7 @@
   {
    "fieldname": "text",
    "fieldtype": "Small Text",
+   "ignore_xss_filter": 1,
    "label": "Вопрос",
    "read_only": 1
   },
@@ -61,12 +62,13 @@
    "fieldtype": "Small Text",
    "label": "Пояснение",
    "description": "Ученику — после ответа",
-   "read_only": 1
+   "read_only": 1,
+   "ignore_xss_filter": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Release Question",

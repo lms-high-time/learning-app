@@ -39,6 +39,7 @@
   {
    "fieldname": "title",
    "fieldtype": "Data",
+   "ignore_xss_filter": 1,
    "in_list_view": 1,
    "label": "Название",
    "reqd": 1
@@ -47,7 +48,8 @@
    "fieldname": "purpose",
    "fieldtype": "Small Text",
    "label": "Зачем документ",
-   "description": "Одна-две фразы ученику: зачем этот документ. Видны в «Моих документах»."
+   "description": "Одна-две фразы ученику: зачем этот документ. Видны в «Моих документах».",
+   "ignore_xss_filter": 1
   },
   {
    "default": "sections",
@@ -94,7 +96,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-09 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Artifact",
