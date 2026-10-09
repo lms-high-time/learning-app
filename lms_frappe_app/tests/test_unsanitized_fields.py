@@ -6,7 +6,8 @@
 
 Мимо очистки идут поля с `ignore_xss_filter`, поля JSON — `sanitize_html`
 пропускает значение, которое разбирается как JSON, даже строку в кавычках с
-тегом, — и поля, которые код пишет `db.set_value`, мимо `validate`.
+тегом, — и текстовые поля из `ТЕКСТ_МИМО_ОЧИСТКИ`: в них код пишет JSON
+строкой или пишет текст `db.set_value`, мимо `validate`.
 
 `Why:` Desk выводит часть значений без экранирования: Report view и колонки
 списка, фильтры, печать — всё, кроме Data и Code, — выпадающий список ссылки
@@ -25,13 +26,26 @@ from frappe.tests import IntegrationTestCase
 КОРЕНЬ = Path(frappe.get_app_path("lms_frappe_app"))
 #: Типы, которые печать выводит экранированными; остальные — сырыми или в обход.
 ПЕЧАТЬ_ЭКРАНИРУЕТ = frozenset({"Data", "Code"})
-#: Custom Field, которые код пишет `db.set_value`, мимо очистки:
-#: `announce_course` (`api.authoring`).
-МИМО_ОЧИСТКИ = frozenset({"LMS Course-announce_objectives"})
+#: Текстовые поля (доктайпа приложения или Custom Field), которые Frappe не
+#: чистит, хотя флага у них нет: в них пишется JSON строкой — снимок релиза,
+#: состояние разговора и сценария, — или текст `db.set_value` мимо `validate` —
+#: цели анонса (`announce_course`, `api.authoring`).
+ТЕКСТ_МИМО_ОЧИСТКИ = frozenset(
+	{
+		("Agent Course Release", "snapshot"),
+		("Agent Chat State", "state"),
+		("Agent Scenario State", "state"),
+		("LMS Course", "announce_objectives"),
+	}
+)
 
 
-def _сырое(поле: dict) -> bool:
-	return поле["fieldtype"] == "JSON" or bool(поле.get("ignore_xss_filter"))
+def _сырое(doctype: str, поле: dict) -> bool:
+	return (
+		поле["fieldtype"] == "JSON"
+		or bool(поле.get("ignore_xss_filter"))
+		or (doctype, поле["fieldname"]) in ТЕКСТ_МИМО_ОЧИСТКИ
+	)
 
 
 def _поля_доктайпов() -> list[tuple[str, str]]:
@@ -39,13 +53,13 @@ def _поля_доктайпов() -> list[tuple[str, str]]:
 	for путь in sorted(КОРЕНЬ.glob("*/doctype/*/*.json")):
 		схема = json.loads(путь.read_text(encoding="utf-8"))
 		if схема.get("doctype") == "DocType":
-			итог += [(схема["name"], п["fieldname"]) for п in схема["fields"] if _сырое(п)]
+			итог += [(схема["name"], п["fieldname"]) for п in схема["fields"] if _сырое(схема["name"], п)]
 	return итог
 
 
 def _поля_фикстуры() -> list[tuple[str, str]]:
 	поля = json.loads((КОРЕНЬ / "fixtures" / "custom_field.json").read_text(encoding="utf-8"))
-	return [(п["dt"], п["fieldname"]) for п in поля if _сырое(п) or п["name"] in МИМО_ОЧИСТКИ]
+	return [(п["dt"], п["fieldname"]) for п in поля if _сырое(п["dt"], п)]
 
 
 def нарушения(поле, title_field: str | None, search_fields: str | None) -> list[str]:
@@ -78,6 +92,11 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 
 	def test_поля_приложения_на_чужих_доктайпах(self):
 		self.проверить(_поля_фикстуры())
+
+	def test_список_текста_мимо_очистки_жив(self):
+		"""Каждое поле `ТЕКСТ_МИМО_ОЧИСТКИ` есть в схемах: переименованное поле
+		выпало бы из проверки молча."""
+		self.assertEqual(ТЕКСТ_МИМО_ОЧИСТКИ - set(_поля_доктайпов()) - set(_поля_фикстуры()), set())
 
 	def test_правило_ловит_нарушения(self):
 		"""Проверка проверки: каждое нарушение по отдельности."""

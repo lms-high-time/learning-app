@@ -256,3 +256,28 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 
 		ответ = схема_документа(курс, "notebook", "Тетрадь <b>", [{"key": "log", "title": "Журнал"}])
 		self.assertEqual(ответ["error"]["code"], "title_forbidden_chars", ответ)
+
+	def test_старое_название_с_угловыми_не_мешает_сохранению(self):
+		"""Название с `<`, записанное до запрета (learning-services#521), не мешает
+		сохранять запись по другим полям: запрет проверяет только новое или
+		изменённое название. Снятие шаблона домашки — `releases.test_homework`."""
+		frappe.set_user(self.куратор)
+		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+		frappe.set_user("Administrator")
+		имя = frappe.db.get_value(
+			"Agent Course Artifact", {"course": курс, "slug": "notebook", "is_active": 1}
+		)
+		frappe.db.set_value("Agent Course Artifact", имя, "title", "x < 5")
+		схема = frappe.get_doc("Agent Course Artifact", имя)
+
+		схема.purpose = "Новое назначение"
+		схема.is_active = 0
+		схема.save()
+
+		self.assertEqual(
+			frappe.db.get_value("Agent Course Artifact", имя, ["title", "purpose", "is_active"]),
+			("x < 5", "Новое назначение", 0),
+		)
+		схема.title = "y < 6"
+		with self.assertRaises(Отказ):
+			схема.save()
