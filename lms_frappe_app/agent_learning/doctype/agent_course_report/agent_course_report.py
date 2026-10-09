@@ -1,10 +1,15 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
+import frappe
 from frappe.model.document import Document
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning.constants import ЗАКРЫТЫЕ_РЕПОРТЫ
+from lms_frappe_app.agent_learning.constants import ЗАКРЫТЫЕ_РЕПОРТЫ, ИМЯ_СТАТУСА_РЕПОРТА, ПЕРЕХОДЫ_РЕПОРТА
+
+#: Поля, которые ставит `report_issue` из занятия и жалобы агента. У
+#: существующего репорта они не меняются ни на каком пути записи.
+ПОЛЯ_ПРИВЯЗКИ = ("session", "course", "lesson", "release", "kind", "question_key", "objective", "text")
 
 
 class AgentCourseReport(Document):
@@ -18,6 +23,8 @@ class AgentCourseReport(Document):
 	Курс, урок и релиз заполняет метод из занятия: привязка от
 	агента указала бы на чужой урок, а вторая копия разъехалась бы с занятием.
 	Поэтому они `read_only` — править их в desk значит подделывать сигнал.
+	`read_only` сервер не охраняет, и поля привязки держит `validate`
+	(learning-services#528).
 
 	Ученик видит статус и итог своих репортов, а `resolution` — ответ ему.
 	`Why:` без ответа ученик не видит смысла писать репорты, а курс правят
@@ -25,7 +32,43 @@ class AgentCourseReport(Document):
 	"""
 
 	def validate(self):
+		прежний = self.get_doc_before_save()
+		if прежний:
+			self._привязка_не_меняется(прежний)
+			self._проверить_переход(прежний)
 		self._отметить_итог()
+
+	def _привязка_не_меняется(self, прежний):
+		"""Отказ, если у существующего репорта сменилось поле привязки.
+
+		`Why:` ученик видит в `my_reports` репорты своих занятий, и `session`,
+		переставленный на занятие другого ученика, показал бы тому чужой текст
+		и ответ. Остальные поля привязки — сам сигнал: подменённые, они
+		указывают куратору не на тот урок и не на ту жалобу.
+		"""
+		for поле in ПОЛЯ_ПРИВЯЗКИ:
+			if (self.get(поле) or None) != (прежний.get(поле) or None):
+				frappe.throw(
+					frappe._("Поле «{0}» ставит жалоба из занятия, его не правят").format(
+						self.meta.get_label(поле)
+					),
+					title=frappe._("Репорт агента"),
+				)
+
+	def _проверить_переход(self, прежний):
+		"""Статус меняется по `ПЕРЕХОДЫ_РЕПОРТА` и в Desk: правило то же, что у
+		`resolve_report`, — закрытый репорт только переоткрывают."""
+		if self.status == прежний.status:
+			return
+		было = ИМЯ_СТАТУСА_РЕПОРТА.get(прежний.status)
+		стало = ИМЯ_СТАТУСА_РЕПОРТА.get(self.status)
+		if стало not in ПЕРЕХОДЫ_РЕПОРТА.get(было, ()):
+			frappe.throw(
+				frappe._("Из «{0}» в «{1}» перейти нельзя: закрытый репорт только переоткрывают").format(
+					frappe._(прежний.status), frappe._(self.status)
+				),
+				title=frappe._("Репорт агента"),
+			)
 
 	def _отметить_итог(self):
 		"""Дата итога — при переходе в закрытый статус, сброс — при возврате

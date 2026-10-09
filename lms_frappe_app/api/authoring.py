@@ -37,6 +37,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ИМЯ_ВИДА_РЕПОРТА,
 	ИМЯ_СТАТУСА_РЕПОРТА,
 	ОТКРЫТЫЕ_РЕПОРТЫ,
+	ПЕРЕХОДЫ_РЕПОРТА,
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.errors import (
@@ -223,6 +224,13 @@ def update_course(
 #: Адрес по форме верен, а такого места в действующем релизе курса нет.
 МЕСТА_НЕТ_В_РЕЛИЗЕ = "note_target_unknown"
 
+# Заметки и репорты методы пишут с `ignore_permissions`: право уже проверил
+# `_автор()`, а записи на этих доктайпах у Course Creator нет намеренно.
+# `Why:` с ней `/api/resource` переставил бы репорт на занятие другого
+# ученика, поправил бы заметке `status`, `via` и релиз мимо переходов и
+# вставил бы строку нити мимо заметки (learning-services#528). Moderator и
+# System Manager пишут и в Desk — их держат `validate` записей.
+
 
 @frappe.whitelist(methods=["POST"])
 @контракт
@@ -269,7 +277,7 @@ def add_note(
 			"quote": (quote or "").strip(),
 			"text": текст,
 		}
-	).insert()
+	).insert(ignore_permissions=True)
 	return {
 		"id": документ.name,
 		"course": course,
@@ -315,7 +323,7 @@ def reply_note(note: str, text: str, via: str = "author") -> dict:
 	документ = _замечание_или_отказ(note)
 	_проверить_источник(via)
 	_ответить(документ, _текст_замечания(text), via)
-	документ.save()
+	документ.save(ignore_permissions=True)
 	return _состояние_замечания(документ)
 
 
@@ -334,7 +342,7 @@ def set_note_status(note: str, status: str, text: str | None = None, via: str = 
 	if (text or "").strip():
 		_ответить(документ, text.strip(), via)
 	документ.status = status
-	документ.save()
+	документ.save(ignore_permissions=True)
 	return _состояние_замечания(документ)
 
 
@@ -909,18 +917,6 @@ def _не_из_релиза(курс: str) -> None:
 #: Фильтр `course_reports` по статусу: всё, что ждёт разбора.
 ФИЛЬТР_ОТКРЫТЫХ = "open"
 
-#: Куда можно перевести репорт. Открытый — в любой другой статус; закрытый —
-#: только обратно в работу. `Why:` итог уже ушёл ученику, и замена одного
-#: итога другим молча переписала бы то, что он прочёл; переоткрытие же честно
-#: говорит «разбираемся заново», а новый итог дойдёт до него снова.
-ПЕРЕХОДЫ_РЕПОРТА = {
-	"new": frozenset({"in_progress", "fixed", "rejected", "duplicate"}),
-	"in_progress": frozenset({"new", "fixed", "rejected", "duplicate"}),
-	"fixed": frozenset({"in_progress"}),
-	"rejected": frozenset({"in_progress"}),
-	"duplicate": frozenset({"in_progress"}),
-}
-
 #: Итоги, которые ученику нужно объяснить словами: «исправили» и «не будем»
 #: без ответа — пустой звук. Дубль отвечает ответом оригинала.
 С_ОТВЕТОМ = frozenset({"fixed", "rejected"})
@@ -1062,7 +1058,7 @@ def resolve_report(
 	документ.status = СТАТУСЫ_РЕПОРТОВ[стало]
 	документ.resolution = ответ or None
 	документ.duplicate_of = оригинал
-	документ.save()
+	документ.save(ignore_permissions=True)
 	return {
 		"id": документ.name,
 		"status": стало,
