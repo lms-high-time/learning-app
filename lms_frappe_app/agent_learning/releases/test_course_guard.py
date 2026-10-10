@@ -51,16 +51,38 @@ def права_из_файла(тест, *doctypes: str) -> None:
 	меты доктайпа — он общий для всего процесса тестов, поэтому подмена
 	снимается в конце теста вместе с кэшем прав ролей. Права в базе сайта она
 	не меняет. На свежем сайте права совпадают с файлом.
+
+	Подмену ставит обёртка `frappe.get_meta` на каждый объект меты, который та
+	отдаёт. `Why:` мету держит `client_cache` процесса, и объект может смениться
+	посреди теста: запись ключа в redis любым процессом сбрасывает местную
+	копию, и следующий `get_meta` отдаёт новый объект с правами из базы.
 	"""
-	тест.addCleanup(setattr, frappe.local, "role_permissions", {})
+	права = {}
 	for doctype in doctypes:
 		имя = frappe.scrub(doctype)
 		путь = frappe.get_app_path("lms_frappe_app", "agent_learning", "doctype", имя, f"{имя}.json")
 		with open(путь) as файл:
-			права = [frappe._dict(право) for право in json.load(файл)["permissions"]]
-		заплатка = patch.object(frappe.get_meta(doctype), "permissions", права)
-		заплатка.start()
-		тест.addCleanup(заплатка.stop)
+			права[doctype] = [frappe._dict(право) for право in json.load(файл)["permissions"]]
+	исходная = frappe.get_meta
+	подменённые = []
+
+	def get_meta(doctype, cached=True):
+		мета = исходная(doctype, cached=cached)
+		свои = права.get(мета.name)
+		if свои is not None and мета.permissions is not свои:
+			подменённые.append((мета, мета.permissions))
+			мета.permissions = свои
+		return мета
+
+	def снять() -> None:
+		for мета, прежние in reversed(подменённые):
+			мета.permissions = прежние
+		frappe.local.role_permissions = {}
+
+	заплатка = patch.object(frappe, "get_meta", get_meta)
+	заплатка.start()
+	тест.addCleanup(снять)
+	тест.addCleanup(заплатка.stop)
 	frappe.local.role_permissions = {}
 
 

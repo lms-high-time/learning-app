@@ -4,15 +4,14 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.api import authoring, student
-from lms_frappe_app.api.authoring import (
-	КУРС_НЕ_НАЙДЕН,
+from lms_frappe_app.agent_learning.reports import (
 	НЕВЕРНЫЙ_ОРИГИНАЛ,
 	НЕДОПУСТИМЫЙ_ПЕРЕХОД_РЕПОРТА,
-	НЕИЗВЕСТНЫЙ_СТАТУС_РЕПОРТА,
 	НУЖЕН_ОРИГИНАЛ,
 	НУЖЕН_ОТВЕТ_УЧЕНИКУ,
 )
+from lms_frappe_app.api import authoring, student
+from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН, НЕИЗВЕСТНЫЙ_СТАТУС_РЕПОРТА
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
