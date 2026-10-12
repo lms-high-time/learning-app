@@ -508,6 +508,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		for утечка in ("V1", "Первый", ПОЯСНЕНИЕ, "explanation", "why_wrong"):
 			self.assertNotIn(утечка, выдано)
 		self.assertEqual(итог["attempts_left"], 2)
+		# Неверный ответ записан без балла из одного.
+		self.assertEqual(
+			[
+				(з.is_correct, з.marks, з.marks_out_of)
+				for з in frappe.get_all(
+					ОТВЕТ,
+					filters={"attempt": ответ["attempt"], "is_correct": 0},
+					fields=["is_correct", "marks", "marks_out_of"],
+				)
+			],
+			[(0, 0, 1)],
+		)
 		закончена = frappe.db.get_value(ПОПЫТКА, ответ["attempt"], "finished_at")
 		момент = datetime.fromisoformat(итог["retry_after"])
 		self.assertIsNotNone(момент.tzinfo, "время пересдачи — с поясом сайта")

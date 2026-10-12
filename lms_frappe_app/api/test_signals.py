@@ -213,3 +213,13 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 			self.старт()["signals"],
 			[{"code": "deadline_pace", "lessons_left": 3, "lessons_per_week": 11, "overdue": False}],
 		)
+
+	def test_срок_прошёл(self):
+		"""Проводка флага просрочки: `_сигналы_старта` передаёт `overdue` из
+		доступа к курсу — темп без числа уроков в неделю."""
+		self.срок(add_days(nowdate(), -3))
+
+		self.assertEqual(
+			self.старт()["signals"],
+			[{"code": "deadline_pace", "lessons_left": 3, "lessons_per_week": None, "overdue": True}],
+		)

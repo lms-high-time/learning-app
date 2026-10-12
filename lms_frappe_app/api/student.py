@@ -10,6 +10,7 @@
 
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 import frappe
@@ -2020,21 +2021,23 @@ def _состояние_старта(ученик: str, курс: str, lesson: s
 		{"student": ученик, "course": курс, "session": занятие, "done": ПРОЙДЕН},
 		as_dict=True,
 	)
-	# Why: перерыв читается и без незакрытого — настройки уже в кеше документов
-	# после `глубина_переноса` в `start_lesson`, лишнего запроса нет.
 	return начало_занятия(
-		прочие, lesson, есть_незакрытое, now_datetime(), timedelta(hours=перерыв_для_мостика())
+		прочие, lesson, есть_незакрытое, now_datetime(), lambda: timedelta(hours=перерыв_для_мостика())
 	)
 
 
 def начало_занятия(
-	прочие: list[dict], lesson: str, есть_незакрытое: bool, сейчас: datetime, перерыв: timedelta
+	прочие: list[dict],
+	lesson: str,
+	есть_незакрытое: bool,
+	сейчас: datetime,
+	перерыв: Callable[[], timedelta],
 ) -> dict:
 	"""`{opening, last_session_at}` по прочим занятиям ученика по курсу — без базы.
 
 	`прочие` — занятия со следом, кроме текущего (`lesson`, `started_at`,
-	`last_activity_at`); `сейчас` — время сайта, `перерыв` — перерыв для
-	мостика. Время занятия — `last_activity_at`, без него — `started_at`;
+	`last_activity_at`); `сейчас` — время сайта, `перерыв` — функция,
+	отдающая перерыв для мостика. Время занятия — `last_activity_at`, без него — `started_at`;
 	`last_session_at` — самое позднее из них. Порядок проверок — порядок
 	приоритета:
 
@@ -2043,6 +2046,9 @@ def начало_занятия(
 	- `return` — `есть_незакрытое`, а с последнего занятия прошло больше
 	  `перерыв`;
 	- `new_lesson` — всё остальное.
+
+	`Why:` перерыв читается из настроек, и `перерыв` зовётся только на
+	проверке `return` — при незакрытом и известном последнем занятии.
 	"""
 	последнее = max(
 		(з["last_activity_at"] or з["started_at"] for з in прочие if з["last_activity_at"] or з["started_at"]),
@@ -2052,7 +2058,7 @@ def начало_занятия(
 		opening = "repeat"
 	elif not прочие:
 		opening = "first_in_course"
-	elif есть_незакрытое and последнее and сейчас - последнее > перерыв:
+	elif есть_незакрытое and последнее and сейчас - последнее > перерыв():
 		opening = "return"
 	else:
 		opening = "new_lesson"
