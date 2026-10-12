@@ -7,6 +7,8 @@
 и `agent_learning/releases/test_service.py`; здесь — что вокруг неё.
 """
 
+from functools import cached_property
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -110,7 +112,16 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 		self.куратор = создать_куратора(f"revision-{суффикс}@example.com")
 		self.ключ = f"revision-{суффикс}"
 		frappe.set_user(self.куратор)
-		self.курс = self.опубликовать()["course"]
+
+	@cached_property
+	def курс(self) -> str:
+		"""Курс из релиза — при первом обращении: тесту анонса он не нужен."""
+		прежний = frappe.session.user
+		frappe.set_user(self.куратор)
+		try:
+			return self.опубликовать()["course"]
+		finally:
+			frappe.set_user(прежний)
 
 	def опубликовать(self, релиз: dict | None = None) -> dict:
 		ответ = authoring.publish_release(release=релиз or пример_релиза(self.ключ))
@@ -123,8 +134,13 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 	def ревизия(self) -> str:
 		return self.отметки()["revision"]
 
-	def test_новый_релиз_двигает_ревизию_а_тот_же_нет(self):
+	def test_новый_релиз_двигает_ревизию_а_тот_же_и_чтение_нет(self):
 		до = self.ревизия()
+		authoring.course_release(course=self.курс)
+		authoring.course_release(course=self.курс, lesson="l-1")
+		authoring.course_releases(course=self.курс)
+		self.assertEqual(self.ревизия(), до)
+
 		self.опубликовать()
 		self.assertEqual(self.ревизия(), до)
 
@@ -146,14 +162,6 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 		self.assertEqual(после_записи["revision"], до["revision"])
 		self.assertIsNotNone(после_записи["notes_revision"])
 		self.assertGreater(после_ответа["notes_revision"], после_записи["notes_revision"])
-
-	def test_чтение_ревизию_не_меняет(self):
-		до = self.ревизия()
-		authoring.course_release(course=self.курс)
-		authoring.course_release(course=self.курс, lesson="l-1")
-		authoring.course_releases(course=self.курс)
-
-		self.assertEqual(self.ревизия(), до)
 
 	def test_снятие_с_публикации_и_анонс_двигают_ревизию(self):
 		было = self.ревизия()

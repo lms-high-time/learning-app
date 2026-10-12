@@ -34,25 +34,26 @@ class IntegrationTestChatState(IntegrationTestCase):
 		self.ученик = создать_ученика(f"chat-{суффикс}@example.com")
 		self.урок = создать_урок(f"Чат {суффикс}")
 		зачислить(self.ученик, self.урок)
-		self.организация = создать_организацию(f"Чат-компания {суффикс}")
-		добавить_в_организацию(self.ученик, self.организация)
-		self.руководитель = создать_менеджера(f"chatboss-{суффикс}@example.com", self.организация)
-		self.чужой = создать_ученика(f"chat-other-{суффикс}@example.com")
-		self.чужое_занятие = создать_занятие(self.чужой, self.урок)
 
 		frappe.set_user(self.ученик)
 		self.занятие = создать_занятие(self.ученик, self.урок)
 
-	def test_без_сохранения_состояния_нет(self):
-		данные = student.chat_state(self.занятие)["data"]
+	def test_состояние_одно_на_занятие_и_ученик_из_занятия(self):
+		"""Без сохранения состояния нет; повторное сохранение замещает запись;
+		ученик записи берётся из занятия."""
+		self.assertEqual(
+			student.chat_state(self.занятие)["data"],
+			{"session": self.занятие, "state": None, "version": None},
+		)
 
-		self.assertEqual(данные, {"session": self.занятие, "state": None, "version": None})
-
-	def test_повторное_сохранение_замещает_запись(self):
 		student.save_chat_state(self.занятие, СОСТОЯНИЕ, "1")
 		self.assertEqual(
 			student.chat_state(self.занятие)["data"],
 			{"session": self.занятие, "state": СОСТОЯНИЕ, "version": "1"},
+		)
+		self.assertEqual(
+			frappe.db.get_value("Agent Chat State", {"session": self.занятие}, "student"),
+			self.ученик,
 		)
 		новое = json.dumps({"id": "conv-1", "messages": []})
 		student.save_chat_state(self.занятие, новое, "2")
@@ -61,26 +62,21 @@ class IntegrationTestChatState(IntegrationTestCase):
 		данные = student.chat_state(self.занятие)["data"]
 		self.assertEqual((данные["state"], данные["version"]), (новое, "2"))
 
-	def test_ученик_записи_берётся_из_занятия(self):
-		student.save_chat_state(self.занятие, СОСТОЯНИЕ, "1")
+	def test_чужое_занятие_не_читается_и_не_пишется(self):
+		frappe.set_user("Administrator")
+		чужой = создать_ученика(f"chat-other-{frappe.generate_hash(length=6)}@example.com")
+		чужое_занятие = создать_занятие(чужой, self.урок)
+		frappe.set_user(self.ученик)
 
-		self.assertEqual(
-			frappe.db.get_value("Agent Chat State", {"session": self.занятие}, "student"),
-			self.ученик,
-		)
-
-	def test_чужое_занятие_не_читается(self):
-		ответ = student.chat_state(self.чужое_занятие)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
-
-	def test_в_чужое_занятие_не_пишется(self):
-		ответ = student.save_chat_state(self.чужое_занятие, СОСТОЯНИЕ, "1")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
-		self.assertFalse(frappe.db.exists("Agent Chat State", {"session": self.чужое_занятие}))
+		for что, вызов in {
+			"читать": lambda: student.chat_state(чужое_занятие),
+			"писать": lambda: student.save_chat_state(чужое_занятие, СОСТОЯНИЕ, "1"),
+		}.items():
+			with self.subTest(что):
+				ответ = вызов()
+				self.assertFalse(ответ["ok"])
+				self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
+		self.assertFalse(frappe.db.exists("Agent Chat State", {"session": чужое_занятие}))
 
 	def test_не_json_отклоняется(self):
 		ответ = student.save_chat_state(self.занятие, "{обрыв", "1")
@@ -100,10 +96,18 @@ class IntegrationTestChatState(IntegrationTestCase):
 	def test_записи_не_читают_ни_ученик_ни_руководитель(self):
 		# Формат внутренний, а переписка — не отчётность: руководителю её не
 		# отдаёт ни один метод, и прямого права на записи нет ни у кого из них.
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		организация = создать_организацию(f"Чат-компания {суффикс}")
+		добавить_в_организацию(self.ученик, организация)
+		руководитель = создать_менеджера(f"chatboss-{суффикс}@example.com", организация)
+		frappe.set_user(self.ученик)
+
 		student.save_chat_state(self.занятие, СОСТОЯНИЕ, "1")
-		for кто in (self.ученик, self.руководитель):
-			frappe.set_user(кто)
-			self.assertFalse(
-				frappe.has_permission("Agent Chat State", "read"),
-				f"{кто} получил доступ к состоянию разговора",
-			)
+		for кто in (self.ученик, руководитель):
+			with self.subTest(кто=кто):
+				frappe.set_user(кто)
+				self.assertFalse(
+					frappe.has_permission("Agent Chat State", "read"),
+					f"{кто} получил доступ к состоянию разговора",
+				)

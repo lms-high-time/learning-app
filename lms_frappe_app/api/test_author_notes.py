@@ -193,37 +193,38 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		релиз["map"] = {"goals": КАРТА["goals"]}
 		return релиз
 
-	def test_неизвестное_место_отклоняется(self):
-		for target in (
-			"chapter.ch-9",
-			"lesson.l-9",
-			"objective.l-9-D1",
-			"goal.l-1/нет",
-			"goal.l-9/term:T1",
-			"question.S9/l-1-D1",
-			"section.нет",
-			"agent.lesson.l-9",
-			"agent.item.l-1/нет",
-			"map.нет",
-		):
-			with self.subTest(target=target):
-				ответ = self.заметка(target)
-				self.assertEqual(self.код(ответ), "note_target_unknown")
-				self.assertEqual(
-					(ответ["error"]["target"], ответ["error"]["release"]), (target, self.первый)
-				)
-		self.assertEqual(self.очередь(), [])
-
-	def test_неверный_адрес_и_пустой_текст(self):
+	def test_неизвестное_место_неверный_адрес_и_пустой_текст(self):
+		"""Отказ `add_note` — с местом отказа; очередь остаётся пустой."""
+		отказы = {
+			target: (
+				{"target": target},
+				{"code": "note_target_unknown", "target": target, "release": self.первый},
+			)
+			for target in (
+				"chapter.ch-9",
+				"lesson.l-9",
+				"objective.l-9-D1",
+				"goal.l-1/нет",
+				"goal.l-9/term:T1",
+				"question.S9/l-1-D1",
+				"section.нет",
+				"agent.lesson.l-9",
+				"agent.item.l-1/нет",
+				"map.нет",
+			)
+		}
 		for правки, код, где in (
 			({"target": "directive.teaching_directive"}, "invalid_target", "target"),
 			({"target": "lesson"}, "invalid_target", "target"),
 			({"text": "  "}, "invalid_note", "text"),
 			({"via": "robot"}, "invalid_note", "via"),
 		):
-			with self.subTest(**правки):
+			отказы[f"{где}={next(iter(правки.values()))!r}"] = (правки, {"code": код, "where": где})
+		for что, (правки, ошибка) in отказы.items():
+			with self.subTest(что):
 				ответ = self.заметка(**правки)
-				self.assertEqual((self.код(ответ), ответ["error"]["where"]), (код, где))
+				self.assertFalse(ответ["ok"], ответ)
+				self.assertEqual({к: ответ["error"][к] for к in ошибка}, ошибка)
 		self.assertEqual(self.очередь(), [])
 
 	def test_курс_без_релиза(self):
@@ -234,16 +235,24 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		self.assertEqual((self.код(ответ), ответ["error"]["course"]), ("course_not_released", курс))
 		self.assertEqual(authoring.list_notes(course=курс)["data"]["notes"], [])
 
-	def test_несуществующий_курс(self):
-		for метод, вызов in {
-			"add_note": lambda: authoring.add_note(course="нет-курса", target="course", text="…"),
-			"list_notes": lambda: authoring.list_notes(course="нет-курса"),
-			"unpublish_course": lambda: authoring.unpublish_course(course="нет-курса"),
-			"course_revision": lambda: authoring.course_revision(course="нет-курса"),
-			"course_reports": lambda: authoring.course_reports(course="нет-курса"),
+	def test_несуществующий_курс_и_заметка(self):
+		for метод, (вызов, код) in {
+			"add_note": (
+				lambda: authoring.add_note(course="нет-курса", target="course", text="…"),
+				"course_not_found",
+			),
+			"list_notes": (lambda: authoring.list_notes(course="нет-курса"), "course_not_found"),
+			"unpublish_course": (lambda: authoring.unpublish_course(course="нет-курса"), "course_not_found"),
+			"course_revision": (lambda: authoring.course_revision(course="нет-курса"), "course_not_found"),
+			"course_reports": (lambda: authoring.course_reports(course="нет-курса"), "course_not_found"),
+			"reply_note": (lambda: authoring.reply_note(note="AAN-нет", text="…"), "note_not_found"),
+			"set_note_status": (
+				lambda: authoring.set_note_status(note="AAN-нет", status="accepted"),
+				"note_not_found",
+			),
 		}.items():
 			with self.subTest(метод=метод):
-				self.assertEqual(self.код(вызов()), "course_not_found")
+				self.assertEqual(self.код(вызов()), код)
 
 	# --- фильтры ---
 
@@ -316,36 +325,32 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 
 		self.assertEqual(ответ, {"id": ид, "status": "open", "waiting_on": "agent", "replies": 1})
 
-	def test_заметки_нет(self):
-		self.assertEqual(self.код(authoring.reply_note(note="AAN-нет", text="…")), "note_not_found")
-		self.assertEqual(self.код(authoring.set_note_status(note="AAN-нет", status="accepted")), "note_not_found")
-
-	def test_ученику_заметки_недоступны(self):
-		ид = self.записать()
-		frappe.set_user(создать_ученика(f"notes-s-{frappe.generate_hash(length=6)}@example.com"))
-
-		for вызов in (
-			lambda: authoring.list_notes(course=self.курс),
-			lambda: authoring.add_note(course=self.курс, target="course", text="Я ученик"),
-			lambda: authoring.reply_note(note=ид, text="Я ученик"),
-			lambda: authoring.set_note_status(note=ид, status="accepted"),
-		):
-			with self.assertRaises(frappe.PermissionError):
-				вызов()
-
-	def test_тестеру_403_гостю_401(self):
+	def test_ученику_тестеру_403_гостю_401(self):
 		"""Заметки и репорты — авторским ролям: тестер курса — ученик с ранним
 		доступом, а не автор. Гостю — 401: сначала вход."""
+		ид = self.записать()
+		ученик = создать_ученика(f"notes-s-{frappe.generate_hash(length=6)}@example.com")
 		тестер = создать_ученика(f"notes-t-{frappe.generate_hash(length=6)}@example.com")
 		self.assertTrue(authoring.add_testers(course=self.курс, users=тестер)["ok"])
-		for пользователь, ошибка in ((тестер, frappe.PermissionError), ("Guest", frappe.AuthenticationError)):
+		не_автору = {
+			"add_note": lambda: authoring.add_note(course=self.курс, target="course", text="Не автор"),
+			"list_notes": lambda: authoring.list_notes(course=self.курс),
+			"course_reports": lambda: authoring.course_reports(course=self.курс),
+		}
+		ученику = {
+			"list_notes": lambda: authoring.list_notes(course=self.курс),
+			"add_note": lambda: authoring.add_note(course=self.курс, target="course", text="Я ученик"),
+			"reply_note": lambda: authoring.reply_note(note=ид, text="Я ученик"),
+			"set_note_status": lambda: authoring.set_note_status(note=ид, status="accepted"),
+		}
+		for пользователь, ошибка, вызовы in (
+			(ученик, frappe.PermissionError, ученику),
+			(тестер, frappe.PermissionError, не_автору),
+			("Guest", frappe.AuthenticationError, не_автору),
+		):
 			frappe.set_user(пользователь)
-			for вызов in (
-				lambda: authoring.add_note(course=self.курс, target="course", text="Не автор"),
-				lambda: authoring.list_notes(course=self.курс),
-				lambda: authoring.course_reports(course=self.курс),
-			):
-				with self.subTest(пользователь=пользователь), self.assertRaises(ошибка):
+			for метод, вызов in вызовы.items():
+				with self.subTest(пользователь=пользователь, метод=метод), self.assertRaises(ошибка):
 					вызов()
 
 	# --- заметки без места ---
@@ -368,22 +373,19 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 			.name
 		)
 
-	def test_архивная_заметка_без_места_даже_у_курса(self):
+	def test_заметки_без_места_в_очереди(self):
+		"""Архивная заметка — без места даже у курса; неразборчивый адрес не роняет очередь."""
 		архив = self.вставить("course", None)
-
-		заметка = next(з for з in self.очередь() if з["id"] == архив)
-
-		self.assertEqual(
-			(заметка["target"], заметка["label"], заметка["missing"], заметка["release"]),
-			("course", "course", True, None),
-		)
-
-	def test_неразборчивый_адрес_не_роняет_очередь(self):
 		живая = self.записать("course")
 		кривая = self.вставить("lesson.", self.первый)
 
 		заметки = {з["id"]: з for з in self.очередь()}
 
+		заметка = заметки[архив]
+		self.assertEqual(
+			(заметка["target"], заметка["label"], заметка["missing"], заметка["release"]),
+			("course", "course", True, None),
+		)
 		self.assertEqual((заметки[кривая]["label"], заметки[кривая]["missing"]), ("lesson.", True))
 		self.assertEqual((заметки[живая]["label"], заметки[живая]["missing"]), ("Курс", False))
 
