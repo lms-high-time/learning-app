@@ -266,7 +266,8 @@ class IntegrationTestКоммитРелиза(IntegrationTestCase):
 	def test_коммит_пишется_в_новую_версию(self):
 		"""Тот же релиз из другого коммита — `unchanged`: коммит в дайджест не
 		входит, а запись версии неизменяема. Неверный коммит — отказ до первой
-		записи, и у нового курса, и у прежнего."""
+		записи, и у нового курса, и у прежнего; какой коммит неверен, проверяет
+		`TestПараметрыАвтора` в `api/test_authoring.py`."""
 		данные = self.опубликовать(commit=self.КОММИТ)["data"]
 		курс = данные["course"]
 
@@ -280,27 +281,15 @@ class IntegrationTestКоммитРелиза(IntegrationTestCase):
 				self.assertEqual((данные["version"], данные["commit"]), (1, self.КОММИТ))
 		self.assertEqual(self.коммиты(курс), [(1, self.КОММИТ)])
 
-		for коммит in (
-			"",
-			self.КОММИТ[:7],
-			self.КОММИТ.upper(),
-			self.КОММИТ + "8",
-			f" {self.КОММИТ}",
-			f"{self.КОММИТ}\n",
-			"g" * 40,
-			self.ДРУГОЙ[:63],
-			40,
-			[self.КОММИТ],
-		):
-			for релиз in (self.другой_релиз(), пример_релиза(f"new-{self.ключ}")):
-				with (
-					self.subTest("неверный", коммит=коммит, ключ=релиз["course"]["key"]),
-					mock.patch.object(service, "_разобрать") as разобрать,
-				):
-					ответ = self.опубликовать(релиз, commit=коммит)
+		for релиз in (self.другой_релиз(), пример_релиза(f"new-{self.ключ}")):
+			with (
+				self.subTest("неверный", ключ=релиз["course"]["key"]),
+				mock.patch.object(service, "_разобрать") as разобрать,
+			):
+				ответ = self.опубликовать(релиз, commit=self.КОММИТ.upper())
 
-					self.assertEqual(ответ.get("error", {}).get("code"), "invalid_commit", ответ)
-					разобрать.assert_not_called()
+				self.assertEqual(ответ.get("error", {}).get("code"), "invalid_commit", ответ)
+				разобрать.assert_not_called()
 		self.assertEqual(self.коммиты(курс), [(1, self.КОММИТ)])
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": f"new-{self.ключ}"}))
 

@@ -650,7 +650,14 @@ def _файлы(имена: list[str], сведения: dict[str, dict]) -> lis
 
 
 def _автор_события(user: str | None, читатель: str, ученик: str | None = None) -> dict:
-	"""`by` и `by_name` строки журнала для `читатель`.
+	"""`by` и `by_name` строки журнала для `читатель`: имя из профиля — у
+	события с автором, правило — `автор_события`."""
+	имя = frappe.get_cached_value("User", user, "full_name") if user else None
+	return автор_события(user, имя, читатель, ученик)
+
+
+def автор_события(user: str | None, имя: str | None, читатель: str, ученик: str | None = None) -> dict:
+	"""`by` и `by_name` строки журнала без базы: `имя` — `full_name` автора.
 
 	`Why:` журнал читает ученик — на странице урока и через агента, и почта
 	куратора ему ни к чему (learning-services#439). Почта остаётся только у
@@ -660,7 +667,6 @@ def _автор_события(user: str | None, читатель: str, учен
 	"""
 	if not user:
 		return {"by": None, "by_name": None}
-	имя = frappe.get_cached_value("User", user, "full_name")
 	if user == читатель:
 		return {"by": user, "by_name": имя or user}
 	return {"by": None, "by_name": имя or (УЧЕНИК if user == ученик else КУРАТОР)}

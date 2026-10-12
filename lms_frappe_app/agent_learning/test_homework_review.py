@@ -2,7 +2,7 @@
 # See license.txt
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import permissions
@@ -190,3 +190,34 @@ class IntegrationTestMayReview(IntegrationTestCase):
 		for user in (self.менеджер, self.методист, "Administrator"):
 			with self.subTest(f"архивную: {user}"):
 				self.assertFalse(permissions.может_проверять(self.рабочая, user), user)
+
+
+class TestАвторСобытия(UnitTestCase):
+	"""Без базы: подпись автора строки журнала сдачи (learning-services#536).
+
+	Проводку — имя из профиля и читатель по умолчанию — проверяет
+	`api/test_homework_api.py`, читателя-куратора — `IntegrationTestHomeworkReview`.
+	"""
+
+	def test_подпись_автора(self):
+		"""Почта — только у своих событий; без имени — почта своим, «Ученик» или «Куратор» чужим.
+
+		Строки «#439» — правило learning-services#439: почта куратора ученику не уходит."""
+		ученик, куратор, другой = "pupil@example.com", "curator@example.com", "other@example.com"
+		случаи = (
+			("событие без автора", None, None, ученик, ученик, (None, None)),
+			("пустой автор", "", "Анна", ученик, ученик, (None, None)),
+			("своё с именем", ученик, "Анна", ученик, ученик, (ученик, "Анна")),
+			("своё без имени — почта", ученик, None, ученик, ученик, (ученик, ученик)),
+			("своё с пустым именем — почта", куратор, "", куратор, ученик, (куратор, куратор)),
+			("#439 ученику — куратор с именем", куратор, "Ирина", ученик, ученик, (None, "Ирина")),
+			("#439 ученику — куратор без имени", куратор, None, ученик, ученик, (None, домашка.КУРАТОР)),
+			("куратору — ученик с именем", ученик, "Анна", куратор, ученик, (None, "Анна")),
+			("куратору — ученик без имени", ученик, None, куратор, ученик, (None, домашка.УЧЕНИК)),
+			("куратору — другой куратор без имени", другой, None, куратор, ученик, (None, домашка.КУРАТОР)),
+			("ученик сдачи не указан", ученик, None, куратор, None, (None, домашка.КУРАТОР)),
+		)
+		for что, user, имя, читатель, автор_сдачи, ожидание in случаи:
+			with self.subTest(что):
+				подпись = домашка.автор_события(user, имя, читатель, автор_сдачи)
+				self.assertEqual((подпись["by"], подпись["by_name"]), ожидание)

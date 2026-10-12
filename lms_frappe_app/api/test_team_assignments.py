@@ -336,14 +336,15 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 
 	def test_неверные_сроки_и_чужое_задание(self):
 		"""Неверный срок — `invalid_due`, задание чужого курса или несуществующее —
-		`homework_not_in_course`; отказ правил не ставит."""
+		`homework_not_in_course`; отказ правил не ставит.
+
+		Правило срока строки — одной строкой проводки (`none`, которого у
+		назначения нет): целиком его проверяет
+		`agent_learning/doctype/agent_lesson_homework/test_agent_lesson_homework.py`."""
 		чужое = создать_домашку(создать_урок(f"Чужой {frappe.generate_hash(length=6)}"))
 		задание = self.задание_1.name
 		отказы = [
 			([{"homework": задание, "due_mode": "none"}], "invalid_due"),
-			([{"homework": задание, "due_mode": "relative"}], "invalid_due"),
-			([{"homework": задание, "due_mode": "relative", "due_days": 0}], "invalid_due"),
-			([{"homework": задание, "due_mode": "absolute"}], "invalid_due"),
 			(
 				[
 					{"homework": задание, "due_mode": "relative", "due_days": 1},
@@ -354,8 +355,6 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 			("{не json", "invalid_due"),
 			([задание], "invalid_due"),
 			({"homework": задание}, "invalid_due"),
-			([{"homework": задание, "due_mode": "absolute", "due_date": "завтра"}], "invalid_due"),
-			([{"homework": задание, "due_mode": "absolute", "due_date": "2030-02-30"}], "invalid_due"),
 			([{"homework": задание, "due_mode": "absolute", "due_date": ["2030-02-01"]}], "invalid_due"),
 			([{"homework": [задание], "due_mode": "relative", "due_days": 1}], "invalid_due"),
 			([{"homework": задание, "due_mode": {"relative": 1}, "due_days": 1}], "invalid_due"),

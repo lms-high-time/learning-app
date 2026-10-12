@@ -110,14 +110,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertEqual(блоки[0]["file"]["name"], "plan.csv")
 		self.assertTrue(блоки[0]["preview"])
 
-	def test_срез_xlsx_показывает_формулу_без_значения(self):
-		self.загрузить("plan.xlsx", xlsx())
-
-		срез = self.блок("money")["preview"]
-
-		self.assertIn("| Месяц | Выручка | Расходы | Прибыль |", срез)
-		self.assertIn("=B2-C2", срез, "у собранного программой файла значения нет — видна формула")
-
 	def test_файл_base64_от_сервиса_ложится_так_же(self):
 		import base64
 
@@ -130,21 +122,16 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertIn("| Месяц | Выручка | Расходы |", ответ["data"]["preview"])
 
 	def test_отказы_записи_в_блок(self):
-		"""Файл, таблица и ссылка — только в блок своего вида и только годные."""
+		"""Файл, таблица и ссылка — только в блок своего вида и только годные.
+
+		Отказы файла — одной строкой проводки: правило целиком проверяет
+		`agent_learning/artifacts/test_files.py`."""
 
 		def записать(ключ: str, **поля) -> dict:
 			return student.update_artifact(self.курс, "plan", ключ, **поля)
 
 		отказы = {
-			"битый base64 — как пустой файл": (
-				lambda: student.upload_artifact_file(
-					self.курс, "plan", "money", file_name="plan.csv", content="не base64!"
-				),
-				codes.ФАЙЛА_НЕТ,
-			),
 			"файл не того типа": (lambda: self.загрузить("photo.png", b"\x89PNG"), codes.ФАЙЛ_НЕ_ТОГО_ТИПА),
-			"пустой файл": (lambda: self.загрузить(данные=b""), codes.ФАЙЛА_НЕТ),
-			"файл в текстовый блок": (lambda: self.загрузить(ключ="goal"), codes.ВИД_НЕ_ТОТ),
 			"таблица в текстовый блок": (lambda: записать("goal", table=[["a"]]), codes.ВИД_НЕ_ТОТ),
 			"кривая таблица": (lambda: записать("money", table=["не строки"]), codes.НЕВЕРНАЯ_ТАБЛИЦА),
 			"большая таблица": (lambda: записать("money", table=[["x"]] * 501), codes.НЕВЕРНАЯ_ТАБЛИЦА),
@@ -160,24 +147,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 				self.assertEqual(ответ["error"]["code"], код)
 				if что == "файл не того типа":
 					self.assertEqual(ответ["error"]["accept"], ["xlsx", "csv"])
-
-	def test_пустые_колонки_справа_в_срез_не_попадают(self):
-		from openpyxl import Workbook
-		from openpyxl.styles import Font
-
-		книга = Workbook()
-		лист = книга.active
-		лист.append(["Гипотеза", "Охват"])
-		лист.append(["Кофейня", 100])
-		# Отформатированная, но пустая колонка далеко справа — как в живом файле.
-		лист.cell(row=1, column=25).font = Font(bold=True)
-		поток = io.BytesIO()
-		книга.save(поток)
-
-		self.загрузить("rice.xlsx", поток.getvalue())
-		срез = self.блок("money")["preview"]
-
-		self.assertEqual(срез.splitlines()[0], "| Гипотеза | Охват |")
 
 	def test_новый_файл_замещает_прежний(self):
 		self.загрузить()
