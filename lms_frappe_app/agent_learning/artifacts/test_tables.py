@@ -9,6 +9,7 @@
 """
 
 import unittest
+from functools import partial
 
 from lms_frappe_app.agent_learning.artifacts import codes, data, export, fill, schema
 from lms_frappe_app.agent_learning.errors import Отказ
@@ -119,12 +120,19 @@ class TestСхема(unittest.TestCase):
 		self.assertEqual(таблица["columns"][3]["block"], "assessment")
 
 	def test_неверная_схема_отказ(self):
-		def документ(правка):
-			блоки = схема()
-			правка(блоки)
-			return lambda: schema.проверить_документ(блоки)
+		"""Строка таблицы — правка: по свежей схеме она готовит проверку, которая отказывает."""
 
-		for случай, проверка, код in (
+		def документ(правка):
+			def подготовить(блоки):
+				правка(блоки)
+				return partial(schema.проверить_документ, блоки)
+
+			return подготовить
+
+		def спек(значение: dict):
+			return lambda _блоки: partial(schema.проверить_спек, значение, "x")
+
+		for случай, правка, код in (
 			(
 				"формула на неизвестное имя",
 				документ(lambda б: б[4]["spec"]["columns"][2].update(formula="probability * weight")),
@@ -135,14 +143,11 @@ class TestСхема(unittest.TestCase):
 				документ(lambda б: б[2]["spec"]["columns"][2].update(ref="nope")),
 				None,
 			),
-			(
-				"выбор без вариантов",
-				lambda: schema.проверить_спек({"columns": [{"key": "kind", "type": "select"}]}, "x"),
-				None,
-			),
-			("колонка id занята", lambda: schema.проверить_спек({"columns": [{"key": "id"}]}, "x"), None),
+			("выбор без вариантов", спек({"columns": [{"key": "kind", "type": "select"}]}), None),
+			("колонка id занята", спек({"columns": [{"key": "id"}]}), None),
 		):
 			with self.subTest(случай):
+				проверка = правка(схема())
 				with self.assertRaises(Отказ) as отказ:
 					проверка()
 				if код:
@@ -388,21 +393,29 @@ class TestФормулыПолей(unittest.TestCase):
 		self.assertIsNone(значения["enough"])
 
 	def test_формула_поля_не_по_правилам_отказ(self):
-		def документ(формула):
-			блоки = экономика()
-			блоки[0]["spec"]["fields"][2]["formula"] = формула
-			return lambda: schema.проверить_документ(блоки)
+		"""Строка таблицы — правка: по свежей схеме она готовит проверку, которая отказывает."""
 
-		for случай, проверка, код in (
+		def документ(формула: str):
+			def подготовить(блоки):
+				блоки[0]["spec"]["fields"][2]["formula"] = формула
+				return partial(schema.проверить_документ, блоки)
+
+			return подготовить
+
+		for случай, правка, код in (
 			(
 				"запись в формулу поля",
-				lambda: data.записать(self.блоки, "economics", self.д, fields={"clients_needed": 10}),
+				lambda _блоки: partial(
+					data.записать, self.блоки, "economics", self.д, fields={"clients_needed": 10}
+				),
 				codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ,
 			),
 			(
 				"required у формулы поля",
-				lambda: schema.проверить_спек(
-					{"fields": [{"key": "a", "type": "formula", "formula": "b", "required": True}]}, "x"
+				lambda _блоки: partial(
+					schema.проверить_спек,
+					{"fields": [{"key": "a", "type": "formula", "formula": "b", "required": True}]},
+					"x",
 				),
 				None,
 			),
@@ -411,6 +424,7 @@ class TestФормулыПолей(unittest.TestCase):
 			("формула поля на формулу ниже", документ("enough"), None),
 		):
 			with self.subTest(случай):
+				проверка = правка(экономика())
 				with self.assertRaises(Отказ) as отказ:
 					проверка()
 				if код:

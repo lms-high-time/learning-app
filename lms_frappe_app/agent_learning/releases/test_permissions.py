@@ -20,7 +20,6 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls.addClassCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		cls.ученик = создать_ученика(f"rel-pupil-{суффикс}@example.com")
 		cls.куратор = создать_куратора(f"rel-curator-{суффикс}@example.com")

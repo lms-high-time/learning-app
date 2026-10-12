@@ -24,10 +24,11 @@ class TestПодменаМетодовРедактора(UnitTestCase):
 		"""`Why:` без хука редактор снова зовёт метод Learning, и порядок курса из
 		релиза правится мимо `validate` — тест на сам модуль этого не заметит."""
 		for метод in learning_editor.ПОДМЕНЯЕМЫЕ:
-			self.assertEqual(
-				frappe.override_whitelisted_method(f"lms.lms.api.{метод}"),
-				f"lms_frappe_app.agent_learning.releases.learning_editor.{метод}",
-			)
+			with self.subTest(метод):
+				self.assertEqual(
+					frappe.override_whitelisted_method(f"lms.lms.api.{метод}"),
+					f"lms_frappe_app.agent_learning.releases.learning_editor.{метод}",
+				)
 
 
 class IntegrationTestРедакторLearning(IntegrationTestCase):
