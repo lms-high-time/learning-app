@@ -7,6 +7,16 @@ on:
     branches: [master]
   pull_request: {}
 
+# Новый коммит в ветку PR останавливает прогон прежнего. Why: итог прежнего
+# коммита уже никому не нужен — обязательная проверка смотрит на последний, —
+# а его машины задерживают новый. На прежнем коммите остаётся красный итог
+# `bench run-tests` — на мерж это не влияет. Пуши в master не отменяются и
+# проверяются целиком. Ручной Re-run старого прогона отменит прогон последнего
+# коммита — тогда перезапустить последний.
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # Ревизия Frappe образа стенда, двигается вместе с ним. При сдвиге сверить
   # правила обхода тестов в frappe/testing/discovery.py с run_tests_part.py:
@@ -20,6 +30,44 @@ env:
   IMAGE_MIRROR: public.ecr.aws/docker/library
 
 jobs:
+  # Меняет ли PR что-то, кроме документации. Why: PR только с правкой README
+  # или правил гонял все тесты впустую. Пропуск — только когда документы из
+  # явного списка изменены (`M`): добавление, удаление и переименование гоняют
+  # тесты — `README.md` читает `pyproject.toml` при установке приложения, а
+  # переименование могло унести файл, который читают тесты. Список явный, а не
+  # `*.md`: `CONTRACT.md` читают тесты контракта. Пуш в master гоняет тесты
+  # всегда. Любая неоднозначность (сбой `git diff`, пустой список) — тесты идут.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - name: Только документация?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "Пуш в master — тесты идут всегда"
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # HEAD — merge-коммит PR, его первый родитель — база.
+          if ! files=$(git diff --no-renames --name-status HEAD^1 HEAD 2>&1); then
+            printf 'git diff не сработал, тесты идут:\n%s\n' "$files"
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf 'Изменено:\n%s\n' "$files"
+          if printf '%s\n' "$files" | grep -qvxP 'M\t(README\.md|TESTING\.md|CONTRIBUTING\.md|license\.txt)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # Тесты делятся на части, каждая поднимает своё окружение на отдельной
   # машине. Why: тесты идут последовательно и занимают бо́льшую часть прогона;
   # на нескольких машинах стена прогона — подготовка плюс доля тестов.
@@ -29,6 +77,8 @@ jobs:
   # Скрипт сверяет состав матрицы и падает, если в ней есть что-то ещё.
   tests:
     name: bench run-tests ${{ matrix.part }}/${{ strategy.job-total }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -233,12 +283,23 @@ jobs:
   # Итог частей под именем обязательной проверки ветки master. Why: правило
   # защиты ветки требует проверку `bench run-tests`, а у частей матрицы имена
   # свои. Без `always()` при падении части итог был бы skipped, а skipped
-  # обязательная проверка не блокирует мерж.
+  # обязательная проверка не блокирует мерж. Части пропущены — зелёный итог,
+  # только если коммит меняет одну документацию и это определено без ошибки.
   tests-result:
     name: bench run-tests
-    needs: tests
+    needs: [changes, tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Все части зелёные
-        run: test "${{ needs.tests.result }}" = success
+      - name: Все части зелёные или менялась только документация
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          TESTS: ${{ needs.tests.result }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$CODE" = false ]; then
+            test "$TESTS" = skipped
+          else
+            test "$TESTS" = success
+          fi
