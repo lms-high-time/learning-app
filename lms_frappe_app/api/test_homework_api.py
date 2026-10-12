@@ -125,7 +125,9 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 	def test_без_имени_журнал_называет_почту(self):
 		frappe.db.set_value("User", self.ученик, {"first_name": "", "last_name": "", "full_name": ""})
 		frappe.clear_document_cache("User", self.ученик)
-		[событие] = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["history"]
+		[событие] = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"][
+			"history"
+		]
 		self.assertEqual(событие["by_name"], self.ученик)
 
 	def test_журнал_не_отдаёт_ученику_почту_куратора(self):
@@ -140,7 +142,9 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		for user in (куратор, безымянный):
 			frappe.clear_document_cache("User", user)
 		документ = frappe.get_doc("Agent Homework Submission", сдача)
-		документ.append("history", {"event": "returned", "by_user": куратор, "at": now_datetime(), "comment": "Доделай"})
+		документ.append(
+			"history", {"event": "returned", "by_user": куратор, "at": now_datetime(), "comment": "Доделай"}
+		)
 		документ.append("history", {"event": "accepted", "by_user": безымянный, "at": now_datetime()})
 		документ.save(ignore_permissions=True)
 		frappe.set_user(self.ученик)
@@ -199,7 +203,9 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		документ = frappe.get_doc("Agent Homework Submission", сдача)
 		for комментарий in ("Первый", "Второй"):
-			документ.append("history", {"event": "returned", "by_user": "Administrator", "comment": комментарий})
+			документ.append(
+				"history", {"event": "returned", "by_user": "Administrator", "comment": комментарий}
+			)
 		документ.append("history", {"event": "submitted", "by_user": self.ученик})
 		документ.save(ignore_permissions=True)
 		frappe.set_user(self.ученик)
@@ -222,7 +228,9 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		сосед = создать_ученика(f"hwan-{frappe.generate_hash(length=6)}@example.com")
 		зачислить(сосед, self.урок)
 		frappe.set_user(сосед)
-		чужая = student.submit_homework(lesson=self.урок, files=[файл("чужой.txt", b"his")])["data"]["submission"]
+		чужая = student.submit_homework(lesson=self.урок, files=[файл("чужой.txt", b"his")])["data"][
+			"submission"
+		]
 		чужой_файл = чужая["files"][0]["id"]
 		frappe.set_user(self.ученик)
 		своя = student.submit_homework(lesson=self.урок, answer="моё", files=[файл("мой.txt", b"mine")])
@@ -336,7 +344,11 @@ class TestСписокДомашки(UnitTestCase):
 				dict,
 				[{"name": "a.txt", "data": "aGk="}],
 			),
-			"files: строка JSON": ('[{"name": "a.txt", "data": "aGk="}]', dict, [{"name": "a.txt", "data": "aGk="}]),
+			"files: строка JSON": (
+				'[{"name": "a.txt", "data": "aGk="}]',
+				dict,
+				[{"name": "a.txt", "data": "aGk="}],
+			),
 			"files: без имени и с именем null": (
 				[{"data": "aGk="}, {"name": None, "data": "aGk="}],
 				dict,

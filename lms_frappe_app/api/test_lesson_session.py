@@ -50,9 +50,7 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 		return frappe.db.count("Agent Session Event", {"session": занятие})
 
 	def занятий(self) -> int:
-		return frappe.db.count(
-			"Agent Learning Session", {"student": self.ученик, "lesson": self.урок}
-		)
+		return frappe.db.count("Agent Learning Session", {"student": self.ученик, "lesson": self.урок})
 
 	def test_последнее_своё_занятие_урока(self):
 		"""Чужое занятие не видно; отдаётся последнее занятие урока; метод ничего
@@ -253,12 +251,16 @@ class TestНачалоЗанятия(UnitTestCase):
 		запрашивается только на проверке `return` — последнее число строки."""
 		сейчас = datetime(2026, 10, 13, 12, 0)
 
-		def занятие(урок: str = "L0", часов_назад: float | None = 48, начато_часов_назад: float | None = None):
+		def занятие(
+			урок: str = "L0", часов_назад: float | None = 48, начато_часов_назад: float | None = None
+		):
 			"""Прочее занятие: `last_activity_at` и `started_at` — часов назад, `None` — пусто."""
 			return {
 				"lesson": урок,
 				"last_activity_at": None if часов_назад is None else сейчас - timedelta(hours=часов_назад),
-				"started_at": None if начато_часов_назад is None else сейчас - timedelta(hours=начато_часов_назад),
+				"started_at": None
+				if начато_часов_назад is None
+				else сейчас - timedelta(hours=начато_часов_назад),
 			}
 
 		случаи = {
@@ -296,7 +298,9 @@ class TestНачалоЗанятия(UnitTestCase):
 
 				начало = student.начало_занятия(прочие, "L1", незакрыто, сейчас, перерыв)
 
-				последнее = None if часов_назад is None else (сейчас - timedelta(hours=часов_назад)).isoformat()
+				последнее = (
+					None if часов_назад is None else (сейчас - timedelta(hours=часов_назад)).isoformat()
+				)
 				self.assertEqual(
 					(начало, len(запрошен)), ({"opening": opening, "last_session_at": последнее}, запросов)
 				)

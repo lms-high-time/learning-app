@@ -45,9 +45,19 @@ class TestПорогиСигналов(UnitTestCase):
 		заполнен; без целей или блоков — нет."""
 
 		def блок(ключ: str = "log", **поля) -> dict:
-			return {"artifact": "notebook", "key": ключ, "title": "Журнал", "content": "", "file": None, "url": None, **поля}
+			return {
+				"artifact": "notebook",
+				"key": ключ,
+				"title": "Журнал",
+				"content": "",
+				"file": None,
+				"url": None,
+				**поля,
+			}
 
-		сигнал = [{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}]
+		сигнал = [
+			{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}
+		]
 		случаи = {
 			"половина целей разобрана": (["covered", "touched"], [блок()], сигнал),
 			"все цели разобраны": (["covered"], [блок()], сигнал),
@@ -61,7 +71,11 @@ class TestПорогиСигналов(UnitTestCase):
 			"блок с файлом": (["covered"], [блок(file="/files/a.txt")], []),
 			"блок со ссылкой": (["covered"], [блок(url="https://example.com")], []),
 			"заполнен хоть один из блоков": (["covered"], [блок(), блок("plan", content="План")], []),
-			"признак filled важнее содержимого": (["covered"], [блок(content="Запись", filled=False)], сигнал),
+			"признак filled важнее содержимого": (
+				["covered"],
+				[блок(content="Запись", filled=False)],
+				сигнал,
+			),
 			"таблица заполнена": (["covered"], [блок(filled=True)], []),
 		}
 		for что, (статусы, блоки, ожидаемо) in случаи.items():
@@ -74,7 +88,14 @@ class TestПорогиСигналов(UnitTestCase):
 		сегодня = date(2026, 10, 13)
 
 		def темп(уроков: int, в_неделю: int) -> list[dict]:
-			return [{"code": "deadline_pace", "lessons_left": уроков, "lessons_per_week": в_неделю, "overdue": False}]
+			return [
+				{
+					"code": "deadline_pace",
+					"lessons_left": уроков,
+					"lessons_per_week": в_неделю,
+					"overdue": False,
+				}
+			]
 
 		случаи = {
 			"срок жмёт": (сегодня + timedelta(days=2), False, 3, темп(3, 11)),
@@ -82,7 +103,12 @@ class TestПорогиСигналов(UnitTestCase):
 			"с округлением вверх до трёх": (сегодня + timedelta(days=10), False, 3, темп(3, 3)),
 			"меньше трёх в неделю": (сегодня + timedelta(days=11), False, 3, []),
 			"срок сегодня — один день": (сегодня, False, 1, темп(1, 7)),
-			"срок прошёл без отметки просрочки — один день": (сегодня - timedelta(days=3), False, 1, темп(1, 7)),
+			"срок прошёл без отметки просрочки — один день": (
+				сегодня - timedelta(days=3),
+				False,
+				1,
+				темп(1, 7),
+			),
 			"срок строкой": ("2026-10-15", False, 3, темп(3, 11)),
 			"срок с временем": (datetime(2026, 10, 15, 23, 59), False, 3, темп(3, 11)),
 			"просрочен": (

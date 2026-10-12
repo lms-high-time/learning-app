@@ -67,6 +67,8 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		начат в чате — туда чат пускает без остатка. Прочие случаи —
 		`TestДорогаНаЗанятие`."""
 		frappe.set_user("Administrator")
+		прежний = frappe.db.get_single_value(НАСТРОЙКИ, "web_demo_lessons")
+		self.addCleanup(self.задать, "web_demo_lessons", прежний)
 		self.задать("web_demo_lessons", 1)
 		frappe.set_user(self.ученик)
 		self.пробный_урок(self.уроки[0])
@@ -75,7 +77,11 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 
 		self.assertEqual(
 			вход["study"],
-			{"channel": "web", "url": f"{СЕРВИС}/chat?lesson={quote(self.уроки[0], safe='')}", "demo_left": 0},
+			{
+				"channel": "web",
+				"url": f"{СЕРВИС}/chat?lesson={quote(self.уроки[0], safe='')}",
+				"demo_left": 0,
+			},
 		)
 
 	def test_зачин_пройденность_и_блоки_документа(self):
@@ -134,9 +140,17 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		первый = self.уроки[0]
 		глава = frappe.db.get_value("Course Lesson", первый, "chapter")
-		второй = frappe.get_doc(
-			{"doctype": "Course Lesson", "title": f"Второй {frappe.generate_hash(length=6)}", "chapter": глава}
-		).insert(ignore_permissions=True).name
+		второй = (
+			frappe.get_doc(
+				{
+					"doctype": "Course Lesson",
+					"title": f"Второй {frappe.generate_hash(length=6)}",
+					"chapter": глава,
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
 		привязать_урок(глава, второй)
 		курс = frappe.db.get_value("Course Chapter", глава, "course")
 		return курс, [первый, второй]
@@ -189,7 +203,13 @@ class TestДорогаНаЗанятие(UnitTestCase):
 			"остался один пробный": ("L1", СЕРВИС, {"L0"}, 2, {"channel": "web", "url": чат, "demo_left": 1}),
 			"без сервиса агента": ("L1", "", set(), 2, {**агент, "demo_left": 2}),
 			"пробные кончились": ("L1", СЕРВИС, {"L0", "L2"}, 2, {**агент, "demo_left": 0}),
-			"начатый в чате урок": ("L1", СЕРВИС, {"L0", "L1"}, 2, {"channel": "web", "url": чат, "demo_left": 0}),
+			"начатый в чате урок": (
+				"L1",
+				СЕРВИС,
+				{"L0", "L1"},
+				2,
+				{"channel": "web", "url": чат, "demo_left": 0},
+			),
 			"начатый в чате урок без сервиса": ("L1", "", {"L1"}, 2, {**агент, "demo_left": 1}),
 			"начато больше лимита — остаток не меньше нуля": (
 				"L1",
@@ -204,7 +224,11 @@ class TestДорогаНаЗанятие(UnitTestCase):
 				СЕРВИС,
 				set(),
 				2,
-				{"channel": "web", "url": f"{СЕРВИС}/chat?lesson={quote('урок 1/2', safe='')}", "demo_left": 2},
+				{
+					"channel": "web",
+					"url": f"{СЕРВИС}/chat?lesson=%D1%83%D1%80%D0%BE%D0%BA%201%2F2",
+					"demo_left": 2,
+				},
 			),
 		}
 		for что, (урок, сервис, использовано, пробных, ожидаемо) in случаи.items():

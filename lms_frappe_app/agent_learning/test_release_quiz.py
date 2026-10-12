@@ -436,10 +436,12 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 	def test_итог_по_целям_и_подтверждение_квизом(self):
 		"""Проводка `итог_ответов`: снимок, верные ответы и порог попытки дают итог
-		в ответе и в записи попытки; граничные случаи зачёта — `TestИтогОтветов`."""
+		в ответе и в записи попытки; граничные случаи зачёта — `TestИтогОтветов`.
+		Проводка `_выбранный` по снимку: верный ответ текстом варианта в ином
+		регистре и с пробелами, неизвестный ответ — неверный, а не ошибка."""
 		run, занятие = self.урок(self.релиз_по_целям())
 
-		ответ = self.сдать(run, занятие, ["V1", "V1", "V1", "V2"])
+		ответ = self.сдать(run, занятие, ["  пеРвый ", "V1", "V1", "Третий"])
 
 		ожидаемо = {"l-1-D1": {"correct": 2, "total": 2}, "l-1-D2": {"correct": 1, "total": 2}}
 		итог = ответ["result"]
@@ -449,9 +451,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		)
 		self.assertEqual(итог["objective_results"], ожидаемо)
 		попытка = frappe.get_doc(ПОПЫТКА, ответ["attempt"])
-		self.assertEqual(
-			(попытка.status, попытка.passed, попытка.score), (ПОПЫТКА_ЗАЧТЕНА, 1, 0.75)
-		)
+		self.assertEqual((попытка.status, попытка.passed, попытка.score), (ПОПЫТКА_ЗАЧТЕНА, 1, 0.75))
 		self.assertIsNotNone(попытка.finished_at)
 		self.assertEqual(frappe.parse_json(попытка.objective_results), ожидаемо)
 		self.assertEqual(self.подтверждены(run), {"l-1-D1": 1, "l-1-D2": 0})
@@ -613,7 +613,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		урок = index.урок(frappe.db.get_value("LMS Course", курс, "active_release"), "l-1")["lesson"]
 		зачислить(self.ученик, урок)
 
-		quiz.отметить_урок_пройденным(frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, урок)))
+		quiz.отметить_урок_пройденным(
+			frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, урок))
+		)
 
 		self.assertEqual(
 			frappe.db.get_value(
@@ -1111,11 +1113,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		)
 
 	def test_порог_снимается_в_попытку_на_старте(self):
-		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=55.5))
+		"""Дробный порог и порог 0 — без подмены умолчанием поля (`100`): попытка
+		без верных при пороге 0 зачтена."""
+		for порог in (55.5, 0):
+			with self.subTest(порог=порог):
+				run, занятие = self.урок(релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=1))
 
-		попытка = release_quiz.начать(run, занятие)["attempt"]
+				попытка = release_quiz.начать(run, занятие)["attempt"]
 
-		self.assertEqual(self.попытка(попытка).pass_percentage, 55.5)
+				self.assertEqual(self.попытка(попытка).pass_percentage, порог)
+				if порог == 0:
+					итог = self.ответить(попытка, С1, "V2")["result"]
+					self.assertEqual((итог["passed"], итог["correct"], итог["pass_threshold"]), (True, 0, 0))
 
 	def test_publish_release_при_взаимоблокировке_и_таймауте_busy(self):
 		"""Попытку под публикацией изменил или держит ответ ученика: откат целиком и `busy`."""
@@ -1269,17 +1278,29 @@ class TestИтогОтветов(UnitTestCase):
 		случаи = {
 			"часть целей верна целиком": (
 				{"Q1", "Q2", "Q3", "Q4"},
-				{"D2": {"correct": 2, "total": 2}, "D1": {"correct": 2, "total": 2}, "D3": {"correct": 0, "total": 1}},
+				{
+					"D2": {"correct": 2, "total": 2},
+					"D1": {"correct": 2, "total": 2},
+					"D3": {"correct": 0, "total": 1},
+				},
 				{"D1", "D2"},
 			),
 			"в цели одна ошибка": (
 				{"Q1", "Q3", "Q4", "Q5"},
-				{"D2": {"correct": 2, "total": 2}, "D1": {"correct": 1, "total": 2}, "D3": {"correct": 1, "total": 1}},
+				{
+					"D2": {"correct": 2, "total": 2},
+					"D1": {"correct": 1, "total": 2},
+					"D3": {"correct": 1, "total": 1},
+				},
 				{"D2", "D3"},
 			),
 			"ни одного верного": (
 				set(),
-				{"D2": {"correct": 0, "total": 2}, "D1": {"correct": 0, "total": 2}, "D3": {"correct": 0, "total": 1}},
+				{
+					"D2": {"correct": 0, "total": 2},
+					"D1": {"correct": 0, "total": 2},
+					"D3": {"correct": 0, "total": 1},
+				},
 				set(),
 			),
 		}
