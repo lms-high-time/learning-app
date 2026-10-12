@@ -4,9 +4,10 @@
 import base64
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import now_datetime
 
+from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -55,9 +56,10 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.assertEqual(сдача["versions"][1]["files"][0]["name"], "a.txt", "старая версия помнит файл")
 
 	def test_файлы_сдачи_отказы_и_список_строкой_json(self):
-		"""Битый или пустой файл — `file_missing`; не список объектов в `files` и не
-		JSON в `remove_files` — `invalid_files`, а не 500. Отказ сдачи не заводит.
-		Frappe отдаёт тело запроса формой: списки приезжают строкой."""
+		"""Битый или пустой файл — `file_missing`; не JSON в `files` — `invalid_files`,
+		а не 500 (проводка `_список_домашки`, прочие виды списка —
+		`TestСписокДомашки`). Отказ сдачи не заводит. Frappe отдаёт тело запроса
+		формой: списки приезжают строкой."""
 		import json
 
 		отказы = {
@@ -68,12 +70,7 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 			),
 			"пустые данные": ({"files": [{"name": "a.txt", "data": ""}]}, "file_missing", {"file": "a.txt"}),
 			"без данных": ({"files": [{"name": "a.txt"}]}, "file_missing", {"file": "a.txt"}),
-			"files: список строк": ({"files": ["a.txt"]}, "invalid_files", {}),
 			"files: не json": ({"files": "{не json"}, "invalid_files", {}),
-			"files: объект": ({"files": {"name": "a.txt", "data": "aGk="}}, "invalid_files", {}),
-			"files: имя числом": ({"files": [{"name": 5, "data": "aGk="}]}, "invalid_files", {}),
-			"remove_files: не json": ({"remove_files": "не json"}, "invalid_files", {}),
-			"remove_files: объекты": ({"remove_files": [{"id": "x"}]}, "invalid_files", {}),
 		}
 		for что, (параметры, код, подробности) in отказы.items():
 			with self.subTest(что):
@@ -320,3 +317,61 @@ class IntegrationTestHomeworkStart(IntegrationTestCase):
 		прошлое = self.старт(self.второй)["previous_homework"]
 		self.assertEqual(прошлое["lesson"], self.первый)
 		self.assertIsNone(прошлое["submission"])
+
+
+class TestСписокДомашки(UnitTestCase):
+	"""Без базы: `files` и `remove_files` у `submit_homework` — `_список_домашки`."""
+
+	def test_виды_списка(self):
+		"""Список, кортеж или строка JSON; пусто — пустой список; `data` не строкой —
+		`None`; прочее — отказ `invalid_files`."""
+		ОТКАЗ = "invalid_files"
+		случаи = {
+			"files: нет": (None, dict, []),
+			"files: пустая строка": ("", dict, []),
+			"remove_files: строка из пробелов": ("  ", str, []),
+			"files: пустой список": ([], dict, []),
+			"files: список объектов": (
+				[{"name": "a.txt", "data": "aGk="}],
+				dict,
+				[{"name": "a.txt", "data": "aGk="}],
+			),
+			"files: строка JSON": ('[{"name": "a.txt", "data": "aGk="}]', dict, [{"name": "a.txt", "data": "aGk="}]),
+			"files: без имени и с именем null": (
+				[{"data": "aGk="}, {"name": None, "data": "aGk="}],
+				dict,
+				[{"data": "aGk="}, {"name": None, "data": "aGk="}],
+			),
+			"files: data не строкой — None": (
+				[{"name": "a.txt", "data": 5}, {"name": "b.txt"}],
+				dict,
+				[{"name": "a.txt", "data": None}, {"name": "b.txt", "data": None}],
+			),
+			"files: прочие поля остаются": (
+				[{"name": "a.txt", "data": "aGk=", "type": "text/plain"}],
+				dict,
+				[{"name": "a.txt", "data": "aGk=", "type": "text/plain"}],
+			),
+			"remove_files: список строк": (["f1", "f2"], str, ["f1", "f2"]),
+			"remove_files: кортеж — список": (("f1",), str, ["f1"]),
+			"remove_files: строка JSON": ('["f1"]', str, ["f1"]),
+			"files: список строк": (["a.txt"], dict, ОТКАЗ),
+			"files: не json": ("{не json", dict, ОТКАЗ),
+			"files: объект": ({"name": "a.txt", "data": "aGk="}, dict, ОТКАЗ),
+			"files: имя числом": ([{"name": 5, "data": "aGk="}], dict, ОТКАЗ),
+			"files: строка JSON с объектом": ('{"name": "a.txt"}', dict, ОТКАЗ),
+			"remove_files: не json": ("не json", str, ОТКАЗ),
+			"remove_files: объекты": ([{"id": "x"}], str, ОТКАЗ),
+			"remove_files: числа": ([1], str, ОТКАЗ),
+			"remove_files: null строкой": ("null", str, ОТКАЗ),
+			"remove_files: строка JSON со строкой": ('"f1"', str, ОТКАЗ),
+			"remove_files: число": (5, str, ОТКАЗ),
+		}
+		for что, (значение, тип, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				if ожидаемо == ОТКАЗ:
+					with self.assertRaises(Отказ) as пойман:
+						student._список_домашки(значение, тип)
+					self.assertEqual(пойман.exception.код, ОТКАЗ)
+				else:
+					self.assertEqual(student._список_домашки(значение, тип), ожидаемо)
