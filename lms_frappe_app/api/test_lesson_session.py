@@ -174,31 +174,42 @@ class IntegrationTestStartState(IntegrationTestCase):
 		время само по себе: без незакрытого строить его не из чего. Перерыв
 		читается из настроек. История каждого случая — у своего ученика."""
 		случаи = {
-			"возвращение после перерыва с незакрытым": (48, True, None, "return"),
-			"перерыв без незакрытого — не возвращение": (48, False, None, "new_lesson"),
-			"перерыв из настроек": (2, True, 1, "return"),
+			"возвращение после перерыва с незакрытым": (48, True, None, "return", [("l-1", ["l-1-D1"])]),
+			"перерыв без незакрытого — не возвращение": (48, False, None, "new_lesson", None),
+			"перерыв из настроек": (2, True, 1, "return", None),
 		}
-		for что, (часов_назад, незакрыто, перерыв, opening) in случаи.items():
+		for что, (часов_назад, незакрыто, перерыв, opening, история) in случаи.items():
 			with self.subTest(что):
 				self.новый_ученик()
+				прежний = frappe.db.get_single_value("Agent Learning Settings", "bridge_after_hours")
 				if перерыв is not None:
-					frappe.set_user("Administrator")
-					frappe.db.set_single_value("Agent Learning Settings", "bridge_after_hours", перерыв)
-					frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
-					frappe.set_user(self.ученик)
-				self.прошлое("l-1", часов_назад=часов_назад, незакрыто=незакрыто)
+					self.перерыв(перерыв)
+				try:
+					self.прошлое("l-1", часов_назад=часов_назад, незакрыто=незакрыто)
 
-				данные = self.начало(self.второй)
+					данные = self.начало(self.второй)
+				finally:
+					if перерыв is not None:
+						self.перерыв(прежний)
 
 				self.assertEqual(данные["start"]["opening"], opening)
-				if что == "возвращение после перерыва с незакрытым":
+				if история is not None:
 					self.assertEqual(
 						[
 							(у["key"], [ц["key"] for ц in у["objectives_open"]])
 							for у in данные["history"]["lessons"]
 						],
-						[("l-1", ["l-1-D1"])],
+						история,
 					)
+
+	def перерыв(self, часов: int) -> None:
+		"""`bridge_after_hours` в настройках — под Administrator, с возвратом ученика."""
+		frappe.set_user("Administrator")
+		try:
+			frappe.db.set_single_value("Agent Learning Settings", "bridge_after_hours", часов)
+			frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
+		finally:
+			frappe.set_user(self.ученик)
 
 	def брошенная_попытка(self, урок: str) -> None:
 		"""Занятие без следа: ни отметки пункта, ни закрытого урока."""

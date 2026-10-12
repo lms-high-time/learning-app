@@ -66,7 +66,12 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 
 	def test_отчёт_организации(self):
 		"""Только своя организация: строка несёт дедлайн, статус, долю пройденного,
-		итог квиза и заполненность документа; фильтры по статусу и курсу."""
+		итог квиза и заполненность документа; фильтры по статусу и курсу.
+
+		Регрессии: с какой попытки сдан урок — зачёт за 100% без лимита, «сдан»
+		не отличает понявшего от перебравшего (#353); урок засчитывает квиз —
+		документ виден отдельно (learning-services#296).
+		"""
 		with self.subTest("ученики чужой организации в отчёт не попадают"):
 			строки = self.отчёт()
 			self.assertIn(self.ученик_а, {с["user"] for с in строки})
@@ -166,7 +171,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		учебный результат, что и зачёт, просто мельче: в отличие от заметок об
 		ученике, он про результат, а не про разговор. Покрытие — цели урока из
 		прохождения, без пунктов и свидетельств; у занятия курса без релиза его
-		нет. Попытка квиза — урок, номер, статус, доля, зачёт и время; ни
+		нет (learning-services#506). Попытка квиза — урок, номер, статус, доля, зачёт и время; ни
 		вопросов, ни ответов.
 		"""
 		занятие = создать_занятие(self.ученик_а, self.урок)
@@ -186,7 +191,6 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		frappe.get_doc(
 			{"doctype": "Course Allocation", "organization": self.компания_а, "course": курс}
 		).insert(ignore_permissions=True)
-		зачислить_на_курс(self.ученик_а, курс)
 		run = прохождения.прохождение(self.ученик_а, курс, "l-1")
 		занятие = создать_занятие(self.ученик_а, run.lesson, run=run.name)
 		прохождения.отметить(run.name, "term:T1", "done", "Свидетельство агента", занятие=занятие)
@@ -203,6 +207,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 			self.assertNotIn("Свидетельство агента", json.dumps(сессии, ensure_ascii=False, default=str))
 
 		frappe.set_user("Administrator")
+		зачислить_на_курс(self.ученик_а, курс)
 		начало = release_quiz.начать(run, создать_занятие(self.ученик_а, run.lesson, run=run.name))
 		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "V1", "слова ученика")
 		with self.subTest("итог попытки квиза из релиза"):

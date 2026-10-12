@@ -199,9 +199,8 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 	def test_прогресс_занятия_по_целям(self):
 		"""Занятие без прохождения — цели не начаты, прохождение не заводится;
 		открытое занятие с прохождением — прогресс по целям, закрытое — без него."""
+		без_прохождения = создать_занятие(self.ученик, self.урок)
 		with self.subTest("занятие без прохождения"):
-			без_прохождения = создать_занятие(self.ученик, self.урок)
-
 			ответ = self.данные(student.remember("observation", "pace", "Торопится", session=без_прохождения))
 
 			self.assertEqual(ответ["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
