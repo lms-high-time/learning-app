@@ -53,51 +53,50 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 			"Agent Learning Session", {"student": self.ученик, "lesson": self.урок}
 		)
 
-	def test_закрытое_занятие_с_разговором_видно_целиком(self):
-		"""Ради этого метод и заводится: ученик вернулся к пройденному уроку,
-		и сервису нужно найти разговор, а не начинать урок заново."""
+	def test_последнее_своё_занятие_урока(self):
+		"""Чужое занятие не видно; отдаётся последнее занятие урока; метод ничего
+		не заводит и не пишет в журнал. Закрытое занятие с разговором видно
+		целиком — ради этого метод и заводится: ученик вернулся к пройденному
+		уроку, и сервису нужно найти разговор, а не начинать урок заново."""
+		чужое = создать_занятие(self.чужой, self.урок)
+		with self.subTest("чужое занятие не видно"):
+			данные = student.lesson_session(self.урок)["data"]
+
+			self.assertNotEqual(данные["session"], чужое)
+			self.assertEqual(данные["session"], None)
+
+		первое = создать_занятие(self.ученик, self.урок)
+		frappe.db.set_value("Agent Learning Session", первое, "status", "Abandoned")
+		последнее = создать_занятие(self.ученик, self.урок)
+		with self.subTest("последнее занятие урока"):
+			данные = student.lesson_session(self.урок)["data"]
+
+			self.assertEqual(данные["session"], последнее)
+
+		with self.subTest("ничего не заводит и не пишет в журнал"):
+			событий_до = self.событий(последнее)
+			занятий_до = self.занятий()
+
+			student.lesson_session(self.урок)
+			student.lesson_session(self.урок)
+
+			self.assertEqual(self.событий(последнее), событий_до)
+			self.assertEqual(self.занятий(), занятий_до)
+			self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+
 		занятие = создать_занятие(self.ученик, self.урок)
 		student.save_chat_state(занятие, СОСТОЯНИЕ, "1")
 		запись = frappe.get_doc("Agent Learning Session", занятие)
 		quiz.отметить_урок_пройденным(запись)
 		запись.status = "Completed"
 		запись.save(ignore_permissions=True)
+		with self.subTest("закрытое занятие с разговором видно целиком"):
+			данные = student.lesson_session(self.урок)["data"]
 
-		данные = student.lesson_session(self.урок)["data"]
-
-		self.assertEqual(данные["session"], занятие)
-		self.assertEqual(данные["status"], "Completed")
-		self.assertTrue(данные["has_chat_state"])
-		self.assertTrue(данные["completed"])
-
-	def test_отдаётся_последнее_занятие_урока(self):
-		первое = создать_занятие(self.ученик, self.урок)
-		frappe.db.set_value("Agent Learning Session", первое, "status", "Abandoned")
-		последнее = создать_занятие(self.ученик, self.урок)
-
-		данные = student.lesson_session(self.урок)["data"]
-
-		self.assertEqual(данные["session"], последнее)
-
-	def test_чужое_занятие_не_видно(self):
-		чужое = создать_занятие(self.чужой, self.урок)
-
-		данные = student.lesson_session(self.урок)["data"]
-
-		self.assertNotEqual(данные["session"], чужое)
-		self.assertEqual(данные["session"], None)
-
-	def test_метод_ничего_не_заводит_и_не_пишет_в_журнал(self):
-		занятие = создать_занятие(self.ученик, self.урок)
-		событий_до = self.событий(занятие)
-		занятий_до = self.занятий()
-
-		student.lesson_session(self.урок)
-		student.lesson_session(self.урок)
-
-		self.assertEqual(self.событий(занятие), событий_до)
-		self.assertEqual(self.занятий(), занятий_до)
-		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+			self.assertEqual(данные["session"], занятие)
+			self.assertEqual(данные["status"], "Completed")
+			self.assertTrue(данные["has_chat_state"])
+			self.assertTrue(данные["completed"])
 
 
 class IntegrationTestStartState(IntegrationTestCase):
@@ -110,11 +109,30 @@ class IntegrationTestStartState(IntegrationTestCase):
 	закрытый урок (learning-services#506).
 	"""
 
+	@classmethod
+	def setUpClass(cls):
+		"""Курс и релиз тесты не меняют: история занятий — у ученика своего теста.
+		Тест, который правит курс и строки релиза, заводит себе свой — `свой_курс`."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, cls.релиз = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+		cls.второй = урок_релиза(cls.курс, "l-2")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.addCleanup(политика_по_умолчанию)
-		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"start-{суффикс}@example.com")
+		self.новый_ученик()
+
+	def новый_ученик(self) -> None:
+		frappe.set_user("Administrator")
+		self.ученик = создать_ученика(f"start-{frappe.generate_hash(length=6)}@example.com")
+		зачислить_на_курс(self.ученик, self.курс)
+		frappe.set_user(self.ученик)
+
+	def свой_курс(self) -> None:
+		"""Курс только этого теста — для теста, который правит курс и строки релиза."""
+		frappe.set_user("Administrator")
 		self.курс, self.релиз = курс_из_релиза()
 		зачислить_на_курс(self.ученик, self.курс)
 		self.урок = урок_релиза(self.курс, "l-1")
@@ -142,6 +160,7 @@ class IntegrationTestStartState(IntegrationTestCase):
 		)
 
 	def test_пустые_зачин_и_обещание_отдаются_как_none(self):
+		self.свой_курс()
 		frappe.db.set_value("LMS Course", self.курс, "course_promise", "")
 		frappe.db.set_value("Agent Release Lesson", {"parent": self.релиз, "lesson_key": "l-1"}, "hook", "")
 
@@ -150,28 +169,47 @@ class IntegrationTestStartState(IntegrationTestCase):
 		self.assertIsNone(данные["course_promise"])
 		self.assertIsNone(данные["lesson"]["hook"])
 
-	def test_возвращение_после_перерыва_с_незакрытым(self):
-		self.прошлое("l-1", часов_назад=48, незакрыто=True)
-		данные = self.начало(self.второй)
-		self.assertEqual(данные["start"]["opening"], "return")
-		self.assertEqual(
-			[(у["key"], [ц["key"] for ц in у["objectives_open"]]) for у in данные["history"]["lessons"]],
-			[("l-1", ["l-1-D1"])],
-		)
-
-	def test_перерыв_без_незакрытого_это_не_возвращение(self):
+	def test_мостик_после_перерыва(self):
 		"""Мостик срабатывает на «есть незакрытое и прошло больше N», а не на
-		время само по себе: без незакрытого строить его не из чего."""
-		self.прошлое("l-1", часов_назад=48, незакрыто=False)
-		self.assertEqual(self.начало(self.второй)["start"]["opening"], "new_lesson")
+		время само по себе: без незакрытого строить его не из чего. Перерыв
+		читается из настроек. История каждого случая — у своего ученика."""
+		случаи = {
+			"возвращение после перерыва с незакрытым": (48, True, None, "return", [("l-1", ["l-1-D1"])]),
+			"перерыв без незакрытого — не возвращение": (48, False, None, "new_lesson", None),
+			"перерыв из настроек": (2, True, 1, "return", None),
+		}
+		for что, (часов_назад, незакрыто, перерыв, opening, история) in случаи.items():
+			with self.subTest(что):
+				self.новый_ученик()
+				прежний = frappe.db.get_single_value("Agent Learning Settings", "bridge_after_hours")
+				if перерыв is not None:
+					self.перерыв(перерыв)
+				try:
+					self.прошлое("l-1", часов_назад=часов_назад, незакрыто=незакрыто)
 
-	def test_перерыв_читается_из_настроек(self):
+					данные = self.начало(self.второй)
+				finally:
+					if перерыв is not None:
+						self.перерыв(прежний)
+
+				self.assertEqual(данные["start"]["opening"], opening)
+				if история is not None:
+					self.assertEqual(
+						[
+							(у["key"], [ц["key"] for ц in у["objectives_open"]])
+							for у in данные["history"]["lessons"]
+						],
+						история,
+					)
+
+	def перерыв(self, часов: int) -> None:
+		"""`bridge_after_hours` в настройках — под Administrator, с возвратом ученика."""
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Agent Learning Settings", "bridge_after_hours", 1)
-		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
-		frappe.set_user(self.ученик)
-		self.прошлое("l-1", часов_назад=2, незакрыто=True)
-		self.assertEqual(self.начало(self.второй)["start"]["opening"], "return")
+		try:
+			frappe.db.set_single_value("Agent Learning Settings", "bridge_after_hours", часов)
+			frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
+		finally:
+			frappe.set_user(self.ученик)
 
 	def брошенная_попытка(self, урок: str) -> None:
 		"""Занятие без следа: ни отметки пункта, ни закрытого урока."""

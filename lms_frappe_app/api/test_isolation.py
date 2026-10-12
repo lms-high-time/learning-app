@@ -58,27 +58,26 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 
 	# --- отчётность ---
 
-	def test_рядовой_ученик_не_получает_чужие_подробности(self):
-		frappe.set_user(self.ученик)
-		ответ = manager.student_detail(self.чужой)
+	def test_подробности_ученика_только_своей_компании(self):
+		"""Рядовой ученик чужих подробностей не получает; менеджер получает своего
+		ученика, а ученика чужой компании — нет."""
+		менеджер = создать_менеджера(f"i-m-{frappe.generate_hash(length=6)}@example.com", self.компания_а)
+		случаи = {
+			"рядовой ученик → чужой": (self.ученик, self.чужой, manager.ЧУЖОЙ_УЧЕНИК),
+			"менеджер → свой": (менеджер, self.ученик, None),
+			"менеджер → чужой компании": (менеджер, self.чужой, manager.ЧУЖОЙ_УЧЕНИК),
+		}
+		for что, (кто, чей, код) in случаи.items():
+			with self.subTest(что):
+				frappe.set_user(кто)
+				ответ = manager.student_detail(чей)
 
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], manager.ЧУЖОЙ_УЧЕНИК)
-
-	def test_менеджер_не_получает_ученика_чужой_компании(self):
-		менеджер = создать_менеджера(
-			f"i-m-{frappe.generate_hash(length=6)}@example.com", self.компания_а
-		)
-		frappe.set_user(менеджер)
-
-		своё = manager.student_detail(self.ученик)
-		self.assertTrue(своё["ok"])
-		self.assertEqual(своё["data"]["user"], self.ученик)
-
-		ответ = manager.student_detail(self.чужой)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], manager.ЧУЖОЙ_УЧЕНИК)
+				if код is None:
+					self.assertTrue(ответ["ok"])
+					self.assertEqual(ответ["data"]["user"], self.ученик)
+				else:
+					self.assertFalse(ответ["ok"])
+					self.assertEqual(ответ["error"]["code"], код)
 
 	# --- чужое занятие и чужая попытка ---
 
@@ -143,8 +142,11 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 
 	# --- прямая запись мимо методов ---
 
-	def test_ученик_не_может_создать_себе_членство(self):
-		# Иначе он вписывается в любую компанию и получает её курсы.
+	def test_прямая_запись_мимо_методов_закрыта_а_чтение_нет(self):
+		"""Ученик не создаёт себе членство — иначе вписывается в любую компанию и
+		получает её курсы; не правит назначения и своё занятие. Урезание прав не
+		должно сломать обычную работу: чтение остаётся."""
+		своё = создать_занятие(self.ученик, self.урок)
 		frappe.set_user(self.ученик)
 		членство = frappe.get_doc(
 			{
@@ -154,27 +156,23 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 				"role": "Manager",
 			}
 		)
-		self.assertFalse(
-			frappe.has_permission("Organization Membership", "create", doc=членство)
-		)
-
-	def test_ученик_не_может_править_назначения(self):
-		frappe.set_user(self.ученик)
-		self.assertFalse(frappe.has_permission("Course Allocation", "write"))
-		self.assertFalse(frappe.has_permission("Course Allocation", "create"))
-
-	def test_ученик_не_может_править_своё_занятие(self):
-		своё = создать_занятие(self.ученик, self.урок)
-		frappe.set_user(self.ученик)
-		self.assertFalse(
-			frappe.has_permission("Agent Learning Session", "write", doc=своё)
-		)
-
-	def test_чтение_остаётся_доступным(self):
-		# Урезание прав не должно сломать обычную работу.
-		frappe.set_user(self.ученик)
-		self.assertTrue(frappe.has_permission("Agent Learning Session", "read"))
-		self.assertTrue(student.list_my_courses()["ok"])
+		права = {
+			"создать себе членство": (
+				lambda: frappe.has_permission("Organization Membership", "create", doc=членство),
+				False,
+			),
+			"править назначения": (lambda: frappe.has_permission("Course Allocation", "write"), False),
+			"создать назначение": (lambda: frappe.has_permission("Course Allocation", "create"), False),
+			"править своё занятие": (
+				lambda: frappe.has_permission("Agent Learning Session", "write", doc=своё),
+				False,
+			),
+			"читать занятия": (lambda: frappe.has_permission("Agent Learning Session", "read"), True),
+			"мои курсы": (lambda: student.list_my_courses()["ok"], True),
+		}
+		for что, (проверка, можно) in права.items():
+			with self.subTest(что):
+				self.assertEqual(bool(проверка()), можно)
 
 
 class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
@@ -198,13 +196,7 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 			{"doctype": "Course Allocation", "organization": self.компания, "course": зачислить_на_курс(self.сотрудник, курс)}
 		).insert(ignore_permissions=True)
 		self.руководитель = создать_менеджера(f"boss-{суффикс}@example.com", self.компания)
-
-		занятие = занятие_релиза(self.сотрудник, курс, "l-1")
-		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
-		frappe.set_user(self.сотрудник)
-		попытка = student.request_quiz(занятие)["data"]
-		student.submit_answer(попытка["attempt"], попытка["question"]["id"], "V1", "слова ученика")
-		frappe.set_user("Administrator")
+		self.курс = курс
 
 	def test_записи_ответов_не_читает_никто_кроме_служебных_ролей(self):
 		"""Ни руководитель, ни сам ученик: вердикт приходит из метода.
@@ -213,6 +205,13 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 		по фильтру, а по отсутствию права. Руководителю агрегаты доступны
 		методом отчётности, где текстов ответов нет.
 		"""
+		занятие = занятие_релиза(self.сотрудник, self.курс, "l-1")
+		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
+		frappe.set_user(self.сотрудник)
+		попытка = student.request_quiz(занятие)["data"]
+		student.submit_answer(попытка["attempt"], попытка["question"]["id"], "V1", "слова ученика")
+		frappe.set_user("Administrator")
+
 		for кто in (self.руководитель, self.сотрудник):
 			frappe.set_user(кто)
 			self.assertFalse(
@@ -220,40 +219,31 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 				f"{кто} получил доступ к записям ответов",
 			)
 
-	def test_заметки_ученика_не_видит_руководитель(self):
+	def test_заметки_ученика_руководителю_недоступны(self):
 		"""Заметки — про разговор, а не про результат.
 
 		Граница проходит по сущности целиком: руководителю не отдаётся ни
-		методом, ни прямым чтением записи.
+		методом, ни прямым чтением записи; чужую заметку он не прочитает и не
+		забудет своими методами ученика.
 		"""
 		frappe.set_user(self.сотрудник)
 		student.remember(kind="fact", key="role", text="Директор по маркетингу")
 
 		frappe.set_user(self.руководитель)
-		выдано = json.dumps(
-			manager.student_detail(self.сотрудник), ensure_ascii=False, default=str
-		)
-
-		self.assertNotIn("Директор по маркетингу", выдано)
-		# get_list, а не get_all: права применяет только он, и проверять
-		# нужно именно их — фильтр в самом методе к делу не относится.
-		self.assertFalse(
-			frappe.get_list(
-				"Agent Student Note", filters={"student": self.сотрудник}, limit=1
-			),
-			"руководитель не должен видеть заметок своих людей",
-		)
-
-	def test_чужую_заметку_не_прочитать_и_не_забыть(self):
-		frappe.set_user(self.сотрудник)
-		student.remember(kind="fact", key="role", text="Директор по маркетингу")
-
-		frappe.set_user(self.руководитель)
-
-		self.assertEqual(student.my_notes()["data"]["facts"], [])
-		self.assertEqual(
-			student.forget(key="role")["error"]["code"], student.ЗАМЕТКА_НЕ_НАЙДЕНА
-		)
+		with self.subTest("подробности ученика"):
+			выдано = json.dumps(manager.student_detail(self.сотрудник), ensure_ascii=False, default=str)
+			self.assertNotIn("Директор по маркетингу", выдано)
+		with self.subTest("прямое чтение записи"):
+			# get_list, а не get_all: права применяет только он, и проверять
+			# нужно именно их — фильтр в самом методе к делу не относится.
+			self.assertFalse(
+				frappe.get_list("Agent Student Note", filters={"student": self.сотрудник}, limit=1),
+				"руководитель не должен видеть заметок своих людей",
+			)
+		with self.subTest("my_notes"):
+			self.assertEqual(student.my_notes()["data"]["facts"], [])
+		with self.subTest("forget"):
+			self.assertEqual(student.forget(key="role")["error"]["code"], student.ЗАМЕТКА_НЕ_НАЙДЕНА)
 
 
 class IntegrationTestArtifactIsolation(IntegrationTestCase):
@@ -288,25 +278,23 @@ class IntegrationTestArtifactIsolation(IntegrationTestCase):
 		)
 		frappe.set_user("Administrator")
 
-	def test_коллега_видит_свой_пустой_документ_а_не_чужой(self):
-		frappe.set_user(self.коллега)
+	def test_чужой_документ_не_виден_коллеге_и_руководителю(self):
+		"""Коллега видит свой пустой документ, а не чужой. Менеджеру идёт покрытие
+		целей; черновик резюме — не отчётность."""
+		with self.subTest("коллега"):
+			frappe.set_user(self.коллега)
 
-		блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
+			блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
 
-		self.assertEqual(блоки[0]["content"], "")
-		self.assertFalse(
-			frappe.has_permission("Agent Student Artifact", "read", doc=self.документ)
-		)
+			self.assertEqual(блоки[0]["content"], "")
+			self.assertFalse(frappe.has_permission("Agent Student Artifact", "read", doc=self.документ))
 
-	def test_руководитель_не_видит_документов_своих_людей(self):
-		"""Менеджеру идёт покрытие целей; черновик резюме — не отчётность."""
-		frappe.set_user(self.руководитель)
+		with self.subTest("руководитель"):
+			frappe.set_user(self.руководитель)
 
-		self.assertFalse(
-			frappe.get_list("Agent Student Artifact", filters={"student": self.сотрудник}, limit=1)
-		)
-		self.assertFalse(
-			frappe.has_permission("Agent Student Artifact", "read", doc=self.документ)
-		)
-		выдано = json.dumps(manager.student_detail(self.сотрудник), ensure_ascii=False, default=str)
-		self.assertNotIn("седьмую кофейню", выдано)
+			self.assertFalse(
+				frappe.get_list("Agent Student Artifact", filters={"student": self.сотрудник}, limit=1)
+			)
+			self.assertFalse(frappe.has_permission("Agent Student Artifact", "read", doc=self.документ))
+			выдано = json.dumps(manager.student_detail(self.сотрудник), ensure_ascii=False, default=str)
+			self.assertNotIn("седьмую кофейню", выдано)

@@ -73,62 +73,74 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 	# --- course_outline ---
 
 	def test_дерево_курса_из_релиза(self):
+		"""Дерево с целями из прохождения; пройденный урок — `completed`, текущим
+		становится следующий."""
 		self.начать_урок()
 
-		дерево = self.данные(student.course_outline(self.курс))
+		with self.subTest("урок начат"):
+			дерево = self.данные(student.course_outline(self.курс))
 
-		self.assertEqual(set(дерево), {"course", "chapters", "programs"})
-		self.assertEqual(
-			[у["id"] for гл in дерево["chapters"] for у in гл["lessons"]],
-			[урок_релиза(self.курс, к) for к in ("l-1", "l-2", "l-3")],
-		)
-		первая, вторая = дерево["chapters"]
-		self.assertEqual(
-			{к: в for к, в in первая.items() if к != "lessons"},
-			{
-				"key": "ch-1",
-				"title": "Глава первая",
-				"description": "Что изменится после первой главы.",
-				"status": "in_progress",
-				"lessons_total": 2,
-				"lessons_started": 1,
-				"lessons_passed": 0,
-			},
-		)
-		self.assertEqual(
-			первая["lessons"][0],
-			{
-				"id": self.урок,
-				"key": "l-1",
-				"title": "Урок первый",
-				"hook": "Зачин урока «Урок первый»",
-				"completed": False,
-				"current": True,
-				"objectives": [{**ЦЕЛЬ_1, "status": "touched"}],
-				"sections": [ЖУРНАЛ],
-				"homework": None,
-			},
-		)
-		self.assertEqual(
-			[р["key"] for р in первая["lessons"][1]["sections"]], ["log", "rules"]
-		)
-		self.assertEqual((вторая["key"], вторая["status"]), ("ch-2", "not_started"))
-		[третий] = вторая["lessons"]
-		self.assertEqual(третий["objectives"][0]["status"], "not_started")
-		self.assertEqual((третий["homework"], третий["sections"]), ({"title": "Задание"}, []))
+			self.assertEqual(set(дерево), {"course", "chapters", "programs"})
+			self.assertEqual(
+				[у["id"] for гл in дерево["chapters"] for у in гл["lessons"]],
+				[урок_релиза(self.курс, к) for к in ("l-1", "l-2", "l-3")],
+			)
+			первая, вторая = дерево["chapters"]
+			self.assertEqual(
+				{к: в for к, в in первая.items() if к != "lessons"},
+				{
+					"key": "ch-1",
+					"title": "Глава первая",
+					"description": "Что изменится после первой главы.",
+					"status": "in_progress",
+					"lessons_total": 2,
+					"lessons_started": 1,
+					"lessons_passed": 0,
+				},
+			)
+			self.assertEqual(
+				первая["lessons"][0],
+				{
+					"id": self.урок,
+					"key": "l-1",
+					"title": "Урок первый",
+					"hook": "Зачин урока «Урок первый»",
+					"completed": False,
+					"current": True,
+					"objectives": [{**ЦЕЛЬ_1, "status": "touched"}],
+					"sections": [ЖУРНАЛ],
+					"homework": None,
+				},
+			)
+			self.assertEqual([р["key"] for р in первая["lessons"][1]["sections"]], ["log", "rules"])
+			self.assertEqual((вторая["key"], вторая["status"]), ("ch-2", "not_started"))
+			[третий] = вторая["lessons"]
+			self.assertEqual(третий["objectives"][0]["status"], "not_started")
+			self.assertEqual((третий["homework"], третий["sections"]), ({"title": "Задание"}, []))
 
-	def test_пройденный_урок_и_текущий_следующий(self):
 		прохождения.отметить_пройденным(self.ученик, self.курс, "l-1")
+		with self.subTest("урок пройден"):
+			уроки = self.данные(student.course_outline(self.курс))["chapters"][0]["lessons"]
 
-		уроки = self.данные(student.course_outline(self.курс))["chapters"][0]["lessons"]
+			self.assertEqual([(у["completed"], у["current"]) for у in уроки], [(True, False), (False, True)])
 
-		self.assertEqual([(у["completed"], у["current"]) for у in уроки], [(True, False), (False, True)])
-
-	def test_дерево_курса_старой_модели_отказ(self):
+	def test_курс_старой_модели(self):
+		"""Дерево и занятие урока курса без релиза — отказ; карта — уроки без целей."""
 		урок = self.курс_без_релиза()
 		курс = frappe.db.get_value("Course Lesson", урок, "course")
 
-		self.отказ(student.course_outline(курс), "course_not_released")
+		отказы = {
+			"course_outline": lambda: student.course_outline(курс),
+			"lesson_session": lambda: student.lesson_session(урок),
+		}
+		for что, вызов in отказы.items():
+			with self.subTest(что):
+				self.отказ(вызов(), "course_not_released")
+
+		with self.subTest("course_map"):
+			карта = self.данные(public.course_map(course=курс))
+
+			self.assertEqual(карта["chapters"][0]["lessons"][0]["objectives"], [])
 
 	# --- public.course_map ---
 
@@ -149,73 +161,69 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		гостю = self.данные(public.course_map(course=self.курс))["chapters"][0]["lessons"][0]
 		self.assertEqual(гостю["objectives"], [{"text": ЦЕЛЬ_1["text"]}])
 
-	def test_карта_курса_без_релиза_уроки_без_целей(self):
-		урок = self.курс_без_релиза()
-		курс = frappe.db.get_value("Course Lesson", урок, "course")
-
-		карта = self.данные(public.course_map(course=курс))
-
-		self.assertEqual(карта["chapters"][0]["lessons"][0]["objectives"], [])
-
 	# --- lesson_session ---
 
 	def test_занятие_урока_с_местом_и_целями(self):
+		"""Урок без занятий — цели не начаты, прохождение не заводится; начатый —
+		место урока в курсе и цели из прохождения."""
+		with self.subTest("урок без занятий"):
+			данные = self.данные(student.lesson_session(self.урок))
+
+			self.assertEqual((данные["session"], данные["status"]), (None, None))
+			self.assertFalse(данные["has_chat_state"])
+			self.assertFalse(данные["completed"])
+			self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
+			self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+
 		занятие = self.начать_урок()
+		with self.subTest("урок начат"):
+			данные = self.данные(student.lesson_session(self.урок))
 
-		данные = self.данные(student.lesson_session(self.урок))
-
-		self.assertEqual(
-			{к: данные[к] for к in ("lesson", "course", "number", "total", "session", "completed")},
-			{
-				"lesson": self.урок,
-				"course": self.курс,
-				"number": 1,
-				"total": 3,
-				"session": занятие,
-				"completed": False,
-			},
-		)
-		self.assertEqual(данные["status"], "In Progress")
-		self.assertEqual(данные["course_title"], "Пример курса")
-		self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "touched"}])
-
-	def test_урок_без_занятий_цели_не_начаты(self):
-		данные = self.данные(student.lesson_session(self.урок))
-
-		self.assertEqual((данные["session"], данные["status"]), (None, None))
-		self.assertFalse(данные["has_chat_state"])
-		self.assertFalse(данные["completed"])
-		self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
-		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
-
-	def test_занятие_урока_старой_модели_отказ(self):
-		self.отказ(student.lesson_session(self.курс_без_релиза()), "course_not_released")
+			self.assertEqual(
+				{к: данные[к] for к in ("lesson", "course", "number", "total", "session", "completed")},
+				{
+					"lesson": self.урок,
+					"course": self.курс,
+					"number": 1,
+					"total": 3,
+					"session": занятие,
+					"completed": False,
+				},
+			)
+			self.assertEqual(данные["status"], "In Progress")
+			self.assertEqual(данные["course_title"], "Пример курса")
+			self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "touched"}])
 
 	# --- remember, update_artifact ---
 
-	def test_прогресс_открытого_занятия_по_целям(self):
+	def test_прогресс_занятия_по_целям(self):
+		"""Занятие без прохождения — цели не начаты, прохождение не заводится;
+		открытое занятие с прохождением — прогресс по целям, закрытое — без него."""
+		без_прохождения = создать_занятие(self.ученик, self.урок)
+		with self.subTest("занятие без прохождения"):
+			ответ = self.данные(student.remember("observation", "pace", "Торопится", session=без_прохождения))
+
+			self.assertEqual(ответ["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
+			self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+		# `update_artifact` берёт открытое занятие ученика: без закрытия этого
+		# случай «закрытое занятие» ниже проверял бы не то.
+		frappe.db.set_value("Agent Learning Session", без_прохождения, "status", "Completed")
+
 		занятие = self.начать_урок()
+		with self.subTest("открытое занятие"):
+			заметка = self.данные(student.remember("observation", "pace", "Торопится", session=занятие))
+			документ = self.данные(
+				student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Встреча"}])
+			)
 
-		заметка = self.данные(student.remember("observation", "pace", "Торопится", session=занятие))
-		документ = self.данные(
-			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Встреча"}])
-		)
-
-		for ответ in (заметка, документ):
-			self.assertEqual(ответ["objectives_progress"], [{**ЦЕЛЬ_1, "status": "touched"}])
+			for ответ in (заметка, документ):
+				self.assertEqual(ответ["objectives_progress"], [{**ЦЕЛЬ_1, "status": "touched"}])
 		frappe.db.set_value("Agent Learning Session", занятие, "status", "Completed")
-		self.assertNotIn(
-			"objectives_progress",
-			self.данные(student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Ещё"}])),
-		)
-
-	def test_занятие_без_прохождения_цели_не_начаты(self):
-		занятие = создать_занятие(self.ученик, self.урок)
-
-		ответ = self.данные(student.remember("observation", "pace", "Торопится", session=занятие))
-
-		self.assertEqual(ответ["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
-		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+		with self.subTest("закрытое занятие"):
+			self.assertNotIn(
+				"objectives_progress",
+				self.данные(student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Ещё"}])),
+			)
 
 	# --- student_detail ---
 

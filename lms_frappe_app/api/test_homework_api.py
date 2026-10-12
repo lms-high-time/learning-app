@@ -54,32 +54,37 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.assertEqual(сдача["files"], [])
 		self.assertEqual(сдача["versions"][1]["files"][0]["name"], "a.txt", "старая версия помнит файл")
 
-	def test_параметры_списком_приходят_и_строкой_json(self):
-		"""Frappe отдаёт тело запроса формой: списки приезжают строкой."""
+	def test_файлы_сдачи_отказы_и_список_строкой_json(self):
+		"""Битый или пустой файл — `file_missing`; не список объектов в `files` и не
+		JSON в `remove_files` — `invalid_files`, а не 500. Отказ сдачи не заводит.
+		Frappe отдаёт тело запроса формой: списки приезжают строкой."""
 		import json
 
-		ответ = student.submit_homework(lesson=self.урок, files=json.dumps([файл("b.txt", b"x")]))
-		self.assertEqual(ответ["data"]["submission"]["files"][0]["name"], "b.txt")
-
-	def test_битый_или_пустой_файл_отказ(self):
-		for битый in ({"name": "a.txt", "data": "%%%"}, {"name": "a.txt", "data": ""}, {"name": "a.txt"}):
-			ответ = student.submit_homework(lesson=self.урок, answer="сделал", files=[битый])
-			self.assertEqual(ответ["error"]["code"], "file_missing", битый)
-			self.assertEqual(ответ["error"]["file"], "a.txt")
+		отказы = {
+			"битый base64": (
+				{"files": [{"name": "a.txt", "data": "%%%"}]},
+				"file_missing",
+				{"file": "a.txt"},
+			),
+			"пустые данные": ({"files": [{"name": "a.txt", "data": ""}]}, "file_missing", {"file": "a.txt"}),
+			"без данных": ({"files": [{"name": "a.txt"}]}, "file_missing", {"file": "a.txt"}),
+			"files: список строк": ({"files": ["a.txt"]}, "invalid_files", {}),
+			"files: не json": ({"files": "{не json"}, "invalid_files", {}),
+			"files: объект": ({"files": {"name": "a.txt", "data": "aGk="}}, "invalid_files", {}),
+			"files: имя числом": ({"files": [{"name": 5, "data": "aGk="}]}, "invalid_files", {}),
+			"remove_files: не json": ({"remove_files": "не json"}, "invalid_files", {}),
+			"remove_files: объекты": ({"remove_files": [{"id": "x"}]}, "invalid_files", {}),
+		}
+		for что, (параметры, код, подробности) in отказы.items():
+			with self.subTest(что):
+				ответ = student.submit_homework(lesson=self.урок, answer="сделал", **параметры)
+				self.assertEqual(ответ.get("error", {}).get("code"), код, параметры)
+				self.assertEqual({к: ответ["error"][к] for к in подробности}, подробности)
 		self.assertIsNone(student.homework(lesson=self.урок)["data"]["submission"])
 
-	def test_неверные_списки_отказ_контракта(self):
-		"""Не список объектов в `files` и не JSON в `remove_files` — отказ, а не 500."""
-		for параметры in (
-			{"files": ["a.txt"]},
-			{"files": "{не json"},
-			{"files": {"name": "a.txt", "data": "aGk="}},
-			{"files": [{"name": 5, "data": "aGk="}]},
-			{"remove_files": "не json"},
-			{"remove_files": [{"id": "x"}]},
-		):
-			ответ = student.submit_homework(lesson=self.урок, answer="сделал", **параметры)
-			self.assertEqual(ответ.get("error", {}).get("code"), "invalid_files", параметры)
+		with self.subTest("список строкой JSON"):
+			ответ = student.submit_homework(lesson=self.урок, files=json.dumps([файл("b.txt", b"x")]))
+			self.assertEqual(ответ["data"]["submission"]["files"][0]["name"], "b.txt")
 
 	def test_взаимоблокировка_при_сохранении_отказ_busy(self):
 		"""Гонку с параллельным сохранением MariaDB отдаёт взаимоблокировкой:
@@ -173,19 +178,27 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 			self.assertEqual(ответ["error"]["code"], "not_enrolled")
 
 	def test_мои_домашки(self):
-		student.submit_homework(lesson=self.урок, answer="сделал")
-		[строка] = student.my_homework()["data"]["items"]
-		self.assertEqual(строка["lesson"], self.урок)
-		self.assertEqual(строка["course"], self.курс)
-		self.assertTrue(строка["lesson_url"].startswith("/lms/courses/"))
-		self.assertEqual(строка["status"], "Submitted")
-		self.assertIsNone(строка["last_comment"])
-		self.assertNotIn("submission", строка)
-		[строка] = student.my_homework(course=self.курс)["data"]["items"]
-		self.assertEqual(строка["lesson"], self.урок)
-
-	def test_мои_домашки_несут_комментарий_последнего_возврата(self):
+		"""Перечень сдач: строка без сдачи целиком, по уроку — целиком; комментарий
+		последнего возврата; урок без главы перечень курса не роняет."""
 		сдача = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["id"]
+
+		with self.subTest("перечень"):
+			[строка] = student.my_homework()["data"]["items"]
+			self.assertEqual(строка["lesson"], self.урок)
+			self.assertEqual(строка["course"], self.курс)
+			self.assertTrue(строка["lesson_url"].startswith("/lms/courses/"))
+			self.assertEqual(строка["status"], "Submitted")
+			self.assertIsNone(строка["last_comment"])
+			self.assertNotIn("submission", строка)
+			[строка] = student.my_homework(course=self.курс)["data"]["items"]
+			self.assertEqual(строка["lesson"], self.урок)
+
+		with self.subTest("по уроку целиком"):
+			[строка] = student.my_homework(lesson=self.урок)["data"]["items"]
+			self.assertEqual(строка["submission"]["answer"], "сделал")
+			self.assertEqual(строка["homework"]["answer_mode"], "text_and_files")
+			self.assertNotIn("versions", строка["submission"])
+
 		frappe.set_user("Administrator")
 		документ = frappe.get_doc("Agent Homework Submission", сдача)
 		for комментарий in ("Первый", "Второй"):
@@ -193,25 +206,18 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		документ.append("history", {"event": "submitted", "by_user": self.ученик})
 		документ.save(ignore_permissions=True)
 		frappe.set_user(self.ученик)
-		[строка] = student.my_homework()["data"]["items"]
-		self.assertEqual(строка["last_comment"], "Второй")
+		with self.subTest("комментарий последнего возврата"):
+			[строка] = student.my_homework()["data"]["items"]
+			self.assertEqual(строка["last_comment"], "Второй")
 
-	def test_урок_без_главы_не_роняет_перечень_курса(self):
-		student.submit_homework(lesson=self.урок, answer="сделал")
 		frappe.set_user("Administrator")
 		frappe.db.set_value("Course Lesson", self.урок, "chapter", None)
 		frappe.set_user(self.ученик)
-		ответ = student.my_homework(course=self.курс)
-		self.assertTrue(ответ["ok"], ответ)
-		[строка] = ответ["data"]["items"]
-		self.assertEqual(строка["course"], self.курс)
-
-	def test_моя_домашка_по_уроку_целиком(self):
-		student.submit_homework(lesson=self.урок, answer="сделал")
-		[строка] = student.my_homework(lesson=self.урок)["data"]["items"]
-		self.assertEqual(строка["submission"]["answer"], "сделал")
-		self.assertEqual(строка["homework"]["answer_mode"], "text_and_files")
-		self.assertNotIn("versions", строка["submission"])
+		with self.subTest("урок без главы"):
+			ответ = student.my_homework(course=self.курс)
+			self.assertTrue(ответ["ok"], ответ)
+			[строка] = ответ["data"]["items"]
+			self.assertEqual(строка["course"], self.курс)
 
 	def test_чужой_файл_не_убрать(self):
 		"""`remove_files` с чужим `id` не трогает ни чужую сдачу, ни файлы своей."""
@@ -264,21 +270,26 @@ class IntegrationTestHomeworkStart(IntegrationTestCase):
 	Курс из релиза: задание у первого урока, у второго — нет.
 	"""
 
-	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"hwst-{суффикс}@example.com")
-		релиз = пример_релиза(f"hwst-{суффикс}")
+	@classmethod
+	def setUpClass(cls):
+		"""Курс тесты только читают; сдачи и занятия — у ученика своего теста."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		релиз = пример_релиза(f"hwst-{frappe.generate_hash(length=6)}")
 		релиз["lessons"][0]["homework"] = {
 			"title": "Встреча со спонсором",
 			"description": "Проведите встречу и опишите итог.",
 			"answer_mode": "text",
 			"due_days": 3,
 		}
-		self.курс, _ = курс_из_релиза(релиз=релиз)
+		cls.курс, _ = курс_из_релиза(релиз=релиз)
+		cls.первый = урок_релиза(cls.курс, "l-1")
+		cls.второй = урок_релиза(cls.курс, "l-2")
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		self.ученик = создать_ученика(f"hwst-{frappe.generate_hash(length=6)}@example.com")
 		зачислить_на_курс(self.ученик, self.курс)
-		self.первый = урок_релиза(self.курс, "l-1")
-		self.второй = урок_релиза(self.курс, "l-2")
 		frappe.set_user(self.ученик)
 
 	def старт(self, урок: str) -> dict:

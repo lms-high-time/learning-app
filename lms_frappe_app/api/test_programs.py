@@ -56,18 +56,18 @@ class IntegrationTestPrograms(IntegrationTestCase):
 		frappe.db.set_value("LMS Enrollment", {"member": self.ученик, "course": курс}, "progress", 100)
 
 	def test_участник_не_записывается_через_голову_предыдущего(self):
-		ответ = self.от_имени(self.ученик, student.enroll, course=self.второй)
+		"""Пройденный предыдущий курс открывает следующий."""
+		with self.subTest("предыдущий не пройден"):
+			ответ = self.от_имени(self.ученик, student.enroll, course=self.второй)
 
-		self.assertEqual(ответ["error"]["code"], ПОРЯДОК_ПРОГРАММЫ)
-		self.assertEqual(ответ["error"]["previous"]["id"], self.первый)
-		self.assertEqual(ответ["error"]["program"], self.программа.name)
-		self.assertTrue(self.от_имени(self.ученик, student.enroll, course=self.первый)["ok"])
+			self.assertEqual(ответ["error"]["code"], ПОРЯДОК_ПРОГРАММЫ)
+			self.assertEqual(ответ["error"]["previous"]["id"], self.первый)
+			self.assertEqual(ответ["error"]["program"], self.программа.name)
+			self.assertTrue(self.от_имени(self.ученик, student.enroll, course=self.первый)["ok"])
 
-	def test_пройденный_предыдущий_открывает_следующий(self):
-		self.от_имени(self.ученик, student.enroll, course=self.первый)
 		self._пройти(self.первый)
-
-		self.assertTrue(self.от_имени(self.ученик, student.enroll, course=self.второй)["ok"])
+		with self.subTest("пройденный предыдущий открывает следующий"):
+			self.assertTrue(self.от_имени(self.ученик, student.enroll, course=self.второй)["ok"])
 
 	def test_без_обязательного_порядка_курс_открыт(self):
 		frappe.db.set_value("LMS Program", self.программа.name, "enforce_course_order", 0)
@@ -88,29 +88,27 @@ class IntegrationTestPrograms(IntegrationTestCase):
 		)
 
 	def test_страница_курса_знает_место_и_замок(self):
-		участнику = self.от_имени(self.ученик, public.course_programs, course=self.второй)["data"]
-		постороннему = self.от_имени(self.посторонний, public.course_programs, course=self.второй)["data"]
+		"""Неопубликованную программу видит только участник."""
+		with self.subTest("опубликованная программа"):
+			участнику = self.от_имени(self.ученик, public.course_programs, course=self.второй)["data"]
+			постороннему = self.от_имени(self.посторонний, public.course_programs, course=self.второй)["data"]
 
-		[программа] = участнику["programs"]
-		self.assertEqual((программа["number"], программа["total"]), (2, 2))
-		self.assertTrue(программа["member"])
-		self.assertEqual(программа["locked_by"]["id"], self.первый)
-		self.assertEqual(программа["previous"]["id"], self.первый)
-		[чужая] = постороннему["programs"]
-		self.assertFalse(чужая["member"])
-		self.assertIsNone(чужая["locked_by"])
+			[программа] = участнику["programs"]
+			self.assertEqual((программа["number"], программа["total"]), (2, 2))
+			self.assertTrue(программа["member"])
+			self.assertEqual(программа["locked_by"]["id"], self.первый)
+			self.assertEqual(программа["previous"]["id"], self.первый)
+			[чужая] = постороннему["programs"]
+			self.assertFalse(чужая["member"])
+			self.assertIsNone(чужая["locked_by"])
 
-	def test_неопубликованную_программу_видит_только_участник(self):
 		frappe.db.set_value("LMS Program", self.программа.name, "published", 0)
+		with self.subTest("неопубликованная программа"):
+			постороннему = self.от_имени(self.посторонний, public.course_programs, course=self.второй)["data"]
+			участнику = self.от_имени(self.ученик, public.course_programs, course=self.второй)["data"]
 
-		self.assertEqual(
-			self.от_имени(self.посторонний, public.course_programs, course=self.второй)["data"]["programs"],
-			[],
-		)
-		self.assertEqual(
-			len(self.от_имени(self.ученик, public.course_programs, course=self.второй)["data"]["programs"]),
-			1,
-		)
+			self.assertEqual(постороннему["programs"], [])
+			self.assertEqual(len(участнику["programs"]), 1)
 
 	def test_страница_урока_ведёт_к_предыдущему_курсу(self):
 		вход = self.от_имени(self.ученик, public.lesson_entry, lesson=self.урок_второго)["data"]

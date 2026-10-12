@@ -112,13 +112,28 @@ class IntegrationTestЗаметкиМимоМетодов(IntegrationTestCase):
 		self.assertEqual(в_обход["error"]["code"], "invalid_transition")
 		self.assertEqual(len(authoring.list_notes(course=self.курс)["data"]["notes"][0]["replies"]), 3)
 
-	def test_куратор_мимо_метода_не_пишет(self):
-		"""Ни статус, ни `via`, ни релиз, ни нить: `frappe.client` и `/api/resource`
-		отклоняются правами — и вставка строки нити тоже."""
+	def test_мимо_методов_заметка_не_меняется(self):
+		"""Куратор: ни статус, ни `via`, ни релиз, ни нить — `frappe.client` и
+		`/api/resource` отклоняются правами, и вставка строки нити тоже.
+		Отдельно от заметки строку не тронуть и тем, у кого право на заметку
+		есть: её `validate` и `on_trash` отказывают. Курс, релиз, место и `via`
+		ставит `add_note` — в Desk их не правят и модератор с администратором."""
 		self.assertTrue(frappe.has_permission(ЗАМЕТКА, "read", user=self.куратор))
 		self.assertTrue(authoring.reply_note(note=self.заметка, text="Уточню: шаг 3")["ok"])
 		строка = frappe.get_doc(ЗАМЕТКА, self.заметка).replies[0].name
+		другой = frappe.get_all(
+			"Agent Course Release", filters={"name": ("!=", self.релиз)}, pluck="name", limit=1
+		)
+		подмены = {
+			"course": создать_курс(f"Другой {frappe.generate_hash(length=6)}"),
+			"release": другой[0] if другой else None,
+			"lesson_key": "l-2",
+			"target": "lesson.l-2",
+			"via": "agent",
+		}
+		self.assertEqual(set(подмены), set(ПОЛЯ_ЗАМЕТКИ))
 		было = self.состояние()
+
 		frappe.set_user(self.куратор)
 		новая = {**self.новая(), "status": "accepted"}
 		пути = {
@@ -134,23 +149,20 @@ class IntegrationTestЗаметкиМимоМетодов(IntegrationTestCase):
 			"rest: строка нити": lambda: через_rest(rest.create_doc, ОТВЕТ, **self.строка()),
 		}
 		for что, путь in пути.items():
-			with self.subTest(что), self.assertRaises(frappe.PermissionError):
+			with self.subTest("куратор", что=что), self.assertRaises(frappe.PermissionError):
 				путь()
 		# `DELETE /api/v2/document/<строка>` удаляет строку через заметку и без
 		# права на неё отвечает 404, а не 403: Frappe не выдаёт, что строка есть.
-		with self.subTest("rest v2: удалить строку нити"), self.assertRaises(frappe.DoesNotExistError):
+		with (
+			self.subTest("куратор: rest v2: удалить строку нити"),
+			self.assertRaises(frappe.DoesNotExistError),
+		):
 			rest_v2.delete_doc(ОТВЕТ, строка)
 
 		frappe.set_user("Administrator")
 		self.assertEqual(self.состояние(), было)
 		self.assertFalse(frappe.db.exists(ЗАМЕТКА, {"course": self.курс, "target": "course"}))
 
-	def test_строку_нити_не_вставить_не_править_и_не_удалить_саму_по_себе(self):
-		"""Отдельно от заметки строку не тронуть и тем, у кого право на заметку
-		есть: её `validate` и `on_trash` отказывают."""
-		self.assertTrue(authoring.reply_note(note=self.заметка, text="Уточню: шаг 3")["ok"])
-		строка = frappe.get_doc(ЗАМЕТКА, self.заметка).replies[0].name
-		было = self.состояние()
 		for кто in (self.модератор, "Administrator"):
 			frappe.set_user(кто)
 			пути = {
@@ -161,13 +173,26 @@ class IntegrationTestЗаметкиМимоМетодов(IntegrationTestCase):
 			}
 			for что, путь in пути.items():
 				with (
-					self.subTest(кто=кто, что=что),
+					self.subTest("строка нити сама по себе", кто=кто, что=что),
 					self.assertRaisesRegex(frappe.ValidationError, "нить заметки"),
 				):
 					путь()
 
 		frappe.set_user("Administrator")
 		self.assertEqual(self.состояние(), было)
+
+		for кто in (self.модератор, "Administrator"):
+			frappe.set_user(кто)
+			for поле, значение in подмены.items():
+				with (
+					self.subTest("привязка в Desk", кто=кто, поле=поле),
+					self.assertRaisesRegex(frappe.ValidationError, ЗАПИСЬ_ЗАМЕТКИ),
+				):
+					сохранить(ЗАМЕТКА, self.заметка, **{поле: значение})
+
+		frappe.set_user("Administrator")
+		self.assertEqual(self.состояние(), было)
+		self.assertEqual(frappe.db.get_value(ЗАМЕТКА, self.заметка, "target"), "lesson.l-1")
 
 	def test_модератор_в_desk_идёт_по_переходам(self):
 		"""«Сделано» отмечает агент с текстом, возвращает автор с текстом — и в Desk."""
@@ -195,33 +220,6 @@ class IntegrationTestЗаметкиМимоМетодов(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		self.assertEqual(self.состояние()[0], "open")
 		self.assertEqual(self.состояние()[3], [("author", "Не то")])
-
-	def test_модератор_в_desk_не_меняет_привязку(self):
-		"""Курс, релиз, место и `via` ставит `add_note` — в Desk они не правятся."""
-		другой = frappe.get_all(
-			"Agent Course Release", filters={"name": ("!=", self.релиз)}, pluck="name", limit=1
-		)
-		подмены = {
-			"course": создать_курс(f"Другой {frappe.generate_hash(length=6)}"),
-			"release": другой[0] if другой else None,
-			"lesson_key": "l-2",
-			"target": "lesson.l-2",
-			"via": "agent",
-		}
-		self.assertEqual(set(подмены), set(ПОЛЯ_ЗАМЕТКИ))
-		было = self.состояние()
-		for кто in (self.модератор, "Administrator"):
-			frappe.set_user(кто)
-			for поле, значение in подмены.items():
-				with (
-					self.subTest(кто=кто, поле=поле),
-					self.assertRaisesRegex(frappe.ValidationError, ЗАПИСЬ_ЗАМЕТКИ),
-				):
-					сохранить(ЗАМЕТКА, self.заметка, **{поле: значение})
-
-		frappe.set_user("Administrator")
-		self.assertEqual(self.состояние(), было)
-		self.assertEqual(frappe.db.get_value(ЗАМЕТКА, self.заметка, "target"), "lesson.l-1")
 
 
 class IntegrationTestРепортМимоМетода(IntegrationTestCase):
@@ -254,9 +252,10 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 
 	def репорты_соседа(self) -> list[dict]:
 		frappe.set_user(self.сосед)
-		репорты = student.my_reports()["data"]["reports"]
-		frappe.set_user("Administrator")
-		return репорты
+		try:
+			return student.my_reports()["data"]["reports"]
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_разбор_методом_от_куратора(self):
 		self.assertFalse(frappe.has_permission(РЕПОРТ, "write", user=self.куратор))
@@ -267,10 +266,23 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		в_обход = self.разобрать("rejected", resolution="Передумали")
 		self.assertEqual(в_обход["error"]["code"], reports.НЕДОПУСТИМЫЙ_ПЕРЕХОД_РЕПОРТА)
 
-	def test_куратор_мимо_метода_не_пишет(self):
-		"""Репорт не переставить на занятие другого ученика: тот увидел бы в
-		`my_reports` чужой текст и ответ."""
+	def test_мимо_методов_привязка_не_меняется(self):
+		"""Куратор мимо метода не пишет: репорт не переставить на занятие другого
+		ученика — тот увидел бы в `my_reports` чужой текст и ответ. Модератор и
+		администратор в Desk привязку не меняют."""
 		self.assertTrue(frappe.has_permission(РЕПОРТ, "read", user=self.куратор))
+		подмены = {
+			"session": self.чужое_занятие,
+			"course": создать_курс(f"Другой {frappe.generate_hash(length=6)}"),
+			"lesson": урок_релиза(self.курс, "l-2"),
+			"release": None,
+			"kind": "Stuck",
+			"question_key": "S1/l-1-D1",
+			"objective": "Чужая цель",
+			"text": "Подделка",
+		}
+		self.assertEqual(set(подмены), set(ПОЛЯ_ПРИВЯЗКИ))
+
 		frappe.set_user(self.куратор)
 		новый = {**self.привязка, "doctype": РЕПОРТ, "text": "Подделка"}
 		чужое = self.чужое_занятие
@@ -285,7 +297,7 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 			"rest: удалить": lambda: через_rest(rest.delete_doc, РЕПОРТ, self.репорт),
 		}
 		for что, путь in пути.items():
-			with self.subTest(что), self.assertRaises(frappe.PermissionError):
+			with self.subTest("куратор", что=что), self.assertRaises(frappe.PermissionError):
 				путь()
 
 		frappe.set_user("Administrator")
@@ -294,25 +306,16 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		self.assertEqual(frappe.db.count(РЕПОРТ, {"course": self.курс}), 1)
 		self.assertEqual(self.репорты_соседа(), [])
 
-	def test_модератор_в_desk_не_меняет_привязку(self):
-		подмены = {
-			"session": self.чужое_занятие,
-			"course": создать_курс(f"Другой {frappe.generate_hash(length=6)}"),
-			"lesson": урок_релиза(self.курс, "l-2"),
-			"release": None,
-			"kind": "Stuck",
-			"question_key": "S1/l-1-D1",
-			"objective": "Чужая цель",
-			"text": "Подделка",
-		}
-		self.assertEqual(set(подмены), set(ПОЛЯ_ПРИВЯЗКИ))
 		for кто in (self.модератор, "Administrator"):
 			frappe.set_user(кто)
 			for поле, значение in подмены.items():
-				with self.subTest(кто=кто, поле=поле), self.assertRaisesRegex(frappe.ValidationError, ЖАЛОБА):
+				with (
+					self.subTest("привязка в Desk", кто=кто, поле=поле),
+					self.assertRaisesRegex(frappe.ValidationError, ЖАЛОБА),
+				):
 					сохранить(РЕПОРТ, self.репорт, **{поле: значение})
 			with (
-				self.subTest(кто=кто, поле="rest: session"),
+				self.subTest("привязка в Desk", кто=кто, поле="rest: session"),
 				self.assertRaisesRegex(frappe.ValidationError, ЖАЛОБА),
 			):
 				через_rest(rest.update_doc, РЕПОРТ, self.репорт, session=self.чужое_занятие)
@@ -331,10 +334,12 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		курс, _ = курс_из_релиза()
 		зачислить_на_курс(self.сосед, курс)
 		frappe.set_user(self.сосед)
-		ответ = student.report_issue(
-			session=создать_занятие(self.сосед, урок_релиза(курс, "l-1")), kind="stuck", text="Встал"
-		)
-		frappe.set_user("Administrator")
+		try:
+			ответ = student.report_issue(
+				session=создать_занятие(self.сосед, урок_релиза(курс, "l-1")), kind="stuck", text="Встал"
+			)
+		finally:
+			frappe.set_user("Administrator")
 		репорт = ответ["data"]["report"]
 		frappe.db.set_value(РЕПОРТ, репорт, {"status": "Fixed", "resolution": "Ответ другого курса", **поля})
 		return репорт
@@ -342,17 +347,20 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 	def репорт_того_же_курса(self) -> str:
 		"""Закрытый репорт соседа по тому же уроку — оригинал для дубля."""
 		frappe.set_user(self.сосед)
-		ответ = student.report_issue(session=self.чужое_занятие, kind="stuck", text="Встал")
-		frappe.set_user("Administrator")
+		try:
+			ответ = student.report_issue(session=self.чужое_занятие, kind="stuck", text="Встал")
+		finally:
+			frappe.set_user("Administrator")
 		репорт = ответ["data"]["report"]
 		frappe.db.set_value(РЕПОРТ, репорт, {"status": "Fixed", "resolution": "Ответ оригинала"})
 		return репорт
 
 	def мои_репорты(self) -> list[dict]:
 		frappe.set_user(self.ученик)
-		репорты = student.my_reports(course=self.курс)["data"]["reports"]
-		frappe.set_user("Administrator")
-		return репорты
+		try:
+			return student.my_reports(course=self.курс)["data"]["reports"]
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_модератор_в_desk_разбирает_по_переходам(self):
 		"""Статус и ответ в Desk правятся, а закрытый репорт только переоткрывают."""
@@ -403,9 +411,11 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		self.assertEqual(frappe.db.get_value(РЕПОРТ, self.репорт, "resolution"), "Поправили пример и вопрос")
 
-	def test_модератор_в_desk_не_ставит_дубль_чужого_курса(self):
+	def test_ответ_чужого_курса_ученику_не_уходит(self):
 		"""Ответ оригинала уходит ученику: оригинал из чужого курса показал бы
-		ему ответ о курсе, которого он не проходил."""
+		ему ответ о курсе, которого он не проходил. Модератор в Desk такой дубль
+		не ставит, а ссылка, записанная мимо `validate`, ответ чужого курса не
+		выдаёт."""
 		чужой = self.репорт_другого_курса()
 		frappe.set_user(self.модератор)
 		for что, код, поля in (
@@ -421,12 +431,10 @@ class IntegrationTestРепортМимоМетода(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value(РЕПОРТ, self.репорт, ["status", "duplicate_of"]), ("New", None))
 		self.assertEqual([р["resolution"] for р in self.мои_репорты()], [None])
 
-	def test_ответ_оригинала_чужого_курса_ученику_не_уходит(self):
-		"""Ссылка, записанная мимо `validate`, не выдаёт ученику ответ чужого курса."""
-		чужой = self.репорт_другого_курса()
-		frappe.db.set_value(РЕПОРТ, self.репорт, {"status": "Duplicate", "duplicate_of": чужой})
+		with self.subTest("ссылка мимо validate"):
+			frappe.db.set_value(РЕПОРТ, self.репорт, {"status": "Duplicate", "duplicate_of": чужой})
 
-		(мой,) = self.мои_репорты()
+			(мой,) = self.мои_репорты()
 
-		self.assertEqual(мой["status"], "duplicate")
-		self.assertIsNone(мой["resolution"])
+			self.assertEqual(мой["status"], "duplicate")
+			self.assertIsNone(мой["resolution"])
