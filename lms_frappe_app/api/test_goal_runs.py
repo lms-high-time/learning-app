@@ -226,7 +226,10 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 					self.assertEqual((len(данные["runs"]), данные["limit"], данные["has_more"]), (1, 1, True))
 
 	def test_отказы(self):
-		"""Неверная страница, курс без релиза, неизвестный курс."""
+		"""Неверная страница, курс без релиза, неизвестный курс.
+
+		Страница — по строке проводки на параметр: разбор целиком проверяет
+		`TestПараметрыАвтора` в `api/test_authoring.py`."""
 		frappe.set_user("Administrator")
 		анонс = frappe.get_doc("LMS Course", создать_курс(f"Анонс {self.суффикс}"))
 		анонс.append("instructors", {"instructor": self.автор})
@@ -235,11 +238,7 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 
 		отказы = [
 			({"limit": 0}, "invalid_page", {"where": "limit"}),
-			({"limit": "-1"}, "invalid_page", {"where": "limit"}),
-			({"limit": "десять"}, "invalid_page", {"where": "limit"}),
-			({"limit": 2.5}, "invalid_page", {"where": "limit"}),
 			({"start": -1}, "invalid_page", {"where": "start"}),
-			({"start": "1a"}, "invalid_page", {"where": "start"}),
 			({"course": анонс}, "course_not_released", {}),
 			({"course": "такого-курса-нет"}, "course_not_found", {}),
 		]
