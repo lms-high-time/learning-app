@@ -10,8 +10,10 @@
 from functools import cached_property
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
+from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	привязать_главу,
@@ -19,7 +21,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
 	создать_ученика,
 )
-from lms_frappe_app.api import authoring
 
 
 class IntegrationTestAuthoring(IntegrationTestCase):
@@ -217,3 +218,71 @@ class IntegrationTestLessonHookAndPromise(IntegrationTestCase):
 
 		authoring.update_course(course=анонс, promise="")
 		self.assertFalse(frappe.db.get_value("LMS Course", анонс, "course_promise"))
+
+
+class TestПараметрыАвтора(UnitTestCase):
+	"""Без базы: разбор параметров методов автора (learning-services#536).
+
+	Проводку проверяют `api/test_goal_runs.py` и `api/test_publish_release.py`.
+	"""
+
+	def test_целое_страницы(self):
+		"""`_целое(значение, по_умолчанию, поле, наименьшее)`: пусто — умолчание,
+		строка цифр — число."""
+		случаи = (
+			("None — умолчание", None, 0, (20,)),
+			("пустая строка — умолчание", "", 1, (20,)),
+			("число", 5, 1, (5,)),
+			("ноль при наименьшем 0", 0, 0, (0,)),
+			("наименьшее включительно", 1, 1, (1,)),
+			("строка цифр", "7", 0, (7,)),
+			("строка цифр с пробелами", " 7 ", 0, (7,)),
+			("ноль меньше наименьшего", 0, 1, ("invalid_page", 0)),
+			("строка 0 меньше наименьшего — значение числом", "0", 1, ("invalid_page", 0)),
+			("отрицательное", -1, 0, ("invalid_page", -1)),
+			("отрицательное строкой", "-1", 1, ("invalid_page", "-1")),
+			("слово", "десять", 1, ("invalid_page", "десять")),
+			("цифры с буквой", "1a", 0, ("invalid_page", "1a")),
+			("только пробелы", "  ", 0, ("invalid_page", "  ")),
+			("дробное", 2.5, 1, ("invalid_page", 2.5)),
+			("True — не число", True, 0, ("invalid_page", True)),
+			("False — не число", False, 0, ("invalid_page", False)),
+		)
+		for что, значение, наименьшее, ожидание in случаи:
+			with self.subTest(что):
+				try:
+					получено = (authoring._целое(значение, 20, "limit", наименьшее),)
+				except Отказ as отказ:
+					self.assertEqual(sorted(отказ.подробности), ["value", "where"])
+					self.assertEqual(отказ.подробности["where"], "limit")
+					получено = (отказ.код, отказ.подробности["value"])
+				self.assertEqual(получено, ожидание)
+				# Why: `0 == False` и `1 == True` — без сверки типа строки с bool сошлись бы.
+				self.assertIs(type(получено[-1]), type(ожидание[-1]))
+
+	def test_коммит(self):
+		"""Полный хеш git ровно как печатает `git rev-parse`, иначе `invalid_commit`."""
+		sha1 = "0123456789abcdef0123456789abcdef01234567"
+		sha256 = "fedcba9876543210" * 4
+		случаи = (
+			("SHA-1", sha1, (sha1,)),
+			("SHA-256", sha256, (sha256,)),
+			("пустая строка", "", ("invalid_commit",)),
+			("короткий хеш", sha1[:7], ("invalid_commit",)),
+			("верхний регистр", sha1.upper(), ("invalid_commit",)),
+			("41 знак", sha1 + "8", ("invalid_commit",)),
+			("63 знака", sha256[:63], ("invalid_commit",)),
+			("пробел в начале", f" {sha1}", ("invalid_commit",)),
+			("перевод строки в конце", f"{sha1}\n", ("invalid_commit",)),
+			("не 0-9a-f", "g" * 40, ("invalid_commit",)),
+			("число", 40, ("invalid_commit",)),
+			("список", [sha1], ("invalid_commit",)),
+			("None", None, ("invalid_commit",)),
+		)
+		for что, значение, ожидание in случаи:
+			with self.subTest(что):
+				try:
+					получено = (authoring._коммит(значение),)
+				except Отказ as отказ:
+					получено = (отказ.код,)
+				self.assertEqual(получено, ожидание)

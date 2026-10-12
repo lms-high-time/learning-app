@@ -111,27 +111,11 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		self.assertEqual([с["event"] for с in сдача["history"]], ["submitted"])
 		self.assertEqual(len(сдача["versions"]), 1)
 
-	def test_журнал_называет_автора_события_по_имени(self):
-		"""Ученику на странице урока журнал показывает имя, а не почту."""
-		frappe.db.set_value(
-			"User", self.ученик, {"first_name": "Анна", "last_name": "Петрова", "full_name": "Анна Петрова"}
-		)
-		frappe.clear_document_cache("User", self.ученик)
-		сдача = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]
-		[событие] = сдача["history"]
-		self.assertEqual(событие["by"], self.ученик)
-		self.assertEqual(событие["by_name"], "Анна Петрова")
-
-	def test_без_имени_журнал_называет_почту(self):
-		frappe.db.set_value("User", self.ученик, {"first_name": "", "last_name": "", "full_name": ""})
-		frappe.clear_document_cache("User", self.ученик)
-		[событие] = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"][
-			"history"
-		]
-		self.assertEqual(событие["by_name"], self.ученик)
-
 	def test_журнал_не_отдаёт_ученику_почту_куратора(self):
-		"""Почта куратора ученику ни к чему: `by` — только у своих событий."""
+		"""Почта куратора ученику ни к чему: `by` — только у своих событий.
+
+		Подпись автора события целиком проверяет `TestАвторСобытия` в
+		`agent_learning/test_homework_review.py`."""
 		сдача = student.submit_homework(lesson=self.урок, answer="сделал")["data"]["submission"]["id"]
 		frappe.set_user("Administrator")
 		суффикс = frappe.generate_hash(length=4)
