@@ -16,7 +16,7 @@ import frappe
 from frappe.query_builder import Order
 from frappe.utils import now_datetime
 
-from lms_frappe_app.agent_learning import announcements, quiz, release_quiz
+from lms_frappe_app.agent_learning import announcements, html_text, quiz, release_quiz
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import signals as сигналы
 from lms_frappe_app.agent_learning.access import (
@@ -706,7 +706,8 @@ def remember(kind: str, key: str, text: str, session: str | None = None) -> dict
 		занятие = _своё_занятие(session)
 		курс = занятие.course
 
-	ключ = (key or "").strip().lower()
+	# Ключ — каким его сохранит запись: с `<` хук экранирует скобку (#527).
+	ключ = html_text.очищенный((key or "").strip().lower())
 	if not ключ:
 		# Свой код, а не «неизвестный вид»: вид к этому месту уже распознан,
 		# и агент, ветвящийся по коду, стал бы подставлять другой вид вместо
@@ -774,7 +775,7 @@ def forget(key: str, course: str | None = None) -> dict:
 		{
 			"student": текущий_пользователь(),
 			"course": course or "",
-			"note_key": (key or "").strip().lower(),
+			"note_key": html_text.очищенный((key or "").strip().lower()),
 		},
 	)
 	if not имя:
