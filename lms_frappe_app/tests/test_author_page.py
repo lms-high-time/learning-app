@@ -57,7 +57,8 @@ def страница(пользователь: str, **параметры) -> str
 	finally:
 		frappe.local.form_dict = прежние
 	html = ответ.get_data(as_text=True)
-	assert ответ.status_code == 200, html[:500]
+	if ответ.status_code != 200:
+		raise AssertionError(f"страница ответила {ответ.status_code}: {html[:500]}")
 	return html
 
 
@@ -211,7 +212,7 @@ def места_заметок(html: str) -> set[str]:
 
 
 class IntegrationTestAuthorPageView(IntegrationTestCase):
-	"""Кабинет автора: тесты, которые курс только смотрят (lms-high-time/learning-services#512).
+	"""Кабинет автора: тесты, которые общий курс не меняют (lms-high-time/learning-services#512).
 
 	Курс с релизом заводится один раз на класс: ни один тест класса его не
 	меняет. Тест, которому нужны заметки, тестеры или новая версия релиза

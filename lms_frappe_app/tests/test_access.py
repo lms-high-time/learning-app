@@ -124,6 +124,8 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 		set_request(method="POST", path="/")
 		frappe.local.cookie_manager = CookieManager()
 		frappe.local.login_manager = LoginManager()
+		# Код ответа — с чистого листа: ожидание «кода нет» не зависит от прошлого случая.
+		frappe.local.response.pop("http_status_code", None)
 		try:
 			with (
 				patch("frappe.sendmail") as письма,
