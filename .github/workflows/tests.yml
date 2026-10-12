@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3]
+        part: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v5
