@@ -4,6 +4,8 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.reports import НУЖЕН_ОТВЕТ_УЧЕНИКУ
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	создать_занятие,
@@ -46,7 +48,8 @@ class IntegrationTestAgentCourseReport(IntegrationTestCase):
 		отметка «ученик узнал» — по чему итог приходит ему один раз. Новый итог
 		после переоткрытия — другая новость, и отметка снимается, чтобы она
 		дошла; статус, сменённый в desk, обязан вести себя так же, поэтому
-		проверяется запись, а не метод."""
+		проверяется запись, а не метод. Ответ закрытого репорта в desk правится,
+		но пустым не становится — те же правила, что у `resolve_report`."""
 		репорт = frappe.get_doc(
 			{
 				"doctype": "Agent Course Report",
@@ -60,19 +63,27 @@ class IntegrationTestAgentCourseReport(IntegrationTestCase):
 		self.assertIsNone(репорт.resolved_at)
 
 		репорт.status = "Fixed"
+		репорт.resolution = "Поправили пример"
 		репорт.save()
 		self.assertTrue(репорт.resolved_at)
 		репорт.db_set("student_notified_at", frappe.utils.now_datetime())
 
-		репорт.resolution = "Поправили пример"
+		репорт.resolution = "Поправили пример и вопрос"
 		репорт.save()
 		self.assertTrue(репорт.student_notified_at, "правка ответа — не новый итог")
+		репорт.resolution = ""
+		with self.assertRaises(Отказ) as пойман:
+			репорт.save()
+		self.assertEqual(пойман.exception.код, НУЖЕН_ОТВЕТ_УЧЕНИКУ, "ответ правят, но не стирают")
+		репорт.reload()
 
 		репорт.status = "In Progress"
 		репорт.save()
 		self.assertIsNone(репорт.resolved_at)
+		self.assertIsNone(репорт.resolution, "переоткрытый репорт не держит прежний итог")
 
 		репорт.status = "Rejected"
+		репорт.resolution = "Так задумано"
 		репорт.save()
 		self.assertTrue(репорт.resolved_at)
 		self.assertIsNone(репорт.student_notified_at)
