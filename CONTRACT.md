@@ -657,6 +657,7 @@ learning-services#405).
                  "title": "Выбор: «for по коллекции»" },
   "resume_from": "Начать с примера ученика про отчёты",
   "directive": "…", "material": "…",
+  "section_hints": { "log": "…" },
   "course_frame": { "frame": "…",
                     "learn_about_student": [ { "key": "where_applies", "text": "…", "changes": false } ] },
   "history": {
@@ -718,7 +719,10 @@ learning-services#405).
 `mark_goal`; `null`, если её нет.
 
 `directive` и `material` — из среза пакета агента для этого урока
-(`agent.lessons.<ключ>` релиза); нет — пустая строка. `course_frame` — рамка
+(`agent.lessons.<ключ>` релиза); нет — пустая строка. `section_hints` —
+подсказки агенту по разделам документа из того же среза (`sections`): ключ
+раздела → текст; пустые не приходят, нет ни одной — `{}`. Ключи — разделы
+документа действующего релиза: публикация не пропускает другие. `course_frame` — рамка
 пакета (`frame`, `learn_about_student`, какие есть) — только при `frame:
 true`; при `false` ключа нет. **Пакет агента отдаёт только этот метод**,
 подробности пункта — `lesson_item`: ученик и руководитель его не видят ни в
