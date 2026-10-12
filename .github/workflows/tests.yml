@@ -163,13 +163,20 @@ jobs:
           # payments — не наша прихоть: lms объявляет его в required_apps
           # и без него не устанавливается.
           # --skip-assets: тесты серверные, собранный фронтенд им не нужен.
-          # Why: сборка ассетов Learning — самая долгая часть шага.
           bench get-app --skip-assets --branch version-16 https://github.com/frappe/payments
           # Learning — из нашего форка, той же веткой, что стоит на стенде
           # платформы. Why: на upstream `main` тесты шли бы по другой схеме
           # Learning, чем работает стенд, — права, DocType и хуки расходятся
           # с первой же серверной правкой форка или отставанием от upstream.
-          bench get-app --skip-assets --branch high-time https://github.com/lms-high-time/learning-fork
+          #
+          # Ставится клоном и `uv pip`, без `bench get-app`. Why: get-app
+          # всегда запускает `yarn install` корня и `frontend/` Learning — это
+          # почти минута из шага, а серверным тестам `node_modules` не нужны:
+          # ассеты не собираются. Каталог — `apps/lms`, по имени приложения.
+          # `apps.txt` пересобирает get-app нашего приложения по каталогам
+          # `apps/`, поэтому клон обязан стоять до него.
+          git clone --quiet --depth 1 --branch high-time https://github.com/lms-high-time/learning-fork apps/lms
+          uv pip install --quiet -e apps/lms --python env/bin/python
           bench get-app lms_frappe_app "$GITHUB_WORKSPACE"
 
       - name: Дождаться MariaDB
