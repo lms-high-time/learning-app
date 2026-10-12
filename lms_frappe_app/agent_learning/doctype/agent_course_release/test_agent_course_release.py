@@ -40,19 +40,20 @@ class IntegrationTestAgentCourseRelease(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		self.курс = создать_курс(f"Курс {frappe.generate_hash(length=6)}")
 
-	def test_релиз_не_правится_даже_администратором(self):
+	def test_релиз_не_правится_и_не_удаляется(self):
+		"""Даже администратором: ни правка снимка, ни удаление."""
 		имя = вставить_релиз(self.курс)
-		релиз = frappe.get_doc(DOCTYPE, имя)
-		релиз.snapshot = '{"format": "подмена"}'
-		with self.assertRaises(frappe.ValidationError):
-			релиз.save()
-		self.assertEqual(frappe.db.get_value(DOCTYPE, имя, "snapshot"), "{}")
+		with self.subTest("не правится даже администратором"):
+			релиз = frappe.get_doc(DOCTYPE, имя)
+			релиз.snapshot = '{"format": "подмена"}'
+			with self.assertRaises(frappe.ValidationError):
+				релиз.save()
+			self.assertEqual(frappe.db.get_value(DOCTYPE, имя, "snapshot"), "{}")
 
-	def test_релиз_не_удаляется(self):
-		имя = вставить_релиз(self.курс)
-		with self.assertRaises(frappe.ValidationError):
-			frappe.delete_doc(DOCTYPE, имя)
-		self.assertTrue(frappe.db.exists(DOCTYPE, имя))
+		with self.subTest("не удаляется"):
+			with self.assertRaises(frappe.ValidationError):
+				frappe.delete_doc(DOCTYPE, имя)
+			self.assertTrue(frappe.db.exists(DOCTYPE, имя))
 
 	def test_версия_одна_на_курс(self):
 		вставить_релиз(self.курс)

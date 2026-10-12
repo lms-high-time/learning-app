@@ -28,11 +28,18 @@ from lms_frappe_app.tests.sample_data import (
 class IntegrationTestOrganizationMembership(IntegrationTestCase):
 	"""Доприём: курсы, назначенные до прихода сотрудника."""
 
-	def setUp(self):
-		self.организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}")
-		self.курс = создать_курс(f"Курс {frappe.generate_hash(length=6)}")
+	@classmethod
+	def setUpClass(cls):
+		"""Пользователей тесты только читают: членство — в организации своего теста."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
 		создать_ученика(НОВИЧОК)
 		создать_ученика(СТАРОЖИЛ)
+
+	def заново(self) -> None:
+		"""Своя организация со старожилом и свой курс — у теста или у строки таблицы."""
+		self.организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}")
+		self.курс = создать_курс(f"Курс {frappe.generate_hash(length=6)}")
 		добавить_в_организацию(СТАРОЖИЛ, self.организация)
 
 	def назначить(self, **поля):
@@ -50,32 +57,34 @@ class IntegrationTestOrganizationMembership(IntegrationTestCase):
 			frappe.db.exists("LMS Enrollment", {"member": user, "course": course or self.курс})
 		)
 
-	def test_новый_участник_получает_назначенный_ранее_курс(self):
-		self.назначить()
-		self.assertFalse(self.записан(НОВИЧОК))
+	def test_новый_участник_и_назначенный_ранее_курс(self):
+		"""Новый участник получает курс, назначенный до его прихода. Поимённое
+		назначение ему не достаётся: у поимённого адресат задан явно, и человека,
+		которого в списке нет, курс не касается. Участник приостановленной
+		организации курс не получает. У каждого случая своя организация."""
+		случаи = {
+			"назначенный ранее курс достаётся": ({}, False, True),
+			"поимённое назначение новичку не достаётся": (
+				{"audience": "Selected Members", "members": [{"user": СТАРОЖИЛ}]},
+				False,
+				False,
+			),
+			"участник приостановленной организации не получает": ({}, True, False),
+		}
+		for что, (поля, приостановить, записан) in случаи.items():
+			with self.subTest(что):
+				self.заново()
+				self.назначить(**поля)
+				if приостановить:
+					frappe.db.set_value("Learning Organization", self.организация, "status", "Suspended")
+				self.assertFalse(self.записан(НОВИЧОК))
 
-		добавить_в_организацию(НОВИЧОК, self.организация)
+				добавить_в_организацию(НОВИЧОК, self.организация)
 
-		self.assertTrue(self.записан(НОВИЧОК))
-
-	def test_поимённое_назначение_новичку_не_достаётся(self):
-		# У поимённого назначения адресат задан явно: человека, которого в
-		# списке нет, курс не касается.
-		self.назначить(audience="Selected Members", members=[{"user": СТАРОЖИЛ}])
-
-		добавить_в_организацию(НОВИЧОК, self.организация)
-
-		self.assertFalse(self.записан(НОВИЧОК))
-
-	def test_участник_приостановленной_организации_курс_не_получает(self):
-		self.назначить()
-		frappe.db.set_value("Learning Organization", self.организация, "status", "Suspended")
-
-		добавить_в_организацию(НОВИЧОК, self.организация)
-
-		self.assertFalse(self.записан(НОВИЧОК))
+				self.assertEqual(self.записан(НОВИЧОК), записан)
 
 	def test_сверка_догоняет_членство_созданное_в_обход_хука(self):
+		self.заново()
 		self.назначить()
 		# Имитируем импорт: строка появляется прямо в базе, хуки не выполняются.
 		frappe.db.sql(
@@ -91,6 +100,7 @@ class IntegrationTestOrganizationMembership(IntegrationTestCase):
 		self.assertTrue(self.записан(НОВИЧОК))
 
 	def test_сбой_одного_зачисления_не_останавливает_сверку(self):
+		self.заново()
 		self.назначить()
 		третий = создать_ученика(f"tretiy-{frappe.generate_hash(length=6)}@example.com")
 		# Сбойный участник — новее: сверка идёт по составу от новых к старым,
@@ -131,6 +141,7 @@ class IntegrationTestOrganizationMembership(IntegrationTestCase):
 		)
 
 	def test_повторная_сверка_не_плодит_зачисления(self):
+		self.заново()
 		self.назначить()
 		добавить_в_организацию(НОВИЧОК, self.организация)
 
@@ -160,37 +171,31 @@ class IntegrationTestMembershipStatus(IntegrationTestCase):
 	def роли(self) -> set[str]:
 		return set(frappe.get_roles(self.человек))
 
-	def test_выход_ставит_дату_а_возвращение_её_снимает(self):
-		членство = self.членство()
-
-		членство.status = "Left"
-		членство.save(ignore_permissions=True)
-		self.assertEqual(str(членство.left_on), frappe.utils.nowdate())
-
-		членство.status = "Active"
-		членство.save(ignore_permissions=True)
-		self.assertFalse(членство.left_on)
-
-	def test_ушедший_не_числится_в_организации(self):
+	def test_выход_и_возвращение(self):
+		"""Выход ставит дату, и ушедший не числится в организации; вернувшийся
+		получает курс, назначенный без него, а дата выхода снимается."""
 		членство = self.членство()
 		членство.status = "Left"
 		членство.save(ignore_permissions=True)
+		with self.subTest("выход ставит дату"):
+			self.assertEqual(str(членство.left_on), frappe.utils.nowdate())
+		with self.subTest("ушедший не числится в организации"):
+			self.assertNotIn(self.организация, организации_пользователя(self.человек))
 
-		self.assertNotIn(self.организация, организации_пользователя(self.человек))
-
-	def test_вернувшийся_получает_назначенное_без_него(self):
-		членство = self.членство()
-		членство.status = "Left"
-		членство.save(ignore_permissions=True)
 		frappe.get_doc(
 			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
 		).insert(ignore_permissions=True)
-		self.assertFalse(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
+		with self.subTest("назначенное без него ушедшему не достаётся"):
+			self.assertFalse(
+				frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс})
+			)
 
 		членство.status = "Active"
 		членство.save(ignore_permissions=True)
-
-		self.assertTrue(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
+		with self.subTest("возвращение снимает дату"):
+			self.assertFalse(членство.left_on)
+		with self.subTest("вернувшийся получает назначенное без него"):
+			self.assertTrue(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
 
 	def test_роль_руководителя_выдаётся_по_членству(self):
 		self.assertNotIn("Organization Manager", self.роли())
