@@ -10,8 +10,6 @@
 клиенту; `Desk User` не отнимается.
 """
 
-import frappe
-
 РОЛИ_ПЛАТФОРМЫ = ("LMS Student", "Course Creator")
 
 
@@ -22,12 +20,3 @@ def разрешить_роли_платформы(doc, method=None) -> None:
 		if роль not in есть:
 			doc.append("allowed_roles", {"role": роль})
 
-
-def добить_роли_существующим() -> None:
-	"""Клиенты, созданные до хука. Идемпотентно: используется патчем."""
-	for имя in frappe.get_all("OAuth Client", pluck="name"):
-		клиент = frappe.get_doc("OAuth Client", имя)
-		было = len(клиент.allowed_roles)
-		разрешить_роли_платформы(клиент)
-		if len(клиент.allowed_roles) != было:
-			клиент.save(ignore_permissions=True)

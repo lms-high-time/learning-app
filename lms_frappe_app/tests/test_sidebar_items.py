@@ -146,38 +146,6 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 		for пункт in ПУНКТЫ_САЙДБАРА:
 			self.assertFalse(пункт["route"].startswith(пути_mcp), пункт["route"])
 
-	def test_патч_убирает_заглушку_под_путём_чата(self):
-		from lms_frappe_app.install import обеспечить_пункты_сайдбара
-		from lms_frappe_app.patches.v0_1.chat_sidebar_route import execute
-
-		frappe.set_user("Administrator")
-		заглушка = frappe.get_doc(
-			{
-				"doctype": "Web Page",
-				"published": 0,
-				"content_type": "Rich Text",
-				"main_section": "<p>Заглушка</p>",
-				# Заголовок другой: имя Web Page строится из него, а новая
-				# заглушка с тем же заголовком уже заведена миграцией. На стенде
-				# столкновения нет — патч идёт раньше after_migrate.
-				"title": "Заниматься в браузере под путём чата",
-				"route": "chat-sidebar",
-			}
-		).insert(ignore_permissions=True)
-		настройки = frappe.get_single("LMS Settings")
-		настройки.append("sidebar_items", {"web_page": заглушка.name, "icon": "message-circle"})
-		настройки.save(ignore_permissions=True)
-		обеспечить_пункты_сайдбара()
-
-		execute()
-		execute()  # повторный запуск не падает
-
-		self.assertFalse(frappe.db.exists("Web Page", {"route": "chat-sidebar"}))
-		self.assertFalse(frappe.db.exists("LMS Sidebar Item", {"web_page": заглушка.name}))
-		self.assertTrue(
-			frappe.db.exists("LMS Sidebar Item", {"parenttype": "LMS Settings", "route": "study-in-browser"})
-		)
-
 	# --- подпись пункта: правит админ, переименование — патчем (learning-services#479) ---
 
 	def _пункт_ассистента(self) -> str:
