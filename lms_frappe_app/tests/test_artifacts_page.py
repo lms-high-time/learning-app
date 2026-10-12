@@ -12,16 +12,18 @@ from lms_frappe_app.api import student
 class IntegrationTestArtifactsPage(IntegrationTestCase):
 	"""Страница «Мои документы»: кто и что на ней видит."""
 
-	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
+	@classmethod
+	def setUpClass(cls):
+		"""Тесты класса документ только читают — он заводится один раз."""
+		super().setUpClass()
 		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"page-{суффикс}@example.com")
-		self.урок = создать_урок(f"Урок {суффикс}")
-		self.курс = зачислить(self.ученик, self.урок)
+		cls.ученик = создать_ученика(f"page-{суффикс}@example.com")
+		cls.урок = создать_урок(f"Урок {суффикс}")
+		cls.курс = зачислить(cls.ученик, cls.урок)
 		frappe.get_doc(
 			{
 				"doctype": "Agent Course Artifact",
-				"course": self.курс,
+				"course": cls.курс,
 				"slug": "summary",
 				"title": "Резюме проекта",
 				"blocks": [
@@ -30,9 +32,14 @@ class IntegrationTestArtifactsPage(IntegrationTestCase):
 				],
 			}
 		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-		student.update_artifact(self.курс, "summary", "goal", "Открыть **седьмую** кофейню")
-		frappe.set_user("Administrator")
+		frappe.set_user(cls.ученик)
+		try:
+			student.update_artifact(cls.курс, "summary", "goal", "Открыть **седьмую** кофейню")
+		finally:
+			frappe.set_user("Administrator")
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
 
 	def документ(self, пользователь: str, artifact: str = "summary") -> dict:
 		frappe.set_user(пользователь)
@@ -50,9 +57,13 @@ class IntegrationTestArtifactsPage(IntegrationTestCase):
 
 	def test_старый_адрес_ведёт_в_spa_с_курсом_и_документом(self):
 		"""Ссылки из веб-чата, писем и закладок не ломаются (learning-services#331)."""
-		self.assertEqual(self.переход(), "/lms/documents")
-		self.assertEqual(self.переход(course="c 1"), "/lms/documents?course=c%201")
-		self.assertEqual(self.переход(course="c1", artifact="summary"), "/lms/documents/c1/summary")
+		for параметры, адрес in (
+			({}, "/lms/documents"),
+			({"course": "c 1"}, "/lms/documents?course=c%201"),
+			({"course": "c1", "artifact": "summary"}, "/lms/documents/c1/summary"),
+		):
+			with self.subTest(f"learning-services#331: {параметры}"):
+				self.assertEqual(self.переход(**параметры), адрес)
 
 	def test_markdown_собирается_одним_файлом(self):
 		from lms_frappe_app.agent_learning.artifacts.export import собрать_markdown

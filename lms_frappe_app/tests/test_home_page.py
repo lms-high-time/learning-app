@@ -28,12 +28,10 @@ class IntegrationTestHomePage(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.addCleanup(frappe.local.flags.pop, "home_page", None)
 		frappe.local.flags.pop("home_page", None)
-		self.ученик = создать_ученика(
-			f"home-{frappe.generate_hash(length=6)}@example.com"
-		)
 
 	def test_ученик_попадает_в_lms(self):
-		frappe.set_user(self.ученик)
+		ученик = создать_ученика(f"home-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(ученик)
 
 		self.assertEqual(
 			get_home_page(),

@@ -16,11 +16,16 @@ from lms_frappe_app.tests.sample_data import создать_куратора, с
 
 
 class IntegrationTestSiteNavigation(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Пользователей тесты класса только читают — они заводятся один раз."""
+		super().setUpClass()
+		суффикс = frappe.generate_hash(length=6)
+		cls.ученик = создать_ученика(f"nav-{суффикс}@example.com")
+		cls.куратор = создать_куратора(f"nav-cur-{суффикс}@example.com")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"nav-{суффикс}@example.com")
-		self.куратор = создать_куратора(f"nav-cur-{суффикс}@example.com")
 
 	def шапка(self, пользователь: str) -> frappe._dict:
 		frappe.set_user(пользователь)
@@ -28,15 +33,16 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 		шапка_платформы(context)
 		return context
 
-	def test_ученик_видит_курсы_занятие_агента_и_документы(self):
-		пункты = [(п.label, п.url) for п in self.шапка(self.ученик).top_bar_items]
+	def test_шапка_ученика(self):
+		шапка = self.шапка(self.ученик)
 
-		self.assertEqual(пункты, list(ПУНКТЫ))
+		with self.subTest("курсы, занятие, агент и документы"):
+			пункты = [(п.label, п.url) for п in шапка.top_bar_items]
 
-	def test_подвал_ведёт_к_исходникам_а_не_на_frappe(self):
-		подвал = self.шапка(self.ученик).footer_powered
+			self.assertEqual(пункты, list(ПУНКТЫ))
 
-		self.assertIn("github.com/lms-high-time/learning-app", подвал)
+		with self.subTest("подвал ведёт к исходникам, а не на Frappe"):
+			self.assertIn("github.com/lms-high-time/learning-app", шапка.footer_powered)
 
 	def test_кабинет_автора_только_автору(self):
 		у_ученика = [п.url for п in self.шапка(self.ученик).top_bar_items]

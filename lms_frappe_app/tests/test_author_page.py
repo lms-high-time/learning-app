@@ -11,7 +11,7 @@ from urllib.parse import quote
 import frappe
 import jinja2
 import jinja2.nodes
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.api import authoring
@@ -210,32 +210,29 @@ def места_заметок(html: str) -> set[str]:
 	return set(re.findall(r'class="note-add" data-note-target="([^"]+)"', html))
 
 
-class IntegrationTestAuthorPage(IntegrationTestCase):
-	"""Кабинет автора: действующий релиз курса, заметки по его ключам,
-	история, тестеры (lms-high-time/learning-services#512)."""
+class IntegrationTestAuthorPageView(IntegrationTestCase):
+	"""Кабинет автора: тесты, которые курс только смотрят (lms-high-time/learning-services#512).
+
+	Курс с релизом заводится один раз на класс: ни один тест класса его не
+	меняет. Тест, которому нужны заметки, тестеры или новая версия релиза
+	этого курса, — в `IntegrationTestAuthorPage`.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		суффикс = frappe.generate_hash(length=6)
+		cls.куратор = создать_куратора(f"author-{суффикс}@example.com")
+		cls.ключ = f"author-{суффикс}"
+		frappe.set_user(cls.куратор)
+		try:
+			cls.курс = authoring.publish_release(release=пример_релиза(cls.ключ))["data"]["course"]
+		finally:
+			frappe.set_user("Administrator")
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.куратор = создать_куратора(f"author-{суффикс}@example.com")
 		frappe.set_user(self.куратор)
-		self.ключ = f"author-{суффикс}"
-		self.курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
-
-	def заметка(self, target: str, **правки) -> str:
-		frappe.set_user(self.куратор)
-		ответ = authoring.add_note(course=self.курс, target=target, text=f"Заметка к {target}", **правки)
-		self.assertTrue(ответ["ok"], ответ)
-		return ответ["data"]["id"]
-
-	def тестер(self) -> str:
-		тестер = создать_ученика(f"author-t-{frappe.generate_hash(length=6)}@example.com")
-		with patch("frappe.sendmail"), patch.object(notices, "почта_есть", return_value=True):
-			frappe.set_user(self.куратор)
-			self.assertTrue(authoring.add_testers(course=self.курс, users=тестер)["data"]["added"])
-		return тестер
-
-	# --- права ---
 
 	def test_гостю_страница_только_зовёт_войти(self):
 		"""Гостю — то же, что ученику: ни курсов, ни релиза, ни ответов квиза."""
@@ -248,49 +245,6 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 				self.assertNotIn(ПАКЕТ_УРОКА, html)
 				self.assertNotIn("Урок первый", html)
 				self.assertNotIn("note-add", html)
-
-	def test_ученик_и_тестер_получают_отказ(self):
-		"""Кабинет — только авторским ролям: ответов квиза и пакета агента
-		не видит ни ученик, ни тестер курса."""
-		ученик = создать_ученика(f"author-s-{frappe.generate_hash(length=6)}@example.com")
-		for кто in (ученик, self.тестер()):
-			for параметры in ({}, {"course": self.курс}, {"course": self.курс, "lesson": "l-1"}):
-				with self.subTest(кто=кто, **параметры):
-					с = сведения_для(кто, **параметры)
-					self.assertFalse(с["allowed"])
-					self.assertEqual(
-						(с["courses"], с["course"], с["release"], с["lesson"]), ([], None, None, None)
-					)
-					html = страница(кто, **параметры)
-					self.assertIn("Кабинет открыт авторам курсов", html)
-					self.assertNotIn(ПОЯСНЕНИЕ, html)
-					self.assertNotIn(ПАКЕТ_УРОКА, html)
-
-	# --- список ---
-
-	def test_список_курсов_с_версией_заметками_и_тестерами(self):
-		self.заметка("lesson.l-1")
-		self.заметка("course", via="agent")
-		принятая = self.заметка("section.log")
-		authoring.set_note_status(note=принятая, status="accepted")
-		self.тестер()
-		без_релиза = authoring.create_course(title=f"Без релиза {self.ключ}", summary="к")["data"]["id"]
-		коллега = создать_куратора(f"author-b-{frappe.generate_hash(length=6)}@example.com")
-
-		курсы = {к["id"]: к for к in сведения_для(коллега)["courses"]}
-
-		курс = курсы[self.курс]
-		self.assertEqual(курс["release"]["version"], 1)
-		self.assertEqual((курс["open_notes"], курс["notes_attention"], курс["testers_count"]), (2, 1, 1))
-		self.assertEqual(курс["url"], f"/author?course={quote(self.курс)}")
-		self.assertIsNone(курсы[без_релиза]["release"])
-		self.assertEqual((курсы[без_релиза]["open_notes"], курсы[без_релиза]["testers_count"]), (0, 0))
-		html = страница(коллега)
-		self.assertIn("релиз v1 от", html)
-		self.assertIn("заметок 2, ждут вас 1", html)
-		self.assertIn("тестеров 1", html)
-
-	# --- экран курса ---
 
 	def test_экран_курса_показывает_релиз_целиком(self):
 		с = сведения_для(self.куратор, course=self.курс)
@@ -427,14 +381,102 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 				for адрес in re.findall(r'\shref="([^"]*)"', html):
 					self.assertNotRegex(адрес, r"[<>]")
 
-	def test_якорь_различает_места(self):
-		self.assertNotEqual(author.якорь("objective.a.b"), author.якорь("objective.a-b"))
-		self.assertRegex(author.якорь(f"agent.item.l-1/{ВРЕД}"), r"^n-[0-9a-f]+$")
-
 	def test_урок_не_из_релиза_и_неизвестный_курс_дают_пометку(self):
 		self.assertTrue(сведения_для(self.куратор, course=self.курс, lesson="l-9")["missing"])
 		self.assertTrue(сведения_для(self.куратор, course="такого-курса-нет")["missing"])
 		self.assertIn("Такого нет", страница(self.куратор, course=self.курс, lesson="l-9"))
+
+	def test_заметка_к_разделу_только_у_разделов_релиза(self):
+		html = страница(self.куратор, course=self.курс)
+
+		разделы = {м for м in места_заметок(html) if м.startswith("section.")}
+		self.assertEqual(разделы, {"section.log", "section.rules"})
+		self.assertNotIn("map.", " ".join(места_заметок(html)))
+
+	def test_курс_без_релиза_карточкой_анонса(self):
+		курс = authoring.create_course(title=f"Анонс {self.ключ}", summary="Скоро")["data"]["id"]
+		self.assertTrue(
+			authoring.announce_course(course=курс, objectives=["Уметь первое", "Уметь второе"])["ok"]
+		)
+
+		с = сведения_для(self.куратор, course=курс, view="notes", lesson="l-1")
+
+		self.assertFalse(с["missing"])
+		self.assertIsNone(с["release"])
+		self.assertIsNone(с["lesson"])
+		self.assertIsNone(с["notes_queue"])
+		self.assertEqual((с["course"]["status"], с["course"]["upcoming"]), ("анонс", True))
+		self.assertEqual(с["course"]["announce_objectives"], ["Уметь первое", "Уметь второе"])
+		html = страница(self.куратор, course=курс)
+		self.assertIn("Цели анонса", html)
+		self.assertIn("Уметь второе", html)
+		self.assertEqual(места_заметок(html), set())
+		self.assertNotIn('class="tabs"', html)
+
+
+class IntegrationTestAuthorPage(IntegrationTestCase):
+	"""Кабинет автора: тесты, которые меняют курс, — заметки, тестеры, новая
+	версия релиза; курс у каждого теста свой (lms-high-time/learning-services#512)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.куратор = создать_куратора(f"author-{суффикс}@example.com")
+		frappe.set_user(self.куратор)
+		self.ключ = f"author-{суффикс}"
+		self.курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
+
+	def заметка(self, target: str, **правки) -> str:
+		frappe.set_user(self.куратор)
+		ответ = authoring.add_note(course=self.курс, target=target, text=f"Заметка к {target}", **правки)
+		self.assertTrue(ответ["ok"], ответ)
+		return ответ["data"]["id"]
+
+	def тестер(self) -> str:
+		тестер = создать_ученика(f"author-t-{frappe.generate_hash(length=6)}@example.com")
+		with patch("frappe.sendmail"), patch.object(notices, "почта_есть", return_value=True):
+			frappe.set_user(self.куратор)
+			self.assertTrue(authoring.add_testers(course=self.курс, users=тестер)["data"]["added"])
+		return тестер
+
+	def test_ученик_и_тестер_получают_отказ(self):
+		"""Кабинет — только авторским ролям: ответов квиза и пакета агента
+		не видит ни ученик, ни тестер курса."""
+		ученик = создать_ученика(f"author-s-{frappe.generate_hash(length=6)}@example.com")
+		for кто in (ученик, self.тестер()):
+			for параметры in ({}, {"course": self.курс}, {"course": self.курс, "lesson": "l-1"}):
+				with self.subTest(кто=кто, **параметры):
+					с = сведения_для(кто, **параметры)
+					self.assertFalse(с["allowed"])
+					self.assertEqual(
+						(с["courses"], с["course"], с["release"], с["lesson"]), ([], None, None, None)
+					)
+					html = страница(кто, **параметры)
+					self.assertIn("Кабинет открыт авторам курсов", html)
+					self.assertNotIn(ПОЯСНЕНИЕ, html)
+					self.assertNotIn(ПАКЕТ_УРОКА, html)
+
+	def test_список_курсов_с_версией_заметками_и_тестерами(self):
+		self.заметка("lesson.l-1")
+		self.заметка("course", via="agent")
+		принятая = self.заметка("section.log")
+		authoring.set_note_status(note=принятая, status="accepted")
+		self.тестер()
+		без_релиза = authoring.create_course(title=f"Без релиза {self.ключ}", summary="к")["data"]["id"]
+		коллега = создать_куратора(f"author-b-{frappe.generate_hash(length=6)}@example.com")
+
+		курсы = {к["id"]: к for к in сведения_для(коллега)["courses"]}
+
+		курс = курсы[self.курс]
+		self.assertEqual(курс["release"]["version"], 1)
+		self.assertEqual((курс["open_notes"], курс["notes_attention"], курс["testers_count"]), (2, 1, 1))
+		self.assertEqual(курс["url"], f"/author?course={quote(self.курс)}")
+		self.assertIsNone(курсы[без_релиза]["release"])
+		self.assertEqual((курсы[без_релиза]["open_notes"], курсы[без_релиза]["testers_count"]), (0, 0))
+		html = страница(коллега)
+		self.assertIn("релиз v1 от", html)
+		self.assertIn("заметок 2, ждут вас 1", html)
+		self.assertIn("тестеров 1", html)
 
 	def test_история_релизов(self):
 		второй = пример_релиза(self.ключ)
@@ -455,8 +497,6 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertEqual([р["commit"] for р in с["history"]], [коммит, None])
 		self.assertIn("<th>Коммит</th>", html)
 		self.assertIn(f'<code title="{коммит}">{коммит[:8]}</code>', html)
-
-	# --- заметки ---
 
 	def test_заметка_на_каждом_месте_просмотра(self):
 		"""Место заметки — у каждой части просмотра; ссылка заметки ведёт на ту
@@ -500,13 +540,6 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		)
 		self.assertFalse({м for м in места_заметок(курс) if м.startswith("agent.")})
 
-	def test_заметка_к_разделу_только_у_разделов_релиза(self):
-		html = страница(self.куратор, course=self.курс)
-
-		разделы = {м for м in места_заметок(html) if м.startswith("section.")}
-		self.assertEqual(разделы, {"section.log", "section.rules"})
-		self.assertNotIn("map.", " ".join(места_заметок(html)))
-
 	def test_очередь_и_заметки_без_места(self):
 		ждёт_агента = self.заметка("lesson.l-1")
 		сделано = self.заметка("question.S1/l-1-D1")
@@ -540,8 +573,6 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertIn("Заметка к курсу", html)
 		self.assertNotIn("амечани", html)
 
-	# --- тестеры ---
-
 	def test_тестеры(self):
 		тестер = self.тестер()
 
@@ -554,30 +585,6 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		html = страница(self.куратор, course=self.курс, view="testers")
 		self.assertIn(тестер, html)
 		self.assertIn("authoring.add_testers", html)
-
-	# --- анонс ---
-
-	def test_курс_без_релиза_карточкой_анонса(self):
-		курс = authoring.create_course(title=f"Анонс {self.ключ}", summary="Скоро")["data"]["id"]
-		self.assertTrue(
-			authoring.announce_course(course=курс, objectives=["Уметь первое", "Уметь второе"])["ok"]
-		)
-
-		с = сведения_для(self.куратор, course=курс, view="notes", lesson="l-1")
-
-		self.assertFalse(с["missing"])
-		self.assertIsNone(с["release"])
-		self.assertIsNone(с["lesson"])
-		self.assertIsNone(с["notes_queue"])
-		self.assertEqual((с["course"]["status"], с["course"]["upcoming"]), ("анонс", True))
-		self.assertEqual(с["course"]["announce_objectives"], ["Уметь первое", "Уметь второе"])
-		html = страница(self.куратор, course=курс)
-		self.assertIn("Цели анонса", html)
-		self.assertIn("Уметь второе", html)
-		self.assertEqual(места_заметок(html), set())
-		self.assertNotIn('class="tabs"', html)
-
-	# --- опрос ---
 
 	def test_опрос_идёт_по_course_revision(self):
 		с = сведения_для(self.куратор, course=self.курс)
@@ -598,6 +605,12 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		с = сведения_для(self.куратор, course=self.курс)
 		self.assertNotEqual(с["course"]["revision"], отметки["revision"])
 		self.assertIsNotNone(с["course"]["notes_revision"])
+
+
+class TestЯкорьЗаметки(UnitTestCase):
+	def test_якорь_различает_места(self):
+		self.assertNotEqual(author.якорь("objective.a.b"), author.якорь("objective.a-b"))
+		self.assertRegex(author.якорь(f"agent.item.l-1/{ВРЕД}"), r"^n-[0-9a-f]+$")
 
 
 class TestЭкранированиеШаблонов(unittest.TestCase):
