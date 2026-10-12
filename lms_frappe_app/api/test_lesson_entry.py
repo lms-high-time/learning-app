@@ -12,7 +12,7 @@
 from urllib.parse import quote
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
@@ -62,42 +62,21 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		return ответ["data"]
 
 	def test_дорога_на_занятие(self):
-		"""Пока есть пробные — в веб-чат на этот урок; без сервиса агента — на
-		страницу агента, даже когда пробные есть; кончились — к своему агенту;
-		урок, начатый в чате, ведёт в чат и без пробных — тем же правилом, что
-		`start_lesson` с каналом `web`: возврат в урок пробного не тратит."""
-		with self.subTest("пока есть пробные"):
-			вход = self.войти(self.уроки[0])
-
-			self.assertEqual(вход["study"]["channel"], "web")
-			self.assertEqual(вход["study"]["url"], f"{СЕРВИС}/chat?lesson={quote(self.уроки[0], safe='')}")
-			self.assertEqual(вход["study"]["demo_left"], 2)
-
+		"""Проводка `дорога_на_занятие`: адрес сервиса и число пробных — из
+		настроек, начатые уроки — из занятий веб-чата. Пробный урок один и уже
+		начат в чате — туда чат пускает без остатка. Прочие случаи —
+		`TestДорогаНаЗанятие`."""
 		frappe.set_user("Administrator")
-		self.задать("agent_service_url", "")
+		self.задать("web_demo_lessons", 1)
 		frappe.set_user(self.ученик)
-		with self.subTest("без сервиса агента"):
-			вход = self.войти(self.уроки[0])
-
-			self.assertEqual(вход["study"]["channel"], "agent")
-			self.assertEqual(вход["study"]["url"], "/lms/agent")
-			self.assertEqual(вход["study"]["demo_left"], 2)
-		frappe.set_user("Administrator")
-		self.задать("agent_service_url", СЕРВИС + "/")
-		frappe.set_user(self.ученик)
-
 		self.пробный_урок(self.уроки[0])
-		self.пробный_урок(self.уроки[1])
-		with self.subTest("пробные кончились"):
-			вход = self.войти(self.уроки[2])
 
-			self.assertEqual(вход["study"], {"channel": "agent", "url": "/lms/agent", "demo_left": 0})
+		вход = self.войти(self.уроки[0])
 
-		with self.subTest("начатый в чате урок"):
-			вход = self.войти(self.уроки[0])
-
-			self.assertEqual(вход["study"]["channel"], "web")
-			self.assertEqual(вход["study"]["demo_left"], 0)
+		self.assertEqual(
+			вход["study"],
+			{"channel": "web", "url": f"{СЕРВИС}/chat?lesson={quote(self.уроки[0], safe='')}", "demo_left": 0},
+		)
 
 	def test_зачин_пройденность_и_блоки_документа(self):
 		"""Блоки документа курса, которые собирают на занятии этого урока
@@ -194,3 +173,40 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 				ответ = public.lesson_entry(**параметры)
 				self.assertFalse(ответ["ok"])
 				self.assertEqual(ответ["error"]["code"], УРОК_НЕ_НАЙДЕН)
+
+
+class TestДорогаНаЗанятие(UnitTestCase):
+	"""Без базы: куда вести со страницы урока — `дорога_на_занятие` (lms-platform#309)."""
+
+	def test_дорога(self):
+		"""Пока есть пробные — в веб-чат на этот урок; без сервиса агента — на
+		страницу агента, даже когда пробные есть; кончились — к своему агенту;
+		урок, начатый в чате, ведёт в чат и без пробных."""
+		чат = f"{СЕРВИС}/chat?lesson=L1"
+		агент = {"channel": "agent", "url": "/lms/agent"}
+		случаи = {
+			"пока есть пробные": ("L1", СЕРВИС, set(), 2, {"channel": "web", "url": чат, "demo_left": 2}),
+			"остался один пробный": ("L1", СЕРВИС, {"L0"}, 2, {"channel": "web", "url": чат, "demo_left": 1}),
+			"без сервиса агента": ("L1", "", set(), 2, {**агент, "demo_left": 2}),
+			"пробные кончились": ("L1", СЕРВИС, {"L0", "L2"}, 2, {**агент, "demo_left": 0}),
+			"начатый в чате урок": ("L1", СЕРВИС, {"L0", "L1"}, 2, {"channel": "web", "url": чат, "demo_left": 0}),
+			"начатый в чате урок без сервиса": ("L1", "", {"L1"}, 2, {**агент, "demo_left": 1}),
+			"начато больше лимита — остаток не меньше нуля": (
+				"L1",
+				СЕРВИС,
+				{"L0", "L2", "L3"},
+				2,
+				{**агент, "demo_left": 0},
+			),
+			"пробных уроков нет": ("L1", СЕРВИС, set(), 0, {**агент, "demo_left": 0}),
+			"урок в адресе экранирован целиком": (
+				"урок 1/2",
+				СЕРВИС,
+				set(),
+				2,
+				{"channel": "web", "url": f"{СЕРВИС}/chat?lesson={quote('урок 1/2', safe='')}", "demo_left": 2},
+			),
+		}
+		for что, (урок, сервис, использовано, пробных, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				self.assertEqual(public.дорога_на_занятие(урок, сервис, использовано, пробных), ожидаемо)
