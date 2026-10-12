@@ -18,12 +18,15 @@ from lms_frappe_app.install import ЯЗЫК, обеспечить_русский
 
 class IntegrationTestLanguage(IntegrationTestCase):
 	def test_установка_ставит_русский_и_включает_его(self):
-		"""Так Frappe оставляет язык после своей установки: `en`, `ru` выключен."""
+		"""Так Frappe оставляет язык после своей установки: поле пустое, `ru`
+		выключен, а в кэше — список языков без него."""
 		прежний = frappe.db.get_single_value("System Settings", "language")
 		self.addCleanup(frappe.clear_cache)
 		self.addCleanup(frappe.db.set_single_value, "System Settings", "language", прежний or "")
-		frappe.db.set_single_value("System Settings", "language", "en")
+		frappe.db.set_single_value("System Settings", "language", "")
 		frappe.db.set_value("Language", ЯЗЫК, "enabled", 0)
+		frappe.client_cache.delete_value("languages")
+		self.assertNotIn(ЯЗЫК, get_all_languages())
 
 		обеспечить_русский_язык()
 
