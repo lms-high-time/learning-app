@@ -177,10 +177,13 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(повтор["question"]["id"], С2)
 		self.assertEqual(frappe.db.count(ПОПЫТКА, {"student": self.ученик}), 1)
 		self.assertEqual(
-			frappe.get_all(
-				"Agent Quiz Event", filters={"attempt": первая}, pluck="kind", order_by="creation asc"
-			),
-			[ПРОВЕРКА_ВОПРОС_ВЫДАН, ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, ПРОВЕРКА_ВОПРОС_ВЫДАН, ПРОВЕРКА_ВОПРОС_ВЫДАН],
+			self.журнал(первая),
+			[
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
+				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С1),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+			],
 		)
 
 	def test_урок_снят_из_релиза(self):
@@ -303,16 +306,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.ответить(попытка, С1)
 
 		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1, "V2")
-
-	def test_дубль_ответа_не_пускает_база(self):
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		self.ответить(попытка, С1)
-
-		with self.assertRaises((frappe.UniqueValidationError, frappe.DuplicateEntryError)):
-			frappe.get_doc({"doctype": ОТВЕТ, "attempt": попытка, "question_key": С1}).insert(
-				ignore_permissions=True
-			)
 
 	def test_параллельный_ответ_на_тот_же_вопрос_отклоняется(self):
 		"""Проверка «уже отвечено» не увидела ответ соседа — держит индекс, попытка цела."""
@@ -518,6 +511,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.assertEqual(ответ["verdict"], {"correct": False})
 		self.assertIsNone(ответ["next_question"])
+		self.assertTrue(ответ["attempt_finished"])
 		итог = ответ["result"]
 		self.assertFalse(итог["passed"])
 		self.assertNotIn("explanations", итог)

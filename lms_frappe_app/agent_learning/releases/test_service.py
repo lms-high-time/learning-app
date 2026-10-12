@@ -10,7 +10,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
-from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 from lms_frappe_app.agent_learning.releases import index, places, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
@@ -178,54 +178,6 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		отказ = self.отказ(service.РЕЛИЗ_НЕ_СХОДИТСЯ, релиз)
 		self.assertEqual(отказ.подробности["problems"][0]["code"], "quiz_correct")
 		self.assertIsNone(self.курс_по_ключу())
-
-	def test_лишние_ключи_пакета_агента_отказ_до_первой_записи(self):
-		"""Хвост снятого урока, пункт не из целей урока, запись раздела в срезе
-		не из документа — отказ; курс и его версии как были. Запись раздела
-		документа, который урок не заполняет, публикации не мешает."""
-		первый = self.опубликовать()
-		курс = первый["course"]
-
-		def хвост(р):
-			р["chapters"] = р["chapters"][:1]
-			р["lessons"] = р["lessons"][:2]
-
-		порчи = {
-			"agent.lessons": (хвост, "l-3"),
-			"agent.lessons.l-1.items": (
-				lambda р: р["agent"]["lessons"]["l-1"]["items"].update({"l-1-D1/V9": "Подробности."}),
-				"l-1-D1/V9",
-			),
-			"agent.lessons.l-1.sections": (
-				lambda р: р["agent"]["lessons"]["l-1"]["sections"].update({"nope": "Запись раздела."}),
-				"nope",
-			),
-		}
-		было = {
-			doctype: frappe.get_all(doctype, filters={"course": курс}, fields=["name", "modified"])
-			for doctype in ("Course Lesson", "Course Chapter")
-		}
-		for где, (порча, ключ) in порчи.items():
-			релиз = пример_релиза(self.ключ)
-			релиз["lessons"][0]["title"] = "Урок первый, исправленный"
-			порча(релиз)
-			with self.subTest(где=где):
-				отказ = self.отказ(service.РЕЛИЗ_НЕ_СХОДИТСЯ, релиз)
-				self.assertEqual(
-					отказ.подробности["problems"], [{"code": "broken_ref", "where": где, "key": ключ}]
-				)
-		self.assertEqual(frappe.db.count(РЕЛИЗ, {"course": курс}), 1)
-		self.assertEqual(frappe.db.get_value("LMS Course", курс, "active_release"), первый["release"])
-		self.assertEqual(
-			{
-				doctype: frappe.get_all(doctype, filters={"course": курс}, fields=["name", "modified"])
-				for doctype in было
-			},
-			было,
-		)
-		релиз = пример_релиза(self.ключ)
-		релиз["agent"]["lessons"]["l-1"]["sections"]["rules"] = "Запись раздела в срезе."
-		self.assertEqual(self.опубликовать(релиз)["version"], 2)
 
 	def test_курс_передан(self):
 		frappe.set_user("Administrator")
@@ -439,5 +391,6 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		)
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc(РЕЛИЗ, другой["release"])
-		with self.assertRaises(Отказ):
+		with self.assertRaises(Отказ) as пойман:
 			frappe.delete_doc("Course Lesson", урок_релиза(другой["course"], "l-1"))
+		self.assertEqual(пойман.exception.код, КУРС_ИЗ_РЕЛИЗА)

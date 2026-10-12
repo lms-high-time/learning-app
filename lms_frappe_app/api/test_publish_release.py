@@ -19,7 +19,12 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
-from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
+from lms_frappe_app.tests.sample_data import (
+	создать_куратора,
+	создать_менеджера,
+	создать_организацию,
+	создать_ученика,
+)
 
 
 class IntegrationTestPublishRelease(IntegrationTestCase):
@@ -30,10 +35,16 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 		self.ученик = создать_ученика(f"rel-api-pupil-{суффикс}@example.com")
 		self.ключ = f"api-{суффикс}"
 
-	def test_ученику_нельзя(self):
-		frappe.set_user(self.ученик)
-		with self.assertRaises(frappe.PermissionError):
-			authoring.publish_release(release=пример_релиза(self.ключ))
+	def test_ученику_и_руководителю_нельзя(self):
+		организация = создать_организацию(f"Релиз {frappe.generate_hash(length=6)}")
+		руководитель = создать_менеджера(
+			f"rel-api-mgr-{frappe.generate_hash(length=6)}@example.com", организация
+		)
+		for кто in (self.ученик, руководитель):
+			with self.subTest(кто=кто):
+				frappe.set_user(кто)
+				with self.assertRaises(frappe.PermissionError):
+					authoring.publish_release(release=пример_релиза(self.ключ))
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
 
 	def test_строка_json_то_же_что_объект(self):

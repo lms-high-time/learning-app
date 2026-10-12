@@ -178,17 +178,6 @@ class IntegrationTestMembershipStatus(IntegrationTestCase):
 
 		self.assertNotIn(self.организация, организации_пользователя(self.человек))
 
-	def test_назначение_не_достаётся_ушедшему(self):
-		членство = self.членство()
-		членство.status = "Left"
-		членство.save(ignore_permissions=True)
-
-		frappe.get_doc(
-			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
-		).insert(ignore_permissions=True)
-
-		self.assertFalse(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
-
 	def test_вернувшийся_получает_назначенное_без_него(self):
 		членство = self.членство()
 		членство.status = "Left"
@@ -196,6 +185,7 @@ class IntegrationTestMembershipStatus(IntegrationTestCase):
 		frappe.get_doc(
 			{"doctype": "Course Allocation", "organization": self.организация, "course": self.курс}
 		).insert(ignore_permissions=True)
+		self.assertFalse(frappe.db.exists("LMS Enrollment", {"member": self.человек, "course": self.курс}))
 
 		членство.status = "Active"
 		членство.save(ignore_permissions=True)

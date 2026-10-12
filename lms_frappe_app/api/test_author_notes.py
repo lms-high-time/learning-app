@@ -235,8 +235,15 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		self.assertEqual(authoring.list_notes(course=курс)["data"]["notes"], [])
 
 	def test_несуществующий_курс(self):
-		self.assertEqual(self.код(authoring.add_note(course="нет-курса", target="course", text="…")), "course_not_found")
-		self.assertEqual(self.код(authoring.list_notes(course="нет-курса")), "course_not_found")
+		for метод, вызов in {
+			"add_note": lambda: authoring.add_note(course="нет-курса", target="course", text="…"),
+			"list_notes": lambda: authoring.list_notes(course="нет-курса"),
+			"unpublish_course": lambda: authoring.unpublish_course(course="нет-курса"),
+			"course_revision": lambda: authoring.course_revision(course="нет-курса"),
+			"course_reports": lambda: authoring.course_reports(course="нет-курса"),
+		}.items():
+			with self.subTest(метод=метод):
+				self.assertEqual(self.код(вызов()), "course_not_found")
 
 	# --- фильтры ---
 

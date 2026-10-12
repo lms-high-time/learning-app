@@ -237,19 +237,13 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 
 	# --- права ---
 
-	def test_гость_получает_приглашение_войти(self):
-		с = сведения_для("Guest")
-
-		self.assertTrue(с["is_guest"])
-		self.assertIn("redirect-to=/author", с["login_url"])
-		self.assertEqual(с["courses"], [])
-
 	def test_гостю_страница_только_зовёт_войти(self):
 		"""Гостю — то же, что ученику: ни курсов, ни релиза, ни ответов квиза."""
 		for параметры in ({}, {"course": self.курс}, {"course": self.курс, "lesson": "l-1"}):
 			with self.subTest(**параметры):
 				html = страница("Guest", **параметры)
 				self.assertIn("чтобы открыть кабинет", html)
+				self.assertIn('href="/login?redirect-to=/author"', html)
 				self.assertNotIn(ПОЯСНЕНИЕ, html)
 				self.assertNotIn(ПАКЕТ_УРОКА, html)
 				self.assertNotIn("Урок первый", html)

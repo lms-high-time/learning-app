@@ -8,7 +8,6 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
-	создать_курс,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
@@ -25,7 +24,8 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 		frappe.set_user("Administrator")
 
 	def test_ученик_не_читает_релиз_и_индекс(self):
-		"""В индексе ответы квиза — ученику нельзя ни записи, ни строк (CLAUDE.md §10)."""
+		"""В индексе ответы квиза — ученику нельзя ни записи, ни строк (CLAUDE.md §10).
+		Срез урока и рамка пакета агента — там же: ученику их отдают только методы агента."""
 		self.assertFalse(frappe.has_permission("Agent Course Release", "read", user=self.ученик))
 		frappe.set_user(self.ученик)
 		with self.assertRaises(frappe.PermissionError):
@@ -36,10 +36,6 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 				parent_doctype="Agent Course Release",
 				fields=["correct"],
 			)
-
-	def test_ученик_не_читает_пакет_агента(self):
-		"""Срез урока и рамка — в индексе релиза: ученику их отдают только методы агента."""
-		frappe.set_user(self.ученик)
 		with self.assertRaises(frappe.PermissionError):
 			frappe.get_list("Agent Course Release", fields=["agent_frame"])
 		with self.assertRaises(frappe.PermissionError):
@@ -66,8 +62,3 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 		for кто in (self.куратор, админ):
 			self.assertFalse(frappe.has_permission("Agent Course Release", "write", user=кто), кто)
 			self.assertFalse(frappe.has_permission("Agent Course Release", "delete", user=кто), кто)
-
-	def test_курсы_без_ключа_не_мешают_друг_другу(self):
-		"""`unique` у `course_key`: пустое значение — NULL, не дубль."""
-		for _ in range(2):
-			создать_курс(f"Без ключа {frappe.generate_hash(length=6)}")

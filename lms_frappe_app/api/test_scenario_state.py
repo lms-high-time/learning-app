@@ -86,8 +86,9 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 
 	def test_сброс_чистит_разговор_но_не_счётчик(self):
 		"""Иначе лимит ходов обходился бы кнопкой «начать заново»."""
+		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"], {"key": КЛЮЧ, "turns": 1})
 		student.count_scenario_turn(КЛЮЧ)
-		student.count_scenario_turn(КЛЮЧ)
+		self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
 		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
 
 		ответ = student.reset_scenario_state(КЛЮЧ)
@@ -103,14 +104,6 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 		ответ = student.reset_scenario_state(КЛЮЧ)
 
 		self.assertTrue(ответ["ok"], ответ.get("error"))
-
-	def test_ходы_считаются_и_заводят_запись(self):
-		первый = student.count_scenario_turn(КЛЮЧ)
-		self.assertTrue(первый["ok"], первый.get("error"))
-		self.assertEqual(первый["data"], {"key": КЛЮЧ, "turns": 1})
-
-		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 2)
-		self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
 
 	def test_счёт_ходов_идёт_за_сутки(self):
 		"""Лимит навсегда закрыл бы профиль ученику, вернувшемуся через полгода."""

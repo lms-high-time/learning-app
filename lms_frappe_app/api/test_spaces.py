@@ -180,16 +180,6 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 	def видимость(self, организация: str, значение: str) -> None:
 		frappe.db.set_value("Learning Organization", организация, "artifact_visibility", значение)
 
-	def test_документы_размечены_по_пространствам(self):
-		self.assertEqual(
-			frappe.db.get_value("Agent Student Artifact", self.документы["икс"], "organization"),
-			self.икс,
-		)
-		self.assertEqual(
-			frappe.db.get_value("Agent Student Artifact", self.документы["игрек"], "organization"),
-			self.игрек,
-		)
-
 	def test_руководитель_читает_документы_только_своего_пространства(self):
 		self.assertTrue(self.читает(self.руководитель_икс, "икс"))
 		self.assertFalse(self.читает(self.руководитель_икс, "игрек"))

@@ -258,6 +258,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 
 		self.отказ(self.отметить(старое, "term:T1"), "course_not_released")
+		for вызов in (student.request_quiz, student.complete_lesson):
+			self.отказ(вызов(старое), "course_not_released")
+		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": старое}))
 		self.отказ(self.отметить(занятие, "term:T1", evidence=""), "evidence_required")
 		self.отказ(self.отметить(занятие, "term:T1", "skipped"), "goal_status_unknown")
 		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
@@ -413,14 +416,6 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertFalse(
 			frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": self.урок})
 		)
-
-	def test_курс_без_релиза_квиз_и_закрытие_отказывают(self):
-		урок = self.курс_без_релиза()
-		занятие = создать_занятие(self.ученик, урок)
-
-		self.отказ(student.request_quiz(занятие), "course_not_released")
-		self.отказ(student.complete_lesson(занятие), "course_not_released")
-		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": занятие}))
 
 	def test_квиз_при_гонке_за_прохождение_busy(self):
 		занятие = создать_занятие(self.ученик, self.урок)

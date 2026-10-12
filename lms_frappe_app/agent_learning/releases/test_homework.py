@@ -330,5 +330,3 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		self.assertEqual(self.шаблон(урок).name, со_сдачей)
 		self.assertEqual(self.шаблон(урок).retired, 1)
 		self.assertIsNone(self.шаблон(лишний))
-
-	# --- удаление курса ---

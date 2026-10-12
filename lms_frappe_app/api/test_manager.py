@@ -248,7 +248,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 			},
 		)
 		выдано = json.dumps(данные, ensure_ascii=False, default=str)
-		for закрытое in (начало["question"]["id"], "слова ученика", "V1"):
+		for закрытое in (начало["question"]["id"], "слова ученика", "V1", "Первый", "is_correct"):
 			self.assertNotIn(закрытое, выдано)
 
 

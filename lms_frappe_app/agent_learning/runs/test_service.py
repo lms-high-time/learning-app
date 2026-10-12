@@ -120,20 +120,6 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(второе.name, первое.name)
 		self.assertFalse(service.сверить(второе))
 
-	def test_статусы_урока_и_целей(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
-		run = service.прохождение(self.ученик, курс, "l-1")
-
-		run = self.отметить(run, "refute:M1", "not_needed")
-		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("in_progress", "not_started"))
-		run = self.отметить(run, "term:T1")
-		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("in_progress", "touched"))
-		run = self.отметить(run, "exec:E1", "planned")
-		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("covered", "covered"))
-		# Пункт вернули в `open`: цель снова в работе, урок остаётся начатым.
-		run = self.отметить(run, "term:T1", "open", None)
-		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("in_progress", "touched"))
-
 	def test_пройденный_урок_не_снимается_пересчётом(self):
 		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
@@ -730,6 +716,8 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		)
 		ответ = service.отметить(имя, "exec:E1", "open", None)
 		self.assertEqual(итог(ответ), ("touched", "in_progress"))
+		run = frappe.get_doc(ПРОХОЖДЕНИЕ, имя)
+		self.assertEqual((run.status, self.цели(run)["l-1-D1"][0]), ("in_progress", "touched"))
 
 	def test_следующий_по_порядку_релиза(self):
 		релиз = релиз_двух_целей(self.ключ)

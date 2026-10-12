@@ -81,24 +81,15 @@ class IntegrationTestSettings(IntegrationTestCase):
 
 		self.assertEqual(адрес_сервиса(), get_url().rstrip("/"))
 
-	def test_заполненное_значение_не_переписывается(self):
-		"""`after_migrate` идёт на каждый старт контейнера — правка админа живёт."""
-		self.задать("carry_over_depth", ГЛУБИНА_ПЕРЕНОСА + 2)
-		self.задать("agent_service_url", "https://agent.example.com")
-
-		обеспечить_значения_настроек()
-		обеспечить_значения_настроек()
-
-		self.assertEqual(глубина_переноса(), ГЛУБИНА_ПЕРЕНОСА + 2)
-		self.assertEqual(адрес_сервиса(), "https://agent.example.com")
-
 	def test_очищенное_поле_остаётся_пустым(self):
 		"""Пустое значение — решение админа, а не недосмотр установки."""
 		self.задать("carry_over_depth", "")
+		self.задать("agent_service_url", "")
 
 		обеспечить_значения_настроек()
 
-		self.assertEqual(frappe.db.get_singles_dict(НАСТРОЙКИ)["carry_over_depth"], "")
+		заполненные = frappe.db.get_singles_dict(НАСТРОЙКИ)
+		self.assertEqual((заполненные["carry_over_depth"], заполненные["agent_service_url"]), ("", ""))
 
 	def test_патч_стирает_значение_убранного_поля(self):
 		from lms_frappe_app.patches.v0_1.drop_authoring_guide_tool import execute

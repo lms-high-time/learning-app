@@ -30,11 +30,6 @@ class IntegrationTestAuthoring(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 
-	def test_снятие_несуществующего_курса_даёт_код(self):
-		ответ = authoring.unpublish_course(course="нет-такого-курса")
-
-		self.assertEqual(ответ["error"]["code"], "course_not_found")
-
 	def test_ученик_не_правит_курсы_и_не_видит_ответов(self):
 		"""Отдельный эндпоинт ничего не защищает — защищает эта проверка."""
 		курс = authoring.publish_release(release=пример_релиза(f"pupil-{frappe.generate_hash(length=6)}"))[
@@ -187,11 +182,6 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			authoring.course_revision(course=self.курс)
-
-	def test_неизвестный_курс_даёт_код(self):
-		ответ = authoring.course_revision(course="такого-курса-нет")
-
-		self.assertEqual(ответ["error"]["code"], "course_not_found")
 
 
 class IntegrationTestLessonHookAndPromise(IntegrationTestCase):

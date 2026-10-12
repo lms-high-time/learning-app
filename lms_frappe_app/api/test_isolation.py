@@ -189,12 +189,7 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.компания = создать_организацию(f"Компания {суффикс}")
-		релиз = пример_релиза(f"answers-{суффикс}")
-		релиз["lessons"][0]["quiz"]["questions"][0]["options"] = [
-			{"key": "V1", "text": "Москва"},
-			{"key": "V2", "text": "Тула"},
-		]
-		курс, _ = курс_из_релиза(релиз=релиз)
+		курс, _ = курс_из_релиза(релиз=пример_релиза(f"answers-{суффикс}"))
 
 		self.сотрудник = создать_ученика(f"emp-{суффикс}@example.com")
 		добавить_в_организацию(self.сотрудник, self.компания)
@@ -224,16 +219,6 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 				frappe.has_permission("Agent Quiz Answer", "read"),
 				f"{кто} получил доступ к записям ответов",
 			)
-
-	def test_руководитель_видит_результат_но_не_ответы(self):
-		frappe.set_user(self.руководитель)
-		данные = manager.student_detail(self.сотрудник)["data"]
-
-		self.assertTrue(данные["quiz_attempts"], "итоги попыток руководителю нужны")
-		выдано = json.dumps(данные, ensure_ascii=False, default=str)
-		self.assertNotIn("Москва", выдано)
-		self.assertNotIn("is_correct", выдано)
-
 
 	def test_заметки_ученика_не_видит_руководитель(self):
 		"""Заметки — про разговор, а не про результат.
