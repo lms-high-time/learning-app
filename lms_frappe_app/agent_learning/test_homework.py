@@ -254,15 +254,16 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		self.assertEqual([с.organization for с in self.сдачи()], [организация])
 
 	def test_задание_проверяет_правило_срока(self):
-		"""Отказ задания не заводит: случаи идут по очереди на одном уроке, как и шли."""
+		"""Отказ задания не заводит: случаи идут по очереди на одном уроке, как и шли.
+
+		Срок — одной строкой проводки: правило целиком проверяет
+		`doctype/agent_lesson_homework/test_agent_lesson_homework.py`."""
 		from lms_frappe_app.agent_learning.errors import Отказ
 
-		случаи = [("относительный без дней", {"due_mode": "relative"}, "invalid_due")]
-		случаи += [
-			(f"абсолютный: {дата}", {"due_mode": "absolute", "due_date": дата}, "invalid_due")
-			for дата in ("завтра", "2030-02-30", "15.01.2030", "20300501", "2030-W01-1")
+		случаи = [
+			("относительный без дней", {"due_mode": "relative"}, "invalid_due"),
+			("ответ голосом", {"answer_mode": "audio"}, "invalid_answer_mode"),
 		]
-		случаи.append(("ответ голосом", {"answer_mode": "audio"}, "invalid_answer_mode"))
 		for что, правило, код in случаи:
 			with self.subTest(что):
 				with self.assertRaises(Отказ) as отказ:
