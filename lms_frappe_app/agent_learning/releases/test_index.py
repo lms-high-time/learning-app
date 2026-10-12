@@ -6,7 +6,7 @@
 import json
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning.releases import index, projection
@@ -58,6 +58,7 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 
 	def test_урок_и_ключ_урока_в_обе_стороны(self):
 		урок = index.урок(self.релиз, "l-2")
+		self.assertNotIn("agent", урок)
 		self.assertEqual(урок["lesson"], self.итог.уроки["l-2"])
 		self.assertEqual(урок["chapter_key"], "ch-1")
 		self.assertEqual(json.loads(урок["section_keys"]), ["log", "rules"])
@@ -114,7 +115,6 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 			index.рамка(self.релиз),
 			{"frame": пакет["frame"], "learn_about_student": пакет["learn_about_student"]},
 		)
-		self.assertEqual(index.ключи_выяснять(self.релиз), ["where_applies", "c-team"])
 
 	def test_урок_без_среза_и_релиз_без_пакета(self):
 		релиз = пример_релиза()
@@ -132,17 +132,26 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 		без_пакета = self.вставить(релиз, self.итог, 3)
 		self.assertEqual(index.пакет_урока(без_пакета, "l-1"), {})
 		self.assertEqual(index.рамка(без_пакета), {})
-		self.assertEqual(index.ключи_выяснять(без_пакета), [])
 
-	def test_ключи_выяснять_терпят_не_ту_форму(self):
-		for версия, что_выяснять, ключи in (
-			(2, "не список", []),
-			(3, [{"key": "a"}, "мусор", {"text": "без ключа"}, {"key": 7}, {"key": "b"}], ["a", "b"]),
+
+class TestКлючиРамки(UnitTestCase):
+	def test_ключи_по_порядку_пакета_и_не_та_форма(self):
+		for рамка_курса, ключи in (
+			(пример_релиза()["agent"], ["where_applies", "c-team"]),
+			({}, []),
+			({"learn_about_student": "не список"}, []),
+			(
+				{
+					"learn_about_student": [
+						{"key": "a"},
+						"мусор",
+						{"text": "без ключа"},
+						{"key": 7},
+						{"key": "b"},
+					]
+				},
+				["a", "b"],
+			),
 		):
-			релиз = пример_релиза()
-			релиз["agent"]["learn_about_student"] = что_выяснять
-			with self.subTest(что_выяснять=что_выяснять):
-				self.assertEqual(index.ключи_выяснять(self.вставить(релиз, self.итог, версия)), ключи)
-
-	def test_урок_не_отдаёт_пакет_агента(self):
-		self.assertNotIn("agent", index.урок(self.релиз, "l-1"))
+			with self.subTest(рамка=рамка_курса):
+				self.assertEqual(index.ключи_рамки(рамка_курса), ключи)
