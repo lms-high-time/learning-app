@@ -9,8 +9,10 @@ on:
 
 # Новый коммит в ветку PR останавливает прогон прежнего. Why: итог прежнего
 # коммита уже никому не нужен — обязательная проверка смотрит на последний, —
-# а его машины задерживают новый. Пуши в master не отменяются: каждый
-# мерж-коммит проверяется целиком.
+# а его машины задерживают новый. На прежнем коммите остаётся красный итог
+# `bench run-tests` — на мерж это не влияет. Пуши в master не отменяются и
+# проверяются целиком. Ручной Re-run старого прогона отменит прогон последнего
+# коммита — тогда перезапустить последний.
 concurrency:
   group: tests-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -28,10 +30,13 @@ env:
   IMAGE_MIRROR: public.ecr.aws/docker/library
 
 jobs:
-  # Меняет ли коммит что-то, кроме документации. Why: PR только с правкой
-  # README или правил гонял все тесты впустую. Список — явный, а не `*.md`:
-  # `CONTRACT.md` читают тесты контракта, и новый документ, который начнут
-  # читать тесты, не должен выпасть из проверки молча.
+  # Меняет ли PR что-то, кроме документации. Why: PR только с правкой README
+  # или правил гонял все тесты впустую. Пропуск — только когда документы из
+  # явного списка изменены (`M`): добавление, удаление и переименование гоняют
+  # тесты — `README.md` читает `pyproject.toml` при установке приложения, а
+  # переименование могло унести файл, который читают тесты. Список явный, а не
+  # `*.md`: `CONTRACT.md` читают тесты контракта. Пуш в master гоняет тесты
+  # всегда. Любая неоднозначность (сбой `git diff`, пустой список) — тесты идут.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -39,19 +44,29 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
-      - id: diff
+          fetch-depth: 2
+      - name: Только документация?
+        id: diff
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
         run: |
-          # Нет базы для сравнения (первый пуш ветки) — считаем, что код есть.
-          if files=$(git diff --name-only "$BASE" "$GITHUB_SHA" 2>&1) \
-            && ! printf '%s\n' "$files" | grep -qvxE 'README\.md|TESTING\.md|CONTRIBUTING\.md|license\.txt'; then
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          else
+          if [ "$EVENT" != pull_request ]; then
+            echo "Пуш в master — тесты идут всегда"
             echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # HEAD — merge-коммит PR, его первый родитель — база.
+          if ! files=$(git diff --no-renames --name-status HEAD^1 HEAD 2>&1); then
+            printf 'git diff не сработал, тесты идут:\n%s\n' "$files"
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           printf 'Изменено:\n%s\n' "$files"
+          if printf '%s\n' "$files" | grep -qvxP 'M\t(README\.md|TESTING\.md|CONTRIBUTING\.md|license\.txt)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
 
   # Тесты делятся на части, каждая поднимает своё окружение на отдельной
   # машине. Why: тесты идут последовательно и занимают бо́льшую часть прогона;
