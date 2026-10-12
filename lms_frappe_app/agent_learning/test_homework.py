@@ -46,6 +46,10 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
+		self.заново()
+
+	def заново(self) -> None:
+		"""Свои ученик и урок — у теста или у строки таблицы."""
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"hw-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок {суффикс}")
@@ -62,19 +66,35 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		домашка.выдать(занятие(self.ученик, self.урок))
 		self.assertEqual(self.сдачи(), [])
 
-	def test_выдача_ставит_относительный_срок_от_закрытия(self):
-		создать_домашку(self.урок, due_mode="relative", due_days=5)
-		домашка.выдать(занятие(self.ученик, self.урок))
-		[сдача] = self.сдачи()
-		self.assertEqual(сдача.status, "Assigned")
-		разница = get_datetime(сдача.due_at) - get_datetime(сдача.assigned_at)
-		self.assertEqual(разница, timedelta(days=5))
+	def test_выдача_ставит_срок(self):
+		"""Относительный — от закрытия; абсолютный — конец дня. У каждого случая
+		свои ученик и урок."""
+		случаи = {
+			"относительный срок от закрытия": (
+				{"due_mode": "relative", "due_days": 5},
+				timedelta(days=5),
+				None,
+			),
+			"абсолютный срок — конец дня": (
+				{"due_mode": "absolute", "due_date": "2030-01-15"},
+				None,
+				"2030-01-15 23:59:59",
+			),
+		}
+		for номер, (что, (правило, от_выдачи, срок)) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				создать_домашку(self.урок, **правило)
 
-	def test_абсолютный_срок_конец_дня(self):
-		создать_домашку(self.урок, due_mode="absolute", due_date="2030-01-15")
-		домашка.выдать(занятие(self.ученик, self.урок))
-		[сдача] = self.сдачи()
-		self.assertEqual(str(сдача.due_at), "2030-01-15 23:59:59")
+				домашка.выдать(занятие(self.ученик, self.урок))
+
+				[сдача] = self.сдачи()
+				if от_выдачи is not None:
+					self.assertEqual(сдача.status, "Assigned")
+					self.assertEqual(get_datetime(сдача.due_at) - get_datetime(сдача.assigned_at), от_выдачи)
+				if срок is not None:
+					self.assertEqual(str(сдача.due_at), срок)
 
 	def test_повторное_закрытие_ничего_не_меняет(self):
 		создать_домашку(self.урок, due_mode="relative", due_days=5)
@@ -144,41 +164,41 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		[сдача] = self.сдачи()
 		self.assertEqual(сдача.status, "Assigned")
 
-	def test_закрытие_урока_ставит_выдачу_в_очередь_после_коммита(self):
-		"""Выдача — не в транзакции закрытия: её сбой не срывает зачёт."""
+	def test_закрытие_урока_и_очередь_выдачи(self):
+		"""Выдача — не в транзакции закрытия: её сбой не срывает зачёт; задача
+		ставится после коммита. Урок без задания и задание, снятое из релиза,
+		задачу не ставят. У каждого случая свои ученик и урок."""
 		from unittest.mock import patch
 
 		from lms_frappe_app.agent_learning import quiz
 
-		создать_домашку(self.урок)
-		запись = занятие(self.ученик, self.урок)
-		with patch.object(frappe, "enqueue") as очередь:
-			quiz.отметить_урок_пройденным(запись)
-		очередь.assert_called_once()
-		self.assertEqual(очередь.call_args.args, ("lms_frappe_app.agent_learning.homework.выдать_по_записи",))
-		self.assertEqual(
-			{к: очередь.call_args.kwargs[к] for к in ("enqueue_after_commit", "doctype", "name")},
-			{"enqueue_after_commit": True, "doctype": "Agent Learning Session", "name": запись.name},
-		)
+		случаи = {
+			"задание есть — выдача в очереди после коммита": ({}, True),
+			"урок без задания не ставит задачу": (None, False),
+			"снятое из релиза задание не ставит задачу": ({"retired": 1}, False),
+		}
+		for номер, (что, (задание, ставит)) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				if задание is not None:
+					создать_домашку(self.урок, **задание)
+				запись = занятие(self.ученик, self.урок)
 
-	def test_урок_без_задания_не_ставит_задачу(self):
-		from unittest.mock import patch
+				with patch.object(frappe, "enqueue") as очередь:
+					quiz.отметить_урок_пройденным(запись)
 
-		from lms_frappe_app.agent_learning import quiz
-
-		with patch.object(frappe, "enqueue") as очередь:
-			quiz.отметить_урок_пройденным(занятие(self.ученик, self.урок))
-		очередь.assert_not_called()
-
-	def test_снятое_из_релиза_задание_не_ставит_задачу(self):
-		from unittest.mock import patch
-
-		from lms_frappe_app.agent_learning import quiz
-
-		создать_домашку(self.урок, retired=1)
-		with patch.object(frappe, "enqueue") as очередь:
-			quiz.отметить_урок_пройденным(занятие(self.ученик, self.урок))
-		очередь.assert_not_called()
+				if not ставит:
+					очередь.assert_not_called()
+					continue
+				очередь.assert_called_once()
+				self.assertEqual(
+					очередь.call_args.args, ("lms_frappe_app.agent_learning.homework.выдать_по_записи",)
+				)
+				self.assertEqual(
+					{к: очередь.call_args.kwargs[к] for к in ("enqueue_after_commit", "doctype", "name")},
+					{"enqueue_after_commit": True, "doctype": "Agent Learning Session", "name": запись.name},
+				)
 
 	def test_сбой_очереди_не_срывает_закрытие_урока(self):
 		from unittest.mock import patch
@@ -197,29 +217,29 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 			"Complete",
 		)
 
-	def test_фоновая_выдача_повторяет_после_взаимоблокировки(self):
+	def test_фоновая_выдача_при_взаимоблокировке(self):
+		"""Повторяет после взаимоблокировки; без успеха за три попытки — пишет в лог."""
 		from unittest.mock import patch
 
 		имя = создать_занятие(self.ученик, self.урок)
-		with (
-			patch.object(домашка, "выдать", side_effect=[frappe.QueryDeadlockError("1020"), None]) as выдать,
-			patch.object(frappe.db, "rollback") as откат,
-		):
-			домашка.выдать_по_записи("Agent Learning Session", имя)
-		self.assertEqual((выдать.call_count, откат.call_count), (2, 1))
+		случаи = {
+			"повторяет после взаимоблокировки": (
+				[frappe.QueryDeadlockError("1020"), None],
+				{"выдать": 2, "откат": 1},
+			),
+			"без успеха пишет в лог": (frappe.QueryDeadlockError("1020"), {"выдать": 3, "лог": 1}),
+		}
+		for что, (исход, вызовов) in случаи.items():
+			with self.subTest(что):
+				with (
+					patch.object(домашка, "выдать", side_effect=исход) as выдать,
+					patch.object(frappe.db, "rollback") as откат,
+					patch.object(frappe, "log_error") as лог,
+				):
+					домашка.выдать_по_записи("Agent Learning Session", имя)
 
-	def test_фоновая_выдача_без_успеха_пишет_в_лог(self):
-		from unittest.mock import patch
-
-		имя = создать_занятие(self.ученик, self.урок)
-		with (
-			patch.object(домашка, "выдать", side_effect=frappe.QueryDeadlockError("1020")) as выдать,
-			patch.object(frappe.db, "rollback"),
-			patch.object(frappe, "log_error") as лог,
-		):
-			домашка.выдать_по_записи("Agent Learning Session", имя)
-		self.assertEqual(выдать.call_count, 3)
-		лог.assert_called_once()
+				счёт = {"выдать": выдать.call_count, "откат": откат.call_count, "лог": лог.call_count}
+				self.assertEqual({к: счёт[к] for к in вызовов}, вызовов)
 
 	def test_попытка_квиза_выдаёт_в_пространстве_своего_занятия(self):
 		создать_домашку(self.урок)
@@ -234,18 +254,20 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		self.assertEqual([с.organization for с in self.сдачи()], [организация])
 
 	def test_задание_проверяет_правило_срока(self):
+		"""Отказ задания не заводит: случаи идут по очереди на одном уроке, как и шли."""
 		from lms_frappe_app.agent_learning.errors import Отказ
 
-		with self.assertRaises(Отказ) as отказ:
-			создать_домашку(self.урок, due_mode="relative")
-		self.assertEqual(отказ.exception.код, "invalid_due")
-		for дата in ("завтра", "2030-02-30", "15.01.2030", "20300501", "2030-W01-1"):
-			with self.assertRaises(Отказ) as отказ:
-				создать_домашку(self.урок, due_mode="absolute", due_date=дата)
-			self.assertEqual(отказ.exception.код, "invalid_due", дата)
-		with self.assertRaises(Отказ) as отказ:
-			создать_домашку(self.урок, answer_mode="audio")
-		self.assertEqual(отказ.exception.код, "invalid_answer_mode")
+		случаи = [("относительный без дней", {"due_mode": "relative"}, "invalid_due")]
+		случаи += [
+			(f"абсолютный: {дата}", {"due_mode": "absolute", "due_date": дата}, "invalid_due")
+			for дата in ("завтра", "2030-02-30", "15.01.2030", "20300501", "2030-W01-1")
+		]
+		случаи.append(("ответ голосом", {"answer_mode": "audio"}, "invalid_answer_mode"))
+		for что, правило, код in случаи:
+			with self.subTest(что):
+				with self.assertRaises(Отказ) as отказ:
+					создать_домашку(self.урок, **правило)
+				self.assertEqual(отказ.exception.код, код)
 
 
 class IntegrationTestHomeworkSave(IntegrationTestCase):
@@ -253,6 +275,10 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
+		self.заново()
+
+	def заново(self) -> None:
+		"""Свои ученик и урок — у теста или у строки таблицы."""
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"hws-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок {суффикс}")
@@ -277,36 +303,77 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		self.assertEqual([с.file for с in вторая.files], [с.file for с in первая.files], "файлы прежней сдачи на месте")
 		self.assertEqual(frappe.db.count("Agent Homework Submission", {"member": self.ученик}), 1)
 
-	def test_сохранение_в_гонке_не_правит_принятую(self):
-		создать_домашку(self.урок)
-		первая = домашка.сохранить(self.ученик, self.урок, None, answer="первая")
-		frappe.db.set_value("Agent Homework Submission", первая.name, "status", "Accepted")
-		with не_найти_с_первого_раза(), self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, answer="вторая")
-		self.assertEqual(отказ.exception.код, "accepted_locked")
+	def test_отказы_сохранения(self):
+		"""Без задания; пустой ответ; текст в задание только файлами и файл — в
+		задание только текстом; больше десяти файлов. Пустой файл — отказ до
+		записи: не пропадает молча из ответа, ученик думал бы, что сдал его. У
+		каждого случая свои ученик и урок."""
+		случаи = {
+			"без задания": (None, {"answer": "сделал"}, "no_homework", {}, False),
+			"пустой ответ": ({}, {"answer": "   "}, "empty_answer", {}, False),
+			"текст в задание только файлами": (
+				{"answer_mode": "files"},
+				{"answer": "текст"},
+				"answer_mode",
+				{},
+				False,
+			),
+			"файл в задание только текстом": (
+				{"answer_mode": "text"},
+				{"новые": [("a.txt", b"one")]},
+				"answer_mode",
+				{},
+				False,
+			),
+			"предел числа файлов": (
+				{},
+				{"новые": [(f"{н}.txt", b"x") for н in range(11)]},
+				"too_many_files",
+				{},
+				False,
+			),
+			"пустой файл": (
+				{},
+				{"answer": "текст", "новые": [("a.txt", b"")]},
+				"file_missing",
+				{"file": "a.txt"},
+				True,
+			),
+		}
+		for номер, (что, (задание, ответ, код, подробности, сдачи_нет)) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				if задание is not None:
+					создать_домашку(self.урок, **задание)
 
-	def test_без_задания_отказ(self):
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, answer="сделал")
-		self.assertEqual(отказ.exception.код, "no_homework")
+				with self.assertRaises(домашка.Отказ) as отказ:
+					домашка.сохранить(self.ученик, self.урок, None, **ответ)
 
-	def test_пустой_ответ_отклоняется(self):
-		создать_домашку(self.урок)
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, answer="   ")
-		self.assertEqual(отказ.exception.код, "empty_answer")
+				self.assertEqual(отказ.exception.код, код)
+				self.assertEqual({к: отказ.exception.подробности[к] for к in подробности}, подробности)
+				if сдачи_нет:
+					self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
 
-	def test_текст_в_задание_только_файлами(self):
-		создать_домашку(self.урок, answer_mode="files")
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, answer="текст")
-		self.assertEqual(отказ.exception.код, "answer_mode")
+	def test_принятую_не_правят(self):
+		"""И в гонке: сохранение, проигравшее гонку, принятую не правит. У каждого
+		случая свои ученик и урок."""
+		from contextlib import nullcontext
 
-	def test_файл_в_задание_только_текстом(self):
-		создать_домашку(self.урок, answer_mode="text")
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one")])
-		self.assertEqual(отказ.exception.код, "answer_mode")
+		for номер, (что, гонка) in enumerate(
+			(("без гонки", nullcontext), ("в гонке", не_найти_с_первого_раза))
+		):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				создать_домашку(self.урок)
+				первая = домашка.сохранить(self.ученик, self.урок, None, answer="первая")
+				frappe.db.set_value("Agent Homework Submission", первая.name, "status", "Accepted")
+
+				with гонка(), self.assertRaises(домашка.Отказ) as отказ:
+					домашка.сохранить(self.ученик, self.урок, None, answer="вторая")
+
+				self.assertEqual(отказ.exception.код, "accepted_locked")
 
 	def test_файлы_сохраняются_и_остаются_в_старой_версии(self):
 		создать_домашку(self.урок)
@@ -389,15 +456,6 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		self.assertEqual(отказ.exception.подробности["file"], "a.txt")
 		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
 
-	def test_пустой_файл_отказ_до_записи(self):
-		"""Пустой файл не пропадает молча из ответа: ученик думал бы, что сдал его."""
-		создать_домашку(self.урок)
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, answer="текст", новые=[("a.txt", b"")])
-		self.assertEqual(отказ.exception.код, "file_missing")
-		self.assertEqual(отказ.exception.подробности["file"], "a.txt")
-		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
-
 	def test_отклонённый_файл_не_оставляет_новой_сдачи(self):
 		создать_домашку(self.урок)
 		файлов = frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"})
@@ -442,12 +500,6 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		])
 		self.assertEqual([ф["name"] for ф in описание["files"]], ["0.txt", "1.txt", "2.txt"])
 
-	def test_предел_числа_файлов(self):
-		создать_домашку(self.урок)
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, новые=[(f"{н}.txt", b"x") for н in range(11)])
-		self.assertEqual(отказ.exception.код, "too_many_files")
-
 	def test_предел_объёма_сохранения(self):
 		создать_домашку(self.урок)
 		# Размер файла пропускает оба, сумма — нет: отказ именно за объём сохранения.
@@ -461,14 +513,6 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.bin", большой), ("b.bin", большой)])
 		self.assertEqual(отказ.exception.код, "answer_too_large")
 
-	def test_принятую_не_правят(self):
-		создать_домашку(self.урок)
-		документ = домашка.сохранить(self.ученик, self.урок, None, answer="готово")
-		frappe.db.set_value("Agent Homework Submission", документ.name, "status", "Accepted")
-		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, answer="ещё")
-		self.assertEqual(отказ.exception.код, "accepted_locked")
-
 	def test_абсолютный_срок_ставится_при_создании(self):
 		создать_домашку(self.урок, due_mode="absolute", due_date="2030-01-15")
 		документ = домашка.сохранить(self.ученик, self.урок, None, answer="рано")
@@ -481,6 +525,10 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
+		self.заново()
+
+	def заново(self) -> None:
+		"""Свои ученик, урок с заданием и организация — у теста или у строки таблицы."""
 		с = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"hwa-{с}@example.com")
 		self.урок = создать_урок(f"Урок {с}")
@@ -510,47 +558,80 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 	def дней_до_срока(self, сдача) -> timedelta:
 		return get_datetime(сдача.due_at) - get_datetime(сдача.assigned_at)
 
-	def test_правило_назначения_перекрывает_автора(self):
-		self.назначить({"due_mode": "relative", "due_days": 2})
-		сдача = self.выдать(self.организация)
-		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=2))
-		self.assertEqual(сдача.history[-1].due_source, "allocation")
+	def test_срок_выдачи_из_назначения(self):
+		"""Правило назначения перекрывает автора; из двух назначений — ближайший
+		срок; назначение другой организации, личная сдача и назначение не адресату
+		оставляют срок автора; выбранный самим курс тоже действует. У каждого
+		случая свои ученик, урок и организация."""
 
-	def test_два_назначения_ближайший_срок(self):
-		self.назначить({"due_mode": "relative", "due_days": 4})
-		self.назначить({"due_mode": "absolute", "due_date": "2020-01-01"}, audience="Selected Members",
-			members=[{"user": self.ученик}])
-		сдача = self.выдать(self.организация)
-		self.assertEqual(str(сдача.due_at), "2020-01-01 23:59:59")
+		def другая_организация():
+			другая = создать_организацию(f"Другая {frappe.generate_hash(length=6)}")
+			добавить_в_организацию(self.ученик, другая)
+			self.назначить({"due_mode": "relative", "due_days": 1}, организация=другая)
 
-	def test_назначение_другой_организации_не_действует(self):
-		другая = создать_организацию(f"Другая {frappe.generate_hash(length=6)}")
-		добавить_в_организацию(self.ученик, другая)
-		self.назначить({"due_mode": "relative", "due_days": 1}, организация=другая)
-		сдача = self.выдать(self.организация)
-		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=5))
-		self.assertEqual(сдача.history[-1].due_source, "author")
+		def не_адресату():
+			коллега = создать_ученика(f"hwa-c-{frappe.generate_hash(length=6)}@example.com")
+			добавить_в_организацию(коллега, self.организация)
+			self.назначить(
+				{"due_mode": "relative", "due_days": 1},
+				audience="Selected Members",
+				members=[{"user": коллега}],
+			)
 
-	def test_личная_сдача_только_автор(self):
-		self.назначить({"due_mode": "relative", "due_days": 1})
-		сдача = self.выдать(None)
-		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=5))
+		случаи = {
+			"правило назначения перекрывает автора": (
+				lambda: self.назначить({"due_mode": "relative", "due_days": 2}),
+				True,
+				{"дней": timedelta(days=2), "источник": "allocation"},
+			),
+			"два назначения — ближайший срок": (
+				lambda: (
+					self.назначить({"due_mode": "relative", "due_days": 4}),
+					self.назначить(
+						{"due_mode": "absolute", "due_date": "2020-01-01"},
+						audience="Selected Members",
+						members=[{"user": self.ученик}],
+					),
+				),
+				True,
+				{"срок": "2020-01-01 23:59:59"},
+			),
+			"назначение другой организации не действует": (
+				другая_организация,
+				True,
+				{"дней": timedelta(days=5), "источник": "author"},
+			),
+			"личная сдача — только автор": (
+				lambda: self.назначить({"due_mode": "relative", "due_days": 1}),
+				False,
+				{"дней": timedelta(days=5)},
+			),
+			"выбранный самим курс тоже действует": (
+				lambda: self.назначить(
+					{"due_mode": "relative", "due_days": 3},
+					audience="Selected Members",
+					members=[{"user": self.ученик}],
+					chosen_by_member=1,
+				),
+				True,
+				{"дней": timedelta(days=3)},
+			),
+			"назначение не адресату не действует": (не_адресату, True, {"дней": timedelta(days=5)}),
+		}
+		for номер, (что, (назначить, в_организации, ожидаемо)) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				назначить()
 
-	def test_выбранный_самим_курс_тоже_действует(self):
-		self.назначить(
-			{"due_mode": "relative", "due_days": 3},
-			audience="Selected Members",
-			members=[{"user": self.ученик}],
-			chosen_by_member=1,
-		)
-		self.assertEqual(self.дней_до_срока(self.выдать(self.организация)), timedelta(days=3))
+				сдача = self.выдать(self.организация if в_организации else None)
 
-	def test_назначение_не_адресату_не_действует(self):
-		коллега = создать_ученика(f"hwa-c-{frappe.generate_hash(length=6)}@example.com")
-		добавить_в_организацию(коллега, self.организация)
-		self.назначить({"due_mode": "relative", "due_days": 1}, audience="Selected Members",
-			members=[{"user": коллега}])
-		self.assertEqual(self.дней_до_срока(self.выдать(self.организация)), timedelta(days=5))
+				итог = {
+					"дней": self.дней_до_срока(сдача),
+					"срок": str(сдача.due_at),
+					"источник": сдача.history[-1].due_source,
+				}
+				self.assertEqual({к: итог[к] for к in ожидаемо}, ожидаемо)
 
 	def test_правка_назначения_не_меняет_выставленный_срок(self):
 		назначение = self.назначить({"due_mode": "relative", "due_days": 2})

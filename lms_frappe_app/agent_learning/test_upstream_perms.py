@@ -152,53 +152,48 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 
 	# --- эталоны ---
 
-	def test_роль_ученика_не_имеет_права_читать_вопросы(self):
-		frappe.set_user(self.ученик)
+	def test_вопросы_ученику_не_отдаются(self):
+		"""Ни права «read» — на доктайп и на конкретный вопрос, ни списка, ни
+		вопроса своего квиза по имени, ни report view.
 
-		self.assertFalse(
-			frappe.has_permission(ЭТАЛОН, "read"),
-			сигнал(ЭТАЛОН, "получила право «read»"),
-		)
-		self.assertFalse(
-			frappe.has_permission(ЭТАЛОН, "read", doc=self.вопрос),
-			сигнал(ЭТАЛОН, "получила право «read» на конкретный вопрос"),
-		)
-
-	def test_список_вопросов_не_отдаётся(self):
-		"""То, что делает `GET /api/resource/LMS Question`."""
-		frappe.set_user(self.ученик)
-
-		with self.assertRaises(
-			frappe.PermissionError, msg=сигнал(ЭТАЛОН, "получила список вопросов")
-		):
-			frappe.client.get_list(ЭТАЛОН, fields=["name", "question"])
-
-	def test_вопрос_своего_квиза_не_открывается_по_имени(self):
-		"""То, что делает `GET /api/resource/LMS Question/<name>`.
-
-		Вопрос берётся из квиза урока, на курс которого ученик зачислен:
-		фильтр списка такую запись всё равно бы вернул, если бы право
+		Вопрос по имени берётся из квиза урока, на курс которого ученик
+		зачислен: фильтр списка такую запись всё равно бы вернул, если бы право
 		появилось, — значит, дыру надо ловить и на прямом обращении по имени.
+		Report view — вторая дверь, и право у неё своё.
 		"""
 		frappe.set_user(self.ученик)
 
-		with self.assertRaises(
-			frappe.PermissionError, msg=сигнал(ЭТАЛОН, "открыла вопрос своего квиза по имени")
-		):
-			frappe.client.get(ЭТАЛОН, self.вопрос)
+		with self.subTest("роль ученика не имеет права читать вопросы"):
+			self.assertFalse(
+				frappe.has_permission(ЭТАЛОН, "read"),
+				сигнал(ЭТАЛОН, "получила право «read»"),
+			)
+			self.assertFalse(
+				frappe.has_permission(ЭТАЛОН, "read", doc=self.вопрос),
+				сигнал(ЭТАЛОН, "получила право «read» на конкретный вопрос"),
+			)
 
-	def test_вопросы_не_отдаются_через_report(self):
-		"""Report view — вторая дверь, и право у неё своё."""
-		frappe.set_user(self.ученик)
+		with self.subTest("список вопросов — `GET /api/resource/LMS Question`"):
+			with self.assertRaises(
+				frappe.PermissionError, msg=сигнал(ЭТАЛОН, "получила список вопросов")
+			):
+				frappe.client.get_list(ЭТАЛОН, fields=["name", "question"])
 
-		self.assertFalse(
-			frappe.has_permission(ЭТАЛОН, "report"),
-			сигнал(ЭТАЛОН, "получила право «report»"),
-		)
-		with self.assertRaises(
-			frappe.PermissionError, msg=сигнал(ЭТАЛОН, "получила вопросы через report view")
-		):
-			self._report_view(ЭТАЛОН)
+		with self.subTest("вопрос своего квиза по имени — `GET /api/resource/LMS Question/<name>`"):
+			with self.assertRaises(
+				frappe.PermissionError, msg=сигнал(ЭТАЛОН, "открыла вопрос своего квиза по имени")
+			):
+				frappe.client.get(ЭТАЛОН, self.вопрос)
+
+		with self.subTest("вопросы через report view"):
+			self.assertFalse(
+				frappe.has_permission(ЭТАЛОН, "report"),
+				сигнал(ЭТАЛОН, "получила право «report»"),
+			)
+			with self.assertRaises(
+				frappe.PermissionError, msg=сигнал(ЭТАЛОН, "получила вопросы через report view")
+			):
+				self._report_view(ЭТАЛОН)
 
 	# --- попытки чужих учеников ---
 

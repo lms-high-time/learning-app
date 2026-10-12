@@ -7,7 +7,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import homework as домашка
@@ -41,6 +41,11 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.addCleanup(patch.stopall)
 		self.addCleanup(frappe.db.set_single_value, "Agent Learning Settings", "deadline_reminder_days", 3)
 		frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 3)
+		self.заново()
+
+	def заново(self) -> None:
+		"""Свои ученик, урок с заданием, организация и руководитель — у теста или у
+		строки таблицы."""
 		с = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"hn-{с}@example.com")
 		self.урок = создать_урок(f"Урок {с}")
@@ -82,11 +87,6 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		[письмо] = self.письма_к(self.ученик)
 		self.assertIn(f"/lms/courses/{self.курс}/learn/", письмо["message"])
 
-	def test_далёкий_срок_не_напоминает(self):
-		self.выдана(выдана_за=timedelta(days=1), срок_через=timedelta(days=10))
-		письма.разослать()
-		self.assertEqual(self.письма_к(self.ученик), [])
-
 	def test_короткий_срок_в_середине_промежутка(self):
 		"""От выдачи до срока меньше порога в три дня — напоминание в середине
 		промежутка, а не сразу после выдачи."""
@@ -112,20 +112,6 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		письма.разослать()
 		self.assertEqual(len(self.журнал(submission=сдача, kind="reminder")), 1)
 
-	def test_ноль_дней_не_напоминать(self):
-		frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 0)
-		self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(hours=2))
-		письма.разослать()
-		self.assertEqual(self.письма_к(self.ученик), [])
-
-	def test_сданную_и_просроченную_не_напоминать(self):
-		сдача = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
-		frappe.db.set_value(домашка.СДАЧА, сдача, "status", "Submitted")
-		письма.разослать()
-		frappe.db.set_value(домашка.СДАЧА, сдача, {"status": "Assigned", "due_at": УТРО - timedelta(hours=1)})
-		письма.разослать()
-		self.assertEqual(self.письма_к(self.ученик), [])
-
 	def test_без_почты_ни_писем_ни_журнала(self):
 		сдача = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
 		self.почта.return_value = False
@@ -135,28 +121,63 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		письма.разослать()
 		self.assertEqual(len(self.журнал(submission=сдача)), 1)
 
-	def test_отключённому_не_пишем(self):
-		self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
-		frappe.db.set_value("User", self.ученик, "enabled", 0)
-		письма.разослать()
-		self.assertEqual(self.письма_к(self.ученик), [])
+	def test_напоминание_не_уходит(self):
+		"""Далёкий срок; ноль дней в настройках — не напоминать; сданная и
+		просроченная; отключённый ученик; ученик без доступа к курсу и ушедший из
+		организации. У каждого случая свои ученик, урок и организация."""
 
-	def test_без_доступа_к_курсу_не_пишем(self):
-		self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
-		frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
-		письма.разослать()
-		self.assertEqual(self.письма_к(self.ученик), [])
+		def далёкий_срок():
+			self.выдана(выдана_за=timedelta(days=1), срок_через=timedelta(days=10))
 
-	def test_ушедшему_из_организации_не_пишем(self):
-		self.выдана(self.организация, выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
-		frappe.db.set_value(
-			"Organization Membership",
-			{"user": self.ученик, "organization": self.организация},
-			"status",
-			"Left",
-		)
-		письма.разослать()
-		self.assertEqual(self.письма_к(self.ученик), [])
+		def ноль_дней():
+			frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 0)
+			self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(hours=2))
+
+		def сданная_и_просроченная():
+			сдача = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+			frappe.db.set_value(домашка.СДАЧА, сдача, "status", "Submitted")
+			письма.разослать()
+			frappe.db.set_value(
+				домашка.СДАЧА, сдача, {"status": "Assigned", "due_at": УТРО - timedelta(hours=1)}
+			)
+
+		def отключённый():
+			self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+			frappe.db.set_value("User", self.ученик, "enabled", 0)
+
+		def без_доступа():
+			self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+			frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+
+		def ушёл():
+			self.выдана(self.организация, выдана_за=timedelta(days=5), срок_через=timedelta(days=1))
+			frappe.db.set_value(
+				"Organization Membership",
+				{"user": self.ученик, "organization": self.организация},
+				"status",
+				"Left",
+			)
+
+		случаи = {
+			"далёкий срок": далёкий_срок,
+			"ноль дней — не напоминать": ноль_дней,
+			"сданную и просроченную": сданная_и_просроченная,
+			"отключённому": отключённый,
+			"без доступа к курсу": без_доступа,
+			"ушедшему из организации": ушёл,
+		}
+		for номер, (что, подготовить) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				try:
+					подготовить()
+
+					письма.разослать()
+				finally:
+					frappe.db.set_single_value("Agent Learning Settings", "deadline_reminder_days", 3)
+
+				self.assertEqual(self.письма_к(self.ученик), [])
 
 	# --- «вернули» ---
 
@@ -240,15 +261,25 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		письма.разослать()
 		self.assertEqual(len(self.дайджест(модератор)), 1)
 
-	def test_пустая_очередь_без_письма(self):
-		письма.разослать()
-		self.assertEqual(self.дайджест(self.менеджер), [])
+	def test_дайджест_руководителю_не_уходит(self):
+		"""Пустая очередь — без письма; отключённому руководителю — без дайджеста.
+		У каждого случая свои ученик, урок, организация и руководитель."""
 
-	def test_отключённому_руководителю_без_дайджеста(self):
-		self.сдать(self.организация)
-		frappe.db.set_value("User", self.менеджер, "enabled", 0)
-		письма.разослать()
-		self.assertEqual(self.дайджест(self.менеджер), [])
+		def отключённый():
+			self.сдать(self.организация)
+			frappe.db.set_value("User", self.менеджер, "enabled", 0)
+
+		for номер, (что, подготовить) in enumerate(
+			{"пустая очередь": lambda: None, "отключённый руководитель": отключённый}.items()
+		):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				подготовить()
+
+				письма.разослать()
+
+				self.assertEqual(self.дайджест(self.менеджер), [])
 
 	def test_сбой_одного_письма_не_валит_рассылку(self):
 		self.сдать(self.организация)
@@ -389,14 +420,6 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.assertEqual(len(self.дайджест(self.менеджер)), 1)
 		ждут.assert_not_called()
 
-	def test_индекс_статуса_и_срока(self):
-		self.assertTrue(
-			frappe.db.sql(
-				"show index from `tabAgent Homework Submission` where Key_name = %s",
-				"agent_homework_submission_status_due",
-			)
-		)
-
 	def test_запись_о_сбое_коммитится(self):
 		"""Запись лога — сразу в базу: полный откат следующего письма её не снимет."""
 		with (
@@ -407,3 +430,15 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		):
 			письма.разослать()
 		self.коммит.assert_called_once()
+
+
+class TestHomeworkNoticeIndex(UnitTestCase):
+	"""Без записи в базу: схема таблицы сдач."""
+
+	def test_индекс_статуса_и_срока(self):
+		self.assertTrue(
+			frappe.db.sql(
+				"show index from `tabAgent Homework Submission` where Key_name = %s",
+				"agent_homework_submission_status_due",
+			)
+		)

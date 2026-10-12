@@ -61,91 +61,90 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 
-	# --- занятия ---
+	def видно(self, кто: str, доктайп: str, **параметры) -> list:
+		"""Список доктайпа глазами пользователя; Administrator возвращается и после ошибки."""
+		frappe.set_user(кто)
+		try:
+			return frappe.get_list(доктайп, **параметры)
+		finally:
+			frappe.set_user("Administrator")
 
-	def test_менеджер_не_видит_занятий_чужой_компании_в_списке(self):
-		frappe.set_user(self.менеджер_а)
-		видимые = frappe.get_list("Agent Learning Session", pluck="name")
-		self.assertIn(self.занятие_а.name, видимые)
-		self.assertNotIn(self.занятие_б.name, видимые)
+	def может_читать(self, кто: str, доктайп: str, имя: str) -> bool:
+		frappe.set_user(кто)
+		try:
+			return bool(frappe.has_permission(доктайп, "read", doc=имя))
+		finally:
+			frappe.set_user("Administrator")
 
-	def test_чужое_занятие_недоступно_по_прямому_обращению(self):
-		frappe.set_user(self.менеджер_а)
-		self.assertFalse(
-			frappe.has_permission("Agent Learning Session", "read", doc=self.занятие_б.name)
-		)
+	def test_менеджер_не_видит_чужую_компанию(self):
+		"""Занятия — ни в списке, ни по прямому обращению; журнал чужого занятия;
+		назначения и членство чужой компании."""
+		with self.subTest("занятия чужой компании в списке"):
+			видимые = self.видно(self.менеджер_а, "Agent Learning Session", pluck="name")
 
-	def test_роль_без_членства_ничего_не_открывает(self):
-		"""Роль даёт возможность смотреть отчёты, членство — по каким компаниям."""
+			self.assertIn(self.занятие_а.name, видимые)
+			self.assertNotIn(self.занятие_б.name, видимые)
+
+		with self.subTest("чужое занятие по прямому обращению"):
+			self.assertFalse(
+				self.может_читать(self.менеджер_а, "Agent Learning Session", self.занятие_б.name)
+			)
+
+		своё = self.занятие_а.записать_событие("Directive Issued", "выдана директива")
+		чужое = self.занятие_б.записать_событие("Directive Issued", "выдана директива")
+		with self.subTest("журнал чужого занятия"):
+			видимые = self.видно(self.менеджер_а, "Agent Session Event", pluck="name")
+
+			self.assertIn(своё.name, видимые)
+			self.assertNotIn(чужое.name, видимые)
+			self.assertFalse(self.может_читать(self.менеджер_а, "Agent Session Event", чужое.name))
+
+		своё = self._назначение(self.компания_а)
+		чужое = self._назначение(self.компания_б)
+		with self.subTest("назначения чужой компании"):
+			видимые = self.видно(self.менеджер_а, "Course Allocation", pluck="name")
+
+			self.assertIn(своё.name, видимые)
+			self.assertNotIn(чужое.name, видимые)
+
+		with self.subTest("членство чужой компании"):
+			видимые = self.видно(self.менеджер_а, "Organization Membership", fields=["user", "organization"])
+			организации = {строка.organization for строка in видимые}
+
+			self.assertIn(self.компания_а, организации)
+			self.assertNotIn(self.компания_б, организации)
+
+	def test_видимость_без_руководства(self):
+		"""Роль руководителя без членства ничего не открывает: роль даёт
+		возможность смотреть отчёты, членство — по каким компаниям. Ученик без
+		организаций не видит ни одного назначения; ученик видит только своё
+		членство; служебная роль видит всё."""
 		безродный = создать_пользователя(
 			f"free-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Organization Manager"
 		)
+		with self.subTest("роль без членства ничего не открывает"):
+			видимые = self.видно(безродный, "Agent Learning Session", pluck="name")
 
-		frappe.set_user(безродный)
-		видимые = frappe.get_list("Agent Learning Session", pluck="name")
+			self.assertNotIn(self.занятие_а.name, видимые)
+			self.assertNotIn(self.занятие_б.name, видимые)
 
-		self.assertNotIn(self.занятие_а.name, видимые)
-		self.assertNotIn(self.занятие_б.name, видимые)
-
-	# --- журнал ---
-
-	def test_журнал_чужого_занятия_не_виден(self):
-		своё = self.занятие_а.записать_событие("Directive Issued", "выдана директива")
-		чужое = self.занятие_б.записать_событие("Directive Issued", "выдана директива")
-
-		frappe.set_user(self.менеджер_а)
-		видимые = frappe.get_list("Agent Session Event", pluck="name")
-
-		self.assertIn(своё.name, видимые)
-		self.assertNotIn(чужое.name, видимые)
-		self.assertFalse(frappe.has_permission("Agent Session Event", "read", doc=чужое.name))
-
-	# --- назначения ---
-
-	def test_назначения_чужой_компании_не_видны(self):
-		своё = self._назначение(self.компания_а)
-		чужое = self._назначение(self.компания_б)
-
-		frappe.set_user(self.менеджер_а)
-		видимые = frappe.get_list("Course Allocation", pluck="name")
-
-		self.assertIn(своё.name, видимые)
-		self.assertNotIn(чужое.name, видимые)
-
-	def test_ученик_без_организаций_не_видит_ни_одного_назначения(self):
 		# Пустое условие в Frappe означает «без ограничений»: ошибка здесь
 		# открыла бы чужие назначения целиком.
 		self._назначение(self.компания_а)
 		одиночка = создать_ученика(f"solo-{frappe.generate_hash(length=6)}@example.com")
+		with self.subTest("ученик без организаций не видит ни одного назначения"):
+			self.assertEqual(self.видно(одиночка, "Course Allocation", pluck="name"), [])
 
-		frappe.set_user(одиночка)
+		with self.subTest("ученик видит только своё членство"):
+			видимые = self.видно(self.ученик_а, "Organization Membership", fields=["user"])
 
-		self.assertEqual(frappe.get_list("Course Allocation", pluck="name"), [])
+			self.assertEqual({строка.user for строка in видимые}, {self.ученик_а})
 
-	# --- членство ---
-
-	def test_членство_чужой_компании_не_видно(self):
-		frappe.set_user(self.менеджер_а)
-		видимые = frappe.get_list("Organization Membership", fields=["user", "organization"])
-		организации = {строка.organization for строка in видимые}
-
-		self.assertIn(self.компания_а, организации)
-		self.assertNotIn(self.компания_б, организации)
-
-	def test_ученик_видит_только_своё_членство(self):
-		frappe.set_user(self.ученик_а)
-		видимые = frappe.get_list("Organization Membership", fields=["user"])
-		self.assertEqual({строка.user for строка in видимые}, {self.ученик_а})
-
-	# --- служебная роль ---
-
-	def test_служебная_роль_видит_всё(self):
 		служебный = создать_пользователя(
 			f"svc-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Agent Service"
 		)
+		with self.subTest("служебная роль видит всё"):
+			видимые = self.видно(служебный, "Agent Learning Session", pluck="name")
 
-		frappe.set_user(служебный)
-		видимые = frappe.get_list("Agent Learning Session", pluck="name")
-
-		self.assertIn(self.занятие_а.name, видимые)
-		self.assertIn(self.занятие_б.name, видимые)
+			self.assertIn(self.занятие_а.name, видимые)
+			self.assertIn(self.занятие_б.name, видимые)
