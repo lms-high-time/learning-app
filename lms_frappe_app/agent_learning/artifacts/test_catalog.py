@@ -7,7 +7,7 @@ import json
 from unittest import mock
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning.artifacts import catalog
 from lms_frappe_app.commands import commands
@@ -33,6 +33,11 @@ from lms_frappe_app.tests.sample_data import зачислить, создать_
 ХОЛСТ = {"grid": ["intro items", "outro outro"], "labels": {"intro": "Начало"}}
 #: Таблица шаблонов документов: на сайте её может не быть.
 ТАБЛИЦА_ШАБЛОНОВ = "Agent Artifact Template"
+
+
+class TestКомандаКаталога(UnitTestCase):
+	def test_команда_bench_объявлена(self):
+		self.assertIn("check-artifact-catalog", [команда.name for команда in commands])
 
 
 class IntegrationTestArtifactCatalog(IntegrationTestCase):
@@ -159,6 +164,3 @@ class IntegrationTestArtifactCatalog(IntegrationTestCase):
 					frappe.get_attr(хук)()
 		# Проверка подмены: хуки дошли до своего DDL, и он не выполнился.
 		self.assertTrue(пропущенный_ddl)
-
-	def test_команда_bench_объявлена(self):
-		self.assertIn("check-artifact-catalog", [команда.name for команда in commands])

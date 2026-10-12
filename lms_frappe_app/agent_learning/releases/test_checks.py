@@ -13,60 +13,123 @@ def _коды(релиз) -> list[str]:
 	return [п["code"] for п in checks.проблемы(релиз)[0]]
 
 
+def _ответ_первого_вопроса(р) -> dict:
+	квиз = р["lessons"][0]["quiz"]
+	return квиз["answers"][квиз["questions"][0]["key"]]
+
+
+def _раздел_с_ключом(р, ключ: str) -> None:
+	р["document"]["sections"][0]["key"] = ключ
+	р["lessons"][0]["sections"] = р["lessons"][1]["sections"] = [ключ]
+
+
+def _без_третьего_урока(р) -> None:
+	"""Урок снят из уроков и из главы, а его срез в пакете остался."""
+	р["chapters"] = р["chapters"][:1]
+	р["lessons"] = р["lessons"][:2]
+
+
+def _пакет_неполный(р) -> None:
+	del р["agent"]["lessons"]["l-1"]
+	del р["agent"]["lessons"]["l-2"]["items"]["term:T1"]
+	р["agent"]["lessons"]["l-2"]["sections"] = ["не", "объект"]
+	р["agent"]["lessons"]["l-3"] = "срез строкой"
+
+
 class TestПроверкиРелиза(unittest.TestCase):
-	def test_пример_чист(self):
-		self.assertEqual(checks.проблемы(пример_релиза()), ([], []))
-
-	def test_повтор_ключа_урока(self):
-		р = пример_релиза()
-		р["lessons"][1]["key"] = "l-1"
-		self.assertIn("duplicate_key", _коды(р))
-
-	def test_пункт_с_тем_же_ключом_в_другом_уроке_допустим(self):
+	def test_релиз_без_проблем(self):
+		"""Правки, после которых релиз чист: ни критичных проблем, ни предупреждений."""
+		for случай, правка in {
+			"пример как есть": lambda р: None,
+			# Раздел `rules` в документе есть, урок `l-1` в него не пишет: ссылка сходится.
+			"запись раздела документа, который урок не заполняет": lambda р: р["agent"]["lessons"]["l-1"][
+				"sections"
+			].update(rules="Запись раздела в срезе."),
+			# Пакет непрозрачен: полноты сервер не требует, части не-объекты не разбирает.
+			"пакет неполный, части иной формы": _пакет_неполный,
+			"уроки пакета не объект": lambda р: р["agent"].update(lessons=["не", "объект"]),
+			# Ключи с тем же смыслом в тексте или в карте курса — не утечка.
+			"answers и correct вне пакета агента": lambda р: р.update(
+				agent={**р["agent"], "frame": "answers и correct — слова, а не ключи"},
+				map={"answers": {"correct": "V1"}},
+			),
+			"релиз без пакета агента": lambda р: р.pop("agent"),
+		}.items():
+			with self.subTest(случай):
+				р = пример_релиза()
+				правка(р)
+				self.assertEqual(checks.проблемы(р), ([], []))
 		# term:T1 и refute:M1 стоят в каждом уроке примера — пространство пункта — урок.
 		self.assertNotIn("duplicate_key", _коды(пример_релиза()))
 
-	def test_вопрос_на_чужую_цель(self):
-		р = пример_релиза()
-		р["lessons"][0]["quiz"]["questions"][0]["objective"] = "l-2-D1"
-		self.assertIn("broken_ref", _коды(р))
+	def test_критичная_проблема_по_правке(self):
+		for случай, правка, код in (
+			("повтор ключа урока", lambda р: р["lessons"][1].update(key="l-1"), "duplicate_key"),
+			(
+				"вопрос на чужую цель",
+				lambda р: р["lessons"][0]["quiz"]["questions"][0].update(objective="l-2-D1"),
+				"broken_ref",
+			),
+			(
+				"раздел урока не из документа",
+				lambda р: р["lessons"][0].update(sections=["nope"]),
+				"broken_ref",
+			),
+			(
+				"уроки глав не в порядке уроков",
+				lambda р: р["chapters"][0].update(lessons=["l-2", "l-1"]),
+				"chapter_order",
+			),
+			(
+				"верный ответ не из вариантов",
+				lambda р: _ответ_первого_вопроса(р).update(correct="V9"),
+				"quiz_correct",
+			),
+			("вопрос без ответа", lambda р: р["lessons"][0]["quiz"].update(answers={}), "quiz_correct"),
+			("ключ раздела не ложится на документ", lambda р: _раздел_с_ключом(р, "Log-1"), "document_key"),
+			("раздел с ключом вида страницы", lambda р: _раздел_с_ключом(р, "table"), "document_key"),
+			(
+				"поле раздела one совпадает с колонкой",
+				lambda р: р["document"]["sections"][1]["columns"][0].update(key="topic"),
+				"document_key",
+			),
+			("длинное название урока", lambda р: р["lessons"][0].update(title="у" * 136), "text_too_long"),
+			# Имя главы Learning — тоже `{####} {название}`.
+			("длинное название главы", lambda р: р["chapters"][0].update(title="г" * 136), "text_too_long"),
+		):
+			with self.subTest(случай):
+				р = пример_релиза()
+				правка(р)
+				self.assertIn(код, _коды(р))
 
-	def test_раздел_урока_не_из_документа(self):
-		р = пример_релиза()
-		р["lessons"][0]["sections"] = ["nope"]
-		self.assertIn("broken_ref", _коды(р))
-
-	def test_хвост_снятого_урока_в_пакете_агента(self):
-		"""Урок снят из уроков и из главы, а его срез в пакете остался."""
-		р = пример_релиза()
-		р["chapters"] = р["chapters"][:1]
-		р["lessons"] = р["lessons"][:2]
-		self.assertEqual(
-			checks.проблемы(р)[0], [{"code": "broken_ref", "where": "agent.lessons", "key": "l-3"}]
-		)
-
-	def test_пункт_пакета_не_из_целей_урока(self):
-		"""Пункт другого урока — тоже чужой: пространство пункта — урок."""
-		р = пример_релиза()
-		р["agent"]["lessons"]["l-1"]["items"]["l-2-D1/V1"] = "Подробности пункта другого урока."
-		self.assertEqual(
-			checks.проблемы(р)[0],
-			[{"code": "broken_ref", "where": "agent.lessons.l-1.items", "key": "l-2-D1/V1"}],
-		)
-
-	def test_запись_раздела_в_срезе_не_из_документа(self):
-		р = пример_релиза()
-		р["agent"]["lessons"]["l-3"]["sections"]["nope"] = "Запись раздела, которого нет."
-		self.assertEqual(
-			checks.проблемы(р)[0],
-			[{"code": "broken_ref", "where": "agent.lessons.l-3.sections", "key": "nope"}],
-		)
-
-	def test_запись_раздела_документа_который_урок_не_заполняет_допустима(self):
-		"""Раздел `rules` в документе есть, урок `l-1` в него не пишет: ссылка сходится."""
-		р = пример_релиза()
-		р["agent"]["lessons"]["l-1"]["sections"]["rules"] = "Запись раздела в срезе."
-		self.assertEqual(checks.проблемы(р), ([], []))
+	def test_битая_ссылка_пакета_агента(self):
+		"""Ссылка пакета, которой нет в релизе, — `broken_ref` с местом и ключом."""
+		for случай, правка, проблема in (
+			(
+				"хвост снятого урока в пакете агента",
+				_без_третьего_урока,
+				{"code": "broken_ref", "where": "agent.lessons", "key": "l-3"},
+			),
+			(
+				# Пункт другого урока — тоже чужой: пространство пункта — урок.
+				"пункт пакета не из целей урока",
+				lambda р: р["agent"]["lessons"]["l-1"]["items"].update(
+					{"l-2-D1/V1": "Подробности пункта другого урока."}
+				),
+				{"code": "broken_ref", "where": "agent.lessons.l-1.items", "key": "l-2-D1/V1"},
+			),
+			(
+				"запись раздела в срезе не из документа",
+				lambda р: р["agent"]["lessons"]["l-3"]["sections"].update(
+					nope="Запись раздела, которого нет."
+				),
+				{"code": "broken_ref", "where": "agent.lessons.l-3.sections", "key": "nope"},
+			),
+		):
+			with self.subTest(случай):
+				р = пример_релиза()
+				правка(р)
+				self.assertEqual(checks.проблемы(р)[0], [проблема])
 
 	def test_запись_раздела_в_релизе_без_документа(self):
 		р = пример_релиза()
@@ -81,61 +144,6 @@ class TestПроверкиРелиза(unittest.TestCase):
 				("agent.lessons.l-2.sections", "rules"),
 			],
 		)
-
-	def test_пакет_неполный_или_иной_формы_не_ошибка(self):
-		"""Пакет непрозрачен: полноты сервер не требует, части не-объекты не разбирает."""
-		р = пример_релиза()
-		del р["agent"]["lessons"]["l-1"]
-		del р["agent"]["lessons"]["l-2"]["items"]["term:T1"]
-		р["agent"]["lessons"]["l-2"]["sections"] = ["не", "объект"]
-		р["agent"]["lessons"]["l-3"] = "срез строкой"
-		self.assertEqual(checks.проблемы(р), ([], []))
-		р["agent"]["lessons"] = ["не", "объект"]
-		self.assertEqual(checks.проблемы(р), ([], []))
-
-	def test_уроки_глав_не_в_порядке_уроков(self):
-		р = пример_релиза()
-		р["chapters"][0]["lessons"] = ["l-2", "l-1"]
-		self.assertIn("chapter_order", _коды(р))
-
-	def test_верный_ответ_не_из_вариантов(self):
-		р = пример_релиза()
-		вопрос = р["lessons"][0]["quiz"]["questions"][0]["key"]
-		р["lessons"][0]["quiz"]["answers"][вопрос]["correct"] = "V9"
-		self.assertIn("quiz_correct", _коды(р))
-
-	def test_вопрос_без_ответа(self):
-		р = пример_релиза()
-		р["lessons"][0]["quiz"]["answers"] = {}
-		self.assertIn("quiz_correct", _коды(р))
-
-	def test_ключ_раздела_не_ложится_на_документ(self):
-		р = пример_релиза()
-		р["document"]["sections"][0]["key"] = "Log-1"
-		р["lessons"][0]["sections"] = р["lessons"][1]["sections"] = ["Log-1"]
-		self.assertIn("document_key", _коды(р))
-
-	def test_раздел_с_ключом_вида_страницы(self):
-		р = пример_релиза()
-		р["document"]["sections"][0]["key"] = "table"
-		р["lessons"][0]["sections"] = р["lessons"][1]["sections"] = ["table"]
-		self.assertIn("document_key", _коды(р))
-
-	def test_поле_раздела_one_совпадает_с_колонкой(self):
-		р = пример_релиза()
-		р["document"]["sections"][1]["columns"][0]["key"] = "topic"
-		self.assertIn("document_key", _коды(р))
-
-	def test_длинное_название_урока(self):
-		р = пример_релиза()
-		р["lessons"][0]["title"] = "у" * 136
-		self.assertIn("text_too_long", _коды(р))
-
-	def test_длинное_название_главы(self):
-		"""Имя главы Learning — тоже `{####} {название}`."""
-		р = пример_релиза()
-		р["chapters"][0]["title"] = "г" * 136
-		self.assertIn("text_too_long", _коды(р))
 
 	def test_длинное_название_домашки(self):
 		"""Название шаблона `Agent Lesson Homework` — Data, без номера."""
@@ -207,15 +215,3 @@ class TestПроверкиРелиза(unittest.TestCase):
 				("agent_leak", "agent.lessons.l-1.answers"),
 			],
 		)
-
-	def test_ответы_вне_пакета_агента_не_утечка(self):
-		"""Ключи с тем же смыслом в тексте или в карте курса — не утечка."""
-		р = пример_релиза()
-		р["agent"]["frame"] = "answers и correct — слова, а не ключи"
-		р["map"] = {"answers": {"correct": "V1"}}
-		self.assertEqual(checks.проблемы(р), ([], []))
-
-	def test_релиз_без_пакета_агента_чист(self):
-		р = пример_релиза()
-		del р["agent"]
-		self.assertEqual(checks.проблемы(р), ([], []))

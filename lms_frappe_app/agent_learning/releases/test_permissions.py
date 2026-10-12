@@ -15,10 +15,18 @@ from lms_frappe_app.tests.sample_data import (
 
 
 class IntegrationTestПраваНаРелиз(IntegrationTestCase):
-	def setUp(self):
+	"""Пользователи ролей тесты только читают — они общие на класс."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
 		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"rel-pupil-{суффикс}@example.com")
-		self.куратор = создать_куратора(f"rel-curator-{суффикс}@example.com")
+		cls.ученик = создать_ученика(f"rel-pupil-{суффикс}@example.com")
+		cls.куратор = создать_куратора(f"rel-curator-{суффикс}@example.com")
+		cls.модератор = создать_куратора(f"rel-moder-{суффикс}@example.com", роль="Moderator")
+		cls.админ = создать_куратора(f"rel-admin-{суффикс}@example.com", роль="System Manager")
+		организация = создать_организацию(f"Релиз {суффикс}")
+		cls.руководитель = создать_менеджера(f"rel-mgr-{суффикс}@example.com", организация)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -41,24 +49,21 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			frappe.get_list("Agent Release Lesson", parent_doctype="Agent Course Release", fields=["agent"])
 
-	def test_куратор_читает_но_не_создаёт_релиз(self):
-		"""Релиз создаёт только сервис публикации: права `create` нет ни у кого."""
-		модератор = создать_куратора(
-			f"rel-moder-{frappe.generate_hash(length=6)}@example.com", роль="Moderator"
-		)
-		for кто in (self.куратор, модератор):
-			self.assertTrue(frappe.has_permission("Agent Course Release", "read", user=кто), кто)
-			self.assertFalse(frappe.has_permission("Agent Course Release", "create", user=кто), кто)
-
-	def test_руководитель_не_читает_релиз(self):
-		организация = создать_организацию(f"Релиз {frappe.generate_hash(length=6)}")
-		руководитель = создать_менеджера(f"rel-mgr-{frappe.generate_hash(length=6)}@example.com", организация)
-		self.assertFalse(frappe.has_permission("Agent Course Release", "read", user=руководитель))
-
-	def test_релиз_не_правит_никто(self):
-		админ = создать_куратора(
-			f"rel-admin-{frappe.generate_hash(length=6)}@example.com", роль="System Manager"
-		)
-		for кто in (self.куратор, админ):
-			self.assertFalse(frappe.has_permission("Agent Course Release", "write", user=кто), кто)
-			self.assertFalse(frappe.has_permission("Agent Course Release", "delete", user=кто), кто)
+	def test_права_ролей_на_релиз(self):
+		"""Куратор и модератор читают релиз. Создаёт его только сервис публикации:
+		права `create` нет ни у кого; правит и удаляет — никто. Руководитель не читает."""
+		for кто, право, можно in (
+			("куратор", "read", True),
+			("куратор", "create", False),
+			("куратор", "write", False),
+			("куратор", "delete", False),
+			("модератор", "read", True),
+			("модератор", "create", False),
+			("админ", "write", False),
+			("админ", "delete", False),
+			("руководитель", "read", False),
+		):
+			with self.subTest(f"{кто}: {право}"):
+				self.assertEqual(
+					bool(frappe.has_permission("Agent Course Release", право, user=getattr(self, кто))), можно
+				)

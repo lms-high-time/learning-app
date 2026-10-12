@@ -18,21 +18,27 @@ from lms_frappe_app.tests.sample_data import создать_куратора
 
 
 class IntegrationTestИндексРелиза(IntegrationTestCase):
-	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
-		self.куратор = создать_куратора(f"rel-index-{frappe.generate_hash(length=6)}@example.com")
-		frappe.set_user(self.куратор)
-		self.курс = проекция.курс_куратора(self.куратор)
-		self.итог = projection.спроецировать(self.курс, пример_релиза(), проекция.ПУСТО, {})
-		frappe.set_user("Administrator")
-		self.релиз = self.вставить(пример_релиза(), self.итог, 1)
+	"""Тесты класса только читают курс и его первый релиз — они общие на класс;
+	релизы других версий тест заводит сам."""
 
-	def вставить(self, релиз: dict, итог, версия: int) -> str:
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.addClassCleanup(frappe.set_user, "Administrator")
+		cls.куратор = создать_куратора(f"rel-index-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(cls.куратор)
+		cls.курс = проекция.курс_куратора(cls.куратор)
+		cls.итог = projection.спроецировать(cls.курс, пример_релиза(), проекция.ПУСТО, {})
+		frappe.set_user("Administrator")
+		cls.релиз = cls.вставить(пример_релиза(), cls.итог, 1)
+
+	@classmethod
+	def вставить(cls, релиз: dict, итог, версия: int) -> str:
 		return (
 			frappe.get_doc(
 				{
 					"doctype": index.РЕЛИЗ,
-					"course": self.курс,
+					"course": cls.курс,
 					"course_key": релиз["course"]["key"],
 					"version": версия,
 					"release_format": релиз["format"],

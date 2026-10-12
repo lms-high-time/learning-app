@@ -90,19 +90,12 @@ class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		frappe.set_user("Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.куратор = создать_куратора(f"rel-guard-{суффикс}@example.com")
-		self.курс = создать_курс(f"Правила {суффикс}")
-		# Куратор — преподаватель курса: Learning даёт ему править курс.
-		курс = frappe.get_doc("LMS Course", self.курс)
-		курс.append("instructors", {"instructor": self.куратор})
-		курс.save()
 
 	def test_ключ_курса_из_релиза_правкой_не_меняется(self):
-		frappe.set_user(self.куратор)
-		ответ = service.опубликовать(
-			пример_релиза(f"guard-{frappe.generate_hash(length=6)}"), None, self.куратор
-		)
+		# Куратор публикует курс — и становится его преподавателем: Learning даёт ему править курс.
+		куратор = создать_куратора(f"rel-guard-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(куратор)
+		ответ = service.опубликовать(пример_релиза(f"guard-{frappe.generate_hash(length=6)}"), None, куратор)
 		курс = frappe.get_doc("LMS Course", ответ["course"])
 		курс.course_key = "other-key"
 		with self.assertRaises(frappe.ValidationError):
@@ -112,14 +105,15 @@ class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
 		курс.save()
 
 	def test_действующий_релиз_только_свой(self):
+		свой = создать_курс(f"Правила {frappe.generate_hash(length=6)}")
 		чужой = вставить_релиз(создать_курс(f"Чужой {frappe.generate_hash(length=6)}"))
-		курс = frappe.get_doc("LMS Course", self.курс)
+		курс = frappe.get_doc("LMS Course", свой)
 		курс.active_release = чужой
 		курс.flags.from_release = True
 		with self.assertRaisesRegex(frappe.ValidationError, "релиз другого курса"):
 			курс.save()
 
-		курс = frappe.get_doc("LMS Course", self.курс)
+		курс = frappe.get_doc("LMS Course", свой)
 		курс.active_release = f"REL-нет-{frappe.generate_hash(length=6)}"
 		курс.flags.from_release = True
 		# Обычную правку остановит ещё проверка Link; хук держит и путь мимо неё.
@@ -129,15 +123,30 @@ class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
 
 
 class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTestCase):
-	"""Desk и любой путь мимо публикации: главы, уроки и порядок глав курса из релиза."""
+	"""Desk и любой путь мимо публикации: главы, уроки и порядок глав курса из релиза.
+
+	Курс из релиза общий на класс: тесты его только читают и получают отказы.
+	Тест, которому правка курса из релиза проходит, публикует свой (`свой_курс`).
+	Курс без релиза тесты правят — его заводит `setUp`.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.addClassCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		cls.курс, cls.урок, cls.глава = cls.свой_курс()
+
+	@staticmethod
+	def свой_курс(ключ: str | None = None) -> tuple[str, str, str]:
+		"""Курс из релиза: (курс, урок `l-1`, его глава)."""
+		курс, _ = курс_из_релиза(релиз=пример_релиза(ключ or f"guard-{frappe.generate_hash(length=6)}"))
+		урок = урок_релиза(курс, "l-1")
+		return курс, урок, frappe.db.get_value("Course Lesson", урок, "chapter")
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		frappe.set_user("Administrator")
-		self.ключ = f"guard-{frappe.generate_hash(length=6)}"
-		self.курс, _ = курс_из_релиза(релиз=пример_релиза(self.ключ))
-		self.урок = урок_релиза(self.курс, "l-1")
-		self.глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		self.свободный_урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
 		self.свободная_глава, self.свободный_курс = frappe.db.get_value(
 			"Course Lesson", self.свободный_урок, ["chapter", "course"]
@@ -205,7 +214,8 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		self.assertFalse(frappe.db.exists("Course Lesson", урок.name))
 
 	def test_порядок_и_набор_глав_курса_из_релиза_не_правятся(self):
-		курс = frappe.get_doc("LMS Course", self.курс)
+		# Курс сохраняется — свой, а не общий.
+		курс = frappe.get_doc("LMS Course", self.свой_курс()[0])
 		было = [с.chapter for с in курс.chapters]
 		курс.chapters = курс.chapters[::-1]
 		for idx, строка in enumerate(курс.chapters, start=1):
@@ -354,18 +364,20 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		self.assertTrue(frappe.db.exists("LMS Course", курс))
 
 	def test_карточка_и_публикация_курса_из_релиза_правятся(self):
-		курс = frappe.get_doc("LMS Course", self.курс)
+		курс = frappe.get_doc("LMS Course", self.свой_курс()[0])
 		курс.title = "Новое название"
 		курс.short_introduction = "Новое описание"
 		курс.published = 1
 		курс.save()
 		курс.published = 0
 		курс.save()
-		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "title"), "Новое название")
+		self.assertEqual(frappe.db.get_value("LMS Course", курс.name, "title"), "Новое название")
 
 	def test_новая_версия_релиза_проходит(self):
 		"""Проекция меняет порядок глав, переносит урок между главами и правит его — под флагом."""
-		релиз = пример_релиза(self.ключ)
+		ключ = f"guard-{frappe.generate_hash(length=6)}"
+		_, урок, _ = self.свой_курс(ключ)
+		релиз = пример_релиза(ключ)
 		уроки = {у["key"]: у for у in релиз["lessons"]}
 		первая, вторая = релиз["chapters"]
 		первая["lessons"], вторая["lessons"] = ["l-2"], ["l-3", "l-1"]
@@ -378,9 +390,7 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		ответ = service.опубликовать(релиз, None, "Administrator", [куратор])
 
 		self.assertEqual((ответ["version"], ответ["unchanged"]), (2, False))
-		self.assertEqual(
-			frappe.db.get_value("Course Lesson", self.урок, "title"), "Урок первый, исправленный"
-		)
+		self.assertEqual(frappe.db.get_value("Course Lesson", урок, "title"), "Урок первый, исправленный")
 		# Тот же релиз со сменой инструкторов — `unchanged` под флагом.
 		повтор = service.опубликовать(релиз, None, "Administrator", ["Administrator"])
 		self.assertEqual((повтор["unchanged"], повтор["instructors"]), (True, ["Administrator"]))
@@ -388,26 +398,46 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 
 class IntegrationTestДомашкаИДокументКурсаИзРелиза(IntegrationTestCase):
 	"""Домашки и схему документа курса из релиза правит только публикация;
-	курса без релиза — Moderator и System Manager в Desk (learning-services#526)."""
+	курса без релиза — Moderator и System Manager в Desk (learning-services#526).
+
+	Курс из релиза, курс без релиза и пользователи ролей общие на класс: тесты
+	их только читают и получают отказы. Тест, которому правка проходит, заводит
+	свои записи.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.addClassCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		cls.куратор = создать_куратора(f"rel-guard-cc-{суффикс}@example.com")
+		cls.курс, cls.домашка = cls.курс_куратора(f"guard-hw-{суффикс}")
+		cls.урок = урок_релиза(cls.курс, "l-1")
+		cls.схема = frappe.db.get_value(ДОКУМЕНТ, {"course": cls.курс, "is_active": 1})
+		cls.свободный_урок, cls.свободный_курс, cls.свободная_схема = cls.свободные(суффикс)
+		cls.свободная_домашка = создать_домашку(cls.свободный_урок).name
+		cls.урок_без_домашки = создать_урок(f"Без релиза и домашки {суффикс}")
+		cls.модератор = создать_куратора(f"rel-guard-mod-{суффикс}@example.com", "Moderator")
+		cls.админ = создать_куратора(f"rel-guard-sm-{суффикс}@example.com", "System Manager")
+
+	@classmethod
+	def курс_куратора(cls, ключ: str) -> tuple[str, str]:
+		"""Курс из релиза от куратора: (курс, домашка урока `l-3`)."""
+		курс, _ = курс_из_релиза(cls.куратор, релиз=пример_релиза(ключ))
+		return курс, frappe.db.get_value(ДОМАШКА, {"lesson": урок_релиза(курс, "l-3")})
+
+	@staticmethod
+	def свободные(суффикс: str) -> tuple[str, str, str]:
+		"""Курс без релиза: (урок, курс, схема документа)."""
+		урок = создать_урок(f"Без релиза {суффикс}")
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		return урок, курс, схема_документа(курс, "journal", "Журнал", [БЛОК])["data"]["id"]
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		frappe.set_user("Administrator")
 		права_из_файла(self, ДОМАШКА, ДОКУМЕНТ)
-		суффикс = frappe.generate_hash(length=6)
-		self.ключ = f"guard-hw-{суффикс}"
-		self.куратор = создать_куратора(f"rel-guard-cc-{суффикс}@example.com")
-		self.курс, _ = курс_из_релиза(self.куратор, релиз=пример_релиза(self.ключ))
-		self.урок = урок_релиза(self.курс, "l-1")
-		self.домашка = frappe.db.get_value(ДОМАШКА, {"lesson": урок_релиза(self.курс, "l-3")})
-		self.схема = frappe.db.get_value(ДОКУМЕНТ, {"course": self.курс, "is_active": 1})
-		self.свободный_урок = создать_урок(f"Без релиза {суффикс}")
-		self.свободный_курс = frappe.db.get_value("Course Lesson", self.свободный_урок, "course")
-		self.свободная_домашка = создать_домашку(self.свободный_урок).name
-		self.урок_без_домашки = создать_урок(f"Без релиза и домашки {суффикс}")
-		self.свободная_схема = схема_документа(self.свободный_курс, "journal", "Журнал", [БЛОК])["data"]["id"]
-		self.модератор = создать_куратора(f"rel-guard-mod-{суффикс}@example.com", "Moderator")
-		self.админ = создать_куратора(f"rel-guard-sm-{суффикс}@example.com", "System Manager")
 
 	def отказ(self, действие):
 		with self.assertRaises(Отказ) as пойман:
@@ -514,6 +544,8 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 				title="Лишний",
 			)
 
+		# Строку в схему курса без релиза тест вставляет — схема своя.
+		*_, свободная_схема = self.свободные(frappe.generate_hash(length=6))
 		прежняя = frappe.get_doc(БЛОК_СХЕМЫ, frappe.db.get_value(БЛОК_СХЕМЫ, {"parent": self.схема}, "name"))
 		for кто in (self.модератор, "Administrator"):
 			frappe.set_user(кто)
@@ -523,14 +555,16 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 				правка.title = "Правка мимо релиза"
 				self.отказ(правка.save)
 		frappe.set_user(self.модератор)
-		строка(self.свободная_схема).insert()
+		строка(свободная_схема).insert()
 
 		frappe.set_user("Administrator")
 		self.assertFalse(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": self.схема, "block_key": "extra"}))
 		self.assertEqual(frappe.db.get_value(БЛОК_СХЕМЫ, прежняя.name, "title"), прежняя.title)
-		self.assertTrue(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": self.свободная_схема, "block_key": "extra"}))
+		self.assertTrue(frappe.db.exists(БЛОК_СХЕМЫ, {"parent": свободная_схема, "block_key": "extra"}))
 
 	def test_курс_без_релиза_правят_модератор_и_администратор(self):
+		# Домашку уроку без домашки тест заводит — урок свой.
+		урок_без_домашки = создать_урок(f"Без релиза и домашки {frappe.generate_hash(length=6)}")
 		for кто in (self.модератор, self.админ):
 			frappe.set_user("Administrator")
 			урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
@@ -538,7 +572,7 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 			домашка = создать_домашку(урок).name
 			схема = схема_документа(курс, "journal", "Журнал", [БЛОК])["data"]["id"]
 			frappe.set_user(кто)
-			for что, действие in self.правки(домашка, схема, self.урок_без_домашки, курс).items():
+			for что, действие in self.правки(домашка, схема, урок_без_домашки, курс).items():
 				with self.subTest(кто=кто, что=что):
 					действие()
 			frappe.set_user("Administrator")
@@ -546,11 +580,13 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 			self.assertFalse(frappe.db.exists(ДОКУМЕНТ, схема))
 			self.assertTrue(frappe.db.exists(ДОКУМЕНТ, {"course": курс, "slug": "own"}))
 			# Домашка урока без домашки заведена: следующему кругу урок нужен снова пустой.
-			frappe.delete_doc(ДОМАШКА, frappe.db.get_value(ДОМАШКА, {"lesson": self.урок_без_домашки}))
+			frappe.delete_doc(ДОМАШКА, frappe.db.get_value(ДОМАШКА, {"lesson": урок_без_домашки}))
 
 	def test_публикация_куратором_правит_снимает_и_удаляет(self):
 		"""Новая версия от Course Creator: домашка и схема правятся, домашка снимается."""
-		релиз = пример_релиза(self.ключ)
+		ключ = f"guard-hw-{frappe.generate_hash(length=6)}"
+		курс, домашка = self.курс_куратора(ключ)
+		релиз = пример_релиза(ключ)
 		уроки = {у["key"]: у for у in релиз["lessons"]}
 		уроки["l-3"]["homework"]["title"] = "Задание, исправленное"
 		релиз["document"]["title"] = "Тетрадь, исправленная"
@@ -558,13 +594,13 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 
 		service.опубликовать(релиз, None, self.куратор)
 
-		self.assertEqual(frappe.db.get_value(ДОМАШКА, self.домашка, "title"), "Задание, исправленное")
+		self.assertEqual(frappe.db.get_value(ДОМАШКА, домашка, "title"), "Задание, исправленное")
 		действующая = frappe.db.get_value(
-			ДОКУМЕНТ, {"course": self.курс, "is_active": 1}, ["title", "version"], as_dict=True
+			ДОКУМЕНТ, {"course": курс, "is_active": 1}, ["title", "version"], as_dict=True
 		)
 		self.assertEqual((действующая.title, действующая.version), ("Тетрадь, исправленная", 2))
 
 		уроки["l-3"]["homework"] = None
 		service.опубликовать(релиз, None, self.куратор)
 
-		self.assertFalse(frappe.db.exists(ДОМАШКА, self.домашка))
+		self.assertFalse(frappe.db.exists(ДОМАШКА, домашка))

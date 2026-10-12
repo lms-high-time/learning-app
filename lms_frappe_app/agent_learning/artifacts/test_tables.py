@@ -9,6 +9,7 @@
 """
 
 import unittest
+from functools import partial
 
 from lms_frappe_app.agent_learning.artifacts import codes, data, export, fill, schema
 from lms_frappe_app.agent_learning.errors import Отказ
@@ -118,22 +119,39 @@ class TestСхема(unittest.TestCase):
 		)
 		self.assertEqual(таблица["columns"][3]["block"], "assessment")
 
-	def test_формула_на_неизвестное_имя_отказ(self):
-		блоки = схема()
-		блоки[4]["spec"]["columns"][2]["formula"] = "probability * weight"
-		with self.assertRaises(Отказ) as отказ:
-			schema.проверить_документ(блоки)
-		self.assertEqual(отказ.exception.код, codes.НЕВЕРНАЯ_СХЕМА)
+	def test_неверная_схема_отказ(self):
+		"""Строка таблицы — правка: по свежей схеме она готовит проверку, которая отказывает."""
 
-	def test_ссылка_на_таблицу_которой_нет_отказ(self):
-		блоки = схема()
-		блоки[2]["spec"]["columns"][2]["ref"] = "nope"
-		with self.assertRaises(Отказ):
-			schema.проверить_документ(блоки)
+		def документ(правка):
+			def подготовить(блоки):
+				правка(блоки)
+				return partial(schema.проверить_документ, блоки)
 
-	def test_выбор_без_вариантов_отказ(self):
-		with self.assertRaises(Отказ):
-			schema.проверить_спек({"columns": [{"key": "kind", "type": "select"}]}, "x")
+			return подготовить
+
+		def спек(значение: dict):
+			return lambda _блоки: partial(schema.проверить_спек, значение, "x")
+
+		for случай, правка, код in (
+			(
+				"формула на неизвестное имя",
+				документ(lambda б: б[4]["spec"]["columns"][2].update(formula="probability * weight")),
+				codes.НЕВЕРНАЯ_СХЕМА,
+			),
+			(
+				"ссылка на таблицу, которой нет",
+				документ(lambda б: б[2]["spec"]["columns"][2].update(ref="nope")),
+				None,
+			),
+			("выбор без вариантов", спек({"columns": [{"key": "kind", "type": "select"}]}), None),
+			("колонка id занята", спек({"columns": [{"key": "id"}]}), None),
+		):
+			with self.subTest(случай):
+				проверка = правка(схема())
+				with self.assertRaises(Отказ) as отказ:
+					проверка()
+				if код:
+					self.assertEqual(отказ.exception.код, код)
 
 	def test_набор_колонок_с_названием(self):
 		спек = schema.проверить_спек(
@@ -143,10 +161,6 @@ class TestСхема(unittest.TestCase):
 		self.assertEqual(спек["views"], [{"type": "columns", "title": "Кратко", "columns": ["a"]}])
 		with self.assertRaises(Отказ):
 			schema.проверить_спек({"columns": [{"key": "a"}], "views": [{"type": "columns", "columns": ["a"]}]}, "x")
-
-	def test_колонка_id_занята(self):
-		with self.assertRaises(Отказ):
-			schema.проверить_спек({"columns": [{"key": "id"}]}, "x")
 
 	def test_ключ_блока_занят_видом_страницы(self):
 		for ключ in schema.ЗАНЯТЫЕ_КЛЮЧИ_БЛОКОВ:
@@ -186,24 +200,20 @@ class TestЗапись(unittest.TestCase):
 			data.записать(self.блоки, "assessment", self.д, rows=[{"probability": 4}])
 		self.assertEqual(отказ.exception.код, codes.СТРОКИ_НЕ_ЗАВОДИТ)
 
-	def test_чужую_колонку_не_записать(self):
-		with self.assertRaises(Отказ) as отказ:
-			data.записать(self.блоки, "assessment", self.д, rows=[{"id": "R1", "event": "другое"}])
-		self.assertEqual(отказ.exception.код, codes.НЕТ_КОЛОНКИ)
-
-	def test_формулу_не_записать(self):
-		with self.assertRaises(Отказ):
-			data.записать(self.блоки, "assessment", self.д, rows=[{"id": "R1", "rank": 20}])
-
-	def test_балл_вне_шкалы_и_неизвестный_вариант_отказ(self):
-		with self.assertRaises(Отказ):
-			data.записать(self.блоки, "assessment", self.д, rows=[{"id": "R1", "probability": 6}])
-		with self.assertRaises(Отказ):
-			data.записать(self.блоки, "risks", self.д, rows=[{"id": "R1", "kind": "проблема"}])
-
-	def test_ссылка_на_несуществующую_строку_отказ(self):
-		with self.assertRaises(Отказ):
-			data.записать(self.блоки, "risks", self.д, rows=[{"id": "R1", "goal_ref": "G9"}])
+	def test_запись_не_по_правилам_отказ(self):
+		for случай, блок, правка, код in (
+			("чужую колонку", "assessment", {"rows": [{"id": "R1", "event": "другое"}]}, codes.НЕТ_КОЛОНКИ),
+			("формулу", "assessment", {"rows": [{"id": "R1", "rank": 20}]}, None),
+			("балл вне шкалы", "assessment", {"rows": [{"id": "R1", "probability": 6}]}, None),
+			("неизвестный вариант выбора", "risks", {"rows": [{"id": "R1", "kind": "проблема"}]}, None),
+			("ссылку на несуществующую строку", "risks", {"rows": [{"id": "R1", "goal_ref": "G9"}]}, None),
+			("удаление строки не хозяином", "assessment", {"delete_rows": ["R1"]}, None),
+		):
+			with self.subTest(случай):
+				with self.assertRaises(Отказ) as отказ:
+					data.записать(self.блоки, блок, self.д, **правка)
+				if код:
+					self.assertEqual(отказ.exception.код, код)
 
 	def test_дата_по_русски_приводится_к_iso(self):
 		д = data.записать(self.блоки, "responses", self.д, rows=[{"id": "R1", "due": "05.03.2027"}])
@@ -219,10 +229,6 @@ class TestЗапись(unittest.TestCase):
 		д = data.записать(self.блоки, "risks", self.д, delete_rows=["R2"])
 		д = data.записать(self.блоки, "risks", д, rows=[{"kind": "угроза", "event": "Сезон начнётся раньше"}])
 		self.assertEqual([с["id"] for с in д["tables"]["register"]], ["R1", "R3"])
-
-	def test_удаляет_только_хозяин(self):
-		with self.assertRaises(Отказ):
-			data.записать(self.блоки, "assessment", self.д, delete_rows=["R1"])
 
 	def test_поле_блока_и_чужое_поле(self):
 		д = data.записать(self.блоки, "assessment", self.д, fields={"threshold": "12"})
@@ -386,10 +392,43 @@ class TestФормулыПолей(unittest.TestCase):
 		self.assertIsNone(значения["clients_needed"])
 		self.assertIsNone(значения["enough"])
 
-	def test_формулу_поля_не_записать(self):
-		with self.assertRaises(Отказ) as отказ:
-			data.записать(self.блоки, "economics", self.д, fields={"clients_needed": 10})
-		self.assertEqual(отказ.exception.код, codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ)
+	def test_формула_поля_не_по_правилам_отказ(self):
+		"""Строка таблицы — правка: по свежей схеме она готовит проверку, которая отказывает."""
+
+		def документ(формула: str):
+			def подготовить(блоки):
+				блоки[0]["spec"]["fields"][2]["formula"] = формула
+				return partial(schema.проверить_документ, блоки)
+
+			return подготовить
+
+		for случай, правка, код in (
+			(
+				"запись в формулу поля",
+				lambda _блоки: partial(
+					data.записать, self.блоки, "economics", self.д, fields={"clients_needed": 10}
+				),
+				codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ,
+			),
+			(
+				"required у формулы поля",
+				lambda _блоки: partial(
+					schema.проверить_спек,
+					{"fields": [{"key": "a", "type": "formula", "formula": "b", "required": True}]},
+					"x",
+				),
+				None,
+			),
+			# Формула поля — только на поля документа.
+			("формула поля на колонку", документ("stage_goal / segment"), codes.НЕВЕРНАЯ_СХЕМА),
+			("формула поля на формулу ниже", документ("enough"), None),
+		):
+			with self.subTest(случай):
+				проверка = правка(экономика())
+				with self.assertRaises(Отказ) as отказ:
+					проверка()
+				if код:
+					self.assertEqual(отказ.exception.код, код)
 
 	def test_заполненность_не_смотрит_на_формулы(self):
 		блок = self.блоки[0]
@@ -413,25 +452,6 @@ class TestФормулыПолей(unittest.TestCase):
 		self.assertIn("- Клиентов нужно: 60", export.markdown_полей(self.блоки[0]["spec"]["fields"], значения))
 		шапка = load_workbook(BytesIO(export.книга_xlsx("План", self.блоки, self.д)))["Шапка"]
 		self.assertEqual([шапка["A4"].value, шапка["B4"].value], ["Клиентов нужно", 60])
-
-	def test_required_у_формулы_поля_отказ(self):
-		with self.assertRaises(Отказ):
-			schema.проверить_спек(
-				{"fields": [{"key": "a", "type": "formula", "formula": "b", "required": True}]}, "x"
-			)
-
-	def test_формула_поля_только_на_поля_документа(self):
-		блоки = экономика()
-		блоки[0]["spec"]["fields"][2]["formula"] = "stage_goal / segment"
-		with self.assertRaises(Отказ) as отказ:
-			schema.проверить_документ(блоки)
-		self.assertEqual(отказ.exception.код, codes.НЕВЕРНАЯ_СХЕМА)
-
-	def test_формула_поля_на_формулу_ниже_отказ(self):
-		блоки = экономика()
-		блоки[0]["spec"]["fields"][2]["formula"] = "enough"
-		with self.assertRaises(Отказ):
-			schema.проверить_документ(блоки)
 
 
 if __name__ == "__main__":
