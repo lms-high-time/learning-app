@@ -44,6 +44,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
+	раздел,
+	схема_документа,
 )
 from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -65,7 +67,7 @@ from lms_frappe_app.testing import сколько_запросов
 	# событие «пакет выдан», начало занятия, итоги репортов, блоки документа,
 	# попытки, сигналы — по одной выборке. У курса образца есть задание, поэтому
 	# домашка читает порядок уроков.
-	"start_lesson": 50,
+	"start_lesson": 49,
 	# Квиз урока из релиза (learning-services#506), ответ посреди попытки:
 	# владелец, релиз и курс попытки; попытка с блокировкой; доступ к курсу —
 	# четыре выборки; действующий релиз курса — попытка не из гонки с
@@ -97,7 +99,7 @@ from lms_frappe_app.testing import сколько_запросов
 	"my_homework": 23,
 	# `start_lesson` на курсе с заданиями у текущего и прошлого урока: сверх
 	# `start_lesson` — поиск и чтение сдачи прошлого урока.
-	"start_lesson_homework": 55,
+	"start_lesson_homework": 54,
 	# Очередь куратора (learning-services#452), три сдачи в двух курсах:
 	# сдачи, счёт, значения фильтров, уроки с курсом, названия курсов,
 	# организаций и заданий, имена учеников, проверенные версии — по одной
@@ -575,21 +577,16 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 	def _артефакты(self, суффикс: str) -> None:
 		"""Две схемы документов курса, обе с блоками этого урока."""
 		for номер in (1, 2):
-			frappe.get_doc(
-				{
-					"doctype": "Agent Course Artifact",
-					"course": self.курс,
-					"slug": f"doc{номер}",
-					"title": f"Документ {номер} {суффикс}",
-					"version": 1,
-					"is_active": 1,
-					"blocks": [
-						{"block_key": f"b{номер}1", "title": "Блок 1", "lesson": self.уроки[0]},
-						{"block_key": f"b{номер}2", "title": "Блок 2", "lesson": self.уроки[1]},
-					],
-				}
-			).insert(ignore_permissions=True)
-			student.update_artifact(self.курс, f"doc{номер}", f"b{номер}1", "текст")
+			схема_документа(
+				self.курс,
+				f"doc{номер}",
+				f"Документ {номер} {суффикс}",
+				[
+					раздел(f"b{номер}1", "Блок 1", lesson=self.уроки[0]),
+					раздел(f"b{номер}2", "Блок 2", lesson=self.уроки[1]),
+				],
+			)
+			student.update_artifact(self.курс, f"doc{номер}", f"b{номер}1", fields={f"b{номер}1": "текст"})
 
 	def _домашки(self) -> None:
 		"""Задания у первого и второго урока, у первого урока другой главы и у

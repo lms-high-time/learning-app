@@ -325,7 +325,9 @@ class IntegrationTestУборкаСнятого(IntegrationTestCase):
 						"slug": "notebook",
 						"title": "Тетрадь другой версии",
 						"is_active": 0,
-						"blocks": [{"block_key": "log", "title": "Журнал", "lesson": уроки["l-block"]}],
+						"blocks": [
+							{"block_key": "log", "title": "Журнал", "rows": "one", "lesson": уроки["l-block"]}
+						],
 					}
 				)
 			)

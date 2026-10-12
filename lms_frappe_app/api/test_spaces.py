@@ -17,9 +17,10 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning
 from lms_frappe_app.api import manager, student
 from lms_frappe_app.patches.v0_1 import document_spaces
 from lms_frappe_app.tests.sample_data import (
+	раздел,
+	схема_документа,
 	добавить_в_организацию,
 	зачислить,
-	как_из_релиза,
 	курс_из_релиза,
 	создать_курс,
 	создать_менеджера,
@@ -31,17 +32,7 @@ from lms_frappe_app.tests.sample_data import (
 
 
 def завести_схему(курс: str) -> None:
-	как_из_релиза(
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [{"block_key": "goal", "title": "Цель"}],
-			}
-		)
-	).insert(ignore_permissions=True)
+	схема_документа(курс, "summary", "Резюме проекта", [раздел("goal", "Цель")])
 
 
 def назначить(организация: str, курс: str) -> None:
@@ -53,7 +44,7 @@ def назначить(организация: str, курс: str) -> None:
 def написать(ученик: str, курс: str, текст: str, space: str | None = None) -> str:
 	"""Пишет блок документа от имени ученика, возвращает имя документа."""
 	frappe.set_user(ученик)
-	ответ = student.update_artifact(курс, "summary", "goal", текст, space=space)
+	ответ = student.update_artifact(курс, "summary", "goal", fields={"goal": текст}, space=space)
 	frappe.set_user("Administrator")
 	assert ответ["ok"], ответ
 	return frappe.db.get_value(
@@ -461,7 +452,7 @@ class IntegrationTestSpaceChoice(IntegrationTestCase):
 		self.assertNotEqual(личный, компании)
 		for space, текст in (("personal", "Для себя"), (self.компания, "Для компании")):
 			блоки = student.artifact(self.курс_компании, "summary", space=space)["data"]["blocks"]
-			self.assertEqual(блоки[0]["content"], текст)
+			self.assertEqual(блоки[0]["values"], {"goal": текст})
 		self.assertEqual(
 			frappe.db.count("LMS Enrollment", {"member": self.ученик, "course": self.курс_компании}), 1
 		)
@@ -492,7 +483,7 @@ class IntegrationTestSpaceChoice(IntegrationTestCase):
 		self.assertEqual(повтор, первое)
 
 	def test_курса_нет_в_пространстве_отказ(self):
-		ответ = student.update_artifact(self.курс_свой, "summary", "goal", "Текст", space=self.компания)
+		ответ = student.update_artifact(self.курс_свой, "summary", "goal", fields={"goal": "Текст"}, space=self.компания)
 
 		self.assertEqual(ответ["error"]["code"], "course_not_in_space")
 

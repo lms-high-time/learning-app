@@ -19,16 +19,8 @@ import frappe
 from lms_frappe_app.agent_learning import homework
 from lms_frappe_app.agent_learning.access import КУРС_ГОТОВИТСЯ
 from lms_frappe_app.agent_learning.announcements import анонсирован
-from lms_frappe_app.agent_learning.artifacts import export
+from lms_frappe_app.agent_learning.artifacts import data, export, fill, schema
 from lms_frappe_app.agent_learning.artifacts.course import _действующая_схема, _схемы_курса
-from lms_frappe_app.agent_learning.artifacts.document import (
-	_блок,
-	_вложения,
-	_данные,
-	заполнен,
-	_содержимое,
-	_файлы,
-)
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 from lms_frappe_app.agent_learning.doctype.agent_lesson_homework.agent_lesson_homework import НЕВЕРНЫЙ_СРОК
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import СРОКИ_ДОМАШЕК
@@ -136,8 +128,8 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 
 	Сравнение идёт блок за блоком: что написал каждый в «Спонсоре проекта»,
 	а не пять документов целиком. У ушедшего документ остаётся — с пометкой.
-	Табличный блок приходит markdown-таблицей документа: страница показывает
-	её, не зная устройства таблиц.
+	Блок участника приходит markdown-текстом: у `many` — таблица, у `one` —
+	поля строками; страница показывает его, не зная устройства разделов.
 	"""
 	_требовать_доступ(organization)
 	if course not in _курсы_организации(organization):
@@ -152,34 +144,26 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 			"organization": organization,
 			"student": ("in", list(участники) or [""]),
 		},
-		pluck="name",
+		fields=["student", "data", "modified"],
 	)
 
-	блоки = {блок.block_key: {"key": блок.block_key, "title": блок.title, "entries": []} for блок in схема.blocks}
+	разделы = [schema.раздел(блок) for блок in схема.blocks]
+	блоки = {р["key"]: {"key": р["key"], "title": р["title"], "entries": []} for р in разделы}
 	авторы = []
-	for имя in экземпляры:
-		экземпляр = frappe.get_doc("Agent Student Artifact", имя)
+	for экземпляр in экземпляры:
 		участник = участники[экземпляр.student]
-		содержимое, вложения, данные = _содержимое(экземпляр), _вложения(экземпляр), _данные(экземпляр)
-		файлы = _файлы(вложения)
-		таблицы = export.таблицы_документа(схема.blocks, данные)
+		данные = data.данные(экземпляр.data)
 		заполнено = 0
-		for блок in схема.blocks:
-			описание = _блок(блок, содержимое, вложения, файлы, схема, данные)
-			заполнен_ли = заполнен(описание)
+		for раздел in разделы:
+			заполнен_ли = fill.заполнен(раздел, данные)
 			заполнено += заполнен_ли
-			блоки[блок.block_key]["entries"].append(
+			блоки[раздел["key"]]["entries"].append(
 				{
 					"user": участник["user"],
 					"full_name": участник["full_name"],
 					"left": участник["left"],
 					"filled": заполнен_ли,
-					"content": описание["content"],
-					"file": описание["file"],
-					"url": описание["url"],
-					"table_markdown": таблицы[описание["table"]]["markdown"]
-					if описание.get("table")
-					else None,
+					"markdown": export.markdown(раздел, данные),
 				}
 			)
 		авторы.append(
@@ -188,7 +172,7 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 				"full_name": участник["full_name"],
 				"left": участник["left"],
 				"blocks_filled": заполнено,
-				"blocks_total": len(схема.blocks),
+				"blocks_total": len(разделы),
 				"modified": экземпляр.modified.isoformat(),
 			}
 		)

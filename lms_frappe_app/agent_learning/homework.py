@@ -20,7 +20,7 @@ from frappe.core.api.file import get_max_file_size
 from frappe.core.doctype.file.exceptions import MaxFileSizeReachedError
 from frappe.utils import get_datetime, getdate, now_datetime
 
-from lms_frappe_app.agent_learning.artifacts import files as файлы_платформы
+from lms_frappe_app.agent_learning import uploads as файлы_платформы
 from lms_frappe_app.agent_learning.constants import (
 	ДОМАШКА_ВОЗВРАЩЕНА,
 	ДОМАШКА_ВЫДАНА,

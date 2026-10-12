@@ -18,6 +18,8 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
+	раздел,
+	схема_документа,
 	добавить_в_организацию,
 	занятие_релиза,
 	зачислить_на_курс,
@@ -261,18 +263,10 @@ class IntegrationTestArtifactIsolation(IntegrationTestCase):
 		self.курс = зачислить(self.сотрудник, self.урок)
 		зачислить(self.коллега, self.урок)
 		self.руководитель = создать_менеджера(f"art-m-{суффикс}@example.com", self.компания)
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [{"block_key": "goal", "title": "Цель"}],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель")])
 
 		frappe.set_user(self.сотрудник)
-		student.update_artifact(self.курс, "summary", "goal", "Открыть седьмую кофейню")
+		student.update_artifact(self.курс, "summary", "goal", fields={"goal": "Открыть седьмую кофейню"})
 		self.документ = frappe.db.get_value(
 			"Agent Student Artifact", {"student": self.сотрудник, "artifact": "summary"}
 		)
@@ -286,7 +280,7 @@ class IntegrationTestArtifactIsolation(IntegrationTestCase):
 
 			блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
 
-			self.assertEqual(блоки[0]["content"], "")
+			self.assertEqual(блоки[0]["values"], {})
 			self.assertFalse(frappe.has_permission("Agent Student Artifact", "read", doc=self.документ))
 
 		with self.subTest("руководитель"):

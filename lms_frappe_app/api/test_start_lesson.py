@@ -374,14 +374,22 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 
 	# --- блоки документа ---
 
-	def test_блоки_документа_своего_урока_с_содержимым(self):
+	def test_блоки_документа_своего_урока_с_заполненностью(self):
 		student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}])
 
 		[журнал] = self.старт(lesson=self.урок)["artifact_blocks"]
 		блоки = self.старт(lesson=урок_релиза(self.курс, "l-2"))["artifact_blocks"]
 
-		self.assertEqual((журнал["artifact"], журнал["key"]), ("notebook", "log"))
-		self.assertIn("Первая встреча", журнал["table_markdown"])
+		self.assertEqual(
+			журнал,
+			{
+				"artifact": "notebook",
+				"key": "log",
+				"title": "Журнал",
+				"description": "Что сюда записывают.",
+				"filled": True,
+			},
+		)
 		self.assertEqual([(б["artifact"], б["key"]) for б in блоки], [("notebook", "rules")])
 		self.assertEqual(self.старт(lesson=урок_релиза(self.курс, "l-3"))["artifact_blocks"], [])
 

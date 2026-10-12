@@ -26,6 +26,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_занятие,
 	создать_урок,
 	создать_ученика,
+	раздел,
+	схема_документа,
 )
 
 СЕРВИС = "https://agent.example.com"
@@ -89,23 +91,25 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		(learning-services#340); зачин и пройденность урока."""
 		frappe.set_user("Administrator")
 		курс = frappe.db.get_value("Course Lesson", self.уроки[0], "course")
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [
-					{"block_key": "goal", "title": "Цель", "lesson": self.уроки[0]},
-					{"block_key": "sponsor", "title": "Спонсор"},
-				],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(
+			курс,
+			"summary",
+			"Резюме проекта",
+			[раздел("goal", "Цель", lesson=self.уроки[0]), раздел("sponsor", "Спонсор")],
+		)
 		frappe.set_user(self.ученик)
 		with self.subTest("learning-services#340: блоки документа этого урока"):
 			self.assertEqual(
 				self.войти(self.уроки[0])["blocks"],
-				[{"artifact": "summary", "key": "goal", "title": "Цель", "filled": False}],
+				[
+					{
+						"artifact": "summary",
+						"key": "goal",
+						"title": "Цель",
+						"description": None,
+						"filled": False,
+					}
+				],
 			)
 
 		frappe.set_user("Administrator")

@@ -6,9 +6,9 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.tests.sample_data import создать_урок, схема_документа
+from lms_frappe_app.tests.sample_data import раздел, создать_урок, схема_документа
 
-БЛОКИ = [{"key": "goal", "title": "Цель"}]
+БЛОКИ = [раздел("goal", "Цель")]
 
 
 class IntegrationTestЗаписьСхемы(IntegrationTestCase):

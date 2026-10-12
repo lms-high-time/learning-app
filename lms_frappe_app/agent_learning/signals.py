@@ -23,7 +23,6 @@ from math import ceil
 import frappe
 from frappe.utils import getdate
 
-from lms_frappe_app.agent_learning.artifacts.document import заполнен
 from lms_frappe_app.agent_learning.constants import ЗАНЯТИЕ_БРОШЕНО, ПРОЙДЕН
 
 БРОШЕНЫ_ПОДРЯД = "abandoned_in_row"
@@ -171,18 +170,13 @@ def документ_пуст(статусы_целей: list[str], блоки: 
 	"""Половина целей урока разобрана, а ни один блок документа урока не начат.
 
 	`статусы_целей` — статусы целей урока в прохождении (снятые не в счёт),
-	`блоки` — блоки документа урока с содержимым ученика (`_блоки_урока`).
+	`блоки` — краткие блоки документа урока с заполненностью ученика (`_блоки_урока`).
 	Сигнал — когда `covered` не меньше половины целей и ни один блок не
 	заполнен; без блоков или целей сигнала нет.
 	"""
 	разобрано = sum(с == "covered" for с in статусы_целей)
 	if not блоки or not статусы_целей or 2 * разобрано < len(статусы_целей):
 		return []
-	if any(заполнен(б) for б in блоки):
+	if any(б["filled"] for б in блоки):
 		return []
-	return [
-		{
-			"code": ДОКУМЕНТ_ПУСТ,
-			"blocks": [{"artifact": б["artifact"], "key": б["key"], "title": б["title"]} for б in блоки],
-		}
-	]
+	return [{"code": ДОКУМЕНТ_ПУСТ, "blocks": блоки}]

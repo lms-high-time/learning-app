@@ -4,8 +4,8 @@
 """Схемы документов курса: действующие версии; схему пишет публикация релиза.
 
 Схема версионируется: у документа курса одна действующая версия, прежние
-остаются в базе. Содержимое ученика хранится по ключам блоков, поэтому новая
-версия его не рушит.
+остаются в базе. Данные ученика хранятся по ключам разделов и колонок, поэтому
+новая версия их не рушит.
 """
 
 from __future__ import annotations
@@ -14,21 +14,19 @@ import json
 
 import frappe
 
-from lms_frappe_app.agent_learning.artifacts import files, schema
-from lms_frappe_app.agent_learning.artifacts.canvas import проверить_холст
-from lms_frappe_app.agent_learning.artifacts.codes import (
-	АРТЕФАКТ_НЕ_НАЙДЕН,
-	БЛОК_НЕ_НАЙДЕН,
-	НЕВЕРНЫЙ_ВИД_БЛОКА,
-)
+from lms_frappe_app.agent_learning.artifacts import schema
+from lms_frappe_app.agent_learning.artifacts.codes import АРТЕФАКТ_НЕ_НАЙДЕН, БЛОК_НЕ_НАЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_course_artifact.agent_course_artifact import (
 	нормализовать_ключ,
 )
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН, Отказ
 
+#: Поля блока схемы, которые читает движок.
+ПОЛЯ_БЛОКА = ("block_key", "title", "description", "lesson", "rows", "columns")
+
 
 def _схемы_курса(course: str) -> list:
-	"""Действующие схемы артефактов курса — в порядке, в каком документы
+	"""Действующие схемы документов курса — в порядке, в каком документы
 	впервые объявили.
 
 	`Why:` порядок по дате действующей версии менялся бы при каждой правке
@@ -41,7 +39,7 @@ def _схемы_курса(course: str) -> list:
 	действующие = frappe.get_all(
 		"Agent Course Artifact",
 		filters={"course": course, "is_active": 1},
-		fields=["name", "slug", "title", "purpose", "layout"],
+		fields=["name", "slug", "title", "purpose"],
 	)
 	if not действующие:
 		return []
@@ -68,7 +66,7 @@ def _блоки_схем(схемы: list[str]) -> dict[str, list]:
 	for строка in frappe.get_all(
 		"Agent Artifact Block",
 		filters={"parent": ("in", схемы), "parenttype": "Agent Course Artifact"},
-		fields=["parent", "block_key", "title", "hint", "lesson", "span", "kind", "accept", "spec"],
+		fields=["parent", *ПОЛЯ_БЛОКА],
 		order_by="parent asc, idx asc",
 	):
 		по_схемам.setdefault(строка.parent, []).append(строка)
@@ -91,109 +89,55 @@ def _блок_схемы(course: str, artifact: str, key: str):
 	ключ = нормализовать_ключ(key)
 	блок = next((б for б in схема.blocks if б.block_key == ключ), None)
 	if блок is None:
-		raise Отказ(
-			БЛОК_НЕ_НАЙДЕН, "В этом документе нет такого блока", artifact=схема.slug, key=key
-		)
+		raise Отказ(БЛОК_НЕ_НАЙДЕН, "В этом документе нет такого блока", artifact=схема.slug, key=key)
 	return схема, блок
 
 
-def строки_схемы(блоки: list) -> list[dict]:
-	"""Блоки от автора — строками схемы в каноническом виде; неверные — отказ.
-
-	Базу не трогает. `блоки` — словари или JSON-строки.
-	"""
-	строки = []
-	for блок in блоки:
-		блок = json.loads(блок) if isinstance(блок, str) else dict(блок or {})
-		# Вид блока: текст, файл ученика или ссылка на внешний документ (#315).
-		вид = блок.get("kind") or files.ТЕКСТ
-		if вид not in files.ВИДЫ:
-			raise Отказ(
-				НЕВЕРНЫЙ_ВИД_БЛОКА,
-				"Вид блока: " + ", ".join(files.ВИДЫ),
-				key=блок.get("key"),
-				kind=вид,
-			)
-		спек = schema.проверить_спек(блок.get("spec"), блок.get("key"))
-		строки.append(
-			{
-				"block_key": блок.get("key"),
-				"title": блок.get("title"),
-				# Что сюда записывают — ученику (learning-services#500).
-				"description": блок.get("description") or None,
-				"hint": блок.get("hint"),
-				"lesson": блок.get("lesson") or None,
-				"span": блок.get("span") or 1,
-				"kind": вид,
-				"accept": ",".join(files.допустимые(блок)) or None,
-				"spec": json.dumps(спек, ensure_ascii=False) if спек else None,
-			}
-		)
-	schema.проверить_документ(строки)
-	return строки
-
-
-def блок_наружу(строка) -> dict:
-	"""Строка схемы — блоком в той форме, в какой его принимает `проверить_схему`.
-
-	`Why:` проверка каталога сверяет записанную схему, прогоняя её блоки через
-	ту же проверку, что и запись: форма у блока одна на оба пути.
-	"""
-	return {
-		"key": schema.ключ_блока(строка),
-		"title": строка.get("title"),
-		"hint": строка.get("hint") or "",
-		"lesson": строка.get("lesson") or None,
-		"span": строка.get("span") or 1,
-		"kind": files.вид(строка),
-		"accept": files.допустимые(строка),
-		"spec": schema.спек(строка) or None,
-	}
-
-
-def проверить_схему(блоки: list, canvas) -> tuple[list[dict], dict | None]:
-	"""Строки схемы документа и холст — такими, какими их запишет `записать_схему`;
+def проверить_схему(разделы: list) -> list[dict]:
+	"""Строки схемы документа — такими, какими их запишет `записать_схему`;
 	неверные — отказ. Ничего не пишет.
 
-	`Why:` публикация релиза сверяет документ релиза с действующей схемой в
-	той форме, в какой его запишет `записать_схему`, — иначе пустая подсказка
-	или ширина по умолчанию плодили бы версии. Ключ блока и ширина — как их
-	приводит контроллер.
+	`разделы` — разделы релиза (`schema.проверить_раздел`) с `lesson` — уроком,
+	на котором раздел показывается. `Why:` публикация релиза сверяет документ
+	релиза с действующей схемой в той форме, в какой его запишет
+	`записать_схему`, — иначе разница в записи плодила бы версии.
 	"""
-	блоки = [json.loads(блок) if isinstance(блок, str) else dict(блок or {}) for блок in блоки]
-	for блок in блоки:
-		урок = блок.get("lesson") or None
-		if урок and not frappe.db.exists("Course Lesson", урок):
-			raise Отказ(УРОК_НЕ_НАЙДЕН, "Course Lesson не найден", id=урок)
-	строки = строки_схемы(блоки)
-	холст = проверить_холст(canvas, строки)
-	for строка in строки:
-		строка["block_key"] = нормализовать_ключ(строка["block_key"])
-		строка["span"] = max(1, int(строка["span"] or 1))
-	return строки, холст
+	проверенные = [schema.проверить_раздел(р) for р in разделы]
+	schema.проверить_документ(проверенные)
+	for р in проверенные:
+		if р["lesson"] and not frappe.db.exists("Course Lesson", р["lesson"]):
+			raise Отказ(УРОК_НЕ_НАЙДЕН, "Course Lesson не найден", id=р["lesson"])
+	return [
+		{
+			"block_key": р["key"],
+			"title": р["title"],
+			"description": р["description"],
+			"lesson": р["lesson"],
+			"rows": р["rows"],
+			"columns": json.dumps(р["columns"], ensure_ascii=False),
+		}
+		for р in проверенные
+	]
 
 
 def записать_схему(
 	course: str,
 	artifact: str,
 	title: str,
-	блоки: list,
-	layout: str,
-	canvas,
+	разделы: list,
 	purpose: str | None = None,
 	флаги: dict | None = None,
 ) -> dict:
 	"""Схема документа курса новой версией; неверная — отказ до записи.
 
-	`блоки` — словари или JSON-строки в форме `блок_наружу`. `purpose` не
-	назван — остаётся у прежней версии (learning-services#462). Пустая строка
-	его убирает. Прежнюю версию снимает с действия контроллер, из базы она не
-	уходит.
+	`purpose` не назван — остаётся у прежней версии (learning-services#462).
+	Пустая строка его убирает. Прежнюю версию снимает с действия контроллер,
+	из базы она не уходит.
 
 	`флаги` — флаги записи схемы: так публикация пишет её без проверки прав и
 	со своей пометкой (`releases.document`).
 	"""
-	строки, холст = проверить_схему(блоки, canvas)
+	строки = проверить_схему(разделы)
 	ключ = нормализовать_ключ(artifact)
 	if purpose is None:
 		purpose = frappe.db.get_value(
@@ -207,9 +151,7 @@ def записать_схему(
 			"is_active": 1,
 			"title": title,
 			"purpose": (purpose or "").strip() or None,
-			"layout": layout,
 			"blocks": строки,
-			"canvas": json.dumps(холст, ensure_ascii=False) if холст else None,
 		}
 	)
 	документ.flags.update(флаги or {})

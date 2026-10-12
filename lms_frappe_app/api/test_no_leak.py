@@ -32,6 +32,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
+	раздел,
+	схема_документа,
 )
 from lms_frappe_app.api import manager, public, review, student
 
@@ -159,15 +161,7 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		self.менеджер = создать_менеджера(f"leakmg-{суффикс}@example.com", self.организация)
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [{"block_key": "goal", "title": "Цель", "hint": "Одной фразой"}],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель")])
 
 	def проверить(self, что: str, ответ) -> str:
 		"""Ответ без полей эталона и внутренностей Frappe."""
@@ -191,7 +185,7 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 		self.проверить("forget", student.forget(key="role"))
 		self.проверить(
 			"update_artifact",
-			student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню"),
+			student.update_artifact(self.курс, "summary", "goal", fields={"goal": "Открыть кофейню"}),
 		)
 		self.проверить("artifact", student.artifact(self.курс))
 		self.проверить("artifact", student.artifact(self.курс, "summary"))
@@ -371,15 +365,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),
 		)
 		self.проверить("artifact", student.artifact(self.курс))
-		# У таблицы документа своё поле `owner` — блок, который её заводит
-		# (CONTRACT.md, «Зачем контракт именно такой»); остальное — полным списком.
-		проверить_ответ(
-			self,
-			student.artifact(self.курс, "notebook"),
-			"artifact",
-			запрещённые_тексты=ЗАКРЫТОЕ_РЕЛИЗА,
-			кроме=("owner",),
-		)
+		проверить_ответ(self, student.artifact(self.курс, "notebook"), "artifact", запрещённые_тексты=ЗАКРЫТОЕ_РЕЛИЗА)
 
 		frappe.set_user(self.менеджер)
 		self.проверить("org_report", manager.org_report())

@@ -18,6 +18,7 @@ from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
 	создать_куратора,
 	создать_ученика,
+	раздел,
 	схема_документа,
 	урок_релиза,
 )
@@ -223,19 +224,6 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 		self.assertNotIn(ТЕГ, html)
 		self.assertNotIn("<b and c>", html)
 
-	def test_подсказка_блока_хранится_как_есть(self):
-		_, первая = self._опубликовать_новый(self.куратор)
-		frappe.set_user("Administrator")
-		ответ = схема_документа(
-			первая["course"], "hints", "Подсказки", [{"key": "note", "title": "Заметка", "hint": f"Ждём {ТЕГ}"}]
-		)
-		self.assertTrue(ответ["ok"], ответ)
-
-		self.assertEqual(
-			frappe.db.get_value("Agent Artifact Block", {"parent": ответ["data"]["id"]}, "hint"),
-			f"Ждём {ТЕГ}",
-		)
-
 
 class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 	"""Названия домашки и документа — `title_field` своих доктайпов: Desk выводит
@@ -264,7 +252,7 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 			(отказ.exception.код, отказ.exception.подробности["where"]), ("title_forbidden_chars", "title")
 		)
 
-		ответ = схема_документа(курс, "notebook", "Тетрадь <b>", [{"key": "log", "title": "Журнал"}])
+		ответ = схема_документа(курс, "notebook", "Тетрадь <b>", [раздел("log", "Журнал")])
 		self.assertEqual(ответ["error"]["code"], "title_forbidden_chars", ответ)
 
 	def test_старое_название_с_угловыми_не_мешает_сохранению(self):

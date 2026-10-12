@@ -9,6 +9,10 @@ from lms_frappe_app.tests.sample_data import создать_курс, созда
 DOCTYPE = "Agent Course Artifact"
 
 
+def блок(ключ: str, название: str) -> dict:
+	return {"block_key": ключ, "title": название, "rows": "one", "columns": "[]"}
+
+
 class IntegrationTestAgentCourseArtifact(IntegrationTestCase):
 	"""Схема артефакта: версии по паре «курс + ключ», ключи блоков, доступ."""
 
@@ -24,8 +28,8 @@ class IntegrationTestAgentCourseArtifact(IntegrationTestCase):
 				"slug": slug,
 				"title": "Резюме проекта",
 				"blocks": [
-					{"block_key": "goal", "title": "Цель", "hint": "Одной фразой"},
-					{"block_key": "sponsor", "title": "Спонсор"},
+					блок("goal", "Цель"),
+					блок("sponsor", "Спонсор"),
 				],
 				**поля,
 			}
@@ -59,17 +63,16 @@ class IntegrationTestAgentCourseArtifact(IntegrationTestCase):
 			with self.assertRaises(frappe.ValidationError):
 				self.схема(
 					blocks=[
-						{"block_key": "goal", "title": "Цель"},
-						{"block_key": "GOAL", "title": "Цель ещё раз"},
+						блок("goal", "Цель"),
+						блок("GOAL", "Цель ещё раз"),
 					]
 				)
 
 		with self.subTest("ключи нормализуются"):
-			схема = self.схема(" Project_Summary ", blocks=[{"block_key": " Goal ", "title": "Цель"}])
+			схема = self.схема(" Project_Summary ", blocks=[блок(" Goal ", "Цель")])
 
 			self.assertEqual(схема.slug, "project_summary")
 			self.assertEqual(схема.blocks[0].block_key, "goal")
-			self.assertEqual(схема.blocks[0].span, 1)
 
 	def test_ученик_не_имеет_доступа_к_схеме(self):
 		"""Схема адресована автору; ученику блоки приходят через метод."""

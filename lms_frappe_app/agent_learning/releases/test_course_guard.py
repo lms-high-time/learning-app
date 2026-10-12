@@ -34,13 +34,14 @@ from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
 	создать_курс,
 	создать_урок,
+	раздел,
 	схема_документа,
 	урок_релиза,
 )
 
 ДОМАШКА = "Agent Lesson Homework"
 БЛОК_СХЕМЫ = "Agent Artifact Block"
-БЛОК = {"key": "notes", "title": "Заметки"}
+БЛОК = раздел("notes", "Заметки")
 
 
 def права_из_файла(тест, *doctypes: str) -> None:
@@ -542,6 +543,7 @@ class IntegrationTestДомашкаИДокументКурсаИзРелиза(
 				parentfield="blocks",
 				block_key="extra",
 				title="Лишний",
+				rows="one",
 			)
 
 		# Строку в схему курса без релиза тест вставляет — схема своя.

@@ -12,6 +12,8 @@ from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import admin, student
 from lms_frappe_app.tests.release_sample import релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
+	раздел,
+	схема_документа,
 	добавить_в_организацию,
 	зачислить,
 	создать_домашку,
@@ -32,20 +34,12 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		self.ученик = создать_ученика(f"reset-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок {суффикс}")
 		self.курс = зачислить(self.ученик, self.урок)
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме",
-				"blocks": [{"block_key": "goal", "title": "Цель", "lesson": self.урок}],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(self.курс, "summary", "Резюме", [раздел("goal", "Цель", lesson=self.урок)])
 
 		# Ученик позанимался: занятие, попытка квиза, документ, заметки, репорт.
 		frappe.set_user(self.ученик)
 		self.занятие = создать_занятие(self.ученик, self.урок)
-		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
+		student.update_artifact(self.курс, "summary", "goal", fields={"goal": "Открыть кофейню"})
 		student.remember("observation", "pace", "Любит примеры", session=self.занятие)
 		student.remember("fact", "role", "Владелец кофейни")
 		frappe.set_user("Administrator")

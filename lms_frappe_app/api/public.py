@@ -19,7 +19,7 @@ from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
-from lms_frappe_app.agent_learning.artifacts.document import _блок_заполнен, _заполненность, _содержимое_курса
+from lms_frappe_app.agent_learning.artifacts.document import _данные_курса, _заполненность, кратко
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
@@ -59,9 +59,8 @@ def course_map(course: str, space: str | None = None) -> dict:
 
 	`documents` — документы курса, которые ученик собирает по ходу, и у урока
 	`blocks` — какие их блоки собирают на нём (learning-services#340). Видны
-	всем: что курс оставит после себя, — его обещание. Зачисленному — ещё
-	заполненность документа и блока. Подсказки автора наружу не выходят: они
-	адресованы агенту.
+	всем: что курс оставит после себя, — его обещание; у блока — описание
+	для ученика. Зачисленному — ещё заполненность документа и блока.
 	"""
 	зачислен = _зачислен(course)
 	if not зачислен and not frappe.db.get_value("LMS Course", course, "published"):
@@ -302,37 +301,25 @@ def _документы_курса(
 ) -> tuple[list[dict], dict[str, list[dict]]]:
 	"""Документы курса и их блоки по урокам; ученику — с заполненностью в пространстве.
 
-	Один проход на курс: схемы документов и, если есть ученик, его содержимое
+	Один проход на курс: схемы документов и, если есть ученик, его данные
 	по всем документам сразу — так же, как перечень у `artifact`. `space` —
 	чей документ показывать; без него — по правилу `spaces.пространство_курса`.
 	"""
 	схемы = _схемы_курса(course)
 	if not схемы:
 		return [], {}
-	содержимое, вложения, данные = (
-		_содержимое_курса(ученик, course, пространства.пространство_курса(ученик, course, space))
-		if ученик
-		else ({}, {}, {})
+	данные = (
+		_данные_курса(ученик, course, пространства.пространство_курса(ученик, course, space)) if ученик else {}
 	)
 	документы: list[dict] = []
 	по_урокам: dict[str, list[dict]] = {}
 	for схема in схемы:
 		документ = {"artifact": схема.slug, "title": схема.title}
-		свои = (содержимое.get(схема.slug, {}), вложения.get(схема.slug, {}), данные.get(схема.slug))
+		свои = (данные.get(схема.slug) or data.данные(None)) if ученик else None
 		if ученик:
-			документ.update(_заполненность(схема, *свои))
+			документ.update(_заполненность(схема, свои))
 		документы.append(документ)
 		for блок in схема.blocks:
-			if not блок.lesson:
-				continue
-			описание = {"artifact": схема.slug, "key": блок.block_key, "title": блок.title}
-			if ученик:
-				описание["filled"] = _блок_заполнен(
-					схема,
-					блок,
-					свои[0],
-					свои[1],
-					свои[2] or data.данные(None),
-				)
-			по_урокам.setdefault(блок.lesson, []).append(описание)
+			if блок.lesson:
+				по_урокам.setdefault(блок.lesson, []).append(кратко(схема, блок, свои))
 	return документы, по_урокам

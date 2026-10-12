@@ -87,7 +87,6 @@ class TestПроверкиРелиза(unittest.TestCase):
 			),
 			("вопрос без ответа", lambda р: р["lessons"][0]["quiz"].update(answers={}), "quiz_correct"),
 			("ключ раздела не ложится на документ", lambda р: _раздел_с_ключом(р, "Log-1"), "document_key"),
-			("раздел с ключом вида страницы", lambda р: _раздел_с_ключом(р, "table"), "document_key"),
 			(
 				"поле раздела one совпадает с колонкой",
 				lambda р: р["document"]["sections"][1]["columns"][0].update(key="topic"),

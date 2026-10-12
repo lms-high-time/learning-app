@@ -125,7 +125,7 @@ def _документ_по_участникам(
 	считаются: они не организации (learning-services#341).
 
 	Считаются блоки действующих схем: убранный из схемы блок не засчитывается,
-	даже если текст в базе остался. Два запроса на курс, не на участника.
+	даже если данные в базе остались. Запросы — на курс, а не на участника.
 	`Why:` урок засчитывает квиз, и без этой колонки руководитель не отличит
 	пройденный курс с пустым документом от собранного (learning-services#296).
 	"""
@@ -134,39 +134,17 @@ def _документ_по_участникам(
 	if not всего:
 		return 0, {}
 
-	экземпляры = {
-		запись.name: запись
-		for запись in frappe.get_all(
-			"Agent Student Artifact",
-			filters={"course": курс, "student": ("in", участники), "organization": организация},
-			fields=["name", "student", "artifact", "data"],
-		)
-	}
-	if not экземпляры:
-		return всего, {}
-
-	содержимое: dict[str, dict[str, str]] = {}
-	вложения: dict[str, dict[str, dict]] = {}
-	for строка in frappe.get_all(
-		"Agent Artifact Content",
-		filters={"parent": ("in", list(экземпляры)), "parenttype": "Agent Student Artifact"},
-		fields=["parent", "block_key", "content", "file", "url"],
-	):
-		содержимое.setdefault(строка.parent, {})[строка.block_key] = строка.content or ""
-		# Заполнен блок с текстом, файлом или ссылкой (#315); сам файл отчёт
-		# не показывает — только то, что блок не пуст.
-		if строка.file or строка.url:
-			вложения.setdefault(строка.parent, {})[строка.block_key] = {"file": строка.file, "url": строка.url}
-
 	заполнено: dict[str, int] = {}
-	for имя, экземпляр in экземпляры.items():
+	for экземпляр in frappe.get_all(
+		"Agent Student Artifact",
+		filters={"course": курс, "student": ("in", участники), "organization": организация},
+		fields=["student", "artifact", "data"],
+	):
 		схема = схемы.get(экземпляр.artifact)
 		if not схема:
 			continue
-		# Правило то же, что у ученика: блок с таблицей — по её строкам (#330).
-		сколько = _заполненность(
-			схема, содержимое.get(имя, {}), вложения.get(имя, {}), data.данные(экземпляр.data)
-		)["blocks_filled"]
+		# Правило то же, что у ученика (`fill.заполнен`).
+		сколько = _заполненность(схема, data.данные(экземпляр.data))["blocks_filled"]
 		заполнено[экземпляр.student] = заполнено.get(экземпляр.student, 0) + сколько
 	return всего, заполнено
 

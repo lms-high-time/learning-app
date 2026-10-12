@@ -1,50 +1,38 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Документ наружу: таблицы для страницы и агента, markdown и книга Excel.
-"""
+"""Документ наружу: markdown раздела и документа, книга Excel."""
 
 from __future__ import annotations
 
-from lms_frappe_app.agent_learning.artifacts.data import вычисленные, поля_документа
-from lms_frappe_app.agent_learning.artifacts.formulas import _лексемы, _число
-from lms_frappe_app.agent_learning.artifacts.schema import поля_схемы, таблицы_схемы
-from lms_frappe_app.agent_learning.artifacts.values import пусто
+import re
 
-#: Чем markdown документа отмечает пустой блок.
-ПУСТОЙ_БЛОК = "_Не заполнено._"
+from lms_frappe_app.agent_learning.artifacts.data import поля, строки
+from lms_frappe_app.agent_learning.artifacts.schema import МНОГО
 
-
-def таблицы_документа(блоки: list, д: dict) -> dict[str, dict]:
-	"""Таблицы для страницы и агента: колонки всех блоков, строки с формулами."""
-	итог = {}
-	for имя, таблица in таблицы_схемы(блоки).items():
-		ряды = вычисленные(таблица, д, блоки)
-		итог[имя] = {
-			"name": имя,
-			"title": таблица["title"],
-			"owner": таблица["owner"],
-			"prefix": таблица["prefix"],
-			"columns": таблица["columns"],
-			"views": таблица["views"],
-			"rows": ряды,
-			# Строки — нетронутая заготовка автора: страница зовёт такую таблицу
-			# «заготовкой», а не «готово» (learning-services#342).
-			"preset": bool(таблица["rows"]) and имя not in д["tables"],
-			"markdown": markdown_таблицы(таблица["columns"], ряды),
-		}
-	return итог
+#: Чем markdown документа отмечает пустой раздел.
+ПУСТОЙ_РАЗДЕЛ = "_Не заполнено._"
+#: Лист книги с полями разделов `one`.
+ЛИСТ_ПОЛЕЙ = "Поля"
+#: Знаки, которых Excel не принимает в имени листа, и длина имени.
+НЕЛЬЗЯ_В_ЛИСТЕ = re.compile(r"[\[\]:*?/\\]")
+ДЛИНА_ЛИСТА = 31
 
 
-def ячейка_текстом(колонка: dict, значение) -> str:
-	if значение is None or значение == "":
-		return ""
-	if колонка["type"] == "check" or isinstance(значение, bool):
-		return "да" if значение else ""
-	return str(_число(значение))
+def markdown(раздел: dict, д: dict) -> str:
+	"""Раздел текстом: у `many` — таблица с колонкой ID, у `one` — поля
+	строками «Название: значение»; пустой раздел — пустая строка."""
+	if раздел["rows"] == МНОГО:
+		return _таблица(раздел["columns"], строки(раздел, д))
+	значения = поля(раздел, д)
+	return "\n".join(
+		f"- {к['title']}: " + значения[к["key"]].replace("\n", "\n  ")
+		for к in раздел["columns"]
+		if к["key"] in значения
+	)
 
 
-def markdown_таблицы(колонки: list[dict], ряды: list[dict]) -> str:
+def _таблица(колонки: list[dict], ряды: list[dict]) -> str:
 	if not ряды:
 		return ""
 
@@ -52,38 +40,31 @@ def markdown_таблицы(колонки: list[dict], ряды: list[dict]) ->
 		return текст.replace("|", "\\|").replace("\n", " ")
 
 	шапка = ["ID", *(к["title"] for к in колонки)]
-	линии = [
-		"| " + " | ".join(клетка(ш) for ш in шапка) + " |",
-		"|" + " --- |" * len(шапка),
-	]
+	линии = ["| " + " | ".join(клетка(ш) for ш in шапка) + " |", "|" + " --- |" * len(шапка)]
 	for р in ряды:
 		линии.append(
-			"| "
-			+ " | ".join([р["id"], *(клетка(ячейка_текстом(к, р.get(к["key"]))) for к in колонки)])
-			+ " |"
+			"| " + " | ".join(клетка(р.get(к, "")) for к in ["id", *(к["key"] for к in колонки)]) + " |"
 		)
 	return "\n".join(линии)
 
 
-def markdown_полей(описания: list[dict], значения: dict) -> str:
-	"""Поля строками «название: значение»; `значения` — `поля_документа`,
-	с посчитанными формулами."""
-	линии = []
-	for п in описания:
-		значение = значения.get(п["key"])
-		if not пусто(значение):
-			линии.append(f"- {п['title']}: {ячейка_текстом(п, значение)}")
-	return "\n".join(линии)
+def собрать_markdown(название: str, разделы: list[dict], д: dict) -> str:
+	"""Документ одним файлом: заголовок и разделы в порядке схемы."""
+	части = [f"# {название}"]
+	for раздел in разделы:
+		части.append(f"## {раздел['title']}")
+		части.append(markdown(раздел, д) or ПУСТОЙ_РАЗДЕЛ)
+	return "\n\n".join(части) + "\n"
 
 
-def книга_xlsx(название: str, блоки: list, д: dict) -> bytes:
-	"""Документ книгой Excel: лист «Шапка» с полями и лист на таблицу.
+def книга_xlsx(разделы: list[dict], д: dict) -> bytes:
+	"""Документ книгой Excel: лист на раздел `many` и лист «Поля» с полями
+	разделов `one` — на месте первого из них. Пустые клетки и поля — тоже в
+	книге: её продолжают вести после курса.
 
-	Формулы колонок уходят формулами Excel — реестр продолжают вести с
-	командой, и ранг считается сам. Формула с and/or/not уходит значением:
-	у Excel другой синтаксис логики, и переводить его ради редкого случая
-	незачем. Формула поля в шапке — значением: поля правят в документе, а не
-	в книге.
+	Текст, начатый с `=`, остаётся текстом. `Why:` иначе Excel счёл бы его
+	формулой и посчитал при открытии — текст ученика исполнялся бы у того,
+	кому он передал книгу.
 	"""
 	import io
 
@@ -92,107 +73,60 @@ def книга_xlsx(название: str, блоки: list, д: dict) -> bytes:
 	from openpyxl.utils import get_column_letter
 
 	книга = Workbook()
-	шапка = книга.active
-	шапка.title = "Шапка"
-	шапка.append([название])
-	шапка["A1"].font = Font(bold=True, size=14)
-	адреса_полей: dict[str, str] = {}
-	значения = поля_документа(блоки, д)
-	for имя, поле in поля_схемы(блоки).items():
-		шапка.append([поле["title"], значения[имя]])
-		адреса_полей[имя] = f"'Шапка'!$B${шапка.max_row}"
-	шапка.column_dimensions["A"].width = 40
-	шапка.column_dimensions["B"].width = 30
-
+	книга.remove(книга.active)
 	заливка = PatternFill("solid", fgColor="EEF2F6")
-	for имя, таблица in таблицы_схемы(блоки).items():
-		лист = книга.create_sheet((таблица["title"] or имя)[:31])
-		колонки = таблица["columns"]
-		буквы = {"id": "A"}
-		for номер, колонка in enumerate(колонки, start=2):
-			буквы[колонка["key"]] = get_column_letter(номер)
-		лист.append(["ID", *(к["title"] for к in колонки)])
+	занятые: set[str] = set()
+	лист_полей = None
+
+	def шапка(лист, названия: list[str], ширины: list[int]) -> None:
+		лист.append(названия)
 		for клетка in лист[1]:
 			клетка.font = Font(bold=True)
 			клетка.fill = заливка
 			клетка.alignment = Alignment(wrap_text=True, vertical="top")
-		for номер_строки, р in enumerate(вычисленные(таблица, д, блоки), start=2):
-			ряд = [р["id"]]
-			for колонка in колонки:
-				if колонка["type"] == "formula":
-					ряд.append(
-						_формула_excel(колонка["formula"], буквы, адреса_полей, номер_строки)
-						or р.get(колонка["key"])
-					)
-				elif колонка["type"] == "check":
-					ряд.append(bool(р.get(колонка["key"])))
-				else:
-					ряд.append(р.get(колонка["key"]))
-			лист.append(ряд)
-		лист.freeze_panes = "B2"
-		for номер, колонка in enumerate(колонки, start=2):
-			широкая = колонка["type"] in ("text", "longtext")
-			лист.column_dimensions[get_column_letter(номер)].width = 36 if широкая else 14
-		for ряд in лист.iter_rows(min_row=2):
-			for клетка in ряд:
-				клетка.alignment = Alignment(wrap_text=True, vertical="top")
+		for номер, ширина in enumerate(ширины, start=1):
+			лист.column_dimensions[get_column_letter(номер)].width = ширина
+		лист.freeze_panes = "A2"
+
+	def строка(лист, значения: list) -> None:
+		лист.append(значения)
+		for клетка in лист[лист.max_row]:
+			клетка.alignment = Alignment(wrap_text=True, vertical="top")
+			if isinstance(клетка.value, str) and клетка.value.startswith("="):
+				клетка.data_type = "s"
+
+	for раздел in разделы:
+		if раздел["rows"] == МНОГО:
+			лист = книга.create_sheet(_имя_листа(раздел["title"], занятые))
+			шапка(
+				лист, ["ID", *(к["title"] for к in раздел["columns"])], [8, *(36 for _ in раздел["columns"])]
+			)
+			for р in строки(раздел, д):
+				строка(лист, [р["id"], *(р.get(к["key"]) for к in раздел["columns"])])
+			continue
+		if лист_полей is None:
+			лист_полей = книга.create_sheet(_имя_листа(ЛИСТ_ПОЛЕЙ, занятые))
+			шапка(лист_полей, ["Раздел", "Поле", "Значение"], [30, 36, 60])
+		значения = поля(раздел, д)
+		for к in раздел["columns"]:
+			строка(лист_полей, [раздел["title"], к["title"], значения.get(к["key"])])
+	if not книга.worksheets:
+		книга.create_sheet(ЛИСТ_ПОЛЕЙ)
 
 	поток = io.BytesIO()
 	книга.save(поток)
 	return поток.getvalue()
 
 
-def _формула_excel(формула: str, буквы: dict, поля: dict, строка: int) -> str | None:
-	части = []
-	for вид, значение in _лексемы(формула):
-		if вид == "op" and значение in ("and", "or", "not"):
-			return None
-		if вид == "name":
-			if значение in буквы:
-				части.append(f"{буквы[значение]}{строка}")
-			elif значение in поля:
-				части.append(поля[значение])
-			else:
-				return None
-		elif значение == "==":
-			части.append("=")
-		elif значение == "!=":
-			части.append("<>")
-		else:
-			части.append(значение)
-	return "=" + "".join(части)
-
-
-def собрать_markdown(документ: dict) -> str:
-	"""Документ одним файлом: заголовок и блоки в порядке схемы.
-
-	Таблица документа выводится у блока, который её заводит, со всеми
-	колонками; у остальных её блоков — поля и заметка. Файл блока сюда не
-	вкладывается — только его имя и срез: markdown остаётся текстом.
-	"""
-	таблицы = документ.get("tables") or {}
-	поля = документ.get("fields") or {}
-	части = [f"# {документ['title']}"]
-	for блок in документ["blocks"]:
-		части.append(f"## {блок['title']}")
-		куски = []
-		значения = [
-			f"- {поле['title']}: {ячейка_текстом(поле, поля.get(поле['key']))}"
-			for поле in блок.get("fields") or []
-			if not пусто(поля.get(поле["key"]))
-		]
-		if значения:
-			куски.append("\n".join(значения))
-		таблица = таблицы.get(блок.get("table") or "")
-		if таблица and таблица["owner"] == блок["key"] and таблица["markdown"]:
-			куски.append(таблица["markdown"])
-		if блок.get("url"):
-			куски.append(f"Ссылка: {блок['url']}")
-		if блок.get("file"):
-			куски.append(f"Файл: {блок['file']['name']}")
-			if блок.get("preview"):
-				куски.append(блок["preview"])
-		if (блок["content"] or "").strip():
-			куски.append(блок["content"].strip())
-		части.append("\n\n".join(куски) or ПУСТОЙ_БЛОК)
-	return "\n\n".join(части) + "\n"
+def _имя_листа(название: str, занятые: set[str]) -> str:
+	"""Имя листа Excel из названия раздела: без запрещённых знаков, не длиннее
+	31 знака, не повторяется в книге (без учёта регистра, как сравнивает Excel)."""
+	основа = НЕЛЬЗЯ_В_ЛИСТЕ.sub(" ", название or "").strip().strip("'") or "Раздел"
+	имя = основа[:ДЛИНА_ЛИСТА]
+	номер = 1
+	while имя.lower() in занятые:
+		номер += 1
+		хвост = f" ({номер})"
+		имя = основа[: ДЛИНА_ЛИСТА - len(хвост)] + хвост
+	занятые.add(имя.lower())
+	return имя

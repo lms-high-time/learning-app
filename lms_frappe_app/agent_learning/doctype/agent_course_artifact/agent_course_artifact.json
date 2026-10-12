@@ -12,8 +12,6 @@
   "slug",
   "title",
   "purpose",
-  "layout",
-  "canvas",
   "version",
   "is_active",
   "sb_blocks",
@@ -29,7 +27,7 @@
    "reqd": 1
   },
   {
-   "description": "Ключ документа в курсе: project_summary, lean_canvas. Действующая схема одна на пару «курс + ключ»",
+   "description": "Ключ документа в курсе: agreements_log. Действующая схема одна на пару «курс + ключ»",
    "fieldname": "slug",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -53,22 +51,6 @@
    "print_hide": 1
   },
   {
-   "default": "sections",
-   "description": "sections — блоки столбцом, canvas — сеткой по ширине блоков",
-   "fieldname": "layout",
-   "fieldtype": "Select",
-   "label": "Раскладка",
-   "options": "sections\ncanvas"
-  },
-  {
-   "description": "Сетка холста из ключей блоков, подписи ячеек, набросок и сводка (learning-services#351)",
-   "fieldname": "canvas",
-   "fieldtype": "JSON",
-   "label": "Холст",
-   "print_hide": 1,
-   "report_hide": 1
-  },
-  {
    "description": "Проставляется автоматически: следующий номер для этого курса и ключа",
    "fieldname": "version",
    "fieldtype": "Int",
@@ -89,7 +71,7 @@
    "label": "Блоки"
   },
   {
-   "description": "В том порядке, в каком документ читается",
+   "description": "Разделы документа в порядке релиза",
    "fieldname": "blocks",
    "fieldtype": "Table",
    "label": "Блоки",
@@ -99,7 +81,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 23:00:00.000000",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Artifact",

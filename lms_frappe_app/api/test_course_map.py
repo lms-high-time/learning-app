@@ -1,8 +1,6 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-import json
-
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -10,9 +8,11 @@ from lms_frappe_app.api import public
 from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН
 from lms_frappe_app.tests.sample_data import (
 	привязать_урок,
+	раздел,
 	зачислить,
 	создать_ученика,
 	создать_урок,
+	схема_документа,
 )
 
 
@@ -119,18 +119,12 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		self.курс = frappe.db.get_value("Course Chapter", глава, "course")
 		frappe.db.set_value("LMS Course", self.курс, "published", 1)
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [
-					{"block_key": "goal", "title": "Цель", "hint": "Секрет для агента", "lesson": self.урок},
-					{"block_key": "sponsor", "title": "Спонсор"},
-				],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(
+			self.курс,
+			"summary",
+			"Резюме проекта",
+			[раздел("goal", "Цель", lesson=self.урок, description="Одной фразой"), раздел("sponsor", "Спонсор")],
+		)
 
 	def карта(self) -> dict:
 		return public.course_map(course=self.курс)["data"]
@@ -143,9 +137,8 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		self.assertEqual(карта["documents"], [{"artifact": "summary", "title": "Резюме проекта"}])
 		self.assertEqual(
 			карта["chapters"][0]["lessons"][0]["blocks"],
-			[{"artifact": "summary", "key": "goal", "title": "Цель"}],
+			[{"artifact": "summary", "key": "goal", "title": "Цель", "description": "Одной фразой"}],
 		)
-		self.assertNotIn("Секрет для агента", json.dumps(карта, ensure_ascii=False))
 
 		frappe.db.delete("Agent Course Artifact", {"course": self.курс})
 		карта = self.карта()
@@ -159,7 +152,7 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		frappe.set_user(ученик)
 		from lms_frappe_app.api import student
 
-		student.update_artifact(self.курс, "summary", "goal", "Открыть седьмую кофейню")
+		student.update_artifact(self.курс, "summary", "goal", fields={"goal": "Открыть седьмую кофейню"})
 		карта = self.карта()
 
 		документ = карта["documents"][0]
