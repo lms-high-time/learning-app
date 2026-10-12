@@ -45,10 +45,12 @@ class IntegrationTestAgentCourseArtifact(IntegrationTestCase):
 
 		вторая = self.схема("project_summary")
 		резюме.reload()
+		карта.reload()
 		with self.subTest("новая версия того же документа вытесняет прежнюю"):
 			self.assertEqual(вторая.version, 2)
 			self.assertTrue(вторая.is_active)
 			self.assertFalse(резюме.is_active)
+			self.assertTrue(карта.is_active, "новая версия другого документа не снимает карту с действия")
 
 	def test_ключи_блоков(self):
 		"""Повторяющийся ключ блока отклоняется — до первой схемы курса; ключи

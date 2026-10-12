@@ -225,7 +225,7 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		случаи = {
 			"повторяет после взаимоблокировки": (
 				[frappe.QueryDeadlockError("1020"), None],
-				{"выдать": 2, "откат": 1},
+				{"выдать": 2, "откат": 1, "лог": 0},
 			),
 			"без успеха пишет в лог": (frappe.QueryDeadlockError("1020"), {"выдать": 3, "лог": 1}),
 		}

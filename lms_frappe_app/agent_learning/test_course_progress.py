@@ -194,21 +194,24 @@ class IntegrationTestПрогрессКурса(IntegrationTestCase):
 			запись.status = "Incomplete"
 			запись.save(ignore_permissions=True)
 
+		отметки = {}
 		for что, снять in (("удалена", удалить), ("снят статус", сменить_статус)):
-			self.новый_ученик()
-			for ключ in ("l-1", "l-2", "l-3"):
-				self.пройти(ключ)
-			отметка = frappe.db.get_value(
-				"LMS Course Progress", {"member": self.ученик, "lesson": self.уроки["l-3"]}
-			)
-
-			снять(отметка)
-
 			with self.subTest(что):
+				self.новый_ученик()
+				for ключ in ("l-1", "l-2", "l-3"):
+					self.пройти(ключ)
+				отметка = frappe.db.get_value(
+					"LMS Course Progress", {"member": self.ученик, "lesson": self.уроки["l-3"]}
+				)
+				отметки[что] = (self.ученик, отметка)
+
+				снять(отметка)
+
 				self.assertAlmostEqual(self.прогресс(), 66.667)
 				self.assertFalse(frappe.flags.get(course_progress.СНИМАЕТСЯ))
 
-		# Ученик и отметка — последнего случая: статус снят, отметка на месте.
+		# Ученик и отметка — случая «снят статус»: статус снят, отметка на месте.
+		self.ученик, отметка = отметки["снят статус"]
 		quiz.отметить_урок_пройденным(
 			frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, self.уроки["l-3"]))
 		)
