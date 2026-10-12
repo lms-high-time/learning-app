@@ -256,12 +256,14 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 	def test_задание_проверяет_правило_срока(self):
 		"""Отказ задания не заводит: случаи идут по очереди на одном уроке, как и шли.
 
-		Срок — одной строкой проводки: правило целиком проверяет
+		Срок — строкой проводки и регрессией learning-services#452 (несуществующая
+		дата доходила до MariaDB и давала 500): правило целиком проверяет
 		`doctype/agent_lesson_homework/test_agent_lesson_homework.py`."""
 		from lms_frappe_app.agent_learning.errors import Отказ
 
 		случаи = [
 			("относительный без дней", {"due_mode": "relative"}, "invalid_due"),
+			("#452 абсолютный: 2030-02-30", {"due_mode": "absolute", "due_date": "2030-02-30"}, "invalid_due"),
 			("ответ голосом", {"answer_mode": "audio"}, "invalid_answer_mode"),
 		]
 		for что, правило, код in случаи:

@@ -9,7 +9,9 @@
 
 import base64
 import io
+from unittest.mock import patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from lms_frappe_app.agent_learning.artifacts import codes, files
@@ -165,7 +167,7 @@ class TestСрезТаблицы(UnitTestCase):
 			),
 			("csv через запятую", b"a,b\n1,2\n", "csv", 20, "| a | b |\n| --- | --- |\n| 1 | 2 |"),
 			("csv через табуляцию", b"a\tb\n1\t2\n", "csv", 20, "| a | b |\n| --- | --- |\n| 1 | 2 |"),
-			("BOM в начале csv", "﻿a;b\n1;2\n".encode(), "csv", 20, "| a | b |\n| --- | --- |\n| 1 | 2 |"),
+			("BOM в начале csv", "\ufeffa;b\n1;2\n".encode(), "csv", 20, "| a | b |\n| --- | --- |\n| 1 | 2 |"),
 			("шапка и не больше строк предела", b"a;b\n1;2\n3;4\n5;6\n", "csv", 1, "| a | b |\n| --- | --- |\n| 1 | 2 |"),
 			("пустые строки выпадают", b"a;b\n;\n1;2\n", "csv", 20, "| a | b |\n| --- | --- |\n| 1 | 2 |"),
 			("пустой файл", b"", "csv", 20, None),
@@ -232,6 +234,26 @@ class TestСрезТаблицы(UnitTestCase):
 				self.assertEqual(files.срез_таблицы(данные, тип, строк), ожидание)
 
 	def test_нечитаемый_xlsx_исключение(self):
-		"""Исключение ловит `срез` и отдаёт `None` с записью в лог."""
+		"""Нечитаемый файл — исключение разборщика, а не `None`."""
 		with self.assertRaises(Exception):
 			files.срез_таблицы(b"not a zip", "xlsx", 20)
+
+
+class TestСрез(UnitTestCase):
+	"""Без базы: обёртка `срез` — настройка числа строк и лог нечитаемого файла."""
+
+	def test_обёртка_среза(self):
+		тело = b"a;b\n1;2\n3;4\n5;6\n"
+		случаи = (
+			("число строк — из настройки", тело, "csv", ("| a | b |\n| --- | --- |\n| 1 | 2 |", 1, 0)),
+			("нечитаемый xlsx — None и запись в лог", b"not a zip", "xlsx", (None, 1, 1)),
+			("не таблица — настройка не читается", тело, "pdf", (None, 0, 0)),
+		)
+		for что, данные, тип, ожидание in случаи:
+			with self.subTest(что):
+				with (
+					patch.object(files, "настройка", return_value=1) as настройка,
+					patch.object(frappe, "log_error") as лог,
+				):
+					срез = files.срез(данные, тип)
+				self.assertEqual((срез, настройка.call_count, лог.call_count), ожидание)

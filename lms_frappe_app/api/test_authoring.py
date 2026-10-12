@@ -12,6 +12,8 @@ from functools import cached_property
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
+from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	привязать_главу,
@@ -19,8 +21,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
 	создать_ученика,
 )
-from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.api import authoring
 
 
 class IntegrationTestAuthoring(IntegrationTestCase):

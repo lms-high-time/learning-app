@@ -462,6 +462,9 @@ class TestРазборИПроверкаРелиза(UnitTestCase):
 			лишние[f"x{номер}"] = 1
 		вопрос = пример_релиза("unit")["lessons"][0]["quiz"]["questions"][0]["key"]
 		неверный_ответ = _релиз(**{f"lessons.0.quiz.answers.{вопрос}.correct": "V9"})
+		схема_и_правила = _релиз(
+			**{f"lessons.0.quiz.answers.{вопрос}.correct": "V9", "lessons.0.body": "материал"}
+		)
 		случаи = (
 			(
 				"другой формат",
@@ -477,6 +480,11 @@ class TestРазборИПроверкаРелиза(UnitTestCase):
 			(
 				"поле вне схемы",
 				_релиз(**{"lessons.0.body": "материал"}),
+				(service.РЕЛИЗ_НЕВЕРЕН, {"paths": ["$.lessons[0].body"], "total": 1}),
+			),
+			(
+				"схема раньше правил сервера",
+				схема_и_правила,
 				(service.РЕЛИЗ_НЕВЕРЕН, {"paths": ["$.lessons[0].body"], "total": 1}),
 			),
 			(
