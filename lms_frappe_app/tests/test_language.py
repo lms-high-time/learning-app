@@ -1,57 +1,32 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Язык платформы.
+"""Язык платформы на новом сайте.
 
 `Why:` интерфейс LMS своего переключателя не показывает — язык он спрашивает
 у сервера, а настройка живёт в базе и не переживает пересоздания сайта.
-
-Ставится патчем, а не хуком миграции. Первая попытка была хуком с проверкой
-«поле пусто»: на стенде оно оказалось не пустым — Frappe при установке пишет
-туда `en`, — и язык не менялся три выкатки подряд, молча.
+Ставится при установке, а не хуком миграции: на действующем сайте язык —
+выбор администратора (#540).
 """
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.translate import get_all_languages
 
-from lms_frappe_app.patches.v0_1.russian_language import ЯЗЫК, execute
+from lms_frappe_app.install import ЯЗЫК, обеспечить_русский_язык
 
 
 class IntegrationTestLanguage(IntegrationTestCase):
-	def setUp(self):
-		self.прежний = frappe.db.get_single_value("System Settings", "language")
-		self.addCleanup(self._вернуть)
-
-	def _вернуть(self):
-		frappe.db.set_single_value("System Settings", "language", self.прежний or "")
-		frappe.clear_cache()
-
-	def _задать(self, значение: str):
-		frappe.db.set_single_value("System Settings", "language", значение)
-		frappe.clear_document_cache("System Settings", "System Settings")
-
-	def test_патч_ставит_русский_поверх_умолчания(self):
-		"""Frappe пишет в это поле `en` при установке — именно это и меняем."""
-		for прежний in ("en", ""):
-			with self.subTest(прежний=прежний):
-				self._задать(прежний)
-
-				execute()
-
-				self.assertEqual(
-					frappe.db.get_single_value("System Settings", "language"), ЯЗЫК
-				)
-
-	def test_русский_в_списке_доступных(self):
-		"""Именно этот список видит селектор языка и подбор по заголовку.
-
-		`Why:` Frappe заводит русский выключенным, и тогда языка нет ни в
-		селекторе профиля, ни в подборе по `Accept-Language`."""
-		from frappe.translate import get_all_languages
-		from lms_frappe_app.patches.v0_1.enable_russian_language import execute as включить
-
+	def test_установка_ставит_русский_и_включает_его(self):
+		"""Так Frappe оставляет язык после своей установки: `en`, `ru` выключен."""
+		прежний = frappe.db.get_single_value("System Settings", "language")
+		self.addCleanup(frappe.clear_cache)
+		self.addCleanup(frappe.db.set_single_value, "System Settings", "language", прежний or "")
+		frappe.db.set_single_value("System Settings", "language", "en")
 		frappe.db.set_value("Language", ЯЗЫК, "enabled", 0)
-		включить()
 
+		обеспечить_русский_язык()
+
+		self.assertEqual(frappe.db.get_single_value("System Settings", "language"), ЯЗЫК)
 		self.assertTrue(frappe.db.get_value("Language", ЯЗЫК, "enabled"))
 		self.assertIn(ЯЗЫК, get_all_languages())

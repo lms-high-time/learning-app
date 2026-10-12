@@ -407,6 +407,29 @@ def обеспечить_клиента_веб_чата() -> None:
 	)
 
 
+ЯЗЫК = "ru"
+
+
+def обеспечить_русский_язык() -> None:
+	"""Русский — язык платформы и включён в списке языков.
+
+	Только при установке сайта. `Why:` Frappe при установке пишет в системные
+	настройки `en`, а `ru` заводит выключенным (`frappe/geo/languages.csv`):
+	без этого шага новый сайт открывается на английском, а русского нет ни в
+	селекторе профиля, ни в подборе по `Accept-Language` (#540). Не на каждую
+	миграцию: на действующем сайте язык — выбор администратора.
+	"""
+	if not frappe.db.exists("Language", ЯЗЫК):
+		return
+	frappe.db.set_value("Language", ЯЗЫК, "enabled", 1)
+	frappe.db.set_single_value("System Settings", "language", ЯЗЫК)
+	frappe.clear_document_cache("System Settings", "System Settings")
+	# Списки языков и словарь кэшируются: без сброса остались бы прежними.
+	frappe.client_cache.delete_value("languages")
+	frappe.cache.delete_value("languages_with_name")
+	frappe.cache.delete_key("merged_translations")
+
+
 def обеспечить_значения_настроек() -> None:
 	"""Незаполненным полям `Agent Learning Settings` — значения по умолчанию.
 
@@ -454,6 +477,7 @@ def after_install() -> None:
 	обеспечить_вход_через_google()
 	обеспечить_клиента_веб_чата()
 	обеспечить_значения_настроек()
+	обеспечить_русский_язык()
 
 
 def after_sync() -> None:
