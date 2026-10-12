@@ -111,13 +111,28 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		реестр = student.artifact(self.курс, "risk_register")["data"]["tables"]["register"]
 		self.assertNotIn("probability", реестр["rows"][0])
 
-	def test_перечень_говорит_когда_документ_менялся(self):
-		"""`modified` в перечне — `null`, пока документ пуст, затем время записи (#462)."""
+	def test_запись_двигает_время_и_версию_и_шлёт_событие(self):
+		"""`modified` в перечне — `null`, пока документ пуст, затем время записи (#462).
+		Сколько раз документ сохранялся и когда — без самой истории (#342).
+		Страница перечитывает документ, когда в него пишет агент: событие — только
+		ученику (#348)."""
+		from unittest.mock import patch
+
 		перечень = student.artifact(self.курс)["data"]["artifacts"]
 		self.assertIsNone(перечень[0]["modified"])
 		self.assertIsNone(перечень[0]["purpose"], "автор не написал — null, а не пустая строка")
+		пустой = student.artifact(self.курс, "risk_register")["data"]
+		self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
 
-		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
+		with patch("frappe.publish_realtime") as publish:
+			self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
+
+		события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
+		self.assertEqual(len(события), 1)
+		self.assertEqual(события[0].kwargs["user"], self.ученик)
+		self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
+		self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
+		self.assertTrue(события[0].kwargs["after_commit"])
 
 		перечень = student.artifact(self.курс)["data"]["artifacts"]
 		self.assertIsNotNone(перечень[0]["modified"])
@@ -131,6 +146,15 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 			next(к for к in документы if к["id"] == self.курс)["documents"][0]["modified"],
 			перечень[0]["modified"],
 		)
+
+		self.записать("assessment", fields={"threshold": 12})
+		документ = student.artifact(self.курс, "risk_register")["data"]
+
+		self.assertTrue(документ["modified"])
+		# Журнал `Version` Frappe пишет после коммита, а тест идёт в
+		# транзакции без него: здесь проверяется форма, число — на стенде.
+		self.assertIsInstance(документ["version"], int)
+		self.assertNotIn("versions", документ)
 
 	def test_прежний_текст_засчитан_пока_таблица_пуста(self):
 		self.записать("risks", content="| ID | Событие |\n| --- | --- |\n| R1 | Подрядчик уйдёт |")
@@ -173,43 +197,25 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		лист = книга["Реестр"]
 		self.assertEqual(лист["E2"].value, "=C2*D2")
 
-	def test_схему_которую_не_прочесть_не_записать(self):
+	def test_схему_которую_не_прочесть_или_не_разложить_не_записать(self):
 		frappe.set_user("Administrator")
-		блоки = json.loads(json.dumps(БЛОКИ))
-		блоки[2]["spec"]["columns"][2]["formula"] = "probability * weight"
-		ответ = схема_документа(
-			course=self.курс, artifact="risk_register", title="Реестр рисков", blocks=блоки
-		)
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], "artifact_invalid_spec")
-
-	def test_время_и_версия_документа(self):
-		"""Сколько раз документ сохранялся и когда — без самой истории (#342)."""
-		пустой = student.artifact(self.курс, "risk_register")["data"]
-		self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
-
-		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
-		self.записать("assessment", fields={"threshold": 12})
-		документ = student.artifact(self.курс, "risk_register")["data"]
-
-		self.assertTrue(документ["modified"])
-		# Журнал `Version` Frappe пишет после коммита, а тест идёт в
-		# транзакции без него: здесь проверяется форма, число — на стенде.
-		self.assertIsInstance(документ["version"], int)
-		self.assertNotIn("versions", документ)
-
-	def test_запись_шлёт_событие_только_ученику(self):
-		"""Страница перечитывает документ, когда в него пишет агент (#348)."""
-		from unittest.mock import patch
-
-		with patch("frappe.publish_realtime") as publish:
-			self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
-		события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
-		self.assertEqual(len(события), 1)
-		self.assertEqual(события[0].kwargs["user"], self.ученик)
-		self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
-		self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
-		self.assertTrue(события[0].kwargs["after_commit"])
+		нечитаемая = json.loads(json.dumps(БЛОКИ))
+		нечитаемая[2]["spec"]["columns"][2]["formula"] = "probability * weight"
+		схемы = {
+			"формула с неизвестной колонкой": ({"blocks": нечитаемая}, {}),
+			"холст, который не разложить": (
+				{"blocks": БЛОКИ, "canvas": {"grid": ["risks assessment", "assessment risks"]}},
+				{"key": "risks"},
+			),
+		}
+		for что, (схема, подробности) in схемы.items():
+			with self.subTest(что):
+				ответ = схема_документа(
+					course=self.курс, artifact="risk_register", title="Реестр рисков", **схема
+				)
+				self.assertFalse(ответ["ok"])
+				self.assertEqual(ответ["error"]["code"], "artifact_invalid_spec")
+				self.assertEqual({к: ответ["error"][к] for к in подробности}, подробности)
 
 	def test_холст_и_формула_поля(self):
 		"""Холст схемы и посчитанное поле доходят до ученика (#351)."""
@@ -260,16 +266,3 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		self.assertEqual(ответ["error"]["code"], "artifact_invalid_value")
 		# Документ без холста отвечает `null`, а не пропуском ключа.
 		self.assertIsNone(student.artifact(self.курс, "risk_register")["data"]["canvas"])
-
-	def test_холст_который_не_разложить_отказ(self):
-		frappe.set_user("Administrator")
-		ответ = схема_документа(
-			course=self.курс,
-			artifact="risk_register",
-			title="Реестр рисков",
-			blocks=БЛОКИ,
-			canvas={"grid": ["risks assessment", "assessment risks"]},
-		)
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], "artifact_invalid_spec")
-		self.assertEqual(ответ["error"]["key"], "risks")

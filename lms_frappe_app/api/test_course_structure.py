@@ -42,8 +42,8 @@ class IntegrationTestCourseStructure(IntegrationTestCase):
 			привязать_урок(self.глава, урок)
 			self.уроки.append(урок)
 
-	def test_состав_и_порядок_совпадают_с_frappe_learning(self):
-		from lms.lms.utils import get_lessons
+	def test_состав_порядок_и_главы_совпадают_с_frappe_learning(self):
+		from lms.lms.utils import get_chapters, get_lessons
 
 		их = [урок["name"] for урок in get_lessons(self.курс)]
 		наш = уроки_курса(self.курс)
@@ -53,9 +53,7 @@ class IntegrationTestCourseStructure(IntegrationTestCase):
 		# и сортировка по нему давала случайный порядок.
 		self.assertEqual(их, self.уроки)
 
-	def test_главы_читаются_тем_же_правилом(self):
-		from lms.lms.utils import get_chapters
-
+		# Главы читаются тем же правилом.
 		их = [глава["name"] for глава in get_chapters(self.курс)]
 		наш = [глава["name"] for глава in главы_курса(self.курс)]
 

@@ -112,13 +112,20 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		)
 		self.assertEqual(authoring.course_reports(course=self.курс, lesson="l-9")["data"]["reports"], [])
 
-	def test_ученику_метод_закрыт(self):
-		"""Роль, а не эндпоинт: агент ученика не должен читать чужие жалобы."""
-		self.пожаловаться("stuck", "Застрял")
+	def test_ученику_чтение_и_разбор_закрыты(self):
+		"""Роль, а не эндпоинт: агент ученика не должен читать чужие жалобы и
+		разбирать свои."""
+		репорт = self.пожаловаться("stuck", "Застрял")
 		frappe.set_user(self.ученик)
 
-		with self.assertRaises(frappe.PermissionError):
-			authoring.course_reports(course=self.курс)
+		for что, вызов in {
+			"course_reports": lambda: authoring.course_reports(course=self.курс),
+			"resolve_report": lambda: authoring.resolve_report(
+				report=репорт, status="rejected", resolution="Сам разберусь"
+			),
+		}.items():
+			with self.subTest(что), self.assertRaises(frappe.PermissionError):
+				вызов()
 
 	# --- разбор куратором ---
 
@@ -161,31 +168,25 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		self.assertIsNone(переоткрыт["resolution"], "прежний итог не выдаётся за действующий")
 		self.assertEqual(self.разобрать(репорт, "resolved")["error"]["code"], НЕИЗВЕСТНЫЙ_СТАТУС_РЕПОРТА)
 
-	def test_исправить_и_отклонить_можно_только_с_ответом_ученику(self):
-		репорт = self.пожаловаться("material_issue", "Материал плох")
-
-		for статус in ("fixed", "rejected"):
-			ответ = self.разобрать(репорт, статус, resolution="   ")
-			self.assertEqual(ответ["error"]["code"], НУЖЕН_ОТВЕТ_УЧЕНИКУ, статус)
-		self.assertEqual(frappe.db.get_value("Agent Course Report", репорт, "status"), "New")
-
-	def test_дубль_ссылается_на_репорт_того_же_курса(self):
-		"""Ответ оригинала уходит ученику: ссылка на чужой курс показала бы
-		ему ответ о курсе, которого он не проходил."""
+	def test_разбор_отказы_без_ответа_и_без_оригинала(self):
+		"""Исправить и отклонить можно только с ответом ученику. Дубль ссылается на
+		репорт того же курса: ответ оригинала уходит ученику, и ссылка на чужой курс
+		показала бы ему ответ о курсе, которого он не проходил."""
 		репорт = self.пожаловаться("material_issue", "Материал плох")
 		чужой = self.пожаловаться("material_issue", "Про другой курс", lesson=self.урок_другого_курса())
 
-		self.assertEqual(self.разобрать(репорт, "duplicate")["error"]["code"], НУЖЕН_ОРИГИНАЛ)
-		for оригинал in (чужой, репорт, "нет-такого"):
-			ответ = self.разобрать(репорт, "duplicate", duplicate_of=оригинал)
-			self.assertEqual(ответ["error"]["code"], НЕВЕРНЫЙ_ОРИГИНАЛ, оригинал)
-
-	def test_ученику_разбор_закрыт(self):
-		репорт = self.пожаловаться("stuck", "Застрял")
-		frappe.set_user(self.ученик)
-
-		with self.assertRaises(frappe.PermissionError):
-			authoring.resolve_report(report=репорт, status="rejected", resolution="Сам разберусь")
+		отказы = {
+			"fixed без ответа": ("fixed", {"resolution": "   "}, НУЖЕН_ОТВЕТ_УЧЕНИКУ),
+			"rejected без ответа": ("rejected", {"resolution": "   "}, НУЖЕН_ОТВЕТ_УЧЕНИКУ),
+			"дубль без оригинала": ("duplicate", {}, НУЖЕН_ОРИГИНАЛ),
+			"дубль чужого курса": ("duplicate", {"duplicate_of": чужой}, НЕВЕРНЫЙ_ОРИГИНАЛ),
+			"дубль самого себя": ("duplicate", {"duplicate_of": репорт}, НЕВЕРНЫЙ_ОРИГИНАЛ),
+			"дубль несуществующего": ("duplicate", {"duplicate_of": "нет-такого"}, НЕВЕРНЫЙ_ОРИГИНАЛ),
+		}
+		for что, (статус, поля, код) in отказы.items():
+			with self.subTest(что):
+				self.assertEqual(self.разобрать(репорт, статус, **поля)["error"]["code"], код)
+		self.assertEqual(frappe.db.get_value("Agent Course Report", репорт, "status"), "New")
 
 	# --- итог глазами ученика ---
 
@@ -291,14 +292,25 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.куратор = создать_куратора(f"rep-rel-author-{суффикс}@example.com")
 		self.ученик = создать_ученика(f"rep-rel-pupil-{суффикс}@example.com")
-		self.курс, self.релиз = курс_из_релиза()
-		зачислить_на_курс(self.ученик, self.курс)
-		self.занятие = создать_занятие(self.ученик, урок_релиза(self.курс, "l-1"))
 		frappe.set_user(self.ученик)
 
 	def test_вопрос_по_ключу_релиза_и_привязка_к_релизу(self):
+		"""Вопрос чужого урока — отказ без записи; репорт без вопроса — с релизом и целью."""
+		frappe.set_user("Administrator")
+		курс, релиз = курс_из_релиза()
+		зачислить_на_курс(self.ученик, курс)
+		занятие = создать_занятие(self.ученик, урок_релиза(курс, "l-1"))
+		frappe.set_user(self.ученик)
+
 		ответ = student.report_issue(
-			session=self.занятие, kind="quiz_question_issue", text="Два верных варианта", question="S1/l-1-D1"
+			session=занятие, kind="quiz_question_issue", text="Не тот вопрос", question="S1/l-2-D1"
+		)
+
+		self.assertEqual(ответ["error"]["code"], "question_mismatch")
+		self.assertFalse(frappe.db.exists("Agent Course Report", {"session": занятие}))
+
+		ответ = student.report_issue(
+			session=занятие, kind="quiz_question_issue", text="Два верных варианта", question="S1/l-1-D1"
 		)
 		self.assertTrue(ответ["ok"], ответ)
 
@@ -308,9 +320,9 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 			["question_key", "release"],
 			as_dict=True,
 		)
-		self.assertEqual(запись, {"question_key": "S1/l-1-D1", "release": self.релиз})
+		self.assertEqual(запись, {"question_key": "S1/l-1-D1", "release": релиз})
 		frappe.set_user(self.куратор)
-		[репорт] = authoring.course_reports(course=self.курс)["data"]["reports"]
+		[репорт] = authoring.course_reports(course=курс)["data"]["reports"]
 		self.assertEqual(
 			set(репорт),
 			{
@@ -318,15 +330,18 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 				"reported_at", "release", "status", "resolution", "resolved_at",
 			},
 		)
-		self.assertEqual((репорт["question_key"], репорт["release"]), ("S1/l-1-D1", self.релиз))
+		self.assertEqual((репорт["question_key"], репорт["release"]), ("S1/l-1-D1", релиз))
 
-	def test_вопрос_чужого_урока_отказ_без_записи(self):
-		ответ = student.report_issue(
-			session=self.занятие, kind="quiz_question_issue", text="Не тот вопрос", question="S1/l-2-D1"
+		frappe.set_user(self.ученик)
+		ответ = student.report_issue(session=занятие, kind="stuck", text="Встал на примере", objective="Цель")
+
+		запись = frappe.db.get_value(
+			"Agent Course Report",
+			ответ["data"]["report"],
+			["question_key", "release", "objective"],
+			as_dict=True,
 		)
-
-		self.assertEqual(ответ["error"]["code"], "question_mismatch")
-		self.assertFalse(frappe.db.exists("Agent Course Report", {"session": self.занятие}))
+		self.assertEqual(запись, {"question_key": None, "release": релиз, "objective": "Цель"})
 
 	def test_урок_снят_из_релиза_вопрос_не_из_квиза(self):
 		"""Урока занятия нет в действующем релизе: вопросов у него нет, репорт без вопроса — с релизом."""
@@ -387,16 +402,3 @@ class IntegrationTestCourseReportsRelease(IntegrationTestCase):
 			[р["text"] for р in authoring.course_reports(course=курс, lesson="l-3")["data"]["reports"]],
 			["Про третий"],
 		)
-
-	def test_репорт_без_вопроса(self):
-		ответ = student.report_issue(
-			session=self.занятие, kind="stuck", text="Встал на примере", objective="Цель"
-		)
-
-		запись = frappe.db.get_value(
-			"Agent Course Report",
-			ответ["data"]["report"],
-			["question_key", "release", "objective"],
-			as_dict=True,
-		)
-		self.assertEqual(запись, {"question_key": None, "release": self.релиз, "objective": "Цель"})

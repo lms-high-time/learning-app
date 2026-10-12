@@ -80,6 +80,10 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 	# --- файл ---
 
 	def test_загруженный_csv_виден_файлом_и_срезом(self):
+		"""Файл виден в блоке, перечне и блоках старта урока (`artifact_blocks`);
+		документ заводится до файла: иначе Frappe снимает привязку (#343)."""
+		from lms_frappe_app.agent_learning.artifacts.document import _блоки_урока
+
 		ответ = self.загрузить()["data"]
 
 		self.assertEqual(ответ["file"]["name"], "plan.csv")
@@ -91,6 +95,15 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertIn("| Февраль | 120 | 90 |", блок["preview"])
 		перечень = student.artifact(self.курс)["data"]["artifacts"][0]
 		self.assertEqual(перечень["blocks_filled"], 1, "файл без текста — блок заполнен")
+
+		файл = frappe.get_doc("File", self.запись_файла())
+		документ = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "course": self.курс})
+		self.assertEqual((файл.attached_to_doctype, файл.attached_to_name), ("Agent Student Artifact", документ))
+
+		блоки = _блоки_урока(self.ученик, self.курс, self.урок, пространство_курса(self.ученик, self.курс))
+		self.assertEqual([б["key"] for б in блоки], ["money"])
+		self.assertEqual(блоки[0]["file"]["name"], "plan.csv")
+		self.assertTrue(блоки[0]["preview"])
 
 	def test_срез_xlsx_показывает_формулу_без_значения(self):
 		self.загрузить("plan.xlsx", xlsx())
@@ -111,12 +124,37 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertEqual(ответ["data"]["file"]["name"], "plan.csv")
 		self.assertIn("| Месяц | Выручка | Расходы |", ответ["data"]["preview"])
 
-	def test_битый_base64_отказ_как_пустой_файл(self):
-		ответ = student.upload_artifact_file(
-			self.курс, "plan", "money", file_name="plan.csv", content="не base64!"
-		)
+	def test_отказы_записи_в_блок(self):
+		"""Файл, таблица и ссылка — только в блок своего вида и только годные."""
 
-		self.assertEqual(ответ["error"]["code"], codes.ФАЙЛА_НЕТ)
+		def записать(ключ: str, **поля) -> dict:
+			return student.update_artifact(self.курс, "plan", ключ, **поля)
+
+		отказы = {
+			"битый base64 — как пустой файл": (
+				lambda: student.upload_artifact_file(
+					self.курс, "plan", "money", file_name="plan.csv", content="не base64!"
+				),
+				codes.ФАЙЛА_НЕТ,
+			),
+			"файл не того типа": (lambda: self.загрузить("photo.png", b"\x89PNG"), codes.ФАЙЛ_НЕ_ТОГО_ТИПА),
+			"пустой файл": (lambda: self.загрузить(данные=b""), codes.ФАЙЛА_НЕТ),
+			"файл в текстовый блок": (lambda: self.загрузить(ключ="goal"), codes.ВИД_НЕ_ТОТ),
+			"таблица в текстовый блок": (lambda: записать("goal", table=[["a"]]), codes.ВИД_НЕ_ТОТ),
+			"кривая таблица": (lambda: записать("money", table=["не строки"]), codes.НЕВЕРНАЯ_ТАБЛИЦА),
+			"большая таблица": (lambda: записать("money", table=[["x"]] * 501), codes.НЕВЕРНАЯ_ТАБЛИЦА),
+			"ссылка в текстовый блок": (
+				lambda: записать("goal", url="https://example.com"),
+				codes.ВИД_НЕ_ТОТ,
+			),
+			"кривая ссылка": (lambda: записать("crm", url="javascript:alert(1)"), codes.НЕВЕРНАЯ_ССЫЛКА),
+		}
+		for что, (вызов, код) in отказы.items():
+			with self.subTest(что):
+				ответ = вызов()
+				self.assertEqual(ответ["error"]["code"], код)
+				if что == "файл не того типа":
+					self.assertEqual(ответ["error"]["accept"], ["xlsx", "csv"])
 
 	def test_пустые_колонки_справа_в_срез_не_попадают(self):
 		from openpyxl import Workbook
@@ -145,16 +183,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("File", первый), "прежний файл удалён")
 		self.assertTrue(второй["url"].startswith("/private/files/"), "файл приватный")
 
-	def test_файл_не_того_типа_отказ(self):
-		ответ = self.загрузить("photo.png", b"\x89PNG")
-
-		self.assertEqual(ответ["error"]["code"], codes.ФАЙЛ_НЕ_ТОГО_ТИПА)
-		self.assertEqual(ответ["error"]["accept"], ["xlsx", "csv"])
-
-	def test_пустой_файл_и_текстовый_блок_отказ(self):
-		self.assertEqual(self.загрузить(данные=b"")["error"]["code"], codes.ФАЙЛА_НЕТ)
-		self.assertEqual(self.загрузить(ключ="goal")["error"]["code"], codes.ВИД_НЕ_ТОТ)
-
 	def test_слишком_большой_файл_отказ(self):
 		frappe.set_user("Administrator")
 		frappe.db.set_single_value("Agent Learning Settings", "artifact_file_max_mb", 1)
@@ -176,18 +204,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertIsNone(self.блок("money")["file"])
 		self.assertFalse(frappe.db.exists("File", файл))
 
-	def test_блоки_урока_приносят_файл(self):
-		"""`artifact_blocks` старта урока — те же блоки урока с файлом."""
-		from lms_frappe_app.agent_learning.artifacts.document import _блоки_урока
-
-		self.загрузить()
-
-		блоки = _блоки_урока(self.ученик, self.курс, self.урок, пространство_курса(self.ученик, self.курс))
-
-		self.assertEqual([б["key"] for б in блоки], ["money"])
-		self.assertEqual(блоки[0]["file"]["name"], "plan.csv")
-		self.assertTrue(блоки[0]["preview"])
-
 	def test_файл_видит_только_ученик(self):
 		self.загрузить()
 		файл = frappe.get_doc("File", self.запись_файла())
@@ -202,14 +218,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		for чужой in (другой, руководитель):
 			with self.subTest(чужой=чужой):
 				self.assertFalse(frappe.has_permission("File", doc=файл, user=чужой))
-
-	def test_файл_первой_загрузки_привязан_к_документу(self):
-		"""Документ заводится до файла: иначе Frappe снимает привязку (#343)."""
-		self.загрузить()
-
-		файл = frappe.get_doc("File", self.запись_файла())
-		документ = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "course": self.курс})
-		self.assertEqual((файл.attached_to_doctype, файл.attached_to_name), ("Agent Student Artifact", документ))
 
 	def test_миграция_привязывает_потерянный_файл(self):
 		from lms_frappe_app.patches.v0_1 import attach_artifact_files
@@ -284,15 +292,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertEqual(блоки[0]["file"]["name"], "calls.csv")
 		self.assertIn("| Дата | Клиент |", блоки[0]["preview"])
 
-	def test_таблица_не_в_блок_файл_и_кривая_отказ(self):
-		мимо = student.update_artifact(self.курс, "plan", "goal", table=[["a"]])
-		кривая = student.update_artifact(self.курс, "plan", "money", table=["не строки"])
-		большая = student.update_artifact(self.курс, "plan", "money", table=[["x"]] * 501)
-
-		self.assertEqual(мимо["error"]["code"], codes.ВИД_НЕ_ТОТ)
-		self.assertEqual(кривая["error"]["code"], codes.НЕВЕРНАЯ_ТАБЛИЦА)
-		self.assertEqual(большая["error"]["code"], codes.НЕВЕРНАЯ_ТАБЛИЦА)
-
 	def test_таблица_строкой_json_тоже_принимается(self):
 		ответ = student.update_artifact(self.курс, "plan", "money", table='[["Месяц"], ["Январь"]]')
 
@@ -307,13 +306,6 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		self.assertTrue(ответ["ok"])
 		self.assertEqual(self.блок("crm")["url"], "https://crm.example.com/base")
 		self.assertEqual(ответ["data"]["blocks_filled"], 1)
-
-	def test_ссылка_не_в_тот_блок_и_кривая_отказ(self):
-		мимо = student.update_artifact(self.курс, "plan", "goal", url="https://example.com")
-		кривая = student.update_artifact(self.курс, "plan", "crm", url="javascript:alert(1)")
-
-		self.assertEqual(мимо["error"]["code"], codes.ВИД_НЕ_ТОТ)
-		self.assertEqual(кривая["error"]["code"], codes.НЕВЕРНАЯ_ССЫЛКА)
 
 	def test_текстовый_блок_как_прежде(self):
 		student.update_artifact(self.курс, "plan", "goal", "Открыть вторую кофейню")

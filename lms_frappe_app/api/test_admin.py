@@ -82,7 +82,9 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		return ответ
 
-	def test_занятия_попытки_документ_и_заметки_уходят_в_архив(self):
+	def test_сброс_архивирует_прогресс_и_снимает_запись(self):
+		"""Занятия, попытки, документ и заметки — в архив; запись на курс снята;
+		ответы на репорты ученик видит и после сброса; след сброса — в карточке."""
 		итог = self.сбросить()["data"]
 
 		self.assertEqual(
@@ -103,6 +105,17 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 			frappe.db.exists("Agent Student Note", {"student": self.ученик, "note_key": "role"}),
 			"факт без курса — не прогресс по курсу",
 		)
+		self.assertIsNone(self.запись())
+		self.assertTrue(
+			frappe.db.exists(
+				"Comment",
+				{"reference_doctype": "User", "reference_name": self.ученик, "comment_type": "Info"},
+			)
+		)
+
+		frappe.set_user(self.ученик)
+		self.assertNotIn(self.курс, [к["id"] for к in student.list_my_courses()["data"]["courses"]])
+		self.assertIn(self.репорт, [р["id"] for р in student.my_reports()["data"]["reports"]])
 
 	def test_сдачи_домашки_уходят_в_архив(self):
 		"""Повторное прохождение начинается с чистого листа (learning-services#439)."""
@@ -126,21 +139,6 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		self.assertNotEqual(заново["id"], сдача)
 		self.assertEqual(заново["version"], 1)
 
-	def test_запись_на_курс_снимается(self):
-		self.сбросить()
-
-		self.assertIsNone(self.запись())
-		frappe.set_user(self.ученик)
-		self.assertNotIn(self.курс, [к["id"] for к in student.list_my_courses()["data"]["courses"]])
-
-	def test_ответы_на_репорты_ученик_видит_и_после_сброса(self):
-		self.сбросить()
-
-		frappe.set_user(self.ученик)
-		репорты = student.my_reports()["data"]["reports"]
-
-		self.assertIn(self.репорт, [р["id"] for р in репорты])
-
 	def test_по_назначению_организации_запись_выдаётся_заново(self):
 		организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}")
 		добавить_в_организацию(self.ученик, организация)
@@ -160,36 +158,27 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		self.assertIsNotNone(self.запись())
 		self.assertNotEqual(self.запись(), прежняя, "запись новая, без прежнего прогресса")
 
-	def test_след_сброса_в_карточке_ученика(self):
-		self.сбросить()
+	def test_сбросить_может_только_преподаватель_курса(self):
+		"""Ученик и чужой куратор получают ошибку прав и ничего не трогают;
+		несуществующая запись — отказ кодом; преподаватель курса сбрасывает."""
+		чужой = создать_куратора(f"cc-{frappe.generate_hash(length=6)}@example.com")
+		преподаватель = создать_куратора(f"in-{frappe.generate_hash(length=6)}@example.com")
+		курс = frappe.get_doc("LMS Course", self.курс)
+		курс.append("instructors", {"instructor": преподаватель})
+		курс.save(ignore_permissions=True)
 
-		self.assertTrue(
-			frappe.db.exists(
-				"Comment",
-				{"reference_doctype": "User", "reference_name": self.ученик, "comment_type": "Info"},
-			)
-		)
-
-	def test_ученик_и_чужой_куратор_сбросить_не_могут(self):
-		куратор = создать_куратора(f"cc-{frappe.generate_hash(length=6)}@example.com")
-		for кто in (self.ученик, куратор):
+		for кто in (self.ученик, чужой):
 			with self.subTest(кто=кто), self.assertRaises(frappe.PermissionError):
 				self.сбросить(кто)
 		self.assertIsNotNone(self.запись(), "после отказа ничего не тронуто")
 
-	def test_преподаватель_курса_сбросить_может(self):
-		куратор = создать_куратора(f"in-{frappe.generate_hash(length=6)}@example.com")
-		курс = frappe.get_doc("LMS Course", self.курс)
-		курс.append("instructors", {"instructor": куратор})
-		курс.save(ignore_permissions=True)
+		with self.subTest("несуществующая запись"):
+			ответ = admin.reset_student_progress("нет-такой")
+			self.assertFalse(ответ["ok"])
+			self.assertEqual(ответ["error"]["code"], admin.ЗАПИСЬ_НЕ_НАЙДЕНА)
 
-		self.assertTrue(self.сбросить(куратор)["ok"])
-
-	def test_несуществующая_запись_отказ_кодом(self):
-		ответ = admin.reset_student_progress("нет-такой")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], admin.ЗАПИСЬ_НЕ_НАЙДЕНА)
+		with self.subTest("преподаватель курса"):
+			self.assertTrue(self.сбросить(преподаватель)["ok"])
 
 
 class IntegrationTestResetProgressRelease(IntegrationTestCase):
@@ -211,7 +200,10 @@ class IntegrationTestResetProgressRelease(IntegrationTestCase):
 		запись = frappe.db.get_value("LMS Enrollment", {"member": self.ученик, "course": self.курс})
 		return admin.reset_student_progress(запись)["data"]
 
-	def test_прохождение_и_попытка_по_релизу_уходят_в_архив(self):
+	def test_прохождение_в_архив_и_урок_проходится_заново(self):
+		"""Прохождение и попытка по релизу уходят в архив. Архивное прохождение
+		не мешает новому и не идёт в счёт глав и сверки."""
+		прежний_релиз = self.run.release
 		итог = self.сбросить()
 
 		self.assertEqual((итог["runs_archived"], итог["attempts_archived"]), (1, 1))
@@ -226,12 +218,7 @@ class IntegrationTestResetProgressRelease(IntegrationTestCase):
 			(None, "Abandoned"),
 		)
 
-	def test_после_сброса_урок_проходится_заново(self):
-		"""Архивное прохождение не мешает новому и не идёт в счёт глав и сверки."""
-		прежний_релиз = self.run.release
-		self.сбросить()
 		зачислить(self.ученик, self.run.lesson)
-
 		заново = прохождения.прохождение(self.ученик, self.курс, "l-1")
 
 		self.assertNotEqual(заново.name, self.run.name)
