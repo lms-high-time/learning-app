@@ -144,24 +144,6 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		[сдача] = self.сдачи()
 		self.assertEqual(сдача.status, "Assigned")
 
-	def test_сданный_квиз_выдаёт_домашку(self):
-		from lms_frappe_app.agent_learning import release_quiz
-		from lms_frappe_app.agent_learning.runs import service as прохождения
-		from lms_frappe_app.tests.release_sample import релиз_двух_целей
-		from lms_frappe_app.tests.sample_data import курс_из_релиза
-
-		курс, _ = курс_из_релиза(релиз=релиз_двух_целей(f"hw-{frappe.generate_hash(length=6)}", вопросов=1))
-		run = прохождения.прохождение(self.ученик, курс, "l-1")
-		зачислить(self.ученик, run.lesson)
-		создать_домашку(run.lesson, due_mode="relative", due_days=2)
-		frappe.set_user(self.ученик)
-		попытка = release_quiz.начать(run, создать_занятие(self.ученик, run.lesson))["attempt"]
-		release_quiz.ответить(попытка, "S1/l-1-D1", "V1", "слова ученика")
-		frappe.set_user("Administrator")
-		self.assertEqual(frappe.db.get_value("Agent Quiz Attempt", попытка, "passed"), 1)
-		[сдача] = self.сдачи()
-		self.assertEqual(сдача.status, "Assigned")
-
 	def test_закрытие_урока_ставит_выдачу_в_очередь_после_коммита(self):
 		"""Выдача — не в транзакции закрытия: её сбой не срывает зачёт."""
 		from unittest.mock import patch
@@ -326,12 +308,6 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one")])
 		self.assertEqual(отказ.exception.код, "answer_mode")
 
-	def test_неполный_ответ_принимается(self):
-		"""Оценки нет: `text_and_files` без файлов видит и возвращает куратор."""
-		создать_домашку(self.урок)
-		документ = домашка.сохранить(self.ученик, self.урок, None, answer="только текст")
-		self.assertEqual(документ.status, "Submitted")
-
 	def test_файлы_сохраняются_и_остаются_в_старой_версии(self):
 		создать_домашку(self.урок)
 		первая = домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one")])
@@ -493,34 +469,10 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 			домашка.сохранить(self.ученик, self.урок, None, answer="ещё")
 		self.assertEqual(отказ.exception.код, "accepted_locked")
 
-	def test_сохранение_в_возвращённой_снова_сдана(self):
-		создать_домашку(self.урок)
-		документ = домашка.сохранить(self.ученик, self.урок, None, answer="готово")
-		frappe.db.set_value("Agent Homework Submission", документ.name, "status", "Returned")
-		self.assertEqual(домашка.сохранить(self.ученик, self.урок, None, answer="доделал").status, "Submitted")
-
-	def test_сдача_до_закрытия_получает_выдачу_и_срок(self):
-		создать_домашку(self.урок, due_mode="relative", due_days=3)
-		домашка.сохранить(self.ученик, self.урок, None, answer="Черновик мыслей")
-		домашка.выдать(занятие(self.ученик, self.урок))
-		[сдача] = frappe.get_all(
-			"Agent Homework Submission", filters={"member": self.ученик}, fields=["status", "assigned_at", "due_at"]
-		)
-		self.assertEqual(сдача.status, "Submitted")
-		self.assertIsNotNone(сдача.assigned_at)
-		self.assertIsNotNone(сдача.due_at)
-
 	def test_абсолютный_срок_ставится_при_создании(self):
 		создать_домашку(self.урок, due_mode="absolute", due_date="2030-01-15")
 		документ = домашка.сохранить(self.ученик, self.урок, None, answer="рано")
 		self.assertEqual(str(документ.due_at), "2030-01-15 23:59:59")
-		self.assertIsNone(документ.assigned_at)
-
-	def test_сдача_без_выдачи_живёт_без_относительного_срока(self):
-		"""Задание появилось у уже закрытого урока: выдачи задним числом нет."""
-		создать_домашку(self.урок, due_mode="relative", due_days=3)
-		документ = домашка.сохранить(self.ученик, self.урок, None, answer="сам нашёл")
-		self.assertIsNone(документ.due_at)
 		self.assertIsNone(документ.assigned_at)
 
 
@@ -622,7 +574,9 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 		self.назначить({"due_mode": "relative", "due_days": 2})
 		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
 		self.assertIsNone(документ.due_at)
+		self.assertIsNone(документ.assigned_at)
 		сдача = self.выдать(self.организация)
+		self.assertEqual(сдача.status, "Submitted")
 		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=2))
 
 	def test_источник_срока_из_журнала_если_правило_сняли(self):

@@ -48,17 +48,12 @@ class IntegrationTestChatState(IntegrationTestCase):
 
 		self.assertEqual(данные, {"session": self.занятие, "state": None, "version": None})
 
-	def test_сохранённое_состояние_возвращается_как_есть(self):
-		сохранено = student.save_chat_state(self.занятие, СОСТОЯНИЕ, "1")
-		self.assertTrue(сохранено["ok"], сохранено.get("error"))
-
-		данные = student.chat_state(self.занятие)["data"]
-
-		self.assertEqual(данные["state"], СОСТОЯНИЕ)
-		self.assertEqual(данные["version"], "1")
-
 	def test_повторное_сохранение_замещает_запись(self):
 		student.save_chat_state(self.занятие, СОСТОЯНИЕ, "1")
+		self.assertEqual(
+			student.chat_state(self.занятие)["data"],
+			{"session": self.занятие, "state": СОСТОЯНИЕ, "version": "1"},
+		)
 		новое = json.dumps({"id": "conv-1", "messages": []})
 		student.save_chat_state(self.занятие, новое, "2")
 

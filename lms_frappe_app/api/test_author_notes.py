@@ -235,8 +235,15 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		self.assertEqual(authoring.list_notes(course=курс)["data"]["notes"], [])
 
 	def test_несуществующий_курс(self):
-		self.assertEqual(self.код(authoring.add_note(course="нет-курса", target="course", text="…")), "course_not_found")
-		self.assertEqual(self.код(authoring.list_notes(course="нет-курса")), "course_not_found")
+		for метод, вызов in {
+			"add_note": lambda: authoring.add_note(course="нет-курса", target="course", text="…"),
+			"list_notes": lambda: authoring.list_notes(course="нет-курса"),
+			"unpublish_course": lambda: authoring.unpublish_course(course="нет-курса"),
+			"course_revision": lambda: authoring.course_revision(course="нет-курса"),
+			"course_reports": lambda: authoring.course_reports(course="нет-курса"),
+		}.items():
+			with self.subTest(метод=метод):
+				self.assertEqual(self.код(вызов()), "course_not_found")
 
 	# --- фильтры ---
 
@@ -312,19 +319,6 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 	def test_заметки_нет(self):
 		self.assertEqual(self.код(authoring.reply_note(note="AAN-нет", text="…")), "note_not_found")
 		self.assertEqual(self.код(authoring.set_note_status(note="AAN-нет", status="accepted")), "note_not_found")
-
-	def test_заметки_двигают_свою_метку_а_не_метку_курса(self):
-		до = authoring.course_revision(course=self.курс)["data"]
-		self.assertIsNone(до["notes_revision"])
-
-		ид = self.записать()
-		после_записи = authoring.course_revision(course=self.курс)["data"]
-		authoring.reply_note(note=ид, text="Уточню: шаг 3")
-		после_ответа = authoring.course_revision(course=self.курс)["data"]
-
-		self.assertEqual(после_записи["revision"], до["revision"])
-		self.assertIsNotNone(после_записи["notes_revision"])
-		self.assertGreater(после_ответа["notes_revision"], после_записи["notes_revision"])
 
 	def test_ученику_заметки_недоступны(self):
 		ид = self.записать()

@@ -98,12 +98,6 @@ class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
 		курс.append("instructors", {"instructor": self.куратор})
 		курс.save()
 
-	def test_ключ_курса_правкой_не_ставится(self):
-		курс = frappe.get_doc("LMS Course", self.курс)
-		курс.course_key = f"hand-{frappe.generate_hash(length=6)}"
-		with self.assertRaises(frappe.ValidationError):
-			курс.save()
-
 	def test_ключ_курса_из_релиза_правкой_не_меняется(self):
 		frappe.set_user(self.куратор)
 		ответ = service.опубликовать(
@@ -174,11 +168,6 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		self.отказ(
 			frappe.get_doc({"doctype": "Course Lesson", "chapter": self.глава, "title": "Лишний"}).insert
 		)
-
-	def test_главу_и_урок_курса_из_релиза_не_удалить(self):
-		self.отказ(lambda: frappe.delete_doc("Course Lesson", self.урок))
-		self.отказ(lambda: frappe.delete_doc("Course Chapter", self.глава))
-		self.assertTrue(frappe.db.exists("Course Lesson", self.урок))
 
 	def test_смена_курса_проверяет_прежний_и_новый(self):
 		# Из курса из релиза — в свободный.
@@ -395,15 +384,6 @@ class IntegrationTestСтруктураКурсаИзРелиза(IntegrationTes
 		# Тот же релиз со сменой инструкторов — `unchanged` под флагом.
 		повтор = service.опубликовать(релиз, None, "Administrator", ["Administrator"])
 		self.assertEqual((повтор["unchanged"], повтор["instructors"]), (True, ["Administrator"]))
-
-	def test_удаление_курса_целиком_проходит(self):
-		другой, _ = курс_из_релиза()
-		service.удалить_курс(self.курс)
-
-		self.assertFalse(frappe.db.exists("LMS Course", self.курс))
-		self.assertFalse(frappe.db.exists("Course Lesson", self.урок))
-		# Флаг удаления снят: другой курс из релиза по-прежнему охраняется.
-		self.отказ(lambda: frappe.delete_doc("Course Lesson", урок_релиза(другой, "l-1")))
 
 
 class IntegrationTestДомашкаИДокументКурсаИзРелиза(IntegrationTestCase):

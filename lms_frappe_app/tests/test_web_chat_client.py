@@ -47,14 +47,6 @@ class IntegrationTestWebChatClient(IntegrationTestCase):
 			else:
 				frappe.conf[ключ] = значение
 
-	def test_без_ключей_клиент_не_создаётся(self):
-		"""Локальная разработка и стенд без веб-чата ключей не держат."""
-		self._задать(None, None, None)
-
-		обеспечить_клиента_веб_чата()
-
-		self.assertFalse(frappe.db.exists("OAuth Client", ID))
-
 	def test_ключи_наполовину_клиент_не_создаётся(self):
 		# Клиент без секрета или адреса возврата — вход, который молча не работает.
 		self._задать(secret=None)

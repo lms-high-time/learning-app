@@ -49,11 +49,9 @@ class IntegrationTestCourseStructure(IntegrationTestCase):
 		наш = уроки_курса(self.курс)
 
 		self.assertEqual(наш, их, "структура курса разошлась с Frappe Learning")
-
-	def test_порядок_уроков_соответствует_заданному(self):
 		# Явная проверка того, что сломалось: idx у самих записей всегда ноль,
 		# и сортировка по нему давала случайный порядок.
-		self.assertEqual(уроки_курса(self.курс), self.уроки)
+		self.assertEqual(их, self.уроки)
 
 	def test_главы_читаются_тем_же_правилом(self):
 		from lms.lms.utils import get_chapters
@@ -62,17 +60,6 @@ class IntegrationTestCourseStructure(IntegrationTestCase):
 		наш = [глава["name"] for глава in главы_курса(self.курс)]
 
 		self.assertEqual(наш, их)
-
-	def test_тестовые_данные_видны_frappe_learning(self):
-		"""Курс, собранный помощниками, должен быть настоящим курсом.
-
-		Прежние помощники создавали уроки прямой ссылкой, без строк порядка:
-		для Frappe Learning такой курс пуст, и все проверки на нём шли мимо
-		реального поведения.
-		"""
-		from lms.lms.utils import get_lessons
-
-		self.assertEqual(len(get_lessons(self.курс)), len(self.уроки))
 
 	def test_урок_вне_порядка_не_теряется(self):
 		"""Запасной путь для курсов, собранных импортом или миграцией."""

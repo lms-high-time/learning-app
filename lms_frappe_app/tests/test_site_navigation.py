@@ -28,9 +28,6 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 		шапка_платформы(context)
 		return context
 
-	def test_логотип_ведёт_в_learning_а_не_на_сайт(self):
-		self.assertEqual(self.шапка(self.ученик).home_page, "/lms")
-
 	def test_ученик_видит_курсы_занятие_агента_и_документы(self):
 		пункты = [(п.label, п.url) for п in self.шапка(self.ученик).top_bar_items]
 

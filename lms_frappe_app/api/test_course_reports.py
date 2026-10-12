@@ -11,7 +11,7 @@ from lms_frappe_app.agent_learning.reports import (
 	НУЖЕН_ОТВЕТ_УЧЕНИКУ,
 )
 from lms_frappe_app.api import authoring, student
-from lms_frappe_app.api.authoring import КУРС_НЕ_НАЙДЕН, НЕИЗВЕСТНЫЙ_СТАТУС_РЕПОРТА
+from lms_frappe_app.api.authoring import НЕИЗВЕСТНЫЙ_СТАТУС_РЕПОРТА
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
@@ -79,17 +79,6 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		return репорты
 
-	def test_куратор_видит_репорты_своего_курса(self):
-		self.пожаловаться("directive_mismatch", "Слишком напористо, вопросы подряд")
-		frappe.set_user(self.куратор)
-
-		репорты = authoring.course_reports(course=self.курс)["data"]["reports"]
-
-		self.assertEqual(len(репорты), 1)
-		self.assertEqual(репорты[0]["kind"], "directive_mismatch")
-		self.assertEqual(репорты[0]["text"], "Слишком напористо, вопросы подряд")
-		self.assertEqual((репорты[0]["lesson"], репорты[0]["lesson_key"]), (self.урок, "l-1"))
-
 	def test_кто_пожаловался_не_отдаётся(self):
 		"""`Why:` куратору нужно, что не так с курсом, а не кто сказал. Имя в
 		выдаче превращает обратную связь в донос и мешает жаловаться."""
@@ -118,8 +107,8 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		отобранные = authoring.course_reports(course=self.курс, lesson="l-2")["data"]["reports"]
 
 		self.assertEqual(
-			[(р["text"], р["lesson"], р["lesson_key"]) for р in отобранные],
-			[("Про второй урок", self.второй_урок, "l-2")],
+			[(р["kind"], р["text"], р["lesson"], р["lesson_key"]) for р in отобранные],
+			[("material_issue", "Про второй урок", self.второй_урок, "l-2")],
 		)
 		self.assertEqual(authoring.course_reports(course=self.курс, lesson="l-9")["data"]["reports"], [])
 
@@ -130,14 +119,6 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			authoring.course_reports(course=self.курс)
-
-	def test_несуществующий_курс_отказывает_доменным_кодом(self):
-		frappe.set_user(self.куратор)
-
-		ответ = authoring.course_reports(course="нет-такого-курса")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], КУРС_НЕ_НАЙДЕН)
 
 	# --- разбор куратором ---
 
@@ -274,7 +255,7 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		второй = self.итоги_на_занятии()
 
 		self.assertEqual([р["id"] for р in первый], [репорт])
-		self.assertEqual(первый[0]["resolution"], "Переписали пример")
+		self.assertEqual((первый[0]["status"], первый[0]["resolution"]), ("fixed", "Переписали пример"))
 		self.assertEqual(второй, [])
 		# Итог ушёл, но из списка ученика репорт никуда не делся.
 		self.assertIn(репорт, {р["id"] for р in self.мои_репорты()})

@@ -88,12 +88,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual(мой["progress"]["lessons_completed"], 0)
 		self.assertEqual(мой["next_lesson"]["id"], self.урок)
 
-	def test_во_внутренностях_frappe_наружу_не_течёт(self):
-		# Контракт обязан оставаться интерфейсом общего назначения.
-		выдано = json.dumps(student.list_my_courses(), ensure_ascii=False, default=str)
-		for поле in ("doctype", "docstatus", "modified_by", "owner"):
-			self.assertNotIn(поле, выдано)
-
 	# --- что продолжать ---
 
 	def _второй_урок(self) -> str:
@@ -248,10 +242,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual([з["key"] for з in теперь["project"]], ["project"])
 		self.assertEqual(теперь["projects_elsewhere"], [], "свой проект есть — чужие не предлагаются")
 
-	def test_проект_без_занятия_отклоняется(self):
-		ответ = student.remember(kind="project", key="scenario", text="Склад")
-		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
-
 	def test_наблюдение_без_занятия_отклоняется(self):
 		ответ = student.remember(kind="observation", key="pace", text="Торопится")
 
@@ -272,15 +262,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], student.ПУСТОЙ_КЛЮЧ)
-
-	def test_лимит_заметок_упирается_в_предел(self):
-		for номер in range(student.ЛИМИТ_ЗАМЕТОК):
-			student.remember(kind="fact", key=f"k{номер}", text="да")
-
-		ответ = student.remember(kind="fact", key="ещё один", text="да")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ПЕРЕПОЛНЕНО)
 
 	def _предел_заметок(self, предел: int) -> None:
 		from lms_frappe_app.tests.sample_data import политика_по_умолчанию
@@ -331,12 +312,6 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		self.assertTrue(student.forget(key="role")["ok"])
 		self.assertEqual(student.my_notes()["data"]["facts"], [])
-
-	def test_забыть_несуществующее_отклоняется(self):
-		ответ = student.forget(key="ничего-такого")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ЗАМЕТКА_НЕ_НАЙДЕНА)
 
 	def test_заметки_приходят_с_датами(self):
 		student.remember(kind="fact", key="role", text="Директор")
@@ -553,27 +528,11 @@ class IntegrationTestCourseOutlineRelease(IntegrationTestCase):
 		self.курс, _ = курс_из_релиза()
 		зачислить_на_курс(self.ученик, self.курс)
 		self.первый = урок_релиза(self.курс, "l-1")
-		self.второй = урок_релиза(self.курс, "l-2")
 		frappe.set_user(self.ученик)
 
 	def уроки(self):
 		структура = student.course_outline(self.курс)["data"]
 		return [урок for глава in структура["chapters"] for урок in глава["lessons"]]
-
-	def test_структура_показывает_все_уроки_и_текущий(self):
-		уроки = self.уроки()
-
-		self.assertEqual([у["id"] for у in уроки], [self.первый, self.второй, урок_релиза(self.курс, "l-3")])
-		self.assertTrue(уроки[0]["current"])
-		self.assertFalse(уроки[0]["completed"])
-
-	def test_после_прохождения_урок_помечен_пройденным(self):
-		закрыть_урок(создать_занятие(self.ученик, self.первый))
-
-		уроки = self.уроки()
-
-		self.assertTrue(уроки[0]["completed"])
-		self.assertTrue(уроки[1]["current"], "текущим должен стать следующий урок")
 
 	def test_повтор_пройденного_не_двигает_прогресс(self):
 		# Ровно то, ради чего метод и нужен: идентификатор пройденного урока

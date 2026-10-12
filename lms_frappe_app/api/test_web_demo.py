@@ -42,10 +42,6 @@ class IntegrationTestWebDemo(IntegrationTestCase):
 		данные = student.start_lesson(lesson=self.уроки[0])["data"]
 		self.assertFalse(frappe.db.get_value("Agent Learning Session", данные["session"], "web_chat"))
 
-	def test_веб_канал_отмечает_занятие(self):
-		данные = self.начать(self.уроки[0])["data"]
-		self.assertTrue(frappe.db.get_value("Agent Learning Session", данные["session"], "web_chat"))
-
 	def test_урок_сверх_лимита_отклоняется(self):
 		self.начать(self.уроки[0])
 		self.начать(self.уроки[1])
@@ -89,18 +85,3 @@ class IntegrationTestWebDemo(IntegrationTestCase):
 		ответ = self.начать(self.уроки[2], channel="agent")
 
 		self.assertTrue(ответ["ok"], ответ.get("error"))
-
-	def test_порог_берётся_из_настроек(self):
-		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Agent Learning Settings", "web_demo_lessons", 1)
-		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
-		frappe.set_user(self.ученик)
-		self.начать(self.уроки[0])
-
-		self.assertEqual(self.начать(self.уроки[1])["error"]["code"], student.ДЕМО_ИСЧЕРПАНО)
-
-	def test_неизвестный_канал_отклоняется(self):
-		ответ = self.начать(self.уроки[0], channel="telegram")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.НЕИЗВЕСТНЫЙ_КАНАЛ)

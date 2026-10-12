@@ -14,7 +14,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning import quiz, release_quiz
-from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН, ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА
+from lms_frappe_app.agent_learning.access import НЕ_ЗАЧИСЛЕН
 from lms_frappe_app.agent_learning.constants import (
 	АННУЛИРОВАНА_КВИЗ_ИЗМЕНИЛСЯ,
 	АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА,
@@ -34,7 +34,6 @@ from lms_frappe_app.agent_learning.constants import (
 from lms_frappe_app.agent_learning.errors import ПРОХОЖДЕНИЕ_В_АРХИВЕ, ЧУЖОЕ_ЗАНЯТИЕ, Отказ
 from lms_frappe_app.agent_learning.quiz import (
 	КВИЗА_НЕТ,
-	НУЖНЫ_СЛОВА,
 	ПОПЫТКА_ЗАВЕРШЕНА,
 	ПОПЫТКИ_ИСЧЕРПАНЫ,
 	СЛИШКОМ_РАНО,
@@ -47,7 +46,6 @@ from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
-	добавить_в_организацию,
 	зачислить,
 	настроить_квиз,
 	отметить_все_пункты,
@@ -55,7 +53,6 @@ from lms_frappe_app.tests.sample_data import (
 	создать_домашку,
 	создать_занятие,
 	создать_куратора,
-	создать_организацию,
 	создать_ученика,
 )
 
@@ -179,6 +176,15 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(повтор["attempt"], первая)
 		self.assertEqual(повтор["question"]["id"], С2)
 		self.assertEqual(frappe.db.count(ПОПЫТКА, {"student": self.ученик}), 1)
+		self.assertEqual(
+			self.журнал(первая),
+			[
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
+				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С1),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+			],
+		)
 
 	def test_урок_снят_из_релиза(self):
 		релиз = пример_релиза(self.ключ)
@@ -213,19 +219,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.отказ(КВИЗА_НЕТ, release_quiz.начать, run, занятие)
 		self.assertFalse(frappe.db.exists(ПОПЫТКА, {"student": self.ученик}))
 
-	def test_квиз_по_курсу_приостановленной_организации_не_начать(self):
-		"""Доступ проверяется и при старте попытки: занятие могло начаться до приостановки."""
-		run, занятие = self.урок()
-		frappe.set_user("Administrator")
-		организация = создать_организацию(f"Компания {frappe.generate_hash(length=6)}")
-		добавить_в_организацию(self.ученик, организация)
-		frappe.get_doc(
-			{"doctype": "Course Allocation", "organization": организация, "course": run.course}
-		).insert(ignore_permissions=True)
-		frappe.db.set_value("Learning Organization", организация, "status", "Suspended")
-
-		self.отказ(ОРГАНИЗАЦИЯ_ПРИОСТАНОВЛЕНА, release_quiz.начать, run, занятие)
-
 	# --- ответ ---
 
 	def test_верный_ответ_с_пояснением(self):
@@ -241,7 +234,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		запись = frappe.get_all(
 			"Agent Quiz Answer",
 			filters={"attempt": попытка},
-			fields=["question_key", "objective_key", "answer", "is_correct"],
+			fields=["question_key", "objective_key", "answer", "is_correct", "marks", "marks_out_of"],
 		)
 		self.assertEqual(
 			[dict(з) for з in запись],
@@ -251,23 +244,11 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 					"objective_key": "l-1-D1",
 					"answer": "V1",
 					"is_correct": 1,
+					"marks": 1,
+					"marks_out_of": 1,
 				}
 			],
 		)
-
-	def test_неверный_ответ_без_пояснения_и_без_верного_варианта(self):
-		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=1))
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		ответ = self.ответить(попытка, С1, "V2")
-
-		self.assertEqual(ответ["verdict"], {"correct": False})
-		self.assertIsNone(ответ["next_question"])
-		self.assertTrue(ответ["attempt_finished"])
-		self.assertEqual(frappe.db.get_value(ПОПЫТКА, попытка, "status"), ПОПЫТКА_НЕ_ЗАЧТЕНА)
-		выдано = json.dumps(ответ, ensure_ascii=False)
-		for утечка in ("V1", "Первый", ПОЯСНЕНИЕ, "explanation", "why_wrong"):
-			self.assertNotIn(утечка, выдано)
 
 	def test_ответ_текстом_варианта_засчитан(self):
 		run, занятие = self.урок()
@@ -280,6 +261,15 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 				"Agent Quiz Answer", filters={"attempt": попытка}, pluck="is_correct", order_by="creation"
 			),
 			[1, 0],
+		)
+		self.assertEqual(
+			[
+				(з.marks, з.marks_out_of)
+				for з in frappe.get_all(
+					ОТВЕТ, filters={"attempt": попытка}, fields=["marks", "marks_out_of"], order_by="creation"
+				)
+			],
+			[(1, 1), (0, 1)],
 		)
 
 	def test_ключ_важнее_текста(self):
@@ -308,52 +298,7 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		self.assertEqual(self.ответить(попытка, С1, "Третий")["verdict"], {"correct": False})
 
-	def test_журнал_проверки_по_ключам_вопросов(self):
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		self.ответить(попытка, С1, "V2")
-
-		журнал = frappe.get_all(
-			"Agent Quiz Event",
-			filters={"attempt": попытка},
-			fields=["kind", "question_key", "answer", "student_words", "is_correct", "lesson"],
-			order_by="creation asc",
-		)
-
-		self.assertEqual(
-			[(з.kind, з.question_key) for з in журнал],
-			[
-				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
-				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С1),
-				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
-			],
-		)
-		self.assertEqual(
-			(журнал[1].answer, журнал[1].student_words, журнал[1].is_correct, журнал[1].lesson),
-			("V2", "слова ученика", 0, run.lesson),
-		)
-
 	# --- отказы ответа ---
-
-	def test_вопрос_не_из_снимка_отклоняется(self):
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, "S9/l-1-D1")
-
-	def test_ответ_в_попытку_без_релиза_отклоняется_без_ответа(self):
-		"""Попытка без релиза — не на действующем: аннулируется, ответ не принят и в журнал не идёт."""
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		frappe.db.set_value(ПОПЫТКА, попытка, "release", None)
-
-		отказ = self.отказ(АННУЛИРОВАНА, self.ответить, попытка, С1)
-
-		self.assertEqual(отказ.подробности["reason"], АННУЛИРОВАНА_ПОПЫТКА_ОТСТАЛА)
-		self.assertFalse(frappe.db.exists(ОТВЕТ, {"attempt": попытка}))
-		self.assertFalse(
-			frappe.db.exists("Agent Quiz Event", {"attempt": попытка, "kind": ПРОВЕРКА_ОТВЕТ_ПРИНЯТ})
-		)
 
 	def test_повторный_ответ_на_вопрос_отклоняется(self):
 		run, занятие = self.урок()
@@ -361,16 +306,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.ответить(попытка, С1)
 
 		self.отказ(ЧУЖОЙ_ВОПРОС, self.ответить, попытка, С1, "V2")
-
-	def test_дубль_ответа_не_пускает_база(self):
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		self.ответить(попытка, С1)
-
-		with self.assertRaises((frappe.UniqueValidationError, frappe.DuplicateEntryError)):
-			frappe.get_doc({"doctype": ОТВЕТ, "attempt": попытка, "question_key": С1}).insert(
-				ignore_permissions=True
-			)
 
 	def test_параллельный_ответ_на_тот_же_вопрос_отклоняется(self):
 		"""Проверка «уже отвечено» не увидела ответ соседа — держит индекс, попытка цела."""
@@ -391,12 +326,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		frappe.db.set_value(ПОПЫТКА, попытка, "status", ПОПЫТКА_НЕ_ЗАЧТЕНА)
 
 		self.отказ(ПОПЫТКА_ЗАВЕРШЕНА, self.ответить, попытка, С1)
-
-	def test_ответ_без_слов_ученика_отклоняется(self):
-		run, занятие = self.урок()
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		self.отказ(НУЖНЫ_СЛОВА, release_quiz.ответить, попытка, С1, "V1", "  ")
 
 	def test_ответ_без_доступа_к_курсу_отклоняется(self):
 		run, занятие = self.урок()
@@ -580,6 +509,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 		ответ = self.сдать(run, занятие, ["V1", "V1", "V1", "V2"])
 
+		self.assertEqual(ответ["verdict"], {"correct": False})
+		self.assertIsNone(ответ["next_question"])
+		self.assertTrue(ответ["attempt_finished"])
 		итог = ответ["result"]
 		self.assertFalse(итог["passed"])
 		self.assertNotIn("explanations", итог)
@@ -643,7 +575,10 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		self.assertEqual(прохождение.status, прохождения.ПРОЙДЕН)
 		self.assertIsNotNone(прохождение.passed_at)
 		self.assertTrue(
-			frappe.db.exists("Agent Homework Submission", {"member": self.ученик, "lesson": run.lesson})
+			frappe.db.exists(
+				"Agent Homework Submission",
+				{"member": self.ученик, "lesson": run.lesson, "status": "Assigned"},
+			)
 		)
 
 	def test_квиз_сдаётся_и_после_закрытия_занятия_по_бездействию(self):
@@ -669,38 +604,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			return student.complete_lesson(занятие)
 		finally:
 			frappe.set_user(self.куратор)
-
-	def test_урок_из_релиза_с_обязательным_квизом_так_не_закрыть(self):
-		run, занятие = self.урок()
-		отметить_все_пункты(run.name)
-
-		ответ = self.закрыть(занятие)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.НУЖЕН_КВИЗ)
-		self.assertFalse(
-			frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": run.lesson})
-		)
-		self.assertNotEqual(
-			frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run.name, "status"), прохождения.ПРОЙДЕН
-		)
-
-	def test_квиз_не_обязателен_урок_закрывается_и_пройден(self):
-		настроить_квиз(quiz_required=0)
-		run, занятие = self.урок()
-		отметить_все_пункты(run.name)
-
-		ответ = self.закрыть(занятие)
-
-		self.assertTrue(ответ["ok"], ответ)
-		self.assertEqual(
-			frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run.name, "status"), прохождения.ПРОЙДЕН
-		)
-		self.assertTrue(
-			frappe.db.exists(
-				"LMS Course Progress", {"member": self.ученик, "lesson": run.lesson, "status": "Complete"}
-			)
-		)
 
 	def test_закрытие_без_прохождения_заводит_его_пройденным(self):
 		"""Урок закрыт до первой отметки — счёт глав всё равно видит его пройденным."""

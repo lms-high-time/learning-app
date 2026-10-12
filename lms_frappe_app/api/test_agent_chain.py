@@ -241,12 +241,6 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "run"), self.прохождение().name)
 
-	def test_архивное_прохождение_не_отмечается(self):
-		занятие = self.старт()["session"]
-		frappe.db.set_value(прохождения.ПРОХОЖДЕНИЕ, self.прохождение().name, "student", None)
-
-		self.отказ(self.отметить(занятие, "term:T1"), "run_archived")
-
 	def test_закрытое_занятие_отметок_не_принимает(self):
 		for статус in ("Completed", "Abandoned"):
 			with self.subTest(статус=статус):
@@ -264,6 +258,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 
 		self.отказ(self.отметить(старое, "term:T1"), "course_not_released")
+		for вызов in (student.request_quiz, student.complete_lesson):
+			self.отказ(вызов(старое), "course_not_released")
+		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": старое}))
 		self.отказ(self.отметить(занятие, "term:T1", evidence=""), "evidence_required")
 		self.отказ(self.отметить(занятие, "term:T1", "skipped"), "goal_status_unknown")
 		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
@@ -353,6 +350,11 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual(set(закрыто), {"lesson", "session_status", "next_lesson", "empty_blocks"})
 		self.assertEqual((закрыто["lesson"], закрыто["session_status"]), (урок, "Completed"))
 		self.assertEqual(self.прохождение(курс).status, прохождения.ПРОЙДЕН)
+		self.assertTrue(
+			frappe.db.exists(
+				"LMS Course Progress", {"member": self.ученик, "lesson": урок, "status": "Complete"}
+			)
+		)
 
 	def test_урок_без_вопросов_закрывается(self):
 		frappe.db.delete("Agent Release Question", {"parent": self.релиз, "lesson_key": "l-1"})
@@ -411,14 +413,9 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.отказ(student.complete_lesson(старт["session"]), "quiz_required")
 
 		self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
-
-	def test_курс_без_релиза_квиз_и_закрытие_отказывают(self):
-		урок = self.курс_без_релиза()
-		занятие = создать_занятие(self.ученик, урок)
-
-		self.отказ(student.request_quiz(занятие), "course_not_released")
-		self.отказ(student.complete_lesson(занятие), "course_not_released")
-		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": занятие}))
+		self.assertFalse(
+			frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": self.урок})
+		)
 
 	def test_квиз_при_гонке_за_прохождение_busy(self):
 		занятие = создать_занятие(self.ученик, self.урок)

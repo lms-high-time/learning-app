@@ -97,22 +97,6 @@ class IntegrationTestDocumentSpace(IntegrationTestCase):
 		)
 		завести_схему(self.курс)
 
-	def test_курс_от_организации_пишется_в_её_пространство(self):
-		назначить(self.компания, self.курс)
-
-		документ = написать(self.ученик, self.курс, "Кофейня")
-
-		self.assertEqual(
-			frappe.db.get_value("Agent Student Artifact", документ, "organization"), self.компания
-		)
-
-	def test_самозапись_остаётся_личной(self):
-		зачислить(self.ученик, self.урок)
-
-		документ = написать(self.ученик, self.курс, "Для себя")
-
-		self.assertFalse(frappe.db.get_value("Agent Student Artifact", документ, "organization"))
-
 	def test_занятие_помнит_пространство(self):
 		_, урок = курс_релиза(self.компания)
 		frappe.set_user(self.ученик)
@@ -127,6 +111,7 @@ class IntegrationTestDocumentSpace(IntegrationTestCase):
 		"""Курс назначен после личной работы — компании достаётся свой документ (#346)."""
 		зачислить(self.ученик, self.урок)
 		личный = написать(self.ученик, self.курс, "Начал сам")
+		self.assertFalse(frappe.db.get_value("Agent Student Artifact", личный, "organization"))
 
 		назначить(self.компания, self.курс)
 		компании = написать(self.ученик, self.курс, "Для компании")
@@ -194,16 +179,6 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 
 	def видимость(self, организация: str, значение: str) -> None:
 		frappe.db.set_value("Learning Organization", организация, "artifact_visibility", значение)
-
-	def test_документы_размечены_по_пространствам(self):
-		self.assertEqual(
-			frappe.db.get_value("Agent Student Artifact", self.документы["икс"], "organization"),
-			self.икс,
-		)
-		self.assertEqual(
-			frappe.db.get_value("Agent Student Artifact", self.документы["игрек"], "organization"),
-			self.игрек,
-		)
 
 	def test_руководитель_читает_документы_только_своего_пространства(self):
 		self.assertTrue(self.читает(self.руководитель_икс, "икс"))

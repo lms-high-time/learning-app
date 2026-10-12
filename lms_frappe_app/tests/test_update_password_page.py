@@ -7,9 +7,8 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import get_html_for_route
 
-from lms_frappe_app.access import КЛЮЧ_ДЕЙСТВУЕТ, КЛЮЧ_НЕ_НАЙДЕН
 from lms_frappe_app.tests.test_access import ключ, ученик
-from lms_frappe_app.www.update_password import ЗАПРОС_ССЫЛКИ, get_context, сведения
+from lms_frappe_app.www.update_password import ЗАПРОС_ССЫЛКИ, get_context
 
 
 class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
@@ -38,15 +37,6 @@ class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
 		self.assertEqual(контекст.state, ЗАПРОС_ССЫЛКИ)
 		self.assertEqual(контекст.email, пользователь)
 
-	def test_действующий_ключ_даёт_форму(self):
-		пользователь = ученик()
-		свой = ключ(пользователь)
-
-		self.assertEqual(сведения(свой), {"state": КЛЮЧ_ДЕЙСТВУЕТ, "key": свой, "email": пользователь})
-
-	def test_ненайденный_ключ_в_страницу_не_попадает(self):
-		self.assertEqual(сведения("выдуманный"), {"state": КЛЮЧ_НЕ_НАЙДЕН, "key": "", "email": ""})
-
 	def test_форма_пароля_с_логином_и_без_обещания_длины(self):
 		"""Логин нужен менеджеру паролей, а длину Frappe не проверяет — решает
 		политика паролей, если она включена."""
@@ -56,14 +46,15 @@ class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
 		html = get_html_for_route("update-password")
 
 		self.assertIn(f'value="{пользователь}"', html)
+		self.assertIn(frappe.form_dict.key, html)
 		self.assertIn('autocomplete="username"', html)
 		self.assertNotIn("8 символов", html)
 
 	def test_frappe_отдаёт_нашу_страницу(self):
 		"""Страница приложения, установленного позже, перекрывает страницу Frappe.
 
-		`Why:` без этого тесты `сведения` зеленели бы, а человек видел бы
-		прежнюю страницу.
+		`Why:` без этого `get_context` отдавал бы верные сведения, а человек
+		видел бы прежнюю страницу.
 		"""
 		frappe.form_dict.key = "выдуманный"
 
@@ -71,3 +62,4 @@ class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
 
 		self.assertIn("Ссылка уже использована или недействительна", html)
 		self.assertIn("frappe.core.doctype.user.user.reset_password", html)
+		self.assertNotIn("выдуманный", html)

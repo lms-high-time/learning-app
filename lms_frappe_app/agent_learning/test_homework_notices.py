@@ -231,6 +231,7 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		письма.разослать()
 		[письмо] = self.письма_к(методист)
 		self.assertIn("1 домашка", письмо["subject"])
+		self.assertIn("в курсах, где вы автор", письмо["message"])
 		self.assertEqual(self.дайджест(чужой), [])
 
 	def test_дайджест_модератору(self):
@@ -376,16 +377,6 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.assertIn("1 домашка", письмо["subject"])
 		# Модератор видит все ожидающие стенда — сколько их, тест не знает.
 		self.assertEqual(len(self.письма_к(модератор)), 1)
-
-	def test_дайджест_автору_про_его_курсы(self):
-		методист = создать_куратора(f"hnz-{frappe.generate_hash(length=6)}@example.com")
-		курс = frappe.get_doc("LMS Course", self.курс)
-		курс.append("instructors", {"instructor": методист})
-		курс.save(ignore_permissions=True)
-		self.сдать(None)
-		письма.разослать()
-		[письмо] = self.письма_к(методист)
-		self.assertIn("в курсах, где вы автор", письмо["message"])
 
 	def test_записанный_дайджест_не_выбирает_сдачи(self):
 		self.сдать(self.организация)

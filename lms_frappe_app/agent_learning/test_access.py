@@ -68,10 +68,6 @@ class IntegrationTestAccess(IntegrationTestCase):
 		self.assertIsNone(курс["deadline"])
 		self.assertFalse(курс["mandatory"])
 
-	def test_частному_ученику_политика_из_общих_настроек(self):
-		self.записать_самостоятельно()
-		self.assertEqual(политика_квиза_для_курса(self.ученик, self.курс)["max_attempts"], 3)
-
 	def test_назначение_добавляет_дедлайн_и_обязательность(self):
 		организация = self.организация()
 		добавить_в_организацию(self.ученик, организация)
@@ -163,6 +159,7 @@ class IntegrationTestAccess(IntegrationTestCase):
 		политика = политика_квиза_для_курса(self.ученик, self.курс)
 
 		self.assertTrue(политика["quiz_required"], "квиз обязателен по настройкам платформы")
+		self.assertEqual(политика["max_attempts"], 3)
 
 	# --- отказы ---
 

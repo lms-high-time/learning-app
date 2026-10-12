@@ -140,19 +140,6 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 			[{"artifact": "summary", "key": "goal", "title": "Цель", "filled": False}],
 		)
 
-	def test_материал_наружу_не_выходит(self):
-		вход = self.войти(self.уроки[0])
-
-		self.assertEqual(
-			set(вход), {"lesson", "course", "title", "hook", "completed", "study", "program_lock", "blocks"}
-		)
-
-	def test_неизвестный_урок(self):
-		ответ = public.lesson_entry(lesson="нет-такого-урока")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], УРОК_НЕ_НАЙДЕН)
-
 	def test_гостю_вход_закрыт(self):
 		frappe.set_user("Guest")
 
@@ -199,7 +186,7 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		self.assertTrue(вход["completed"])
 
 	def test_курс_без_уроков_и_пустой_вызов_отказываются(self):
-		for параметры in ({"course": "нет-такого-курса"}, {}):
+		for параметры in ({"lesson": "нет-такого-урока"}, {"course": "нет-такого-курса"}, {}):
 			with self.subTest(параметры=параметры):
 				ответ = public.lesson_entry(**параметры)
 				self.assertFalse(ответ["ok"])

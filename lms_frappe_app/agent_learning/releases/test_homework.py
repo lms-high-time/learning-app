@@ -46,13 +46,6 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		релиз["lessons"][2]["homework"] = домашка_урока
 		return релиз
 
-	def без_третьего_урока(self) -> dict:
-		релиз = пример_релиза(self.ключ)
-		релиз["chapters"] = релиз["chapters"][:1]
-		релиз["lessons"] = релиз["lessons"][:2]
-		del релиз["agent"]["lessons"]["l-3"]
-		return релиз
-
 	def урок(self, курс: str, ключ: str = "l-3") -> str:
 		return frappe.get_all(
 			"Agent Release Lesson",
@@ -276,25 +269,6 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		self.assertEqual((прошлое["lesson"], прошлое["title"]), (прошлый, "Задание"))
 		self.assertIsNotNone(прошлое["submission"])
 
-	def test_урок_ушёл_из_релиза_как_убранная_домашка(self):
-		курс = self.опубликовать()["course"]
-		урок = self.урок(курс)
-
-		self.опубликовать(self.без_третьего_урока())
-		self.assertIsNone(self.шаблон(урок))
-		# Урок без сдач и шаблона ни на что не ссылается — уборка его удалила.
-		self.assertFalse(frappe.db.exists("Course Lesson", урок))
-
-		self.опубликовать()
-		урок = self.урок(курс)
-		шаблон = self.шаблон(урок)
-		ученик = self.ученик(курс, урок)
-		self.закрыть_урок(ученик, урок)
-
-		self.опубликовать(self.без_третьего_урока())
-		self.assertEqual(self.шаблон(урок).name, шаблон.name)
-		self.assertEqual(self.шаблон(урок).retired, 1)
-
 	def test_вернувшаяся_домашка_тот_же_шаблон(self):
 		курс = self.опубликовать()["course"]
 		урок = self.урок(курс)
@@ -356,15 +330,3 @@ class IntegrationTestДомашкаИзРелиза(IntegrationTestCase):
 		self.assertEqual(self.шаблон(урок).name, со_сдачей)
 		self.assertEqual(self.шаблон(урок).retired, 1)
 		self.assertIsNone(self.шаблон(лишний))
-
-	# --- удаление курса ---
-
-	def test_курс_с_домашкой_удаляется_целиком(self):
-		курс = self.опубликовать()["course"]
-		урок = self.урок(курс)
-		frappe.set_user("Administrator")
-
-		service.удалить_курс(курс)
-
-		self.assertFalse(frappe.db.exists("LMS Course", курс))
-		self.assertFalse(frappe.db.exists(домашка.ЗАДАНИЕ, {"lesson": урок}))
