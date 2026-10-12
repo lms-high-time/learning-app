@@ -7,6 +7,14 @@ on:
     branches: [master]
   pull_request: {}
 
+# Новый коммит в ветку PR останавливает прогон прежнего. Why: итог прежнего
+# коммита уже никому не нужен — обязательная проверка смотрит на последний, —
+# а его машины задерживают новый. Пуши в master не отменяются: каждый
+# мерж-коммит проверяется целиком.
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # Ревизия Frappe образа стенда, двигается вместе с ним. При сдвиге сверить
   # правила обхода тестов в frappe/testing/discovery.py с run_tests_part.py:
@@ -20,6 +28,31 @@ env:
   IMAGE_MIRROR: public.ecr.aws/docker/library
 
 jobs:
+  # Меняет ли коммит что-то, кроме документации. Why: PR только с правкой
+  # README или правил гонял все тесты впустую. Список — явный, а не `*.md`:
+  # `CONTRACT.md` читают тесты контракта, и новый документ, который начнут
+  # читать тесты, не должен выпасть из проверки молча.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # Нет базы для сравнения (первый пуш ветки) — считаем, что код есть.
+          if files=$(git diff --name-only "$BASE" "$GITHUB_SHA" 2>&1) \
+            && ! printf '%s\n' "$files" | grep -qvxE 'README\.md|TESTING\.md|CONTRIBUTING\.md|license\.txt'; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+          printf 'Изменено:\n%s\n' "$files"
+
   # Тесты делятся на части, каждая поднимает своё окружение на отдельной
   # машине. Why: тесты идут последовательно и занимают бо́льшую часть прогона;
   # на нескольких машинах стена прогона — подготовка плюс доля тестов.
@@ -29,6 +62,8 @@ jobs:
   # Скрипт сверяет состав матрицы и падает, если в ней есть что-то ещё.
   tests:
     name: bench run-tests ${{ matrix.part }}/${{ strategy.job-total }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -233,12 +268,23 @@ jobs:
   # Итог частей под именем обязательной проверки ветки master. Why: правило
   # защиты ветки требует проверку `bench run-tests`, а у частей матрицы имена
   # свои. Без `always()` при падении части итог был бы skipped, а skipped
-  # обязательная проверка не блокирует мерж.
+  # обязательная проверка не блокирует мерж. Части пропущены — зелёный итог,
+  # только если коммит меняет одну документацию и это определено без ошибки.
   tests-result:
     name: bench run-tests
-    needs: tests
+    needs: [changes, tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Все части зелёные
-        run: test "${{ needs.tests.result }}" = success
+      - name: Все части зелёные или менялась только документация
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          TESTS: ${{ needs.tests.result }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$CODE" = false ]; then
+            test "$TESTS" = skipped
+          else
+            test "$TESTS" = success
+          fi
