@@ -169,7 +169,16 @@ jobs:
           # платформы. Why: на upstream `main` тесты шли бы по другой схеме
           # Learning, чем работает стенд, — права, DocType и хуки расходятся
           # с первой же серверной правкой форка или отставанием от upstream.
-          bench get-app --skip-assets --branch high-time https://github.com/lms-high-time/learning-fork
+          #
+          # Ставится клоном и `uv pip`, без `bench get-app`. Why: get-app
+          # всегда запускает `yarn install` корня и `frontend/` Learning — это
+          # почти минута из шага, а серверным тестам `node_modules` не нужны:
+          # ассеты не собираются. Каталог — `apps/lms`, по имени приложения, и
+          # строка в `apps.txt` перед нашим приложением, как ставит get-app.
+          git clone --quiet --depth 1 --branch high-time https://github.com/lms-high-time/learning-fork apps/lms
+          uv pip install --quiet -e apps/lms --python env/bin/python
+          sed -i -e '$a\' sites/apps.txt
+          echo lms >> sites/apps.txt
           bench get-app lms_frappe_app "$GITHUB_WORKSPACE"
 
       - name: Дождаться MariaDB
