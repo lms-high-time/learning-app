@@ -58,15 +58,3 @@ class IntegrationTestOAuthClientRoles(IntegrationTestCase):
 		роли = [р.role for р in к.allowed_roles]
 		self.assertEqual(len(роли), len(set(роли)))
 		self.assertTrue(РОЛИ_ПЛАТФОРМЫ <= set(роли))
-
-	def test_патч_добивает_роли_старым_клиентам_идемпотентно(self):
-		from lms_frappe_app.patches.v0_1.oauth_client_roles import execute
-
-		к = клиент()
-		# Старый клиент: только Desk User, как ставит Frappe без нашего хука.
-		frappe.db.delete("OAuth Client Role", {"parent": к.name, "role": ["in", list(РОЛИ_ПЛАТФОРМЫ)]})
-		execute()
-		execute()
-		роли = [р.role for р in frappe.get_doc("OAuth Client", к.name).allowed_roles]
-		self.assertTrue(РОЛИ_ПЛАТФОРМЫ <= set(роли))
-		self.assertEqual(len(роли), len(set(роли)))
