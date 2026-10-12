@@ -17,6 +17,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_занятие,
 	создать_менеджера,
 	создать_организацию,
+	создать_пользователя,
 	создать_ученика,
 	создать_урок,
 )
@@ -143,8 +144,9 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 
 	def test_менеджер_без_организаций_видит_пустой_отчёт(self):
 		# Роль сама по себе не открывает ничего — нужна связка с членством.
-		одиночка = создать_ученика(f"lone-{frappe.generate_hash(length=6)}@example.com")
-		frappe.get_doc("User", одиночка).add_roles("Organization Manager")
+		одиночка = создать_пользователя(
+			f"lone-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Organization Manager"
+		)
 
 		frappe.set_user(одиночка)
 
@@ -286,9 +288,9 @@ class IntegrationTestManagerRole(IntegrationTestCase):
 				"email": self.руководитель,
 				"first_name": "Руководитель",
 				"send_welcome_email": 0,
+				"roles": [{"role": "Organization Manager"}],
 			}
 		).insert(ignore_permissions=True)
-		пользователь.add_roles("Organization Manager")
 		# Frappe Learning выдаёт роль ученика каждому новому пользователю
 		# автоматически — снимаем её явно, иначе проверка ничего не проверит:
 		# отчёт мог бы работать на правах ученика, как и было раньше.

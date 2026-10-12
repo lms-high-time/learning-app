@@ -9,6 +9,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_курс,
 	создать_менеджера,
 	создать_организацию,
+	создать_пользователя,
 	создать_ученика,
 	создать_урок,
 )
@@ -76,8 +77,9 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 
 	def test_роль_без_членства_ничего_не_открывает(self):
 		"""Роль даёт возможность смотреть отчёты, членство — по каким компаниям."""
-		безродный = создать_ученика(f"free-{frappe.generate_hash(length=6)}@example.com")
-		frappe.get_doc("User", безродный).add_roles("Organization Manager")
+		безродный = создать_пользователя(
+			f"free-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Organization Manager"
+		)
 
 		frappe.set_user(безродный)
 		видимые = frappe.get_list("Agent Learning Session", pluck="name")
@@ -138,8 +140,9 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 	# --- служебная роль ---
 
 	def test_служебная_роль_видит_всё(self):
-		служебный = создать_ученика(f"svc-{frappe.generate_hash(length=6)}@example.com")
-		frappe.get_doc("User", служебный).add_roles("Agent Service")
+		служебный = создать_пользователя(
+			f"svc-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Agent Service"
+		)
 
 		frappe.set_user(служебный)
 		видимые = frappe.get_list("Agent Learning Session", pluck="name")

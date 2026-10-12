@@ -56,24 +56,46 @@ def привязать_урок(chapter: str, lesson: str) -> None:
 		глава.save(ignore_permissions=True)
 
 
-def создать_ученика(почта: str) -> str:
-	"""Пользователь с ролью ученика.
+def создать_пользователя(почта: str, *роли: str) -> str:
+	"""Пользователь с ролями; уже существующему добавляются недостающие.
+
+	Роли передаются прямо в `insert`. `Why:` второе сохранение User повторяет
+	все хуки Frappe — контакт, уведомления, расшаривание, сброс кэша.
+	`user_type` Frappe выставляет по ролям в `validate`, при `insert` так же,
+	как при пересохранении. `LMS Student` Frappe Learning добавляет в
+	`before_insert` любому новому пользователю, даже без этой роли в списке.
 
 	`cache=False` обязателен: тесты откатывают транзакцию, а кеш документов
 	переживает откат — проверка отвечала «есть», пользователь не создавался, и
 	следующий тест падал на несуществующей ссылке.
 	"""
 	if not frappe.db.exists("User", почта, cache=False):
-		user = frappe.get_doc(
+		frappe.get_doc(
 			{
 				"doctype": "User",
 				"email": почта,
 				"first_name": почта.split("@")[0],
 				"send_welcome_email": 0,
+				"roles": [{"role": роль} for роль in роли],
 			}
 		).insert(ignore_permissions=True)
-		user.add_roles("LMS Student")
+	else:
+		_добрать_роли(почта, *роли)
 	return почта
+
+
+def _добрать_роли(почта: str, *роли: str) -> None:
+	"""Добавляет пользователю роли, которых у него нет; все есть — не сохраняет."""
+	пользователь = frappe.get_doc("User", почта)
+	есть = {строка.role for строка in пользователь.roles}
+	недостающие = [роль for роль in роли if роль not in есть]
+	if недостающие:
+		пользователь.add_roles(*недостающие)
+
+
+def создать_ученика(почта: str) -> str:
+	"""Пользователь с ролью ученика."""
+	return создать_пользователя(почта, "LMS Student")
 
 
 def создать_куратора(почта: str, роль: str = "Course Creator") -> str:
@@ -82,17 +104,7 @@ def создать_куратора(почта: str, роль: str = "Course Cre
 	Роль задаётся: удаление уроков Frappe Learning разрешает только
 	`Moderator`, и тесты на него заводят куратора с этой ролью.
 	"""
-	if not frappe.db.exists("User", почта, cache=False):
-		user = frappe.get_doc(
-			{
-				"doctype": "User",
-				"email": почта,
-				"first_name": почта.split("@")[0],
-				"send_welcome_email": 0,
-			}
-		).insert(ignore_permissions=True)
-		user.add_roles(роль)
-	return почта
+	return создать_пользователя(почта, роль)
 
 
 def создать_организацию(название: str, **поля) -> str:
@@ -129,15 +141,17 @@ def создать_курс(название: str) -> str:
 	).insert(ignore_permissions=True).name
 
 
-def создать_менеджера(почта: str, organization: str) -> str:
+def создать_менеджера(почта: str, organization: str, *доп_роли: str) -> str:
 	"""Пользователь с ролью менеджера и членством в организации.
 
 	Роль Frappe даёт возможность смотреть отчёты, членство — определяет, по
 	каким именно организациям. Без второго роль не открывает ничего.
+	`доп_роли` — сверх менеджерской, сразу при создании пользователя.
 	"""
-	создать_ученика(почта)
-	пользователь = frappe.get_doc("User", почта)
-	пользователь.add_roles("Organization Manager")
+	if frappe.db.exists("User", почта, cache=False):
+		_добрать_роли(почта, "Organization Manager", *доп_роли)
+	else:
+		создать_пользователя(почта, "LMS Student", "Organization Manager", *доп_роли)
 	if not frappe.db.exists(
 		"Organization Membership", {"user": почта, "organization": organization}
 	):
