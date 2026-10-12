@@ -3,7 +3,7 @@
 """Сигналы агенту — выводы сервера из истории ученика (learning-services#416)."""
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_days, nowdate
 
 from lms_frappe_app.agent_learning import signals
@@ -21,7 +21,9 @@ from lms_frappe_app.tests.sample_data import (
 from lms_frappe_app.api import student
 
 
-class IntegrationTestSignalsPriority(IntegrationTestCase):
+class TestSignalsPriority(UnitTestCase):
+	"""Отбор сигналов — без базы: запись в занятие подменена."""
+
 	def test_по_приоритету_и_один_раз_на_занятие(self):
 		занятие = frappe.get_doc({"doctype": "Agent Learning Session", "signals_shown": ""})
 		записано = {}
@@ -39,12 +41,19 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 	"""Сигналы урока курса из релиза — по прохождению: брошенные попытки, пустой
 	документ, темп к сроку; после отметки пункта — пустой документ."""
 
+	@classmethod
+	def setUpClass(cls):
+		"""Курс тесты только читают; ученик, организация и назначение — у каждого
+		теста свои."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, _ = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"sig-start-{суффикс}@example.com")
-		self.курс, _ = курс_из_релиза()
-		self.урок = урок_релиза(self.курс, "l-1")
 		организация = создать_организацию(f"Компания {суффикс}")
 		добавить_в_организацию(self.ученик, организация)
 		self.назначение = frappe.get_doc(

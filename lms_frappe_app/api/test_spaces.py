@@ -91,11 +91,6 @@ class IntegrationTestDocumentSpace(IntegrationTestCase):
 		self.компания = создать_организацию(f"Компания {суффикс}")
 		self.ученик = создать_ученика(f"space-{суффикс}@example.com")
 		добавить_в_организацию(self.ученик, self.компания)
-		self.урок = создать_урок(f"Урок {суффикс}")
-		self.курс = frappe.db.get_value(
-			"Course Chapter", frappe.db.get_value("Course Lesson", self.урок, "chapter"), "course"
-		)
-		завести_схему(self.курс)
 
 	def test_занятие_помнит_пространство(self):
 		_, урок = курс_релиза(self.компания)
@@ -109,12 +104,15 @@ class IntegrationTestDocumentSpace(IntegrationTestCase):
 
 	def test_без_пространства_документ_выбранного(self):
 		"""Курс назначен после личной работы — компании достаётся свой документ (#346)."""
-		зачислить(self.ученик, self.урок)
-		личный = написать(self.ученик, self.курс, "Начал сам")
+		урок = создать_урок(f"Урок {frappe.generate_hash(length=6)}")
+		курс = frappe.db.get_value("Course Chapter", frappe.db.get_value("Course Lesson", урок, "chapter"), "course")
+		завести_схему(курс)
+		зачислить(self.ученик, урок)
+		личный = написать(self.ученик, курс, "Начал сам")
 		self.assertFalse(frappe.db.get_value("Agent Student Artifact", личный, "organization"))
 
-		назначить(self.компания, self.курс)
-		компании = написать(self.ученик, self.курс, "Для компании")
+		назначить(self.компания, курс)
+		компании = написать(self.ученик, курс, "Для компании")
 
 		self.assertNotEqual(компании, личный)
 		self.assertEqual(
@@ -180,50 +178,60 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 	def видимость(self, организация: str, значение: str) -> None:
 		frappe.db.set_value("Learning Organization", организация, "artifact_visibility", значение)
 
-	def test_руководитель_читает_документы_только_своего_пространства(self):
-		self.assertTrue(self.читает(self.руководитель_икс, "икс"))
-		self.assertFalse(self.читает(self.руководитель_икс, "игрек"))
-		self.assertFalse(self.читает(self.руководитель_икс, "личное"))
-		self.assertTrue(self.читает(self.руководитель_игрек, "игрек"))
-		self.assertFalse(self.читает(self.руководитель_игрек, "икс"))
+	def test_чтение_по_роли_и_пространству(self):
+		"""Руководитель читает документы только своего пространства; автор читает
+		все свои, но напрямую не правит."""
+		случаи = {
+			"руководитель икс → икс": (self.руководитель_икс, "икс", True),
+			"руководитель икс → игрек": (self.руководитель_икс, "игрек", False),
+			"руководитель икс → личное": (self.руководитель_икс, "личное", False),
+			"руководитель игрек → игрек": (self.руководитель_игрек, "игрек", True),
+			"руководитель игрек → икс": (self.руководитель_игрек, "икс", False),
+			"автор → икс": (self.сотрудник, "икс", True),
+			"автор → игрек": (self.сотрудник, "игрек", True),
+			"автор → личное": (self.сотрудник, "личное", True),
+		}
+		for что, (кто, пространство, читает) in случаи.items():
+			with self.subTest(что):
+				self.assertEqual(self.читает(кто, пространство), читает)
 
-	def test_автор_читает_все_свои_но_не_правит_напрямую(self):
-		for пространство in self.документы:
-			self.assertTrue(self.читает(self.сотрудник, пространство))
-		frappe.set_user(self.сотрудник)
-		self.assertFalse(
-			frappe.has_permission("Agent Student Artifact", "write", doc=self.документы["икс"])
-		)
+		with self.subTest("автор не правит напрямую"):
+			frappe.set_user(self.сотрудник)
+			try:
+				правит = frappe.has_permission("Agent Student Artifact", "write", doc=self.документы["икс"])
+			finally:
+				frappe.set_user("Administrator")
+			self.assertFalse(правит)
 
 	def test_участник_читает_документы_коллег_только_если_открыто_всем(self):
-		self.assertFalse(self.читает(self.коллега, "икс"))
+		"""Ушедший участник документов коллег не читает — последним, на той же
+		открытой видимости."""
+		with self.subTest("видимость по умолчанию"):
+			self.assertFalse(self.читает(self.коллега, "икс"))
 
 		self.видимость(self.икс, "All Members")
+		with self.subTest("открыто всем"):
+			self.assertTrue(self.читает(self.коллега, "икс"))
+			self.assertFalse(self.читает(self.коллега, "личное"))
+			self.assertFalse(self.читает(self.коллега, "игрек"))
 
-		self.assertTrue(self.читает(self.коллега, "икс"))
-		self.assertFalse(self.читает(self.коллега, "личное"))
-		self.assertFalse(self.читает(self.коллега, "игрек"))
+		выйти(self.коллега, self.икс)
+		with self.subTest("ушедший участник"):
+			self.assertFalse(self.читает(self.коллега, "икс"))
 
-	def test_ушедший_автор_читает_свой_документ(self):
+	def test_документ_ушедшего_автора(self):
+		"""Ушедший автор свой документ читает, а документ остаётся у организации."""
 		выйти(self.сотрудник, self.икс)
 
-		self.assertTrue(self.читает(self.сотрудник, "икс"))
-
-	def test_документ_ушедшего_остаётся_у_организации(self):
-		выйти(self.сотрудник, self.икс)
-
-		self.assertTrue(self.читает(self.руководитель_икс, "икс"))
+		with self.subTest("автор читает свой"):
+			self.assertTrue(self.читает(self.сотрудник, "икс"))
+		with self.subTest("руководитель читает документ ушедшего"):
+			self.assertTrue(self.читает(self.руководитель_икс, "икс"))
 
 	def test_ушедший_руководитель_теряет_доступ_сразу(self):
 		выйти(self.руководитель_икс, self.икс)
 
 		self.assertFalse(self.читает(self.руководитель_икс, "икс"))
-
-	def test_ушедший_участник_не_читает_документы_коллег(self):
-		self.видимость(self.икс, "All Members")
-		выйти(self.коллега, self.икс)
-
-		self.assertFalse(self.читает(self.коллега, "икс"))
 
 	def test_отчёт_считает_документ_пространства_организации(self):
 		"""Личный документ по тому же курсу в отчёт организации не попадает."""
@@ -278,35 +286,38 @@ class IntegrationTestDocumentSpacesPatch(IntegrationTestCase):
 class IntegrationTestSessionAccess(IntegrationTestCase):
 	"""Занятия, события и попытки видны руководителю по пространству (#344)."""
 
-	def setUp(self):
-		self.addCleanup(frappe.set_user, "Administrator")
+	@classmethod
+	def setUpClass(cls):
+		"""Тесты класса записи только читают."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		self.икс = создать_организацию(f"Икс {суффикс}")
-		self.игрек = создать_организацию(f"Игрек {суффикс}")
-		self.сотрудник = создать_ученика(f"ses-e-{суффикс}@example.com")
-		добавить_в_организацию(self.сотрудник, self.икс)
-		добавить_в_организацию(self.сотрудник, self.игрек)
-		self.руководитель = создать_менеджера(f"ses-m-{суффикс}@example.com", self.икс)
+		cls.икс = создать_организацию(f"Икс {суффикс}")
+		cls.игрек = создать_организацию(f"Игрек {суффикс}")
+		cls.сотрудник = создать_ученика(f"ses-e-{суффикс}@example.com")
+		добавить_в_организацию(cls.сотрудник, cls.икс)
+		добавить_в_организацию(cls.сотрудник, cls.игрек)
+		cls.руководитель = создать_менеджера(f"ses-m-{суффикс}@example.com", cls.икс)
 		урок = создать_урок(f"Урок {суффикс}")
-		зачислить(self.сотрудник, урок)
+		зачислить(cls.сотрудник, урок)
 
-		self.занятия, self.попытки, self.события = {}, {}, {}
-		for пространство, организация in (("икс", self.икс), ("игрек", self.игрек), ("личное", None)):
+		cls.занятия, cls.попытки, cls.события = {}, {}, {}
+		for пространство, организация in (("икс", cls.икс), ("игрек", cls.игрек), ("личное", None)):
 			занятие = frappe.get_doc(
 				{
 					"doctype": "Agent Learning Session",
-					"student": self.сотрудник,
+					"student": cls.сотрудник,
 					"lesson": урок,
 					"organization": организация,
 				}
 			).insert(ignore_permissions=True)
-			self.занятия[пространство] = занятие.name
-			self.попытки[пространство] = (
+			cls.занятия[пространство] = занятие.name
+			cls.попытки[пространство] = (
 				frappe.get_doc(
 					{
 						"doctype": "Agent Quiz Attempt",
 						"session": занятие.name,
-						"student": self.сотрудник,
+						"student": cls.сотрудник,
 						"lesson": урок,
 						"attempt_number": 1,
 					}
@@ -314,7 +325,10 @@ class IntegrationTestSessionAccess(IntegrationTestCase):
 				.insert(ignore_permissions=True)
 				.name
 			)
-			self.события[пространство] = занятие.записать_событие(СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА, "тест").name
+			cls.события[пространство] = занятие.записать_событие(СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА, "тест").name
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
 
 	def видит(self, doctype: str, имя: str) -> bool:
 		frappe.set_user(self.руководитель)
@@ -381,23 +395,27 @@ class IntegrationTestSpaceChoice(IntegrationTestCase):
 	def курсы(self, space=None) -> set[str]:
 		return {к["id"] for к in student.list_my_courses(space=space)["data"]["courses"]}
 
-	def test_по_умолчанию_выбрана_организация(self):
-		ответ = student.my_spaces()["data"]
+	def test_выбор_пространства(self):
+		"""По умолчанию выбрана организация; выбор запоминается, а чужое
+		отклоняется."""
+		with self.subTest("по умолчанию выбрана организация"):
+			ответ = student.my_spaces()["data"]
 
-		self.assertEqual(ответ["current"], self.компания)
-		self.assertEqual([п["id"] for п in ответ["spaces"]], ["personal", self.компания])
-		self.assertEqual(
-			[п["documents_visible_to"] for п in ответ["spaces"]], ["only_me", "managers"]
-		)
+			self.assertEqual(ответ["current"], self.компания)
+			self.assertEqual([п["id"] for п in ответ["spaces"]], ["personal", self.компания])
+			self.assertEqual(
+				[п["documents_visible_to"] for п in ответ["spaces"]], ["only_me", "managers"]
+			)
 
-	def test_выбор_запоминается_а_чужое_отклоняется(self):
-		self.assertEqual(student.set_space("personal")["data"]["current"], "personal")
-		self.assertEqual(student.my_spaces()["data"]["current"], "personal")
-		self.assertEqual(student.whoami()["data"]["space"], "personal")
+		with self.subTest("выбор запоминается"):
+			self.assertEqual(student.set_space("personal")["data"]["current"], "personal")
+			self.assertEqual(student.my_spaces()["data"]["current"], "personal")
+			self.assertEqual(student.whoami()["data"]["space"], "personal")
 
-		отказ = student.set_space(self.чужая)
+		with self.subTest("чужое отклоняется"):
+			отказ = student.set_space(self.чужая)
 
-		self.assertEqual(отказ["error"]["code"], "space_not_available")
+			self.assertEqual(отказ["error"]["code"], "space_not_available")
 
 	def test_личное_показывает_все_курсы_организация_свои(self):
 		self.assertEqual(self.курсы("personal"), {self.курс_компании, self.курс_свой})

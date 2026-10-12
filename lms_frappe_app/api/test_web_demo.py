@@ -22,15 +22,21 @@ from lms_frappe_app.api import student
 
 
 class IntegrationTestWebDemo(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Курсы тесты только читают; занятия пишет ученик своего теста."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		# Уроки из разных курсов: лимит общий на учётную запись, а не на курс.
+		# Курсы из релиза: `start_lesson` открывает только их (learning-services#506).
+		cls.уроки = [урок_релиза(курс_из_релиза()[0], "l-1") for _ in range(3)]
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.addCleanup(политика_по_умолчанию)
 		политика_по_умолчанию()
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"web-{суффикс}@example.com")
-		# Уроки из разных курсов: лимит общий на учётную запись, а не на курс.
-		# Курсы из релиза: `start_lesson` открывает только их (learning-services#506).
-		self.уроки = [урок_релиза(курс_из_релиза()[0], "l-1") for _ in range(3)]
 		for урок in self.уроки:
 			зачислить(self.ученик, урок)
 		frappe.set_user(self.ученик)

@@ -43,16 +43,23 @@ class IntegrationTestCourseTesters(IntegrationTestCase):
 	def добавить(self, users) -> dict:
 		return self.от_имени(self.куратор, authoring.add_testers, course=self.курс, users=users)
 
-	def test_тестер_занимается_неопубликованным_курсом(self):
+	def test_тестер_занимается_неопубликованным_курсом_пока_доступ_не_закрыт(self):
 		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "published"))
 		self.assertFalse(доступен_курс(self.тестер, self.курс)[0])
 
 		данные = self.добавить(self.тестер)["data"]
 
-		self.assertEqual(данные["added"], [{"user": self.тестер, "notified": True}])
-		self.assertTrue(доступен_курс(self.тестер, self.курс)[0])
-		self.assertEqual([т["user"] for т in данные["testers"]], [self.тестер])
-		self.assertEqual(self.письма.call_args.kwargs["recipients"], [self.тестер])
+		with self.subTest("тестер занимается неопубликованным курсом"):
+			self.assertEqual(данные["added"], [{"user": self.тестер, "notified": True}])
+			self.assertTrue(доступен_курс(self.тестер, self.курс)[0])
+			self.assertEqual([т["user"] for т in данные["testers"]], [self.тестер])
+			self.assertEqual(self.письма.call_args.kwargs["recipients"], [self.тестер])
+
+		данные = self.от_имени(self.куратор, authoring.remove_tester, course=self.курс, user=self.тестер)["data"]
+		with self.subTest("закрыть доступ тестеру"):
+			self.assertEqual(данные["testers"], [])
+			self.assertFalse(frappe.db.exists("LMS Enrollment", {"member": self.тестер, "course": self.курс}))
+			self.assertFalse(доступен_курс(self.тестер, self.курс)[0])
 
 	def test_адреса_текстом_без_повторов_и_с_причинами(self):
 		обычный = создать_ученика(f"ts-e-{frappe.generate_hash(length=6)}@example.com")
@@ -69,9 +76,18 @@ class IntegrationTestCourseTesters(IntegrationTestCase):
 		повтор = self.добавить([self.тестер])["data"]
 		self.assertEqual(повтор["skipped"], [{"user": self.тестер, "reason": "already_tester"}])
 
-	def test_без_адресов_отказ(self):
-		ответ = self.добавить("  ,  ")
-		self.assertEqual(ответ["error"]["code"], authoring.НЕТ_АДРЕСОВ)
+	def test_отказы_добавления_и_снятия(self):
+		"""Без адресов — отказ; ученика, который не тестер, не убрать: зачисление
+		остаётся."""
+		with self.subTest("без адресов"):
+			ответ = self.добавить("  ,  ")
+			self.assertEqual(ответ["error"]["code"], authoring.НЕТ_АДРЕСОВ)
+
+		зачислить(self.второй, self.урок)
+		with self.subTest("ученика не тестера не убрать"):
+			ответ = self.от_имени(self.куратор, authoring.remove_tester, course=self.курс, user=self.второй)
+			self.assertEqual(ответ["error"]["code"], authoring.ТЕСТЕР_НЕ_НАЙДЕН)
+			self.assertTrue(frappe.db.exists("LMS Enrollment", {"member": self.второй, "course": self.курс}))
 
 	def test_без_почты_доступ_есть_а_письма_нет(self):
 		with patch.object(notices, "почта_есть", return_value=False):
@@ -88,21 +104,6 @@ class IntegrationTestCourseTesters(IntegrationTestCase):
 		зачислить(self.второй, self.урок)
 		карта = self.от_имени(self.второй, public.course_map, course=self.курс)["data"]
 		self.assertNotIn("tester", карта)
-
-	def test_закрыть_доступ_тестеру(self):
-		self.добавить(self.тестер)
-		данные = self.от_имени(
-			self.куратор, authoring.remove_tester, course=self.курс, user=self.тестер
-		)["data"]
-		self.assertEqual(данные["testers"], [])
-		self.assertFalse(frappe.db.exists("LMS Enrollment", {"member": self.тестер, "course": self.курс}))
-		self.assertFalse(доступен_курс(self.тестер, self.курс)[0])
-
-	def test_ученика_не_тестера_не_убрать(self):
-		зачислить(self.второй, self.урок)
-		ответ = self.от_имени(self.куратор, authoring.remove_tester, course=self.курс, user=self.второй)
-		self.assertEqual(ответ["error"]["code"], authoring.ТЕСТЕР_НЕ_НАЙДЕН)
-		self.assertTrue(frappe.db.exists("LMS Enrollment", {"member": self.второй, "course": self.курс}))
 
 	def test_ученик_тестеров_не_назначает(self):
 		with self.assertRaises(frappe.PermissionError):

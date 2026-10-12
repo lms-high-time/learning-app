@@ -62,48 +62,65 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 
 	# --- очередь ---
 
-	def test_руководитель_видит_только_свою_организацию(self):
-		данные = self.очередь(self.менеджер)
-		self.assertEqual([с["id"] for с in данные["items"]], [self.рабочая.name])
-		self.assertEqual(данные["total"], 1)
-		[строка] = данные["items"]
-		self.assertEqual(строка["student"], {"name": "Анна Петрова"})
-		self.assertEqual(
-			(строка["course"], строка["lesson"], строка["organization"], строка["organization_title"]),
-			(self.курс, self.урок, self.организация, self.организация),
-		)
-		self.assertEqual((строка["version"], строка["reviewed_version"], строка["overdue"]), (1, None, False))
-		self.assertEqual(данные["organizations"], [{"id": self.организация, "title": self.организация}])
-		self.assertEqual([к["id"] for к in данные["courses"]], [self.курс])
+	def test_очередь_по_ролям_и_фильтрам(self):
+		"""Руководитель видит только свою организацию — ни личного, ни чужой;
+		методист — всё по курсу, старые сверху; `limit` режет страницу, а не
+		`total`; ученику очередь пуста. Свою сдачу куратор в очереди не видит —
+		последним: эта строка добавляет сдачу в курс."""
+		with self.subTest("руководитель: строка своей организации"):
+			данные = self.очередь(self.менеджер)
+			self.assertEqual([с["id"] for с in данные["items"]], [self.рабочая.name])
+			self.assertEqual(данные["total"], 1)
+			[строка] = данные["items"]
+			self.assertEqual(строка["student"], {"name": "Анна Петрова"})
+			self.assertEqual(
+				(строка["course"], строка["lesson"], строка["organization"], строка["organization_title"]),
+				(self.курс, self.урок, self.организация, self.организация),
+			)
+			self.assertEqual((строка["version"], строка["reviewed_version"], строка["overdue"]), (1, None, False))
+			self.assertEqual(данные["organizations"], [{"id": self.организация, "title": self.организация}])
+			self.assertEqual([к["id"] for к in данные["courses"]], [self.курс])
 
-	def test_руководитель_не_видит_личное(self):
-		self.assertEqual(self.очередь(self.менеджер, organization="personal")["items"], [])
-		self.assertEqual(self.очередь(self.менеджер, organization=self.чужая_организация)["items"], [])
+		with self.subTest("методист: личное подписано"):
+			данные = self.очередь(self.методист, course=self.курс)
+			личная = данные["items"][0]
+			self.assertEqual((личная["organization"], личная["organization_title"]), ("personal", "Личное"))
+			self.assertIn({"id": "personal", "title": "Личное"}, данные["organizations"])
 
-	def test_методист_видит_всё_старые_сверху(self):
-		данные = self.очередь(self.методист, course=self.курс)
-		self.assertEqual(
-			[с["id"] for с in данные["items"]], [self.личная.name, self.рабочая.name, self.чужая.name]
-		)
-		личная = данные["items"][0]
-		self.assertEqual((личная["organization"], личная["organization_title"]), ("personal", "Личное"))
-		self.assertIn({"id": "personal", "title": "Личное"}, данные["organizations"])
+		отборы = {
+			"руководитель: личное": (self.менеджер, {"organization": "personal"}, []),
+			"руководитель: чужая организация": (self.менеджер, {"organization": self.чужая_организация}, []),
+			"методист: курс, старые сверху": (
+				self.методист,
+				{"course": self.курс},
+				[self.личная.name, self.рабочая.name, self.чужая.name],
+			),
+			"методист: личное": (self.методист, {"course": self.курс, "organization": "personal"}, [self.личная.name]),
+			"методист: организация": (
+				self.методист,
+				{"course": self.курс, "organization": self.организация},
+				[self.рабочая.name],
+			),
+		}
+		for что, (кто, параметры, сдачи) in отборы.items():
+			with self.subTest(что):
+				self.assertEqual([с["id"] for с in self.очередь(кто, **параметры)["items"]], сдачи)
 
-	def test_фильтр_личного_и_организации(self):
-		self.assertEqual(
-			[
-				с["id"]
-				for с in self.очередь(self.методист, course=self.курс, organization="personal")["items"]
-			],
-			[self.личная.name],
-		)
-		self.assertEqual(
-			[
-				с["id"]
-				for с in self.очередь(self.методист, course=self.курс, organization=self.организация)["items"]
-			],
-			[self.рабочая.name],
-		)
+		with self.subTest("limit и total"):
+			данные = self.очередь(self.методист, course=self.курс, limit=2)
+			self.assertEqual((len(данные["items"]), данные["total"]), (2, 3))
+			self.assertEqual(len(self.очередь(self.методист, course=self.курс, limit=500)["items"]), 3)
+
+		with self.subTest("ученику очередь пуста"):
+			данные = self.очередь(self.ученик)
+			self.assertEqual((данные["items"], данные["total"]), ([], 0))
+			self.assertEqual(self.вызвать(self.ученик, "pending_count")["data"], {"count": 0})
+
+		frappe.set_user("Administrator")
+		зачислить(self.методист, self.урок)
+		своя = домашка.сохранить(self.методист, self.урок, None, answer="моя")
+		with self.subTest("свою сдачу куратор не видит"):
+			self.assertNotIn(своя.name, [с["id"] for с in self.очередь(self.методист, course=self.курс)["items"]])
 
 	def test_фильтр_курса(self):
 		другой = создать_урок(f"Урок {frappe.generate_hash(length=6)}")
@@ -121,27 +138,12 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 		[строка] = self.очередь(self.менеджер, status="Returned")["items"]
 		self.assertEqual((строка["status"], строка["reviewed_version"]), ("Returned", 1))
 
-	def test_свою_сдачу_куратор_не_видит(self):
-		зачислить(self.методист, self.урок)
-		своя = домашка.сохранить(self.методист, self.урок, None, answer="моя")
-		self.assertNotIn(своя.name, [с["id"] for с in self.очередь(self.методист, course=self.курс)["items"]])
-
 	def test_архивные_не_видны(self):
 		frappe.db.set_value(
 			домашка.СДАЧА, self.рабочая.name, {"member": None, "archived_student": self.ученик}
 		)
 		данные = self.очередь(self.менеджер)
 		self.assertEqual((данные["items"], данные["total"]), ([], 0))
-
-	def test_limit_и_total(self):
-		данные = self.очередь(self.методист, course=self.курс, limit=2)
-		self.assertEqual((len(данные["items"]), данные["total"]), (2, 3))
-		self.assertEqual(len(self.очередь(self.методист, course=self.курс, limit=500)["items"]), 3)
-
-	def test_ученику_очередь_пуста(self):
-		данные = self.очередь(self.ученик)
-		self.assertEqual((данные["items"], данные["total"]), ([], 0))
-		self.assertEqual(self.вызвать(self.ученик, "pending_count")["data"], {"count": 0})
 
 	def test_счётчик_ожидающих(self):
 		self.assertEqual(self.вызвать(self.менеджер, "pending_count")["data"], {"count": 1})
@@ -151,6 +153,39 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 	# --- карточка ---
 
 	def test_карточка_и_действия_по_статусу(self):
+		"""Своя сдача — карточка без действий; чужую не открыть и не вернуть; нет
+		сдачи — свой код. Отказы ничего не меняют, затем карточка руководителя и
+		действия по статусу."""
+		with self.subTest("своя сдача: карточка без действий"):
+			карточка = self.вызвать(self.ученик, "submission", submission=self.рабочая.name)["data"]
+			self.assertEqual(карточка["actions"], [])
+
+		отказы = {
+			"ученик: принять свою": (self.ученик, "accept", {"submission": self.рабочая.name, "version": 1}, "not_allowed"),
+			"руководитель: карточка личной": (self.менеджер, "submission", {"submission": self.личная.name}, "not_allowed"),
+			"руководитель: вернуть личную": (
+				self.менеджер,
+				"send_back",
+				{"submission": self.личная.name, "version": 1, "comment": "x"},
+				"not_allowed",
+			),
+			"нет сдачи: карточка": (self.менеджер, "submission", {"submission": "нет-такой"}, "submission_not_found"),
+			"нет сдачи: принять": (
+				self.менеджер,
+				"accept",
+				{"submission": "нет-такой", "version": 1},
+				"submission_not_found",
+			),
+		}
+		for что, (кто, метод, параметры, код) in отказы.items():
+			with self.subTest(что):
+				self.assertEqual(self.код(self.вызвать(кто, метод, **параметры)), код)
+		with self.subTest("отказы сдачи не меняют"):
+			self.assertEqual(
+				frappe.db.get_value(домашка.СДАЧА, self.рабочая.name, ["status", "version"]), ("Submitted", 1)
+			)
+			self.assertEqual(frappe.db.get_value(домашка.СДАЧА, self.личная.name, ["status", "version"]), ("Submitted", 1))
+
 		карточка = self.вызвать(self.менеджер, "submission", submission=self.рабочая.name)["data"]
 		self.assertEqual(карточка["actions"], ["accept", "send_back"])
 		self.assertEqual(карточка["submission"]["id"], self.рабочая.name)
@@ -181,35 +216,6 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 		карточка = self.вызвать(self.менеджер, "submission", submission=self.рабочая.name)["data"]
 		self.assertEqual((карточка["submission"]["version"], карточка["reviewed_version"]), (2, 1))
 
-	def test_своя_сдача_карточка_без_действий(self):
-		карточка = self.вызвать(self.ученик, "submission", submission=self.рабочая.name)["data"]
-		self.assertEqual(карточка["actions"], [])
-		self.assertEqual(
-			self.код(self.вызвать(self.ученик, "accept", submission=self.рабочая.name, version=1)),
-			"not_allowed",
-		)
-
-	def test_чужую_карточку_не_открыть(self):
-		self.assertEqual(
-			self.код(self.вызвать(self.менеджер, "submission", submission=self.личная.name)), "not_allowed"
-		)
-		self.assertEqual(
-			self.код(
-				self.вызвать(self.менеджер, "send_back", submission=self.личная.name, version=1, comment="x")
-			),
-			"not_allowed",
-		)
-
-	def test_нет_сдачи(self):
-		self.assertEqual(
-			self.код(self.вызвать(self.менеджер, "submission", submission="нет-такой")),
-			"submission_not_found",
-		)
-		self.assertEqual(
-			self.код(self.вызвать(self.менеджер, "accept", submission="нет-такой", version=1)),
-			"submission_not_found",
-		)
-
 	def гонка(self, *исходы):
 		"""`проверить` по очереди: исключение — бросить, `None` — настоящий вызов.
 
@@ -230,19 +236,27 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 
 		return patch.object(домашка, "проверить", side_effect=проверить), patch.object(frappe.db, "rollback")
 
-	def test_гонка_повторяется_один_раз(self):
-		подмена, откат = self.гонка(frappe.QueryDeadlockError("1213"), None)
-		with подмена, откат:
-			ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
-		self.assertTrue(ответ["ok"], ответ)
-		self.assertEqual(ответ["data"]["submission"]["status"], "Accepted")
-
-	def test_гонка_дважды_даёт_busy(self):
-		for ошибка in (frappe.QueryDeadlockError("1213"), frappe.QueryTimeoutError("1205")):
-			подмена, откат = self.гонка(ошибка, ошибка)
-			with подмена, откат:
-				ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
-			self.assertEqual(self.код(ответ), "busy", ошибка)
+	def test_гонка_дважды_даёт_busy_а_один_раз_повторяется(self):
+		"""Повтор, который принимает сдачу, — последней строкой: отказы `busy`
+		сдачу не трогают."""
+		взаимоблокировка = frappe.QueryDeadlockError("1213")
+		таймаут = frappe.QueryTimeoutError("1205")
+		случаи = {
+			"взаимоблокировка дважды": ((взаимоблокировка, взаимоблокировка), (False, "busy", None)),
+			"таймаут дважды": ((таймаут, таймаут), (False, "busy", None)),
+			"взаимоблокировка, затем успех": ((frappe.QueryDeadlockError("1213"), None), (True, None, "Accepted")),
+		}
+		for что, (исходы, ожидание) in случаи.items():
+			with self.subTest(что):
+				подмена, откат = self.гонка(*исходы)
+				with подмена, откат:
+					ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
+				итог = (
+					ответ["ok"],
+					(ответ.get("error") or {}).get("code"),
+					((ответ.get("data") or {}).get("submission") or {}).get("status"),
+				)
+				self.assertEqual(итог, ожидание, ответ)
 
 	def test_гонка_с_новой_версией_даёт_stale_version(self):
 		"""Ученик сохранил, пока куратор ждал блокировку: повтор видит новую версию."""

@@ -29,7 +29,6 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"scenario-{суффикс}@example.com")
-		self.другой = создать_ученика(f"scenario-other-{суффикс}@example.com")
 		frappe.set_user(self.ученик)
 
 	def запись(self, ученик: str | None = None):
@@ -40,31 +39,29 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 			as_dict=True,
 		)
 
-	def test_без_сохранения_состояния_нет(self):
-		данные = student.scenario_state(КЛЮЧ)["data"]
+	def test_сохранённое_состояние_возвращается_и_замещается(self):
+		"""Без сохранения состояния нет; сохранённое возвращается как есть;
+		повторное сохранение замещает запись, а не заводит вторую."""
+		with self.subTest("без сохранения"):
+			данные = student.scenario_state(КЛЮЧ)["data"]
+			self.assertEqual(данные, {"key": КЛЮЧ, "state": None, "version": None})
 
-		self.assertEqual(данные, {"key": КЛЮЧ, "state": None, "version": None})
-
-	def test_сохранённое_состояние_возвращается_как_есть(self):
 		сохранено = student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
-		self.assertTrue(сохранено["ok"], сохранено.get("error"))
-		self.assertEqual(сохранено["data"], {"key": КЛЮЧ, "version": "1"})
+		with self.subTest("сохранённое возвращается как есть"):
+			self.assertTrue(сохранено["ok"], сохранено.get("error"))
+			self.assertEqual(сохранено["data"], {"key": КЛЮЧ, "version": "1"})
+			данные = student.scenario_state(КЛЮЧ)["data"]
+			self.assertEqual(данные, {"key": КЛЮЧ, "state": СОСТОЯНИЕ, "version": "1"})
+			self.assertEqual(self.запись().turns, 0)
 
-		данные = student.scenario_state(КЛЮЧ)["data"]
-
-		self.assertEqual(данные, {"key": КЛЮЧ, "state": СОСТОЯНИЕ, "version": "1"})
-		self.assertEqual(self.запись().turns, 0)
-
-	def test_повторное_сохранение_замещает_запись(self):
-		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
 		новое = json.dumps({"id": "conv-1", "messages": []})
 		student.save_scenario_state(КЛЮЧ, новое, "2")
-
-		self.assertEqual(
-			frappe.db.count("Agent Scenario State", {"student": self.ученик, "scenario_key": КЛЮЧ}), 1
-		)
-		данные = student.scenario_state(КЛЮЧ)["data"]
-		self.assertEqual((данные["state"], данные["version"]), (новое, "2"))
+		with self.subTest("повторное сохранение замещает запись"):
+			self.assertEqual(
+				frappe.db.count("Agent Scenario State", {"student": self.ученик, "scenario_key": КЛЮЧ}), 1
+			)
+			данные = student.scenario_state(КЛЮЧ)["data"]
+			self.assertEqual((данные["state"], данные["version"]), (новое, "2"))
 
 	def test_вторая_запись_того_же_ключа_не_заводится(self):
 		"""Уникальность держит база: метод ищет запись перед созданием, но
@@ -77,33 +74,27 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 				{"doctype": "Agent Scenario State", "student": self.ученик, "scenario_key": КЛЮЧ}
 			).insert(ignore_permissions=True)
 
-	def test_не_json_отклоняется(self):
-		ответ = student.save_scenario_state(КЛЮЧ, "{обрыв", "1")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.НЕВЕРНОЕ_СОСТОЯНИЕ)
-		self.assertIsNone(self.запись())
-
 	def test_сброс_чистит_разговор_но_не_счётчик(self):
-		"""Иначе лимит ходов обходился бы кнопкой «начать заново»."""
-		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"], {"key": КЛЮЧ, "turns": 1})
-		student.count_scenario_turn(КЛЮЧ)
-		self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
-		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
+		"""Иначе лимит ходов обходился бы кнопкой «начать заново». Сброс без
+		разговора проходит — первым: записи он не заводит."""
+		with self.subTest("сброс без разговора"):
+			ответ = student.reset_scenario_state(КЛЮЧ)
+			self.assertTrue(ответ["ok"], ответ.get("error"))
 
-		ответ = student.reset_scenario_state(КЛЮЧ)
+		with self.subTest("сброс разговора"):
+			self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"], {"key": КЛЮЧ, "turns": 1})
+			student.count_scenario_turn(КЛЮЧ)
+			self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
+			student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
 
-		self.assertTrue(ответ["ok"], ответ.get("error"))
-		self.assertEqual(
-			student.scenario_state(КЛЮЧ)["data"], {"key": КЛЮЧ, "state": None, "version": None}
-		)
-		self.assertEqual(self.запись().turns, 2)
-		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 3)
+			ответ = student.reset_scenario_state(КЛЮЧ)
 
-	def test_сброс_без_разговора_проходит(self):
-		ответ = student.reset_scenario_state(КЛЮЧ)
-
-		self.assertTrue(ответ["ok"], ответ.get("error"))
+			self.assertTrue(ответ["ok"], ответ.get("error"))
+			self.assertEqual(
+				student.scenario_state(КЛЮЧ)["data"], {"key": КЛЮЧ, "state": None, "version": None}
+			)
+			self.assertEqual(self.запись().turns, 2)
+			self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 3)
 
 	def test_счёт_ходов_идёт_за_сутки(self):
 		"""Лимит навсегда закрыл бы профиль ученику, вернувшемуся через полгода."""
@@ -148,31 +139,35 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 			("_сбросить_разговор", lambda: student.reset_scenario_state(КЛЮЧ)),
 		)
 
-	def test_гонка_повторяется_один_раз(self):
+	def test_гонка_дважды_даёт_busy_а_один_раз_повторяется(self):
+		"""`busy` — первыми: отказ записи не оставляет, и повторы идут с чистого
+		листа."""
+		for функция, вызов in self.вызовы():
+			with self.subTest("дважды", функция=функция):
+				подмена, откат = self.гонка(
+					функция, frappe.QueryDeadlockError("1020"), frappe.QueryDeadlockError("1020")
+				)
+				with подмена, откат:
+					ответ = вызов()
+				self.assertFalse(ответ["ok"], функция)
+				self.assertEqual(
+					(ответ["error"]["code"], ответ["error"]["key"]), ("busy", КЛЮЧ), функция
+				)
+		self.assertIsNone(self.запись(), "busy записи не оставляет")
+
 		for функция, вызов in self.вызовы():
 			for ошибка in (
 				frappe.QueryDeadlockError("1020"),
 				frappe.QueryTimeoutError("1205"),
 				frappe.UniqueValidationError("1062"),
 			):
-				подмена, откат = self.гонка(функция, ошибка, None)
-				with подмена, откат:
-					ответ = вызов()
-				self.assertTrue(ответ["ok"], (функция, ошибка, ответ))
+				with self.subTest("один раз", функция=функция, ошибка=type(ошибка).__name__):
+					подмена, откат = self.гонка(функция, ошибка, None)
+					with подмена, откат:
+						ответ = вызов()
+					self.assertTrue(ответ["ok"], (функция, ошибка, ответ))
 		self.assertEqual(self.запись().state, None, "сброс шёл последним")
 		self.assertEqual(self.запись().turns, 3)
-
-	def test_гонка_дважды_даёт_busy(self):
-		for функция, вызов in self.вызовы():
-			подмена, откат = self.гонка(
-				функция, frappe.QueryDeadlockError("1020"), frappe.QueryDeadlockError("1020")
-			)
-			with подмена, откат:
-				ответ = вызов()
-			self.assertFalse(ответ["ok"], функция)
-			self.assertEqual(
-				(ответ["error"]["code"], ответ["error"]["key"]), ("busy", КЛЮЧ), функция
-			)
 
 	def test_сообщение_о_дубле_не_уходит_в_ответ(self):
 		"""Frappe кладёт «must be unique» в журнал перед исключением; при
@@ -190,28 +185,44 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 		self.assertEqual(ответ["data"]["turns"], 1)
 		self.assertEqual(len(frappe.local.message_log), сообщений)
 
-	def test_неверный_ключ_отклоняется(self):
+	def test_неверные_ключ_и_состояние_отклоняются(self):
+		"""Отказ записи не заводит."""
 		for ключ in ("", "Profile", "1profile", "lesson:1", "a" * 33, "profile\n", None):
-			for ответ in (
-				student.scenario_state(ключ),
-				student.save_scenario_state(ключ, СОСТОЯНИЕ, "1"),
-				student.reset_scenario_state(ключ),
-				student.count_scenario_turn(ключ),
-			):
-				self.assertFalse(ответ["ok"], ключ)
-				self.assertEqual(ответ["error"]["code"], student.НЕВЕРНЫЙ_КЛЮЧ_СЦЕНАРИЯ, ключ)
+			with self.subTest(ключ=ключ):
+				for ответ in (
+					student.scenario_state(ключ),
+					student.save_scenario_state(ключ, СОСТОЯНИЕ, "1"),
+					student.reset_scenario_state(ключ),
+					student.count_scenario_turn(ключ),
+				):
+					self.assertFalse(ответ["ok"], ключ)
+					self.assertEqual(ответ["error"]["code"], student.НЕВЕРНЫЙ_КЛЮЧ_СЦЕНАРИЯ, ключ)
+
+		with self.subTest("состояние не JSON"):
+			ответ = student.save_scenario_state(КЛЮЧ, "{обрыв", "1")
+
+			self.assertFalse(ответ["ok"])
+			self.assertEqual(ответ["error"]["code"], student.НЕВЕРНОЕ_СОСТОЯНИЕ)
+			self.assertIsNone(self.запись())
 		self.assertFalse(frappe.db.exists("Agent Scenario State", {"student": self.ученик}))
 
 	def test_ученики_с_одним_ключом_не_смешиваются(self):
+		frappe.set_user("Administrator")
+		try:
+			другой = создать_ученика(f"scenario-other-{frappe.generate_hash(length=6)}@example.com")
+		finally:
+			frappe.set_user(self.ученик)
 		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
 		student.count_scenario_turn(КЛЮЧ)
 
-		frappe.set_user(self.другой)
-		self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
-		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 1)
-		student.reset_scenario_state(КЛЮЧ)
+		frappe.set_user(другой)
+		try:
+			self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
+			self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 1)
+			student.reset_scenario_state(КЛЮЧ)
+		finally:
+			frappe.set_user(self.ученик)
 
-		frappe.set_user(self.ученик)
 		self.assertEqual(student.scenario_state(КЛЮЧ)["data"]["state"], СОСТОЯНИЕ)
 		self.assertEqual(self.запись().turns, 1)
 
