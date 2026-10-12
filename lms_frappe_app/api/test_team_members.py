@@ -12,6 +12,7 @@ from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_менеджера,
 	создать_организацию,
+	создать_пользователя,
 	создать_ученика,
 )
 
@@ -22,7 +23,8 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.компания = создать_организацию(f"Компания {суффикс}")
 		self.руководитель = создать_менеджера(f"inv-m-{суффикс}@example.com", self.компания)
-		self.админ = создать_ученика(f"inv-a-{суффикс}@example.com")
+		# Роль сразу при создании: хук членства её увидит и не пересохранит User.
+		self.админ = создать_пользователя(f"inv-a-{суффикс}@example.com", "LMS Student", "Organization Manager")
 		добавить_в_организацию(self.админ, self.компания, "Org Admin")
 		self.сотрудник = создать_ученика(f"inv-e-{суффикс}@example.com")
 		добавить_в_организацию(self.сотрудник, self.компания)
