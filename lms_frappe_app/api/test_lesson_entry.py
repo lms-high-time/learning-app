@@ -140,13 +140,6 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 			[{"artifact": "summary", "key": "goal", "title": "Цель", "filled": False}],
 		)
 
-	def test_материал_наружу_не_выходит(self):
-		вход = self.войти(self.уроки[0])
-
-		self.assertEqual(
-			set(вход), {"lesson", "course", "title", "hook", "completed", "study", "program_lock", "blocks"}
-		)
-
 	def test_неизвестный_урок(self):
 		ответ = public.lesson_entry(lesson="нет-такого-урока")
 

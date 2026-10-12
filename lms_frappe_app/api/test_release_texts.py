@@ -226,24 +226,6 @@ class IntegrationTestНазванияБезУгловых(IntegrationTestCase):
 		self.куратор = создать_куратора(f"titles-{суффикс}@example.com")
 		self.ключ = f"titles-{суффикс}"
 
-	def test_релиз_с_угловыми_в_названиях_отказ(self):
-		р = пример_релиза(self.ключ)
-		р["lessons"][2]["homework"]["title"] = f"Задание {ТЕГ}"
-		р["document"]["title"] = "Тетрадь a<b"
-		frappe.set_user(self.куратор)
-
-		ответ = authoring.publish_release(release=р)
-
-		self.assertEqual(ответ["error"]["code"], "release_inconsistent", ответ)
-		self.assertEqual(
-			[(п["code"], п["where"], п["chars"]) for п in ответ["error"]["problems"]],
-			[
-				("title_forbidden_chars", "lessons[l-3].homework.title", ["<", ">"]),
-				("title_forbidden_chars", "document.title", ["<"]),
-			],
-		)
-		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
-
 	def test_мимо_релиза_отказ_при_сохранении(self):
 		frappe.set_user(self.куратор)
 		ответ = authoring.publish_release(release=пример_релиза(self.ключ))

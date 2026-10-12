@@ -53,23 +53,6 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 			"Agent Learning Session", {"student": self.ученик, "lesson": self.урок}
 		)
 
-	def test_без_занятий_отдаётся_пусто(self):
-		данные = student.lesson_session(self.урок)["data"]
-
-		self.assertEqual(данные["session"], None)
-		self.assertEqual(данные["status"], None)
-		self.assertFalse(данные["has_chat_state"])
-		self.assertFalse(данные["completed"])
-
-	def test_незакрытое_занятие_отдаётся_как_идущее(self):
-		занятие = создать_занятие(self.ученик, self.урок)
-
-		данные = student.lesson_session(self.урок)["data"]
-
-		self.assertEqual(данные["session"], занятие)
-		self.assertEqual(данные["status"], "In Progress")
-		self.assertFalse(данные["completed"])
-
 	def test_закрытое_занятие_с_разговором_видно_целиком(self):
 		"""Ради этого метод и заводится: ученик вернулся к пройденному уроку,
 		и сервису нужно найти разговор, а не начинать урок заново."""
@@ -158,14 +141,6 @@ class IntegrationTestStartState(IntegrationTestCase):
 			{"status": "Completed", "started_at": когда, "last_activity_at": когда, "finished_at": когда},
 		)
 
-	def test_первое_занятие_по_курсу(self):
-		данные = self.начало(self.урок)
-
-		self.assertEqual(данные["start"]["opening"], "first_in_course")
-		self.assertIsNone(данные["start"]["last_session_at"])
-		self.assertEqual(данные["course_promise"], "К концу курса вы умеете пример.")
-		self.assertEqual(данные["lesson"]["hook"], "Зачин урока «Урок первый»")
-
 	def test_пустые_зачин_и_обещание_отдаются_как_none(self):
 		frappe.db.set_value("LMS Course", self.курс, "course_promise", "")
 		frappe.db.set_value("Agent Release Lesson", {"parent": self.релиз, "lesson_key": "l-1"}, "hook", "")
@@ -174,10 +149,6 @@ class IntegrationTestStartState(IntegrationTestCase):
 
 		self.assertIsNone(данные["course_promise"])
 		self.assertIsNone(данные["lesson"]["hook"])
-
-	def test_новый_урок_после_недавнего_занятия(self):
-		self.прошлое("l-1", часов_назад=1, незакрыто=True)
-		self.assertEqual(self.начало(self.второй)["start"]["opening"], "new_lesson")
 
 	def test_возвращение_после_перерыва_с_незакрытым(self):
 		self.прошлое("l-1", часов_назад=48, незакрыто=True)
@@ -201,10 +172,6 @@ class IntegrationTestStartState(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		self.прошлое("l-1", часов_назад=2, незакрыто=True)
 		self.assertEqual(self.начало(self.второй)["start"]["opening"], "return")
-
-	def test_повтор_урока(self):
-		self.прошлое("l-1", часов_назад=48, незакрыто=True)
-		self.assertEqual(self.начало(self.урок)["start"]["opening"], "repeat")
 
 	def брошенная_попытка(self, урок: str) -> None:
 		"""Занятие без следа: ни отметки пункта, ни закрытого урока."""

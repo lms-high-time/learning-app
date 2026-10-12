@@ -274,7 +274,7 @@ class IntegrationTestCourseReports(IntegrationTestCase):
 		второй = self.итоги_на_занятии()
 
 		self.assertEqual([р["id"] for р in первый], [репорт])
-		self.assertEqual(первый[0]["resolution"], "Переписали пример")
+		self.assertEqual((первый[0]["status"], первый[0]["resolution"]), ("fixed", "Переписали пример"))
 		self.assertEqual(второй, [])
 		# Итог ушёл, но из списка ученика репорт никуда не делся.
 		self.assertIn(репорт, {р["id"] for р in self.мои_репорты()})

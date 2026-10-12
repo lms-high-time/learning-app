@@ -313,19 +313,6 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		self.assertEqual(self.код(authoring.reply_note(note="AAN-нет", text="…")), "note_not_found")
 		self.assertEqual(self.код(authoring.set_note_status(note="AAN-нет", status="accepted")), "note_not_found")
 
-	def test_заметки_двигают_свою_метку_а_не_метку_курса(self):
-		до = authoring.course_revision(course=self.курс)["data"]
-		self.assertIsNone(до["notes_revision"])
-
-		ид = self.записать()
-		после_записи = authoring.course_revision(course=self.курс)["data"]
-		authoring.reply_note(note=ид, text="Уточню: шаг 3")
-		после_ответа = authoring.course_revision(course=self.курс)["data"]
-
-		self.assertEqual(после_записи["revision"], до["revision"])
-		self.assertIsNotNone(после_записи["notes_revision"])
-		self.assertGreater(после_ответа["notes_revision"], после_записи["notes_revision"])
-
 	def test_ученику_заметки_недоступны(self):
 		ид = self.записать()
 		frappe.set_user(создать_ученика(f"notes-s-{frappe.generate_hash(length=6)}@example.com"))

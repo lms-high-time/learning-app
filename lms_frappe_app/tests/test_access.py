@@ -49,9 +49,6 @@ def ключ(пользователь: str) -> str:
 class IntegrationTestResetKey(IntegrationTestCase):
 	"""Состояние ключа сброса: страница пароля решает по нему, что показать."""
 
-	def test_свежий_ключ_действует(self):
-		self.assertEqual(состояние_ключа(ключ(ученик())), КЛЮЧ_ДЕЙСТВУЕТ)
-
 	def test_просроченный_ключ_устарел(self):
 		пользователь = ученик()
 		свой = ключ(пользователь)
@@ -205,16 +202,10 @@ class IntegrationTestSignUp(IntegrationTestCase):
 	def новый_адрес(self) -> str:
 		return f"signup-{frappe.generate_hash(length=8)}@example.com"
 
-	def test_новый_адрес_создаёт_аккаунт(self):
-		адрес = self.новый_адрес()
-
-		self.assertEqual(sign_up(адрес, "Новый Ученик", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
-		self.assertTrue(frappe.db.exists("User", адрес))
-
 	def test_после_пароля_возврат_туда_откуда_пришёл_и_без_кэша(self):
 		"""Кэш Redis может вытесниться, пока человек идёт к письму."""
 		адрес = self.новый_адрес()
-		sign_up(адрес, "Новый Ученик", "/lms/join/abc")
+		self.assertEqual(sign_up(адрес, "Новый Ученик", "/lms/join/abc"), (1, ПРОВЕРЬТЕ_ПОЧТУ))
 		frappe.cache.hdel("redirect_after_login", адрес)
 
 		переход = update_password(НОВЫЙ_ПАРОЛЬ, key=ключ(адрес))

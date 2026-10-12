@@ -53,6 +53,7 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 		данные = student.scenario_state(КЛЮЧ)["data"]
 
 		self.assertEqual(данные, {"key": КЛЮЧ, "state": СОСТОЯНИЕ, "version": "1"})
+		self.assertEqual(self.запись().turns, 0)
 
 	def test_повторное_сохранение_замещает_запись(self):
 		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
@@ -195,12 +196,6 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 
 		self.assertEqual(ответ["data"]["turns"], 1)
 		self.assertEqual(len(frappe.local.message_log), сообщений)
-
-	def test_первое_сохранение_заводит_запись_с_разговором(self):
-		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
-
-		запись = self.запись()
-		self.assertEqual((запись.state, запись.state_version, запись.turns), (СОСТОЯНИЕ, "1", 0))
 
 	def test_неверный_ключ_отклоняется(self):
 		for ключ in ("", "Profile", "1profile", "lesson:1", "a" * 33, "profile\n", None):

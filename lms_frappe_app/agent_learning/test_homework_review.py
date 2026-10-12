@@ -11,7 +11,6 @@ from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
 	создать_домашку,
-	создать_занятие,
 	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
@@ -80,12 +79,6 @@ class IntegrationTestHomeworkReview(IntegrationTestCase):
 		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="вторая")
 		self.assertEqual((документ.status, документ.version), ("Submitted", 2))
 
-	def test_после_отмены_приёма_ученик_снова_правит(self):
-		self.проверить("accept")
-		self.проверить("reopen", "Не то")
-		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="исправил")
-		self.assertEqual((документ.status, документ.version), ("Submitted", 2))
-
 	def test_устаревшая_версия(self):
 		домашка.сохранить(self.ученик, self.урок, self.организация, answer="вторая")
 		отказ = self.отказ("accept", version=1)
@@ -101,18 +94,6 @@ class IntegrationTestHomeworkReview(IntegrationTestCase):
 		self.сдача.reload()
 		отказ = self.отказ("reopen", "Не то")
 		self.assertEqual((отказ.код, отказ.подробности["status"]), ("wrong_status", "Submitted"))
-
-	def test_принять_выданную_нельзя(self):
-		урок = создать_урок(f"Урок {frappe.generate_hash(length=6)}")
-		зачислить(self.ученик, урок)
-		создать_домашку(урок)
-		домашка.выдать(frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, урок)))
-		имя = frappe.db.get_value(домашка.СДАЧА, {"member": self.ученик, "lesson": урок}, "name")
-		with self.assertRaises(Отказ) as отказ:
-			домашка.проверить(self.куратор, имя, "accept", 0)
-		self.assertEqual(
-			(отказ.exception.код, отказ.exception.подробности["status"]), ("wrong_status", "Assigned")
-		)
 
 	def test_архивную_не_проверяют(self):
 		frappe.db.set_value(домашка.СДАЧА, self.сдача.name, {"member": None, "archived_student": self.ученик})

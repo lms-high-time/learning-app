@@ -78,6 +78,10 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		дерево = self.данные(student.course_outline(self.курс))
 
 		self.assertEqual(set(дерево), {"course", "chapters", "programs"})
+		self.assertEqual(
+			[у["id"] for гл in дерево["chapters"] for у in гл["lessons"]],
+			[урок_релиза(self.курс, к) for к in ("l-1", "l-2", "l-3")],
+		)
 		первая, вторая = дерево["chapters"]
 		self.assertEqual(
 			{к: в for к, в in первая.items() if к != "lessons"},
@@ -171,6 +175,7 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 				"completed": False,
 			},
 		)
+		self.assertEqual(данные["status"], "In Progress")
 		self.assertEqual(данные["course_title"], "Пример курса")
 		self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "touched"}])
 
@@ -179,6 +184,7 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 
 		self.assertEqual((данные["session"], данные["status"]), (None, None))
 		self.assertFalse(данные["has_chat_state"])
+		self.assertFalse(данные["completed"])
 		self.assertEqual(данные["objectives_progress"], [{**ЦЕЛЬ_1, "status": "not_started"}])
 		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
 

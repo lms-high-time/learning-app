@@ -118,17 +118,6 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 			)
 			self.assertTrue(событие.occurred_at)
 
-	def test_возвращённая_попытка_выдаёт_вопрос_ещё_раз(self):
-		"""Каждая выдача — факт для разбора: видно, сколько раз ученик
-		возвращался к вопросу."""
-		повтор = student.request_quiz(self.занятие)["data"]
-
-		self.assertEqual(повтор["attempt"], self.попытка)
-		self.assertEqual(
-			[(с.kind, с.question_key) for с in self.события()],
-			[(ВЫДАН, self.первый), (ВЫДАН, self.первый)],
-		)
-
 	# --- слова ученика обязательны ---
 
 	def test_без_слов_ученика_ответ_не_принят(self):

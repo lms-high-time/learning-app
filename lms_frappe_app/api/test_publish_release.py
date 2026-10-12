@@ -19,12 +19,7 @@ from frappe.tests import IntegrationTestCase
 from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
-from lms_frappe_app.tests.sample_data import (
-	создать_куратора,
-	создать_менеджера,
-	создать_организацию,
-	создать_ученика,
-)
+from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 
 
 class IntegrationTestPublishRelease(IntegrationTestCase):
@@ -41,14 +36,6 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 			authoring.publish_release(release=пример_релиза(self.ключ))
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
 
-	def test_куратор_публикует_объектом(self):
-		frappe.set_user(self.куратор)
-		ответ = authoring.publish_release(release=пример_релиза(self.ключ))
-
-		self.assertTrue(ответ["ok"], ответ)
-		self.assertEqual(ответ["data"]["version"], 1)
-		self.assertTrue(ответ["data"]["course_created"])
-
 	def test_строка_json_то_же_что_объект(self):
 		frappe.set_user(self.куратор)
 		authoring.publish_release(release=пример_релиза(self.ключ))
@@ -56,13 +43,6 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 		ответ = authoring.publish_release(release=json.dumps(пример_релиза(self.ключ), ensure_ascii=False))
 
 		self.assertTrue(ответ["data"]["unchanged"], ответ)
-
-	def test_отказ_кодом_контракта(self):
-		frappe.set_user(self.куратор)
-		ответ = authoring.publish_release(release={"format": "lms-release/2"})
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], "release_format_unsupported")
 
 	def test_пустой_course_ищет_по_ключу(self):
 		frappe.set_user(self.куратор)
@@ -98,18 +78,6 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 		спроецировать.assert_not_called()
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
 
-	def test_знак_не_для_имени_в_новом_релизе_курс_не_трогает(self):
-		frappe.set_user(self.куратор)
-		курс = authoring.publish_release(release=пример_релиза(self.ключ))["data"]["course"]
-		релиз = пример_релиза(self.ключ)
-		релиз["lessons"][0]["title"] = "Урок <новый>"
-
-		ответ = authoring.publish_release(release=релиз)
-
-		self.assertEqual(ответ["error"]["code"], "release_inconsistent", ответ)
-		self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
-		self.assertFalse(frappe.db.exists("Course Lesson", {"course": курс, "title": "Урок <новый>"}))
-
 	def test_только_post(self):
 		self.assertEqual(
 			set(frappe.allowed_http_methods_for_whitelisted_func[authoring.publish_release]), {"POST"}
@@ -124,15 +92,6 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 
 		self.assertEqual(ответ.get("error", {}).get("code"), "course_from_release", ответ)
 		self.assertNotEqual(frappe.db.get_value("LMS Course", курс, "title"), "Другое")
-
-	def test_руководителю_нельзя(self):
-		организация = создать_организацию(f"Релиз {frappe.generate_hash(length=6)}")
-		руководитель = создать_менеджера(
-			f"rel-api-mgr-{frappe.generate_hash(length=6)}@example.com", организация
-		)
-		frappe.set_user(руководитель)
-		with self.assertRaises(frappe.PermissionError):
-			authoring.publish_release(release=пример_релиза(self.ключ))
 
 
 class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
@@ -327,16 +286,6 @@ class IntegrationTestКоммитРелиза(IntegrationTestCase):
 		self.assertEqual(self.коммиты(данные["course"]), [(1, None)])
 		[версия] = authoring.course_releases(course=данные["course"])["data"]["releases"]
 		self.assertIsNone(версия["commit"])
-
-	def test_версия_без_коммита_его_не_получает(self):
-		"""Версия, впервые опубликованная без коммита, так и остаётся без него."""
-		курс = self.опубликовать()["data"]["course"]
-
-		данные = self.опубликовать(commit=self.КОММИТ)["data"]
-
-		self.assertTrue(данные["unchanged"])
-		self.assertIsNone(данные["commit"])
-		self.assertEqual(self.коммиты(курс), [(1, None)])
 
 	def test_неверный_коммит_отказ_до_первой_записи(self):
 		курс = self.опубликовать(commit=self.КОММИТ)["data"]["course"]

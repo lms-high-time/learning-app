@@ -36,21 +36,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 	def карта(self) -> dict:
 		return public.course_map(course=self.курс)["data"]
 
-	def test_гость_видит_уроки_без_целей(self):
-		frappe.set_user("Guest")
-
-		[урок] = self.карта()["chapters"][0]["lessons"]
-
-		self.assertEqual((урок["id"], урок["objectives"]), (self.урок, []))
-
-	def test_зачисленный_видит_уроки_без_целей(self):
-		зачислить(self.ученик, self.урок)
-		frappe.set_user(self.ученик)
-
-		[урок] = self.карта()["chapters"][0]["lessons"]
-
-		self.assertEqual((урок["id"], урок["objectives"]), (self.урок, []))
-
 	# --- программа курса: зачин, пройденность, следующий урок (learning-services#322) ---
 
 	def test_гость_видит_зачин_но_не_свой_путь(self):

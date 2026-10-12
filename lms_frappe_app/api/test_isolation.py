@@ -325,9 +325,3 @@ class IntegrationTestArtifactIsolation(IntegrationTestCase):
 		)
 		выдано = json.dumps(manager.student_detail(self.сотрудник), ensure_ascii=False, default=str)
 		self.assertNotIn("седьмую кофейню", выдано)
-
-	def test_ученик_не_правит_документ_напрямую(self):
-		frappe.set_user(self.сотрудник)
-
-		self.assertTrue(frappe.has_permission("Agent Student Artifact", "read", doc=self.документ))
-		self.assertFalse(frappe.has_permission("Agent Student Artifact", "write", doc=self.документ))

@@ -551,12 +551,6 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(пойман.exception.код, "lesson_not_in_release")
 		self.assertFalse(frappe.db.exists(ПРОХОЖДЕНИЕ, {"student": другой}))
 
-	def test_урока_нет_в_релизе(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
-		with self.assertRaises(Отказ) as пойман:
-			service.прохождение(self.ученик, курс, "l-404")
-		self.assertEqual(пойман.exception.код, "lesson_not_in_release")
-
 	def test_гонка_создания_отдаёт_уже_созданное(self):
 		"""Параллельный вызов вставил прохождение между поиском и вставкой.
 

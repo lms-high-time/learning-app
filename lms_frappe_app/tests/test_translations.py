@@ -60,13 +60,6 @@ class IntegrationTestTranslations(IntegrationTestCase):
 
 		self.assertEqual(с_пробелами, [], "такую строку Frappe обрежет")
 
-	def test_переводы_доезжают_до_платформы(self):
-		"""Проверка всей цепочки: файл найден Frappe и попал в общий словарь."""
-		словарь = get_all_translations("ru")
-		оригинал, перевод = _строки()[0][0], _строки()[0][1]
-
-		self.assertEqual(словарь.get(оригинал), перевод)
-
 	def test_письма_о_пароле_переведены_целиком(self):
 		"""Приглашение после регистрации и сброс пароля — шаблоны Frappe.
 

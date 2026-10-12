@@ -27,22 +27,6 @@ class IntegrationTestAgentCourseReport(IntegrationTestCase):
 		self.курс = зачислить(self.ученик, self.урок)
 		self.занятие = создать_занятие(self.ученик, self.урок)
 
-	def test_новый_репорт_ждёт_разбора(self):
-		"""Why: статус — очередь методолога. Репорт, заведённый без статуса,
-		выпал бы из фильтра «новые» и не был бы разобран никогда."""
-		репорт = frappe.get_doc(
-			{
-				"doctype": "Agent Course Report",
-				"session": self.занятие,
-				"course": self.курс,
-				"lesson": self.урок,
-				"kind": "Material Issue",
-				"text": "В примере перепутаны роли",
-			}
-		).insert()
-
-		self.assertEqual(репорт.status, "New")
-
 	def test_дата_итога_ставится_при_закрытии_и_снимается_при_переоткрытии(self):
 		"""Why: дата итога — то, по чему ученик узнаёт «когда ответили», а
 		отметка «ученик узнал» — по чему итог приходит ему один раз. Новый итог

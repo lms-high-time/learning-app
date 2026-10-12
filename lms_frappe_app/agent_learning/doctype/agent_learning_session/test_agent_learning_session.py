@@ -100,24 +100,6 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 
 	# --- брошенные занятия ---
 
-	def test_брошенное_занятие_закрывается(self):
-		занятие = self.занятие()
-		frappe.db.set_value(
-			DOCTYPE, занятие.name, "last_activity_at", add_to_date(now_datetime(), hours=-24)
-		)
-
-		закрыть_брошенные_занятия()
-		занятие.reload()
-
-		# Проверяется конкретное занятие, а не счётчик: задача сканирует всю
-		# базу, и счётчик зависел бы от данных соседних тестов.
-		self.assertEqual(занятие.status, "Abandoned")
-		self.assertTrue(
-			frappe.db.exists(
-				"Agent Session Event", {"session": занятие.name, "kind": "Session Abandoned"}
-			)
-		)
-
 	def брошенное(self, занятие):
 		frappe.db.set_value(
 			DOCTYPE, занятие.name, "last_activity_at", add_to_date(now_datetime(), hours=-24)

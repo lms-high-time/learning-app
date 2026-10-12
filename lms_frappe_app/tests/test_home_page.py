@@ -40,6 +40,9 @@ class IntegrationTestHomePage(IntegrationTestCase):
 			ДОМАШНЯЯ,
 			"домашней не должна быть страница настроек `me` — именно её видел первый вошедший через Google",
 		)
+		self.assertEqual(
+			frappe.get_hooks("get_website_user_home_page")[-1], "lms_frappe_app.www.home.домашняя_страница"
+		)
 
 	def test_сотрудника_платформы_ведём_в_воркспейс(self):
 		"""`Why:` строковый хук уводил администратора в ученический интерфейс,
@@ -49,11 +52,6 @@ class IntegrationTestHomePage(IntegrationTestCase):
 
 		self.assertEqual(домашняя_страница("Administrator"), РАБОЧАЯ)
 		self.assertEqual(РАБОЧАЯ, "desk/agent-learning")
-
-	def test_ученику_отдаём_каталог(self):
-		from lms_frappe_app.www.home import домашняя_страница
-
-		self.assertEqual(домашняя_страница(self.ученик), ДОМАШНЯЯ)
 
 	def test_руководителя_организации_ведём_в_lms(self):
 		"""Роль по членству не открывает desk: с `desk_access` руководитель
@@ -72,8 +70,3 @@ class IntegrationTestHomePage(IntegrationTestCase):
 		self.assertIn("Organization Manager", frappe.get_roles(руководитель))
 		self.assertEqual(frappe.db.get_value("User", руководитель, "user_type"), "Website User")
 		self.assertEqual(домашняя_страница(руководитель), ДОМАШНЯЯ)
-
-	def test_хук_объявлен_приложением(self):
-		"""Значение приходит из hooks.py, а не из настроек сайта: настройка в
-		базе не переживает пересоздания сайта."""
-		self.assertTrue(frappe.get_hooks("get_website_user_home_page"))

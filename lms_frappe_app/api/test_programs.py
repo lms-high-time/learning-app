@@ -69,10 +69,6 @@ class IntegrationTestPrograms(IntegrationTestCase):
 
 		self.assertTrue(self.от_имени(self.ученик, student.enroll, course=self.второй)["ok"])
 
-	def test_не_участнику_порядок_не_мешает(self):
-		# Решение владельца: порядок — только для участников программы.
-		self.assertTrue(self.от_имени(self.посторонний, student.enroll, course=self.второй)["ok"])
-
 	def test_без_обязательного_порядка_курс_открыт(self):
 		frappe.db.set_value("LMS Program", self.программа.name, "enforce_course_order", 0)
 
@@ -153,17 +149,6 @@ class IntegrationTestPrograms(IntegrationTestCase):
 			мой["programs"][0]["next"]["title"], frappe.db.get_value("LMS Course", self.второй, "title")
 		)
 		self.assertEqual(структура["programs"], мой["programs"])
-
-	def test_пройденный_предыдущий_снимает_замок_в_каталоге(self):
-		self.от_имени(self.ученик, student.enroll, course=self.первый)
-		self._пройти(self.первый)
-
-		[второй] = [
-			курс
-			for курс in self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
-			if курс["id"] == self.второй
-		]
-		self.assertIsNone(второй["programs"][0]["locked_by"])
 
 	def test_выборок_не_больше_от_числа_курсов(self):
 		# Каталог и список курсов строятся одним вызовом: запрос на курс

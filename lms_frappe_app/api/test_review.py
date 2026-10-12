@@ -210,21 +210,6 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 			"submission_not_found",
 		)
 
-	def test_отказы_переходов(self):
-		домашка.сохранить(self.ученик, self.урок, self.организация, answer="вторая")
-		ответ = self.вызвать(self.менеджер, "accept", submission=self.рабочая.name, version=1)
-		self.assertEqual((self.код(ответ), ответ["error"]["version"]), ("stale_version", 2))
-		self.assertEqual(
-			self.код(
-				self.вызвать(self.менеджер, "send_back", submission=self.рабочая.name, version=2, comment=" ")
-			),
-			"comment_required",
-		)
-		ответ = self.вызвать(
-			self.менеджер, "reopen", submission=self.рабочая.name, version=2, comment="Не то"
-		)
-		self.assertEqual((self.код(ответ), ответ["error"]["status"]), ("wrong_status", "Submitted"))
-
 	def гонка(self, *исходы):
 		"""`проверить` по очереди: исключение — бросить, `None` — настоящий вызов.
 

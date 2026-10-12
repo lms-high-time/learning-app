@@ -30,13 +30,6 @@ class IntegrationTestAuthoring(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 
-	def test_курс_без_релиза_не_открывается(self):
-		"""Открывается только курс с действующим релизом."""
-		ответ = authoring.publish_course(course=self.курс)
-
-		self.assertEqual(ответ["error"]["code"], "course_not_released")
-		self.assertFalse(frappe.db.get_value("LMS Course", self.курс, "published"))
-
 	def test_снятие_несуществующего_курса_даёт_код(self):
 		ответ = authoring.unpublish_course(course="нет-такого-курса")
 
@@ -146,11 +139,6 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 
 		self.assertGreater(self.ревизия(), до)
 
-	def test_открытие_курса_двигает_ревизию(self):
-		до = self.ревизия()
-		authoring.publish_course(course=self.курс)
-		self.assertGreater(self.ревизия(), до)
-
 	def test_заметка_двигает_свою_метку_а_не_ревизию(self):
 		до = self.отметки()
 		self.assertIsNone(до["notes_revision"])
@@ -173,8 +161,10 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 		self.assertEqual(self.ревизия(), до)
 
 	def test_снятие_с_публикации_и_анонс_двигают_ревизию(self):
+		было = self.ревизия()
 		authoring.publish_course(course=self.курс)
 		до = self.ревизия()
+		self.assertGreater(до, было)
 		authoring.unpublish_course(course=self.курс)
 		после_снятия = self.ревизия()
 		self.assertGreater(после_снятия, до)
@@ -218,10 +208,6 @@ class IntegrationTestLessonHookAndPromise(IntegrationTestCase):
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
-
-	def test_у_урока_и_курса_есть_поля_зачина_и_обещания(self):
-		self.assertTrue(frappe.get_meta("Course Lesson").has_field("lesson_hook"))
-		self.assertTrue(frappe.get_meta("LMS Course").has_field("course_promise"))
 
 	def test_обещание_курса_задаётся_и_очищается(self):
 		анонс = authoring.create_course(title="Анонс", summary="Без уроков")["data"]["id"]

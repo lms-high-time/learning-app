@@ -80,6 +80,7 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertIn("Тезисы урока l-1", данные["material"])
 		self.assertEqual(данные["quiz"], {"required": True, "pass_threshold": 0.7, "attempts_left": 3})
 		self.assertEqual(данные["start"]["opening"], "first_in_course")
+		self.assertIsNone(данные["start"]["last_session_at"])
 		self.assertIsNone(данные["resume_from"])
 		self.assertEqual(
 			frappe.get_all(
@@ -164,12 +165,6 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertEqual(данные["next_step"], {"kind": "complete"})
 		self.assertEqual(данные["quiz"], {"required": False, "pass_threshold": 0.7, "attempts_left": None})
 
-	def test_с_чего_продолжить_из_прохождения(self):
-		run = прохождения.прохождение(self.ученик, self.курс, "l-1")
-		frappe.db.set_value("Agent Lesson Run", run.name, "resume_from", "С варианта «первый»")
-
-		self.assertEqual(self.старт(lesson=self.урок)["resume_from"], "С варианта «первый»")
-
 	# --- рамка ---
 
 	def test_рамка_только_по_просьбе(self):
@@ -237,17 +232,6 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertEqual([(з["key"], з["kind"], з["text"]) for з in заметки["other"]], [("role", "fact", "Руководитель")])
 
 	# --- репорты ---
-
-	def test_закрытые_репорты_приходят_один_раз(self):
-		занятие = создать_занятие(self.ученик, self.урок)
-		репорт = student.report_issue(session=занятие, kind="stuck", text="Встал на примере")["data"]["report"]
-		frappe.db.set_value("Agent Course Report", репорт, {"status": "Fixed", "resolution": "Поправили пример"})
-
-		первый = self.старт(lesson=self.урок)["closed_reports"]
-		второй = self.старт(lesson=self.урок)["closed_reports"]
-
-		self.assertEqual([(р["id"], р["status"], р["resolution"]) for р in первый], [(репорт, "fixed", "Поправили пример")])
-		self.assertEqual(второй, [])
 
 	# --- прохождение и занятие ---
 
@@ -369,20 +353,6 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 
 		self.assertEqual(self.старт(lesson=self.урок)["start"]["opening"], "repeat")
 		self.assertEqual(self.старт(lesson=урок_релиза(self.курс, "l-2"))["start"]["opening"], "new_lesson")
-
-	def test_возврат_с_мостиком_после_перерыва(self):
-		занятие = self.старт(lesson=self.урок)["session"]
-		прохождения.отметить(self.прохождение().name, "term:T1", "done", "Назвал термин", занятие=занятие)
-		давно = add_to_date(now_datetime(), days=-3)
-		frappe.db.set_value(
-			"Agent Learning Session",
-			занятие,
-			{"status": "Abandoned", "started_at": давно, "last_activity_at": давно},
-		)
-
-		старт = self.старт(lesson=урок_релиза(self.курс, "l-2"))["start"]
-
-		self.assertEqual(старт["opening"], "return")
 
 	# --- блоки документа ---
 
