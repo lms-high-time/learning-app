@@ -79,73 +79,80 @@ class IntegrationTestTeam(IntegrationTestCase):
 	def видимость(self, значение: str) -> None:
 		frappe.db.set_value("Learning Organization", self.компания, "artifact_visibility", значение)
 
-	def test_руководитель_видит_участников_курсы_и_отчёт(self):
-		ответ = self.от_имени(self.руководитель, team.team, organization=self.компания)["data"]
-
-		self.assertTrue(ответ["can_see_report"])
-		self.assertEqual(
-			{у["user"] for у in ответ["members"]}, {self.сотрудник, self.коллега, self.руководитель}
-		)
-		self.assertEqual([к["id"] for к in ответ["courses"]], [self.курс])
-		self.assertEqual(ответ["courses"][0]["documents"][0]["artifact"], "summary")
-
-	def test_сравнение_берёт_только_документы_пространства_организации(self):
-		ответ = self.документы(self.руководитель)["data"]
-
-		цель = next(б for б in ответ["blocks"] if б["key"] == "goal")
-		тексты = {з["user"]: з["content"] for з in цель["entries"]}
-		self.assertEqual(
-			тексты, {self.сотрудник: "Кофейня для компании", self.коллега: "Склад"}
-		)
-		спонсор = next(б for б in ответ["blocks"] if б["key"] == "sponsor")
-		self.assertFalse(any(з["filled"] for з in спонсор["entries"]))
-
-	def test_участник_видит_команду_только_если_открыто_всем(self):
-		отказ = self.от_имени(self.коллега, team.team, organization=self.компания)
-		self.assertEqual(отказ["error"]["code"], "team_not_available")
-
-		self.видимость("All Members")
-
-		ответ = self.от_имени(self.коллега, team.team, organization=self.компания)["data"]
-		self.assertFalse(ответ["can_see_report"])
-		self.assertTrue(self.документы(self.коллега)["ok"])
-
-	def test_посторонний_и_ушедший_не_видят(self):
-		self.видимость("All Members")
-		членство = frappe.get_doc(
-			"Organization Membership", {"user": self.коллега, "organization": self.компания}
-		)
+	def уйти(self, кто: str) -> None:
+		членство = frappe.get_doc("Organization Membership", {"user": кто, "organization": self.компания})
 		членство.status = "Left"
 		членство.save(ignore_permissions=True)
 
-		for кто in (self.посторонний, self.коллега):
-			with self.subTest(кто):
-				self.assertEqual(self.документы(кто)["error"]["code"], "team_not_available")
+	def test_руководитель_видит_команду_документы_и_отчёт(self):
+		"""Руководителю — участники, курсы, сравнение документов пространства
+		организации и отчёт одной организации. Курс не организации — отказ,
+		последним: он зачисляет сотрудника на ещё один курс."""
+		with self.subTest("участники, курсы и отчёт"):
+			ответ = self.от_имени(self.руководитель, team.team, organization=self.компания)["data"]
 
-	def test_документ_ушедшего_остаётся_с_пометкой(self):
-		членство = frappe.get_doc(
-			"Organization Membership", {"user": self.коллега, "organization": self.компания}
-		)
-		членство.status = "Left"
-		членство.save(ignore_permissions=True)
+			self.assertTrue(ответ["can_see_report"])
+			self.assertEqual(
+				{у["user"] for у in ответ["members"]}, {self.сотрудник, self.коллега, self.руководитель}
+			)
+			self.assertEqual([к["id"] for к in ответ["courses"]], [self.курс])
+			self.assertEqual(ответ["courses"][0]["documents"][0]["artifact"], "summary")
 
-		авторы = {а["user"]: а for а in self.документы(self.руководитель)["data"]["authors"]}
+		with self.subTest("сравнение берёт только документы пространства организации"):
+			ответ = self.документы(self.руководитель)["data"]
 
-		self.assertTrue(авторы[self.коллега]["left"])
-		self.assertFalse(авторы[self.сотрудник]["left"])
+			цель = next(б for б in ответ["blocks"] if б["key"] == "goal")
+			тексты = {з["user"]: з["content"] for з in цель["entries"]}
+			self.assertEqual(тексты, {self.сотрудник: "Кофейня для компании", self.коллега: "Склад"})
+			спонсор = next(б for б in ответ["blocks"] if б["key"] == "sponsor")
+			self.assertFalse(any(з["filled"] for з in спонсор["entries"]))
 
-	def test_курс_не_организации_отказ(self):
+		with self.subTest("отчёт одной организации"):
+			строки = self.от_имени(self.руководитель, manager.org_report, organization=self.компания)["data"][
+				"rows"
+			]
+			чужие = self.от_имени(self.руководитель, manager.org_report, organization=self.другая)["data"]["rows"]
+
+			self.assertEqual({с["organization"] for с in строки}, {self.компания})
+			self.assertEqual(чужие, [])
+
 		чужой = зачислить(self.сотрудник, создать_урок(f"Чужой {frappe.generate_hash(length=6)}"))
+		with self.subTest("курс не организации"):
+			ответ = self.от_имени(
+				self.руководитель,
+				team.team_documents,
+				organization=self.компания,
+				course=чужой,
+				artifact="summary",
+			)
 
-		ответ = self.от_имени(
-			self.руководитель, team.team_documents, organization=self.компания, course=чужой, artifact="summary"
-		)
+			self.assertEqual(ответ["error"]["code"], "course_not_in_organization")
 
-		self.assertEqual(ответ["error"]["code"], "course_not_in_organization")
+	def test_участник_посторонний_и_ушедший(self):
+		"""Участник видит команду, только если открыто всем; посторонний и
+		ушедший — нет, и при открытой видимости. Документ ушедшего остаётся у
+		руководителя с пометкой — на видимости по умолчанию, как без открытия."""
+		with self.subTest("участник: закрыто"):
+			отказ = self.от_имени(self.коллега, team.team, organization=self.компания)
+			self.assertEqual(отказ["error"]["code"], "team_not_available")
 
-	def test_отчёт_одной_организации(self):
-		строки = self.от_имени(self.руководитель, manager.org_report, organization=self.компания)["data"]["rows"]
-		чужие = self.от_имени(self.руководитель, manager.org_report, organization=self.другая)["data"]["rows"]
+		прежняя = frappe.db.get_value("Learning Organization", self.компания, "artifact_visibility")
+		self.видимость("All Members")
+		try:
+			with self.subTest("участник: открыто всем"):
+				ответ = self.от_имени(self.коллега, team.team, organization=self.компания)["data"]
+				self.assertFalse(ответ["can_see_report"])
+				self.assertTrue(self.документы(self.коллега)["ok"])
 
-		self.assertEqual({с["organization"] for с in строки}, {self.компания})
-		self.assertEqual(чужие, [])
+			self.уйти(self.коллега)
+			for кто in (self.посторонний, self.коллега):
+				with self.subTest("посторонний и ушедший не видят", кто=кто):
+					self.assertEqual(self.документы(кто)["error"]["code"], "team_not_available")
+		finally:
+			self.видимость(прежняя)
+
+		with self.subTest("документ ушедшего остаётся с пометкой"):
+			авторы = {а["user"]: а for а in self.документы(self.руководитель)["data"]["authors"]}
+
+			self.assertTrue(авторы[self.коллега]["left"])
+			self.assertFalse(авторы[self.сотрудник]["left"])

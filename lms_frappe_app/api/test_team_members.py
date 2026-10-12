@@ -46,70 +46,86 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 			"Organization Membership", {"user": user, "organization": self.компания}, ["role", "status"], as_dict=True
 		)
 
-	def test_по_ссылке_вступают_и_попадают_в_пространство_компании(self):
-		ключ = self.ссылка()
-
-		сведения = self.от_имени(self.новичок, team.invite_info, token=ключ)["data"]
-		self.assertEqual((сведения["organization"], сведения["member"]), (self.компания, False))
-		self.assertEqual(сведения["documents_visible_to"], "managers")
-
-		self.assertTrue(self.от_имени(self.новичок, team.accept_invite, token=ключ)["ok"])
-		self.assertEqual(self.членство(self.новичок), {"role": "Member", "status": "Active"})
-		self.assertEqual(spaces.текущее(self.новичок), self.компания)
-
-	def test_отозванная_ссылка_не_принимается(self):
-		ключ = self.ссылка()
-		self.от_имени(self.руководитель, team.revoke_invite, token=ключ)
-
-		ответ = self.от_имени(self.новичок, team.accept_invite, token=ключ)
-
-		self.assertEqual(ответ["error"]["code"], "invite_not_found")
-		self.assertIsNone(self.членство(self.новичок))
-
-	def test_ушедший_возвращается_по_ссылке(self):
+	def test_вступление_по_ссылке(self):
+		"""Ушедший возвращается по ссылке; по отозванной не вступить; по ссылке
+		вступают и попадают в пространство компании. Возврат — первым: новичок,
+		вступивший раньше, занял бы место в организации."""
 		self.от_имени(self.руководитель, team.remove_member, organization=self.компания, user=self.сотрудник)
-		self.assertEqual(self.членство(self.сотрудник).status, "Left")
+		with self.subTest("ушедший возвращается по ссылке"):
+			self.assertEqual(self.членство(self.сотрудник).status, "Left")
 
-		self.от_имени(self.сотрудник, team.accept_invite, token=self.ссылка())
+			self.от_имени(self.сотрудник, team.accept_invite, token=self.ссылка())
 
-		self.assertEqual(self.членство(self.сотрудник).status, "Active")
+			self.assertEqual(self.членство(self.сотрудник).status, "Active")
 
-	def test_посторонний_и_участник_не_управляют_командой(self):
-		for кто in (self.посторонний, self.сотрудник):
-			with self.subTest(кто):
-				ответ = self.от_имени(кто, team.create_invite, organization=self.компания)
-				self.assertIn(ответ["error"]["code"], ("team_not_available", "not_allowed"))
+		отозванная = self.ссылка()
+		self.от_имени(self.руководитель, team.revoke_invite, token=отозванная)
+		with self.subTest("отозванная ссылка не принимается"):
+			ответ = self.от_имени(self.новичок, team.accept_invite, token=отозванная)
 
-	def test_роли_меняет_только_администратор(self):
-		ответ = self.от_имени(
-			self.руководитель, team.set_member_role, organization=self.компания, user=self.сотрудник, role="Manager"
-		)
-		self.assertEqual(ответ["error"]["code"], "not_allowed")
+			self.assertEqual(ответ["error"]["code"], "invite_not_found")
+			self.assertIsNone(self.членство(self.новичок))
 
-		self.от_имени(self.админ, team.set_member_role, organization=self.компания, user=self.сотрудник, role="Manager")
+		ключ = self.ссылка()
+		with self.subTest("по ссылке вступают и попадают в пространство компании"):
+			сведения = self.от_имени(self.новичок, team.invite_info, token=ключ)["data"]
+			self.assertEqual((сведения["organization"], сведения["member"]), (self.компания, False))
+			self.assertEqual(сведения["documents_visible_to"], "managers")
 
-		self.assertEqual(self.членство(self.сотрудник).role, "Manager")
-		self.assertIn("Organization Manager", frappe.get_roles(self.сотрудник))
+			self.assertTrue(self.от_имени(self.новичок, team.accept_invite, token=ключ)["ok"])
+			self.assertEqual(self.членство(self.новичок), {"role": "Member", "status": "Active"})
+			self.assertEqual(spaces.текущее(self.новичок), self.компания)
 
-	def test_последнего_администратора_не_снять(self):
-		ответ = self.от_имени(
-			self.админ, team.set_member_role, organization=self.компания, user=self.админ, role="Member"
-		)
-		self.assertEqual(ответ["error"]["code"], "last_org_admin")
+	def test_управление_командой_по_ролям(self):
+		"""Признаки управления для интерфейса. Посторонний и участник командой не
+		управляют; руководитель не меняет роли и не снимает коллегу-руководителя;
+		последнего администратора не снять. Роль меняет администратор — последним."""
+		with self.subTest("признаки управления для интерфейса"):
+			руководителю = self.от_имени(self.руководитель, team.team, organization=self.компания)["data"]
+			админу = self.от_имени(self.админ, team.team, organization=self.компания)["data"]
 
-		ответ = self.от_имени(self.админ, team.remove_member, organization=self.компания, user=self.админ)
-		self.assertEqual(ответ["error"]["code"], "last_org_admin")
+			self.assertEqual((руководителю["can_manage"], руководителю["can_change_roles"]), (True, False))
+			self.assertEqual((админу["can_manage"], админу["can_change_roles"]), (True, True))
 
-	def test_руководитель_не_снимает_коллегу_руководителя(self):
 		коллега = создать_менеджера(f"inv-m2-{frappe.generate_hash(length=6)}@example.com", self.компания)
+		орг = {"organization": self.компания}
+		отказы = {
+			"посторонний: ссылка": (self.посторонний, team.create_invite, орг, ("team_not_available", "not_allowed")),
+			"участник: ссылка": (self.сотрудник, team.create_invite, орг, ("team_not_available", "not_allowed")),
+			"руководитель: роль": (
+				self.руководитель,
+				team.set_member_role,
+				{**орг, "user": self.сотрудник, "role": "Manager"},
+				("not_allowed",),
+			),
+			"руководитель: снять коллегу-руководителя": (
+				self.руководитель,
+				team.remove_member,
+				{**орг, "user": коллега},
+				("not_allowed",),
+			),
+			"последний администратор: снять роль": (
+				self.админ,
+				team.set_member_role,
+				{**орг, "user": self.админ, "role": "Member"},
+				("last_org_admin",),
+			),
+			"последний администратор: уйти": (
+				self.админ,
+				team.remove_member,
+				{**орг, "user": self.админ},
+				("last_org_admin",),
+			),
+		}
+		for что, (кто, метод, аргументы, коды) in отказы.items():
+			with self.subTest(что):
+				ответ = self.от_имени(кто, метод, **аргументы)
+				self.assertIn(ответ["error"]["code"], коды)
 
-		ответ = self.от_имени(self.руководитель, team.remove_member, organization=self.компания, user=коллега)
+		with self.subTest("роль меняет администратор"):
+			self.от_имени(
+				self.админ, team.set_member_role, organization=self.компания, user=self.сотрудник, role="Manager"
+			)
 
-		self.assertEqual(ответ["error"]["code"], "not_allowed")
-
-	def test_признаки_управления_для_интерфейса(self):
-		руководителю = self.от_имени(self.руководитель, team.team, organization=self.компания)["data"]
-		админу = self.от_имени(self.админ, team.team, organization=self.компания)["data"]
-
-		self.assertEqual((руководителю["can_manage"], руководителю["can_change_roles"]), (True, False))
-		self.assertEqual((админу["can_manage"], админу["can_change_roles"]), (True, True))
+			self.assertEqual(self.членство(self.сотрудник).role, "Manager")
+			self.assertIn("Organization Manager", frappe.get_roles(self.сотрудник))

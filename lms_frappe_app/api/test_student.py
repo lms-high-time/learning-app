@@ -4,7 +4,7 @@
 import json
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.artifacts import codes
@@ -164,23 +164,24 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 	# --- кто вошёл ---
 
-	def test_whoami_называет_учётную_запись_и_организацию(self):
-		"""Без этого «вошёл не тем аккаунтом» неотличимо от «нет курсов»."""
-		данные = student.whoami()["data"]
+	def test_whoami_называет_учётную_запись_и_организацию_без_ролей_frappe(self):
+		"""Без этого «вошёл не тем аккаунтом» неотличимо от «нет курсов». Роли —
+		внутреннее устройство платформы, агенту они ни к чему."""
+		ответ = student.whoami()
+		данные = ответ["data"]
 
-		self.assertEqual(данные["login"], self.ученик)
-		self.assertEqual(
-			[(о["id"], о["role"]) for о in данные["organizations"]],
-			[(self.организация, "Member")],
-		)
-		self.assertFalse(данные["organizations"][0]["suspended"])
+		with self.subTest("учётная запись и организация"):
+			self.assertEqual(данные["login"], self.ученик)
+			self.assertEqual(
+				[(о["id"], о["role"]) for о in данные["organizations"]],
+				[(self.организация, "Member")],
+			)
+			self.assertFalse(данные["organizations"][0]["suspended"])
 
-	def test_whoami_не_несёт_ролей_frappe(self):
-		# Роли — внутреннее устройство платформы, агенту они ни к чему.
-		выдано = json.dumps(student.whoami(), ensure_ascii=False, default=str)
-
+		выдано = json.dumps(ответ, ensure_ascii=False, default=str)
 		for поле in ("roles", "LMS Student", "System Manager", "doctype"):
-			self.assertNotIn(поле, выдано)
+			with self.subTest("без ролей frappe", поле=поле):
+				self.assertNotIn(поле, выдано)
 
 	# --- заметки об ученике ---
 
@@ -242,26 +243,23 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 		self.assertEqual([з["key"] for з in теперь["project"]], ["project"])
 		self.assertEqual(теперь["projects_elsewhere"], [], "свой проект есть — чужие не предлагаются")
 
-	def test_наблюдение_без_занятия_отклоняется(self):
-		ответ = student.remember(kind="observation", key="pace", text="Торопится")
+	def test_заметка_отклоняется_своим_кодом(self):
+		"""Наблюдение без занятия, неизвестный вид, пустой ключ — у каждого свой код.
 
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
-
-	def test_неизвестный_вид_заметки_отклоняется(self):
-		ответ = student.remember(kind="мнение", key="pace", text="Торопится")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.НЕИЗВЕСТНЫЙ_ВИД)
-
-	def test_пустой_ключ_заметки_отклоняется_своим_кодом(self):
-		"""Why: раньше пустой ключ отвечал кодом «неизвестный вид», хотя вид к
+		Why: раньше пустой ключ отвечал кодом «неизвестный вид», хотя вид к
 		этому месту уже распознан. Агент ветвится по коду, а не по тексту, и
 		чинил бы не то — подставлял другой вид вместо того, чтобы дать ключ."""
-		ответ = student.remember(kind="fact", key="   ", text="Ведёт склад")
+		отказы = {
+			"наблюдение без занятия": ({"kind": "observation", "key": "pace", "text": "Торопится"}, student.ЧУЖОЕ_ЗАНЯТИЕ),
+			"неизвестный вид": ({"kind": "мнение", "key": "pace", "text": "Торопится"}, student.НЕИЗВЕСТНЫЙ_ВИД),
+			"пустой ключ": ({"kind": "fact", "key": "   ", "text": "Ведёт склад"}, student.ПУСТОЙ_КЛЮЧ),
+		}
+		for что, (параметры, код) in отказы.items():
+			with self.subTest(что):
+				ответ = student.remember(**параметры)
 
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ПУСТОЙ_КЛЮЧ)
+				self.assertFalse(ответ["ok"])
+				self.assertEqual(ответ["error"]["code"], код)
 
 	def _предел_заметок(self, предел: int) -> None:
 		from lms_frappe_app.tests.sample_data import политика_по_умолчанию
@@ -307,19 +305,17 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		self.assertTrue(student.remember(kind="fact", key="k0", text="нет")["ok"])
 
-	def test_забытая_заметка_исчезает(self):
+	def test_заметка_приходит_с_датами_и_забывается(self):
 		student.remember(kind="fact", key="role", text="Директор")
 
-		self.assertTrue(student.forget(key="role")["ok"])
-		self.assertEqual(student.my_notes()["data"]["facts"], [])
+		with self.subTest("с датами"):
+			факт = student.my_notes()["data"]["facts"][0]
+			self.assertIsNotNone(факт["since"])
+			self.assertIsNotNone(факт["updated"])
 
-	def test_заметки_приходят_с_датами(self):
-		student.remember(kind="fact", key="role", text="Директор")
-
-		факт = student.my_notes()["data"]["facts"][0]
-
-		self.assertIsNotNone(факт["since"])
-		self.assertIsNotNone(факт["updated"])
+		with self.subTest("забытая исчезает"):
+			self.assertTrue(student.forget(key="role")["ok"])
+			self.assertEqual(student.my_notes()["data"]["facts"], [])
 
 	# --- сводка ---
 
@@ -336,12 +332,18 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 class IntegrationTestReportIssue(IntegrationTestCase):
 	"""Репорт агента о курсе — по занятию урока курса из релиза."""
 
+	@classmethod
+	def setUpClass(cls):
+		"""Курс тесты только читают; ученик и занятие — у каждого теста свои."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, cls.релиз = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.ученик = создать_ученика(f"rep-{frappe.generate_hash(length=6)}@example.com")
-		self.курс, self.релиз = курс_из_релиза()
 		зачислить_на_курс(self.ученик, self.курс)
-		self.урок = урок_релиза(self.курс, "l-1")
 		self.занятие = занятие_релиза(self.ученик, self.курс, "l-1")
 		frappe.set_user(self.ученик)
 
@@ -413,6 +415,27 @@ class IntegrationTestReportIssue(IntegrationTestCase):
 		self.assertEqual(сохранено, длинное.strip()[: student.ДЛИНА_ОПИСАНИЯ])
 		self.assertLess(len(сохранено), len(длинное.strip()))
 
+	def test_репорт_отклоняется_своим_кодом(self):
+		"""Неизвестный вид и пустое описание — у каждого свой код.
+
+		Why: без машинного кода пустой текст упирается в обязательное поле
+		схемы и уезжает агенту ошибкой сервера, а не отказом, который он умеет
+		разобрать."""
+		отказы = {
+			"неизвестный вид": ({"kind": "нытьё", "text": "всё плохо"}, student.НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА),
+			"без описания": ({"kind": "stuck", "text": "   "}, student.ПУСТОЙ_РЕПОРТ),
+		}
+		for что, (параметры, код) in отказы.items():
+			with self.subTest(что):
+				ответ = student.report_issue(session=self.занятие, **параметры)
+
+				self.assertFalse(ответ["ok"])
+				self.assertEqual(ответ["error"]["code"], код)
+
+
+class TestReportKinds(UnitTestCase):
+	"""Словарь видов репорта против схемы: читает метаданные, в базу не пишет."""
+
 	def test_виды_репорта_совпадают_со_схемой(self):
 		"""Why: словарь метода и options поля живут врозь, а сверяет их только
 		база — уже на вставке. Переименуют значение в схеме, и метод сложит
@@ -422,21 +445,6 @@ class IntegrationTestReportIssue(IntegrationTestCase):
 		опции = frappe.get_meta("Agent Course Report").get_field("kind").options.split("\n")
 
 		self.assertEqual(set(student.ВИДЫ_РЕПОРТОВ.values()), set(опции))
-
-	def test_неизвестный_вид_репорта_отклоняется(self):
-		ответ = student.report_issue(session=self.занятие, kind="нытьё", text="всё плохо")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.НЕИЗВЕСТНЫЙ_ВИД_РЕПОРТА)
-
-	def test_репорт_без_описания_отклоняется(self):
-		"""Why: без машинного кода пустой текст упирается в обязательное поле
-		схемы и уезжает агенту ошибкой сервера, а не отказом, который он умеет
-		разобрать."""
-		ответ = student.report_issue(session=self.занятие, kind="stuck", text="   ")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], student.ПУСТОЙ_РЕПОРТ)
 
 
 class IntegrationTestSelfEnroll(IntegrationTestCase):
@@ -455,32 +463,30 @@ class IntegrationTestSelfEnroll(IntegrationTestCase):
 	def каталог(self):
 		return {к["id"] for к in student.list_catalog()["data"]["courses"]}
 
-	def test_частный_ученик_видит_каталог_и_записывается(self):
+	def test_частный_ученик_записывается_один_раз(self):
+		"""Частный ученик видит курс в каталоге и записывается; записанный курс из
+		каталога исчезает — он и так виден в list_my_courses; повторная запись
+		отклоняется."""
 		frappe.set_user(self.ученик)
-		self.assertIn(self.курс, self.каталог())
+		with self.subTest("видит каталог и записывается"):
+			self.assertIn(self.курс, self.каталог())
 
-		ответ = student.enroll(self.курс)["data"]
+			ответ = student.enroll(self.курс)["data"]
 
-		self.assertEqual(ответ["course"], self.курс)
-		self.assertEqual(ответ["first_lesson"]["id"], self.урок)
-		self.assertTrue(
-			frappe.db.exists("LMS Enrollment", {"member": self.ученик, "course": self.курс})
-		)
+			self.assertEqual(ответ["course"], self.курс)
+			self.assertEqual(ответ["first_lesson"]["id"], self.урок)
+			self.assertTrue(
+				frappe.db.exists("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+			)
 
-	def test_записанный_курс_из_каталога_исчезает(self):
-		# Он и так виден в list_my_courses — дублировать незачем.
-		frappe.set_user(self.ученик)
-		student.enroll(self.курс)
-		self.assertNotIn(self.курс, self.каталог())
+		with self.subTest("записанный курс из каталога исчезает"):
+			self.assertNotIn(self.курс, self.каталог())
 
-	def test_повторная_запись_отклоняется(self):
-		frappe.set_user(self.ученик)
-		student.enroll(self.курс)
+		with self.subTest("повторная запись отклоняется"):
+			ответ = student.enroll(self.курс)
 
-		ответ = student.enroll(self.курс)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], УЖЕ_ЗАПИСАН)
+			self.assertFalse(ответ["ok"])
+			self.assertEqual(ответ["error"]["code"], УЖЕ_ЗАПИСАН)
 
 	def test_неопубликованный_курс_недоступен(self):
 		frappe.db.set_value("LMS Course", self.курс, "published", 0)
@@ -521,13 +527,19 @@ class IntegrationTestSelfEnroll(IntegrationTestCase):
 class IntegrationTestCourseOutlineRelease(IntegrationTestCase):
 	"""Дерево курса из релиза: агент должен уметь вернуться к пройденному."""
 
+	@classmethod
+	def setUpClass(cls):
+		"""Курс тесты только читают; прогресс — у ученика своего теста."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, _ = курс_из_релиза()
+		cls.первый = урок_релиза(cls.курс, "l-1")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"out-rel-{суффикс}@example.com")
-		self.курс, _ = курс_из_релиза()
 		зачислить_на_курс(self.ученик, self.курс)
-		self.первый = урок_релиза(self.курс, "l-1")
 		frappe.set_user(self.ученик)
 
 	def уроки(self):
@@ -590,42 +602,97 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 
 	# --- чтение ---
 
-	def test_без_ключа_перечисляются_документы_с_заполненностью(self):
-		перечень = student.artifact(self.курс)["data"]["artifacts"]
+	def test_запись_и_чтение_блоков(self):
+		"""Без ключа перечисляются документы с заполненностью; запись заводит
+		экземпляр и считает заполненность — и в ответе, и в прогрессе; повторная
+		запись замещает блок; с ключом приходят блоки с подсказками."""
+		with self.subTest("без ключа — перечень с заполненностью"):
+			перечень = student.artifact(self.курс)["data"]["artifacts"]
 
-		self.assertEqual(
-			[(а["artifact"], а["blocks_total"], а["blocks_filled"]) for а in перечень],
-			[("summary", 2, 0)],
-		)
-		self.assertEqual(перечень[0]["layout"], "sections")
+			self.assertEqual(
+				[(а["artifact"], а["blocks_total"], а["blocks_filled"]) for а in перечень],
+				[("summary", 2, 0)],
+			)
+			self.assertEqual(перечень[0]["layout"], "sections")
 
-	def test_с_ключом_приходят_блоки_с_подсказками(self):
-		student.update_artifact(self.курс, "summary", "goal", "Открыть седьмую кофейню")
+		with self.subTest("запись заводит экземпляр"):
+			ответ = student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")["data"]
 
-		документ = student.artifact(self.курс, "summary")["data"]
+			self.assertEqual((ответ["blocks_filled"], ответ["blocks_total"]), (1, 2))
+			self.assertTrue(
+				frappe.db.exists(
+					"Agent Student Artifact",
+					{"student": self.ученик, "course": self.курс, "artifact": "summary"},
+				)
+			)
 
-		self.assertEqual(
-			[(б["key"], б["content"]) for б in документ["blocks"]],
-			[("goal", "Открыть седьмую кофейню"), ("sponsor", "")],
-			"порядок — из схемы; пустой блок приходит без содержимого",
-		)
-		self.assertEqual(документ["blocks"][0]["hint"], "Одной фразой, без клише")
+		with self.subTest("прогресс показывает заполненность"):
+			курс = next(к for к in student.get_my_progress()["data"]["courses"] if к["id"] == self.курс)
 
-	def test_неизвестный_документ_отклоняется(self):
-		ответ = student.artifact(self.курс, "lean_canvas")
+			self.assertEqual(
+				[(д["artifact"], д["blocks_total"], д["blocks_filled"]) for д in курс["documents"]],
+				[("summary", 2, 1)],
+			)
 
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], codes.АРТЕФАКТ_НЕ_НАЙДЕН)
+		with self.subTest("повторная запись замещает блок"):
+			student.update_artifact(self.курс, "summary", "Goal", "Открыть седьмую кофейню")
 
-	def test_документы_чужого_курса_недоступны(self):
+			документ = frappe.get_doc(
+				"Agent Student Artifact",
+				{"student": self.ученик, "course": self.курс, "artifact": "summary"},
+			)
+			self.assertEqual(
+				[(б.block_key, б.content) for б in документ.blocks],
+				[("goal", "Открыть седьмую кофейню")],
+				"ключ нормализуется, строка замещается, а не удваивается",
+			)
+
+		with self.subTest("с ключом — блоки с подсказками"):
+			документ = student.artifact(self.курс, "summary")["data"]
+
+			self.assertEqual(
+				[(б["key"], б["content"]) for б in документ["blocks"]],
+				[("goal", "Открыть седьмую кофейню"), ("sponsor", "")],
+				"порядок — из схемы; пустой блок приходит без содержимого",
+			)
+			self.assertEqual(документ["blocks"][0]["hint"], "Одной фразой, без клише")
+
+	def test_отказы_не_трогают_записанное(self):
+		"""Неизвестный документ, документы чужого курса, неизвестный блок; пустой
+		блок и очистка с текстом не стирают записанное."""
 		frappe.set_user("Administrator")
 		чужой = создать_курс(f"Чужой {frappe.generate_hash(length=6)}")
 		frappe.set_user(self.ученик)
 
-		ответ = student.artifact(чужой)
+		отказы = {
+			"неизвестный документ": (lambda: student.artifact(self.курс, "lean_canvas"), codes.АРТЕФАКТ_НЕ_НАЙДЕН),
+			"документы чужого курса": (lambda: student.artifact(чужой), НЕ_ЗАЧИСЛЕН),
+			"неизвестный блок": (
+				lambda: student.update_artifact(self.курс, "summary", "budget", "Миллион"),
+				codes.БЛОК_НЕ_НАЙДЕН,
+			),
+		}
+		for что, (вызов, код) in отказы.items():
+			with self.subTest(что):
+				ответ = вызов()
 
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], НЕ_ЗАЧИСЛЕН)
+				self.assertFalse(ответ["ok"])
+				self.assertEqual(ответ["error"]["code"], код)
+
+		затирания = {
+			"пустой блок": ("Открыть кофейню", {"content": "   "}, codes.ПУСТОЙ_БЛОК),
+			"очистка с текстом": ("Старый проект", {"content": "Новый проект", "clear": True}, codes.ОЧИСТКА_С_ТЕКСТОМ),
+		}
+		for что, (записано, параметры, код) in затирания.items():
+			with self.subTest(что):
+				student.update_artifact(self.курс, "summary", "goal", записано)
+
+				ответ = student.update_artifact(self.курс, "summary", "goal", **параметры)
+
+				self.assertFalse(ответ["ok"])
+				self.assertEqual(ответ["error"]["code"], код)
+				блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
+				self.assertEqual(блоки[0]["content"], записано)
 
 	def test_документы_идут_в_порядке_объявления(self):
 		"""Правка схемы не должна переставлять документы местами."""
@@ -638,93 +705,45 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 
 	# --- запись ---
 
-	def test_запись_создаёт_экземпляр_и_считает_заполненность(self):
-		ответ = student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")["data"]
+	def test_очистка_блока(self):
+		"""Очистка ещё не заведённого документа — не отказ, и экземпляр ради неё
+		не заводится; очистка записанного удаляет блок."""
+		with self.subTest("пустой блок — не отказ"):
+			# Документ ещё не заводился: очищать нечего, и ответ тот же, что после
+			# удаления, — а экземпляр ради этого не создаётся.
+			ответ = student.update_artifact(self.курс, "summary", "goal", "", clear="true")
 
-		self.assertEqual((ответ["blocks_filled"], ответ["blocks_total"]), (1, 2))
-		self.assertTrue(
-			frappe.db.exists(
+			self.assertTrue(ответ["ok"])
+			self.assertEqual(ответ["data"]["blocks_filled"], 0)
+			self.assertFalse(
+				frappe.db.exists(
+					"Agent Student Artifact",
+					{"student": self.ученик, "course": self.курс, "artifact": "summary"},
+				)
+			)
+
+		with self.subTest("очистка удаляет блок"):
+			student.update_artifact(self.курс, "summary", "goal", "Старый проект")
+			student.update_artifact(self.курс, "summary", "sponsor", "Марина")
+
+			ответ = student.update_artifact(self.курс, "summary", "Goal", clear=True)["data"]
+
+			self.assertEqual(
+				ответ,
+				{
+					"artifact": "summary",
+					"key": "goal",
+					"blocks_total": 2,
+					"blocks_filled": 1,
+					"empty_cells": [],
+					"created": [],
+				},
+			)
+			документ = frappe.get_doc(
 				"Agent Student Artifact",
 				{"student": self.ученик, "course": self.курс, "artifact": "summary"},
 			)
-		)
-
-	def test_повторная_запись_замещает_блок(self):
-		student.update_artifact(self.курс, "summary", "goal", "Черновик")
-		student.update_artifact(self.курс, "summary", "Goal", "Открыть седьмую кофейню")
-
-		документ = frappe.get_doc(
-			"Agent Student Artifact",
-			{"student": self.ученик, "course": self.курс, "artifact": "summary"},
-		)
-		self.assertEqual(
-			[(б.block_key, б.content) for б in документ.blocks],
-			[("goal", "Открыть седьмую кофейню")],
-			"ключ нормализуется, строка замещается, а не удваивается",
-		)
-
-	def test_неизвестный_блок_отклоняется(self):
-		ответ = student.update_artifact(self.курс, "summary", "budget", "Миллион")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], codes.БЛОК_НЕ_НАЙДЕН)
-
-	def test_пустой_блок_отклоняется_и_не_стирает_записанное(self):
-		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
-
-		ответ = student.update_artifact(self.курс, "summary", "goal", "   ")
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], codes.ПУСТОЙ_БЛОК)
-		блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
-		self.assertEqual(блоки[0]["content"], "Открыть кофейню")
-
-	def test_очистка_удаляет_блок(self):
-		student.update_artifact(self.курс, "summary", "goal", "Старый проект")
-		student.update_artifact(self.курс, "summary", "sponsor", "Марина")
-
-		ответ = student.update_artifact(self.курс, "summary", "Goal", clear=True)["data"]
-
-		self.assertEqual(
-			ответ,
-			{
-				"artifact": "summary",
-				"key": "goal",
-				"blocks_total": 2,
-				"blocks_filled": 1,
-				"empty_cells": [],
-				"created": [],
-			},
-		)
-		документ = frappe.get_doc(
-			"Agent Student Artifact",
-			{"student": self.ученик, "course": self.курс, "artifact": "summary"},
-		)
-		self.assertEqual([б.block_key for б in документ.blocks], ["sponsor"])
-
-	def test_очистка_пустого_блока_не_отказ(self):
-		# Документ ещё не заводился: очищать нечего, и ответ тот же, что после
-		# удаления, — а экземпляр ради этого не создаётся.
-		ответ = student.update_artifact(self.курс, "summary", "goal", "", clear="true")
-
-		self.assertTrue(ответ["ok"])
-		self.assertEqual(ответ["data"]["blocks_filled"], 0)
-		self.assertFalse(
-			frappe.db.exists(
-				"Agent Student Artifact",
-				{"student": self.ученик, "course": self.курс, "artifact": "summary"},
-			)
-		)
-
-	def test_очистка_с_текстом_отклоняется(self):
-		student.update_artifact(self.курс, "summary", "goal", "Старый проект")
-
-		ответ = student.update_artifact(self.курс, "summary", "goal", "Новый проект", clear=True)
-
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], codes.ОЧИСТКА_С_ТЕКСТОМ)
-		блоки = student.artifact(self.курс, "summary")["data"]["blocks"]
-		self.assertEqual(блоки[0]["content"], "Старый проект")
+			self.assertEqual([б.block_key for б in документ.blocks], ["sponsor"])
 
 	def test_блок_исчезнувший_из_схемы_не_теряет_содержимого(self):
 		"""Автор правит схему — труд ученика остаётся."""
@@ -750,15 +769,3 @@ class IntegrationTestArtifacts(IntegrationTestCase):
 			{"student": self.ученик, "course": self.курс, "artifact": "summary"},
 		)
 		self.assertEqual(документ.schema_version, вторая.name)
-
-	def test_прогресс_показывает_заполненность_документа(self):
-		student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню")
-
-		курс = next(
-			к for к in student.get_my_progress()["data"]["courses"] if к["id"] == self.курс
-		)
-
-		self.assertEqual(
-			[(д["artifact"], д["blocks_total"], д["blocks_filled"]) for д in курс["documents"]],
-			[("summary", 2, 1)],
-		)

@@ -29,15 +29,23 @@ from lms_frappe_app.tests.sample_data import (
 
 
 class IntegrationTestStartLesson(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Строки курса и релиза тесты не меняют; занятия и прохождения пишет ученик
+		своего теста. Тест, который правит строки релиза или уроки курса, заводит
+		себе свой курс — `свой_курс`."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, cls.релиз = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.addCleanup(политика_по_умолчанию)
 		политика_по_умолчанию()
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"start-{суффикс}@example.com")
-		self.курс, self.релиз = курс_из_релиза()
 		зачислить_на_курс(self.ученик, self.курс)
-		self.урок = урок_релиза(self.курс, "l-1")
 		frappe.set_user(self.ученик)
 
 	def старт(self, **параметры) -> dict:
@@ -50,6 +58,16 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 			"Agent Lesson Run",
 			{"student": self.ученик, "course": курс or self.курс, "lesson_key": ключ},
 		)
+
+	def свой_курс(self) -> tuple[str, str, str]:
+		"""Курс только этого теста, ученик на нём: (курс, релиз, первый урок)."""
+		frappe.set_user("Administrator")
+		try:
+			курс, релиз = курс_из_релиза()
+			зачислить_на_курс(self.ученик, курс)
+		finally:
+			frappe.set_user(self.ученик)
+		return курс, релиз, урок_релиза(курс, "l-1")
 
 	def курс_двух_целей(self) -> tuple[str, str]:
 		frappe.set_user("Administrator")
@@ -93,11 +111,10 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertTrue(занятие.via_trusted_service)
 
 	def test_срез_без_директивы_и_материала_пустые_строки(self):
-		frappe.db.set_value(
-			"Agent Release Lesson", {"parent": self.релиз, "lesson_key": "l-1"}, "agent", "{}"
-		)
+		_, релиз, урок = self.свой_курс()
+		frappe.db.set_value("Agent Release Lesson", {"parent": релиз, "lesson_key": "l-1"}, "agent", "{}")
 
-		данные = self.старт(lesson=self.урок)
+		данные = self.старт(lesson=урок)
 
 		self.assertEqual((данные["directive"], данные["material"]), ("", ""))
 
@@ -157,10 +174,11 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertIsNone(self.старт(lesson=урок)["next_step"])
 
 	def test_урок_без_вопросов_закрывается_без_квиза(self):
-		frappe.db.delete("Agent Release Question", {"parent": self.релиз, "lesson_key": "l-1"})
-		отметить_все_пункты(прохождения.прохождение(self.ученик, self.курс, "l-1").name)
+		курс, релиз, урок = self.свой_курс()
+		frappe.db.delete("Agent Release Question", {"parent": релиз, "lesson_key": "l-1"})
+		отметить_все_пункты(прохождения.прохождение(self.ученик, курс, "l-1").name)
 
-		данные = self.старт(lesson=self.урок)
+		данные = self.старт(lesson=урок)
 
 		self.assertEqual(данные["next_step"], {"kind": "complete"})
 		self.assertEqual(данные["quiz"], {"required": False, "pass_threshold": 0.7, "attempts_left": None})
@@ -274,61 +292,61 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("Agent Learning Session", {"student": self.ученик}))
 		self.assertFalse(frappe.db.exists("Agent Lesson Run", {"student": self.ученик}))
 
-	def test_курс_без_релиза_отказ_без_записей(self):
+	def test_отказы_без_записей(self):
+		"""Курс без релиза, урок не из релиза, чужой курс, неизвестный канал —
+		отказ без занятия и прохождения. Кончившаяся проба веб-чата — последней:
+		она меняет настройку и заводит пробное занятие."""
 		frappe.set_user("Administrator")
-		урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
-		курс = зачислить(self.ученик, урок)
-		frappe.set_user(self.ученик)
-
-		ответ = student.start_lesson(lesson=урок)
-
-		self.assertEqual(ответ["error"]["code"], "course_not_released")
-		self.assertEqual((ответ["error"]["course"], ответ["error"]["lesson"]), (курс, урок))
-		self.нет_записей()
-
-	def test_урок_не_из_релиза_отказ_без_записей(self):
+		без_релиза = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
+		курс_без_релиза = зачислить(self.ученик, без_релиза)
+		_, _, свой_урок = self.свой_курс()
 		frappe.set_user("Administrator")
-		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
+		глава = frappe.db.get_value("Course Lesson", свой_урок, "chapter")
 		лишний = frappe.get_doc({"doctype": "Course Lesson", "title": "Вне релиза", "chapter": глава})
 		# Мимо охраны курса из релиза: урок вне релиза у курса из релиза —
 		# запись, сделанная мимо публикации.
 		лишний.flags[ИЗ_РЕЛИЗА] = True
 		лишний.insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-
-		ответ = student.start_lesson(lesson=лишний.name)
-
-		self.assertEqual(ответ["error"]["code"], "course_not_released")
-		self.нет_записей()
-
-	def test_чужой_курс_отказ_без_записей(self):
-		frappe.set_user("Administrator")
 		чужой, _ = курс_из_релиза()
 		frappe.set_user(self.ученик)
 
-		ответ = student.start_lesson(lesson=урок_релиза(чужой, "l-1"))
+		отказы = {
+			"курс без релиза": (
+				{"lesson": без_релиза},
+				"course_not_released",
+				{"course": курс_без_релиза, "lesson": без_релиза},
+			),
+			"урок не из релиза": ({"lesson": лишний.name}, "course_not_released", {}),
+			"чужой курс": ({"lesson": урок_релиза(чужой, "l-1")}, "not_enrolled", {}),
+			"неизвестный канал": ({"lesson": self.урок, "channel": "sms"}, "unknown_channel", {}),
+		}
+		for что, (параметры, код, подробности) in отказы.items():
+			with self.subTest(что):
+				ответ = student.start_lesson(**параметры)
 
-		self.assertEqual(ответ["error"]["code"], "not_enrolled")
-		self.нет_записей()
+				self.assertEqual(ответ["error"]["code"], код)
+				self.assertEqual({к: ответ["error"][к] for к in подробности}, подробности)
+				self.нет_записей()
 
-	def test_неизвестный_канал_отказ_без_записей(self):
-		ответ = student.start_lesson(lesson=self.урок, channel="sms")
+		with self.subTest("проба веб-чата кончилась"):
+			try:
+				frappe.set_user("Administrator")
+				настроить_квиз(web_demo_lessons=1)
+				frappe.set_user(self.ученик)
+				пробный = создать_занятие(self.ученик, урок_релиза(self.курс, "l-2"))
+				frappe.db.set_value("Agent Learning Session", пробный, "web_chat", 1)
 
-		self.assertEqual(ответ["error"]["code"], "unknown_channel")
-		self.нет_записей()
+				ответ = student.start_lesson(lesson=self.урок, channel="web")
 
-	def test_проба_веб_чата_кончилась_отказ_без_записей(self):
-		frappe.set_user("Administrator")
-		настроить_квиз(web_demo_lessons=1)
-		frappe.set_user(self.ученик)
-		пробный = создать_занятие(self.ученик, урок_релиза(self.курс, "l-2"))
-		frappe.db.set_value("Agent Learning Session", пробный, "web_chat", 1)
-
-		ответ = student.start_lesson(lesson=self.урок, channel="web")
-
-		self.assertEqual(ответ["error"]["code"], "web_demo_exhausted")
-		self.assertEqual(frappe.get_all("Agent Learning Session", {"student": self.ученик}, pluck="name"), [пробный])
-		self.assertFalse(frappe.db.exists("Agent Lesson Run", {"student": self.ученик}))
+				self.assertEqual(ответ["error"]["code"], "web_demo_exhausted")
+				self.assertEqual(
+					frappe.get_all("Agent Learning Session", {"student": self.ученик}, pluck="name"), [пробный]
+				)
+				self.assertFalse(frappe.db.exists("Agent Lesson Run", {"student": self.ученик}))
+			finally:
+				frappe.set_user("Administrator")
+				политика_по_умолчанию()
+				frappe.set_user(self.ученик)
 
 	# --- веб-канал и начало ---
 
@@ -371,30 +389,48 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 class IntegrationTestStartLessonChoice(IntegrationTestCase):
 	"""Какой урок открывает `start_lesson` без `lesson`: по сроку, по последнему занятию, по курсу."""
 
+	@classmethod
+	def setUpClass(cls):
+		"""Курсы тесты только читают; назначения — у организации своего теста,
+		занятия и прогресс — у её ученика."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, _ = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+		cls._срочный = None
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"choice-{суффикс}@example.com")
 		self.организация = создать_организацию(f"Выбор {суффикс}")
 		добавить_в_организацию(self.ученик, self.организация)
-		self.курс = self.курс_со_сроком("2026-12-31")
-		self.урок = урок_релиза(self.курс, "l-1")
+		self.назначить(self.курс, "2026-12-31")
 		frappe.set_user(self.ученик)
 
-	def курс_со_сроком(self, срок: str) -> str:
+	def назначить(self, курс: str, срок: str) -> None:
 		frappe.set_user("Administrator")
-		курс, _ = курс_из_релиза()
-		frappe.get_doc(
-			{
-				"doctype": "Course Allocation",
-				"organization": self.организация,
-				"course": курс,
-				"deadline": срок,
-				"mandatory": 1,
-			}
-		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-		return курс
+		try:
+			frappe.get_doc(
+				{
+					"doctype": "Course Allocation",
+					"organization": self.организация,
+					"course": курс,
+					"deadline": срок,
+					"mandatory": 1,
+				}
+			).insert(ignore_permissions=True)
+		finally:
+			frappe.set_user(self.ученик)
+
+	def курс_со_сроком(self, срок: str) -> str:
+		"""Второй курс, назначенный организации теста со сроком `срок`. Курс один
+		на класс и заводится при первом обращении: тесты его только читают."""
+		класс = type(self)
+		if класс._срочный is None:
+			класс._срочный, _ = курс_из_релиза()
+		self.назначить(класс._срочный, срок)
+		return класс._срочный
 
 	def урок_старта(self, **параметры) -> str:
 		ответ = student.start_lesson(**параметры)

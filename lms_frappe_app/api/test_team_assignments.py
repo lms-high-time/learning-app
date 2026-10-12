@@ -258,41 +258,45 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 		self.assertFalse(ответ["ok"], ответ)
 		return ответ["error"]["code"]
 
-	def test_перечень_заданий_по_порядку_уроков(self):
-		сроки = self.сроки()
-		self.assertEqual([с["homework"] for с in сроки], [self.задание_1.name, self.задание_3.name])
-		первое = сроки[0]
-		self.assertEqual(
-			(первое["lesson"], первое["title"], первое["lesson_title"]),
-			(self.первый, "Первое", frappe.db.get_value("Course Lesson", self.первый, "title")),
-		)
-		self.assertEqual(первое["author_due"], {"mode": "relative", "days": 5, "date": None})
-		self.assertIsNone(первое["due"])
+	def test_перечень_заданий_и_правило_назначения(self):
+		"""Перечень заданий по порядку уроков, сроки автора; правило назначения
+		ставится, не переданное не трогается, список заменяет таблицу целиком,
+		пустой снимает все правила."""
+		with self.subTest("перечень по порядку уроков"):
+			сроки = self.сроки()
+			self.assertEqual([с["homework"] for с in сроки], [self.задание_1.name, self.задание_3.name])
+			первое = сроки[0]
+			self.assertEqual(
+				(первое["lesson"], первое["title"], первое["lesson_title"]),
+				(self.первый, "Первое", frappe.db.get_value("Course Lesson", self.первый, "title")),
+			)
+			self.assertEqual(первое["author_due"], {"mode": "relative", "days": 5, "date": None})
+			self.assertIsNone(первое["due"])
 
-	def test_правило_назначения_и_снятие(self):
-		ответ = self.задать(
-			[
-				{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "2030-02-01", "due_days": 9},
-				{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 2},
-			]
-		)
-		self.assertTrue(ответ["ok"], ответ)
-		первое, третье = self.сроки()
-		self.assertEqual(первое["due"], {"mode": "absolute", "days": None, "date": "2030-02-01"})
-		self.assertEqual(третье["due"], {"mode": "relative", "days": 2, "date": None})
+		with self.subTest("правило назначения"):
+			ответ = self.задать(
+				[
+					{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "2030-02-01", "due_days": 9},
+					{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 2},
+				]
+			)
+			self.assertTrue(ответ["ok"], ответ)
+			первое, третье = self.сроки()
+			self.assertEqual(первое["due"], {"mode": "absolute", "days": None, "date": "2030-02-01"})
+			self.assertEqual(третье["due"], {"mode": "relative", "days": 2, "date": None})
 
-		# Не передан — не трогать.
-		self.assertTrue(self.от_имени(team.update_allocation, allocation=self.назначение, mandatory=0)["ok"])
-		self.assertIsNotNone(self.сроки()[0]["due"])
-		self.assertTrue(self.задать("null")["ok"])
-		self.assertIsNotNone(self.сроки()[0]["due"])
+		with self.subTest("не передан — не трогать"):
+			self.assertTrue(self.от_имени(team.update_allocation, allocation=self.назначение, mandatory=0)["ok"])
+			self.assertIsNotNone(self.сроки()[0]["due"])
+			self.assertTrue(self.задать("null")["ok"])
+			self.assertIsNotNone(self.сроки()[0]["due"])
 
-		# Список заменяет таблицу целиком; пустой снимает все правила.
-		правило_3 = [{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1}]
-		self.assertTrue(self.задать(json.dumps(правило_3))["ok"])
-		self.assertEqual([с["due"] is None for с in self.сроки()], [True, False])
-		self.assertTrue(self.задать([])["ok"])
-		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
+		with self.subTest("список заменяет таблицу целиком, пустой снимает все"):
+			правило_3 = [{"homework": self.задание_3.name, "due_mode": "relative", "due_days": 1}]
+			self.assertTrue(self.задать(json.dumps(правило_3))["ok"])
+			self.assertEqual([с["due"] is None for с in self.сроки()], [True, False])
+			self.assertTrue(self.задать([])["ok"])
+			self.assertEqual([с["due"] for с in self.сроки()], [None, None])
 
 	def test_сроки_проверяются_один_раз(self):
 		"""Метод проверяет сроки до сохранения — `validate` второй раз не зовёт."""
@@ -330,33 +334,38 @@ class IntegrationTestAllocationHomeworkDue(IntegrationTestCase):
 		правило_3[0]["due_days"] = 2
 		self.assertEqual(self.код(self.задать(правило_3)), "homework_not_in_course")
 
-	def test_неверные_сроки(self):
-		for неверное in (
-			[{"homework": self.задание_1.name, "due_mode": "none"}],
-			[{"homework": self.задание_1.name, "due_mode": "relative"}],
-			[{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 0}],
-			[{"homework": self.задание_1.name, "due_mode": "absolute"}],
-			[
-				{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 1},
-				{"homework": self.задание_1.name, "due_mode": "relative", "due_days": 2},
-			],
-			"{не json",
-			[self.задание_1.name],
-			{"homework": self.задание_1.name},
-			[{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "завтра"}],
-			[{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": "2030-02-30"}],
-			[{"homework": self.задание_1.name, "due_mode": "absolute", "due_date": ["2030-02-01"]}],
-			[{"homework": [self.задание_1.name], "due_mode": "relative", "due_days": 1}],
-			[{"homework": self.задание_1.name, "due_mode": {"relative": 1}, "due_days": 1}],
-		):
-			self.assertEqual(self.код(self.задать(неверное)), "invalid_due", неверное)
-		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
-
-	def test_задание_чужого_курса(self):
+	def test_неверные_сроки_и_чужое_задание(self):
+		"""Неверный срок — `invalid_due`, задание чужого курса или несуществующее —
+		`homework_not_in_course`; отказ правил не ставит."""
 		чужое = создать_домашку(создать_урок(f"Чужой {frappe.generate_hash(length=6)}"))
-		for задание in (чужое.name, "нет-такого"):
-			ответ = self.задать([{"homework": задание, "due_mode": "relative", "due_days": 1}])
-			self.assertEqual(self.код(ответ), "homework_not_in_course")
+		задание = self.задание_1.name
+		отказы = [
+			([{"homework": задание, "due_mode": "none"}], "invalid_due"),
+			([{"homework": задание, "due_mode": "relative"}], "invalid_due"),
+			([{"homework": задание, "due_mode": "relative", "due_days": 0}], "invalid_due"),
+			([{"homework": задание, "due_mode": "absolute"}], "invalid_due"),
+			(
+				[
+					{"homework": задание, "due_mode": "relative", "due_days": 1},
+					{"homework": задание, "due_mode": "relative", "due_days": 2},
+				],
+				"invalid_due",
+			),
+			("{не json", "invalid_due"),
+			([задание], "invalid_due"),
+			({"homework": задание}, "invalid_due"),
+			([{"homework": задание, "due_mode": "absolute", "due_date": "завтра"}], "invalid_due"),
+			([{"homework": задание, "due_mode": "absolute", "due_date": "2030-02-30"}], "invalid_due"),
+			([{"homework": задание, "due_mode": "absolute", "due_date": ["2030-02-01"]}], "invalid_due"),
+			([{"homework": [задание], "due_mode": "relative", "due_days": 1}], "invalid_due"),
+			([{"homework": задание, "due_mode": {"relative": 1}, "due_days": 1}], "invalid_due"),
+			([{"homework": чужое.name, "due_mode": "relative", "due_days": 1}], "homework_not_in_course"),
+			([{"homework": "нет-такого", "due_mode": "relative", "due_days": 1}], "homework_not_in_course"),
+		]
+		for номер, (неверное, код) in enumerate(отказы):
+			with self.subTest(номер=номер, сроки=str(неверное)):
+				self.assertEqual(self.код(self.задать(неверное)), код, неверное)
+		self.assertEqual([с["due"] for с in self.сроки()], [None, None])
 
 	def test_после_переноса_урока_срок_назначения_правится(self):
 		"""Урок с заданием ушёл в другой курс — правкой в Learning: строка срока
