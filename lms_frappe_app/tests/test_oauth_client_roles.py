@@ -41,17 +41,21 @@ class IntegrationTestOAuthClientRoles(IntegrationTestCase):
 		# Роль Frappe по умолчанию не отнимается: desk-пользователи тоже агенты.
 		self.assertIn("Desk User", роли)
 
-	def test_ученик_проходит_проверку_роли_клиента(self):
-		к = клиент()
-		ученик = создать_ученика(f"uch-{frappe.generate_hash(length=6)}@example.com")
-		frappe.set_user(ученик)
-		self.assertTrue(frappe.get_doc("OAuth Client", к.name).user_has_allowed_role())
-
-	def test_куратор_без_desk_проходит_проверку(self):
-		к = клиент()
-		куратор = создать_куратора(f"kur-{frappe.generate_hash(length=6)}@example.com")
-		frappe.set_user(куратор)
-		self.assertTrue(frappe.get_doc("OAuth Client", к.name).user_has_allowed_role())
+	def test_пользователь_платформы_проходит_проверку_роли_клиента(self):
+		"""Без desk-доступа клиент отказывал: «Invalid client_id parameter
+		value» (#26). Ученик и куратор без desk — каждый со своим клиентом."""
+		for что, создать, префикс in (
+			("#26: ученик", создать_ученика, "uch"),
+			("#26: куратор без desk", создать_куратора, "kur"),
+		):
+			with self.subTest(что):
+				к = клиент()
+				пользователь = создать(f"{префикс}-{frappe.generate_hash(length=6)}@example.com")
+				frappe.set_user(пользователь)
+				try:
+					self.assertTrue(frappe.get_doc("OAuth Client", к.name).user_has_allowed_role())
+				finally:
+					frappe.set_user("Administrator")
 
 	def test_явно_заданные_роли_не_дублируются(self):
 		к = клиент(allowed_roles=[{"role": "LMS Student"}])

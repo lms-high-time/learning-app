@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.translate import get_all_translations
 
 ФАЙЛ = Path(frappe.get_app_path("lms_frappe_app", "translations", "ru.csv"))
@@ -30,7 +30,9 @@ def _строки() -> list[list[str]]:
 		return list(csv.reader(ф))
 
 
-class IntegrationTestTranslations(IntegrationTestCase):
+class TestФайлПереводов(UnitTestCase):
+	"""Разбор самого файла — без базы."""
+
 	def test_файл_разбирается_и_не_пуст(self):
 		строки = _строки()
 
@@ -60,6 +62,8 @@ class IntegrationTestTranslations(IntegrationTestCase):
 
 		self.assertEqual(с_пробелами, [], "такую строку Frappe обрежет")
 
+
+class IntegrationTestTranslations(IntegrationTestCase):
 	def test_письма_о_пароле_переведены_целиком(self):
 		"""Приглашение после регистрации и сброс пароля — шаблоны Frappe.
 

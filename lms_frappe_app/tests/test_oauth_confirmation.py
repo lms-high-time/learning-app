@@ -26,28 +26,22 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 
 
 class IntegrationTestOAuthConfirmation(IntegrationTestCase):
-	def setUp(self):
+	def test_экран_подтверждения(self):
+		"""Экран называет учётную запись и остаётся рабочим: кнопки и защита от
+		CSRF — из исходного шаблона, их легко потерять."""
 		self.addCleanup(frappe.set_user, "Administrator")
-		self.ученик = создать_ученика(
-			f"oauth-{frappe.generate_hash(length=6)}@example.com"
-		)
-
-	def test_экран_называет_учётную_запись(self):
-		frappe.set_user(self.ученик)
+		ученик = создать_ученика(f"oauth-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(ученик)
 
 		страница = frappe.render_template(ШАБЛОН, КОНТЕКСТ)
 
-		self.assertIn("Вы вошли как", страница)
-		self.assertIn(self.ученик, страница)
+		with self.subTest("называет учётную запись"):
+			self.assertIn("Вы вошли как", страница)
+			self.assertIn(ученик, страница)
 
-	def test_экран_остаётся_рабочим(self):
-		"""Кнопки и защита от CSRF — из исходного шаблона, их легко потерять."""
-		frappe.set_user(self.ученик)
-
-		страница = frappe.render_template(ШАБЛОН, КОНТЕКСТ)
-
-		self.assertIn(КОНТЕКСТ["success_url"], страница)
-		self.assertIn(КОНТЕКСТ["failure_url"], страница)
-		self.assertIn('name="csrf_token"', страница)
-		# Перечень запрашиваемых прав — то, ради чего экран существует.
-		self.assertIn("All", страница)
+		with self.subTest("остаётся рабочим"):
+			self.assertIn(КОНТЕКСТ["success_url"], страница)
+			self.assertIn(КОНТЕКСТ["failure_url"], страница)
+			self.assertIn('name="csrf_token"', страница)
+			# Перечень запрашиваемых прав — то, ради чего экран существует.
+			self.assertIn("All", страница)

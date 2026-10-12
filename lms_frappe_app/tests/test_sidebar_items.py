@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 # (route пункта, заголовок, куда уводит редирект)
 ПУНКТЫ = (
@@ -64,17 +64,6 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 			with self.subTest(путь=путь):
 				resolve_redirect(путь)  # без переадресации
 
-	# --- веб-чат (lms-platform#141) ---
-
-	def test_состав_пунктов_сайдбара(self):
-		# Пин на состав: пункт, добавленный или убранный мимо ревью, виден здесь.
-		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА
-
-		self.assertEqual(
-			[п["route"] for п in ПУНКТЫ_САЙДБАРА],
-			["study-in-browser", "agent-sidebar", "artifacts-sidebar"],
-		)
-
 	# --- порядок и иконки пунктов (lms-platform#311) ---
 
 	def _строки_сайдбара(self) -> list[tuple[str, str]]:
@@ -133,18 +122,6 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 		итог = self._строки_сайдбара()
 		self.assertIn(выбранная, итог, "иконку, выбранную админом, установка не трогает")
 		self.assertEqual(итог[len(ПУНКТЫ_САЙДБАРА)], (свой.route, "Scale"), "пункт админа — следом за нашими")
-
-	def test_заглушки_не_попадают_в_пути_mcp_сервиса(self):
-		"""Traefik сопоставляет пути сервиса mcp по префиксу.
-
-		`Why:` заглушка `/chat-sidebar` уходила в MCP-сервис по правилу `/chat`
-		и отвечала «Not Found» вместо переадресации в чат (lms-platform#142).
-		"""
-		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА
-
-		пути_mcp = ("mcp", "authoring", "chat", ".well-known")
-		for пункт in ПУНКТЫ_САЙДБАРА:
-			self.assertFalse(пункт["route"].startswith(пути_mcp), пункт["route"])
 
 	# --- подпись пункта: правит админ, переименование — патчем (learning-services#479) ---
 
@@ -208,3 +185,30 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 		обеспечить_пункты_сайдбара()
 
 		self.assertEqual(self._подписи(заглушка), ("Свой ИИ", "Свой ИИ"))
+
+
+class TestСоставПунктовСайдбара(UnitTestCase):
+	"""Пункты платформы — константа установки: проверка без базы."""
+
+	# --- веб-чат (lms-platform#141) ---
+
+	def test_состав_пунктов_сайдбара(self):
+		# Пин на состав: пункт, добавленный или убранный мимо ревью, виден здесь.
+		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА
+
+		self.assertEqual(
+			[п["route"] for п in ПУНКТЫ_САЙДБАРА],
+			["study-in-browser", "agent-sidebar", "artifacts-sidebar"],
+		)
+
+	def test_заглушки_не_попадают_в_пути_mcp_сервиса(self):
+		"""Traefik сопоставляет пути сервиса mcp по префиксу.
+
+		`Why:` заглушка `/chat-sidebar` уходила в MCP-сервис по правилу `/chat`
+		и отвечала «Not Found» вместо переадресации в чат (lms-platform#142).
+		"""
+		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА
+
+		пути_mcp = ("mcp", "authoring", "chat", ".well-known")
+		for пункт in ПУНКТЫ_САЙДБАРА:
+			self.assertFalse(пункт["route"].startswith(пути_mcp), пункт["route"])

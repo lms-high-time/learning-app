@@ -25,63 +25,64 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 
-	def test_workspace_модуля_публичный(self):
-		# Точка входа в desk: без неё сайдбару нечего показывать.
+	def test_workspace_модуля(self):
+		"""Точка входа в desk: без неё сайдбару нечего показывать. Карточки ведут
+		на доктайпы, на обзоре — вход в кабинет автора (#261) и счёт
+		неразобранных репортов."""
 		workspace = frappe.get_doc("Workspace", WORKSPACE)
 
-		self.assertTrue(workspace.public)
-		self.assertEqual(workspace.module, МОДУЛЬ)
-		self.assertFalse(workspace.is_hidden)
+		with self.subTest("публичный"):
+			self.assertTrue(workspace.public)
+			self.assertEqual(workspace.module, МОДУЛЬ)
+			self.assertFalse(workspace.is_hidden)
 
-	def test_сайдбар_ведёт_на_каждый_доктайп_модуля(self):
-		"""Пин на состав: новый доктайп без строки в сайдбаре снова станет
-		невидимым, и заметят это по прямой ссылке, как в прошлый раз."""
+		with self.subTest("карточки с доктайпами"):
+			карточки = [с.label for с in workspace.links if с.type == "Card Break"]
+			ссылки = {с.link_to for с in workspace.links if с.type == "Link"}
+
+			self.assertEqual(карточки, ["Курс", "Ученики", "Организации"])
+			self.assertIn("Agent Student Artifact", ссылки)
+			self.assertIn("Agent Course Report", ссылки)
+
+		with self.subTest("#261: на обзоре вход в кабинет автора"):
+			# `Why:` в сайдбар Learning кабинет не положить — пункты сайдбара видят
+			# все, и ученики тоже; workspace видят только авторские роли.
+			content = json.loads(workspace.content)
+			абзацы = [блок["data"]["text"] for блок in content if блок["type"] == "paragraph"]
+
+			self.assertTrue(any('href="/author"' in текст for текст in абзацы), абзацы)
+
+		with self.subTest("на обзоре виден счёт неразобранных репортов"):
+			# `Why:` репорт разбирают, только если видят, что он пришёл. Ссылка
+			# в карточке ведёт в список, но молчит о том, есть ли там новое, а
+			# ярлык со `stats_filter` Frappe считает сам — своего виджета не нужно.
+			ярлыки = {я.link_to: я for я in workspace.shortcuts}
+
+			self.assertIn("Agent Course Report", ярлыки)
+			фильтр = json.loads(ярлыки["Agent Course Report"].stats_filter)
+			self.assertEqual(фильтр, {"status": ["=", "New"]})
+			# Статус сверяется со схемой, а не с копией себя: переименованный в
+			# доктайпе, он оставит ярлык навсегда на «0 новых», и молча.
+			статусы = frappe.get_meta("Agent Course Report").get_field("status").options.split("\n")
+			self.assertIn(фильтр["status"][1], статусы)
+
+	def test_сайдбар_модуля(self):
+		"""Сайдбар начинается с обзора и ведёт на каждый доктайп модуля. Пин на
+		состав: новый доктайп без строки в сайдбаре снова станет невидимым, и
+		заметят это по прямой ссылке, как в прошлый раз."""
 		сайдбар = frappe.get_doc("Workspace Sidebar", WORKSPACE)
-		ссылки = {п.link_to for п in сайдбар.items if п.type == "Link" and п.link_type == "DocType"}
-		доктайпы = set(
-			frappe.get_all("DocType", filters={"module": МОДУЛЬ, "istable": 0}, pluck="name")
-		)
 
-		self.assertTrue(сайдбар.standard)
-		self.assertEqual(доктайпы - ссылки, set(), "доктайпы модуля без пункта в сайдбаре")
+		with self.subTest("ведёт на каждый доктайп модуля"):
+			ссылки = {п.link_to for п in сайдбар.items if п.type == "Link" and п.link_type == "DocType"}
+			доктайпы = set(frappe.get_all("DocType", filters={"module": МОДУЛЬ, "istable": 0}, pluck="name"))
 
-	def test_сайдбар_начинается_с_обзора(self):
-		сайдбар = frappe.get_doc("Workspace Sidebar", WORKSPACE)
-		первый = сайдбар.items[0]
+			self.assertTrue(сайдбар.standard)
+			self.assertEqual(доктайпы - ссылки, set(), "доктайпы модуля без пункта в сайдбаре")
 
-		self.assertEqual((первый.link_type, первый.link_to), ("Workspace", WORKSPACE))
+		with self.subTest("начинается с обзора"):
+			первый = сайдбар.items[0]
 
-	def test_workspace_показывает_карточки_с_доктайпами(self):
-		workspace = frappe.get_doc("Workspace", WORKSPACE)
-		карточки = [с.label for с in workspace.links if с.type == "Card Break"]
-		ссылки = {с.link_to for с in workspace.links if с.type == "Link"}
-
-		self.assertEqual(карточки, ["Курс", "Ученики", "Организации"])
-		self.assertIn("Agent Student Artifact", ссылки)
-		self.assertIn("Agent Course Report", ссылки)
-
-	def test_на_обзоре_есть_вход_в_кабинет_автора(self):
-		"""`Why:` в сайдбар Learning кабинет не положить — пункты сайдбара видят
-		все, и ученики тоже; workspace видят только авторские роли (#261)."""
-		content = json.loads(frappe.get_doc("Workspace", WORKSPACE).content)
-		абзацы = [блок["data"]["text"] for блок in content if блок["type"] == "paragraph"]
-
-		self.assertTrue(any('href="/author"' in текст for текст in абзацы), абзацы)
-
-	def test_на_обзоре_виден_счёт_неразобранных_репортов(self):
-		"""`Why:` репорт разбирают, только если видят, что он пришёл. Ссылка
-		в карточке ведёт в список, но молчит о том, есть ли там новое, а
-		ярлык со `stats_filter` Frappe считает сам — своего виджета не нужно.
-		"""
-		ярлыки = {я.link_to: я for я in frappe.get_doc("Workspace", WORKSPACE).shortcuts}
-
-		self.assertIn("Agent Course Report", ярлыки)
-		фильтр = json.loads(ярлыки["Agent Course Report"].stats_filter)
-		self.assertEqual(фильтр, {"status": ["=", "New"]})
-		# Статус сверяется со схемой, а не с копией себя: переименованный в
-		# доктайпе, он оставит ярлык навсегда на «0 новых», и молча.
-		статусы = frappe.get_meta("Agent Course Report").get_field("status").options.split("\n")
-		self.assertIn(фильтр["status"][1], статусы)
+			self.assertEqual((первый.link_type, первый.link_to), ("Workspace", WORKSPACE))
 
 	def test_приложение_объявлено_для_стартового_экрана(self):
 		приложения = {п["name"]: п for п in frappe.get_hooks("add_to_apps_screen")}
