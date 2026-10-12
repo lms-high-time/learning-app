@@ -29,18 +29,33 @@ from lms_frappe_app.tests.sample_data import (
 
 
 class IntegrationTestAgentChain(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Курс из релиза тесты только читают: у каждого свой ученик. Тест, который
+		правит строки релиза, заводит себе свой курс — `свой_курс`."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, cls.релиз = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.addCleanup(политика_по_умолчанию)
 		политика_по_умолчанию()
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"chain-{суффикс}@example.com")
+		зачислить_на_курс(self.ученик, self.курс)
+		frappe.set_user(self.ученик)
+
+	# --- помощники ---
+
+	def свой_курс(self) -> None:
+		"""Курс только этого теста — для теста, который правит строки релиза."""
+		frappe.set_user("Administrator")
 		self.курс, self.релиз = курс_из_релиза()
 		зачислить_на_курс(self.ученик, self.курс)
 		self.урок = урок_релиза(self.курс, "l-1")
 		frappe.set_user(self.ученик)
-
-	# --- помощники ---
 
 	def данные(self, ответ: dict) -> dict:
 		self.assertTrue(ответ["ok"], ответ)
@@ -121,6 +136,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertNotIn(СВИДЕТЕЛЬСТВО, json.dumps(после, ensure_ascii=False))
 
 	def test_подробности_без_текста_в_пакете_пустая_строка(self):
+		self.свой_курс()
 		frappe.db.set_value("Agent Release Lesson", {"parent": self.релиз, "lesson_key": "l-1"}, "agent", "{}")
 		занятие = self.старт()["session"]
 
@@ -136,23 +152,29 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertFalse(frappe.db.get_value("Agent Learning Session", занятие, "run"))
 
 	def test_подробности_отказы(self):
+		"""Отзыв доступа — последней строкой: он снимает запись ученика на курс."""
 		занятие = self.старт()["session"]
 		frappe.set_user("Administrator")
 		чужой = создать_ученика(f"chain-other-{frappe.generate_hash(length=6)}@example.com")
 		чужое = создать_занятие(чужой, self.урок)
 		frappe.set_user(self.ученик)
-
-		self.отказ(student.lesson_item(чужое, "term:T1"), "not_your_session")
-		неизвестный = self.отказ(student.lesson_item(занятие, "term:T9"), "goal_unknown")
-		self.assertEqual(неизвестный["goals"], ["term:T1", "l-1-D1/V1", "refute:M1"])
 		старое = создать_занятие(self.ученик, self.курс_без_релиза())
-		self.отказ(student.lesson_item(старое, "term:T1"), "course_not_released")
 
-	def test_подробности_после_отзыва_доступа_отказ(self):
-		занятие = self.старт()["session"]
-		frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+		def отозвать_доступ():
+			frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
+			return student.lesson_item(занятие, "term:T1")
 
-		self.отказ(student.lesson_item(занятие, "term:T1"), "not_enrolled")
+		отказы = {
+			"чужое занятие": (lambda: student.lesson_item(чужое, "term:T1"), "not_your_session"),
+			"неизвестный пункт": (lambda: student.lesson_item(занятие, "term:T9"), "goal_unknown"),
+			"курс без релиза": (lambda: student.lesson_item(старое, "term:T1"), "course_not_released"),
+			"после отзыва доступа": (отозвать_доступ, "not_enrolled"),
+		}
+		for что, (вызов, код) in отказы.items():
+			with self.subTest(что):
+				ошибка = self.отказ(вызов(), код)
+				if что == "неизвестный пункт":
+					self.assertEqual(ошибка["goals"], ["term:T1", "l-1-D1/V1", "refute:M1"])
 
 	def test_урок_снят_из_релиза_подробностей_и_закрытия_нет(self):
 		"""Прохождение урока, снятого новым релизом, отстаёт от действующего: подробности
@@ -198,14 +220,6 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, run, "resume_from"), "С варианта «первый»")
 		self.assertEqual(self.старт()["resume_from"], "С варианта «первый»")
 
-	def test_длинная_заметка_отказ_без_записи(self):
-		занятие = создать_занятие(self.ученик, self.урок)
-
-		ошибка = self.отказ(self.отметить(занятие, "term:T1", resume_from="я" * 501), "resume_from_too_long")
-
-		self.assertEqual((ошибка["limit"], ошибка["length"]), (500, 501))
-		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
-
 	def test_ответ_отметки_и_следующий_шаг(self):
 		курс, урок = self.курс_двух_целей()
 		занятие = self.старт(урок)["session"]
@@ -241,41 +255,61 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "run"), self.прохождение().name)
 
-	def test_закрытое_занятие_отметок_не_принимает(self):
-		for статус in ("Completed", "Abandoned"):
-			with self.subTest(статус=статус):
-				занятие = создать_занятие(self.ученик, self.урок)
-				frappe.db.set_value("Agent Learning Session", занятие, "status", статус)
-
-				ошибка = self.отказ(self.отметить(занятие, "term:T1"), "session_closed")
-
-				self.assertEqual(ошибка["status"], статус)
-				self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
-				self.assertFalse(frappe.db.get_value("Agent Learning Session", занятие, "run"))
-
 	def test_отметка_отказы_до_записи(self):
+		"""Отказ отметки не заводит прохождения урока и не привязывает его к занятию."""
 		занятие = создать_занятие(self.ученик, self.урок)
 		старое = создать_занятие(self.ученик, self.курс_без_релиза())
 
-		self.отказ(self.отметить(старое, "term:T1"), "course_not_released")
-		for вызов in (student.request_quiz, student.complete_lesson):
-			self.отказ(вызов(старое), "course_not_released")
-		self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": старое}))
-		self.отказ(self.отметить(занятие, "term:T1", evidence=""), "evidence_required")
-		self.отказ(self.отметить(занятие, "term:T1", "skipped"), "goal_status_unknown")
-		self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+		def закрытое(статус: str) -> str:
+			имя = создать_занятие(self.ученик, self.урок)
+			frappe.db.set_value("Agent Learning Session", имя, "status", статус)
+			return имя
+
+		отказы = {
+			"длинная заметка": (
+				занятие,
+				{"resume_from": "я" * 501},
+				"resume_from_too_long",
+				{"limit": 500, "length": 501},
+			),
+			"занятие Completed": (закрытое("Completed"), {}, "session_closed", {"status": "Completed"}),
+			"занятие Abandoned": (закрытое("Abandoned"), {}, "session_closed", {"status": "Abandoned"}),
+			"курс без релиза": (старое, {}, "course_not_released", {}),
+			"без свидетельства": (занятие, {"evidence": ""}, "evidence_required", {}),
+			"неизвестный статус": (занятие, {"статус": "skipped"}, "goal_status_unknown", {}),
+		}
+		for что, (где, поля, код, подробности) in отказы.items():
+			with self.subTest(что):
+				статус = поля.pop("статус", "done")
+				ошибка = self.отказ(self.отметить(где, "term:T1", статус, **поля), код)
+				self.assertEqual({к: ошибка[к] for к in подробности}, подробности)
+				self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
+				self.assertFalse(frappe.db.get_value("Agent Learning Session", где, "run"))
+		with self.subTest("квиз и закрытие курса без релиза"):
+			for вызов in (student.request_quiz, student.complete_lesson):
+				self.отказ(вызов(старое), "course_not_released")
+			self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": старое}))
 
 	def test_гонка_за_прохождение_busy(self):
-		занятие = self.старт()["session"]
+		"""Гонка за прохождение — `busy` с откатом: и у отметки, и у квиза."""
+		гонки = {
+			"отметка": (
+				self.старт()["session"],
+				"отметить_с_целями",
+				lambda занятие: self.отметить(занятие, "term:T1"),
+			),
+			"квиз": (создать_занятие(self.ученик, self.урок), "прохождение", student.request_quiz),
+		}
+		for что, (занятие, где, вызов) in гонки.items():
+			with (
+				self.subTest(что),
+				patch.object(прохождения, где, side_effect=frappe.QueryDeadlockError("1213")),
+				patch.object(frappe.db, "rollback") as откат,
+			):
+				ошибка = self.отказ(вызов(занятие), "busy")
 
-		with (
-			patch.object(прохождения, "отметить_с_целями", side_effect=frappe.QueryDeadlockError("1213")),
-			patch.object(frappe.db, "rollback") as откат,
-		):
-			ошибка = self.отказ(self.отметить(занятие, "term:T1"), "busy")
-
-		self.assertEqual(ошибка["session"], занятие)
-		откат.assert_called_once_with()
+				self.assertEqual(ошибка["session"], занятие)
+				откат.assert_called_once_with()
 
 	# --- квиз и закрытие ---
 
@@ -357,6 +391,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		)
 
 	def test_урок_без_вопросов_закрывается(self):
+		self.свой_курс()
 		frappe.db.delete("Agent Release Question", {"parent": self.релиз, "lesson_key": "l-1"})
 		старт = self.старт()
 		self.отметить_обязательные(старт["session"], старт["lesson_map"])
@@ -369,6 +404,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual([(б["artifact"], б["key"]) for б in закрыто["empty_blocks"]], [("notebook", "log")])
 
 	def test_заполненный_раздел_урока_не_предупреждает(self):
+		self.свой_курс()
 		frappe.db.delete("Agent Release Question", {"parent": self.релиз, "lesson_key": "l-1"})
 		старт = self.старт()
 		self.отметить_обязательные(старт["session"], старт["lesson_map"])
@@ -378,21 +414,35 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 
 		self.assertEqual(закрыто["empty_blocks"], [])
 
-	def test_закрытое_занятие_урок_не_закрывает(self):
-		frappe.set_user("Administrator")
-		настроить_квиз(quiz_required=0)
-		frappe.set_user(self.ученик)
+	def test_закрытие_отказы_после_всех_пунктов(self):
+		"""Все пункты отмечены, а урок не закрыт: квиз обязателен — `quiz_required`;
+		квиз не обязателен, но занятие закрыто — `session_closed`."""
 		старт = self.старт()
-		self.отметить_обязательные(старт["session"], старт["lesson_map"])
-		frappe.db.set_value("Agent Learning Session", старт["session"], "status", "Abandoned")
+		занятие = старт["session"]
+		self.отметить_обязательные(занятие, старт["lesson_map"])
 
-		ошибка = self.отказ(student.complete_lesson(старт["session"]), "session_closed")
+		def закрытое_занятие():
+			frappe.set_user("Administrator")
+			настроить_квиз(quiz_required=0)
+			frappe.set_user(self.ученик)
+			frappe.db.set_value("Agent Learning Session", занятие, "status", "Abandoned")
+			return student.complete_lesson(занятие)
 
-		self.assertEqual(ошибка["status"], "Abandoned")
-		self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
-		self.assertFalse(frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": self.урок}))
+		отказы = {
+			"квиз обязателен": (lambda: student.complete_lesson(занятие), "quiz_required", {}),
+			"занятие закрыто": (закрытое_занятие, "session_closed", {"status": "Abandoned"}),
+		}
+		for что, (вызов, код, подробности) in отказы.items():
+			with self.subTest(что):
+				ошибка = self.отказ(вызов(), код)
+
+				self.assertEqual({к: ошибка[к] for к in подробности}, подробности)
+				self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
+				self.assertFalse(
+					frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": self.урок})
+				)
 		self.assertFalse(
-			frappe.db.exists("Agent Session Event", {"session": старт["session"], "kind": "Verdict Returned"})
+			frappe.db.exists("Agent Session Event", {"session": занятие, "kind": "Verdict Returned"})
 		)
 
 	def test_ответ_не_принят_после_отзыва_доступа(self):
@@ -405,26 +455,3 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.отказ(student.submit_answer(квиз["attempt"], квиз["question"]["id"], "V1", "Первый"), "not_enrolled")
 
 		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": квиз["attempt"]}))
-
-	def test_с_обязательным_квизом_так_не_закрыть(self):
-		старт = self.старт()
-		self.отметить_обязательные(старт["session"], старт["lesson_map"])
-
-		self.отказ(student.complete_lesson(старт["session"]), "quiz_required")
-
-		self.assertNotEqual(self.прохождение().status, прохождения.ПРОЙДЕН)
-		self.assertFalse(
-			frappe.db.exists("LMS Course Progress", {"member": self.ученик, "lesson": self.урок})
-		)
-
-	def test_квиз_при_гонке_за_прохождение_busy(self):
-		занятие = создать_занятие(self.ученик, self.урок)
-
-		with (
-			patch.object(прохождения, "прохождение", side_effect=frappe.QueryDeadlockError("1213")),
-			patch.object(frappe.db, "rollback") as откат,
-		):
-			ошибка = self.отказ(student.request_quiz(занятие), "busy")
-
-		self.assertEqual(ошибка["session"], занятие)
-		откат.assert_called_once_with()

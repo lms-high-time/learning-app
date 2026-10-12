@@ -30,18 +30,23 @@ from lms_frappe_app.tests.sample_data import (
 
 
 class IntegrationTestAnnouncements(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Куратора, ученика и его компанию тесты не меняют: курс у каждого теста свой."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		cls.куратор = создать_куратора(f"an-c-{суффикс}@example.com")
+		cls.ученик = создать_ученика(f"an-s-{суффикс}@example.com")
+		cls.компания = создать_организацию(f"Анонс {суффикс}")
+		добавить_в_организацию(cls.ученик, cls.компания)
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		self.письма = patch("frappe.sendmail").start()
 		patch.object(notices, "почта_есть", return_value=True).start()
 		self.addCleanup(patch.stopall)
-		суффикс = frappe.generate_hash(length=6)
-		self.куратор = создать_куратора(f"an-c-{суффикс}@example.com")
-		self.ученик = создать_ученика(f"an-s-{суффикс}@example.com")
-		self.компания = создать_организацию(f"Анонс {суффикс}")
-		добавить_в_организацию(self.ученик, self.компания)
-		self.руководитель = создать_менеджера(f"an-m-{суффикс}@example.com", self.компания)
-		self.курс = создать_курс(f"Анонс {суффикс}")
+		self.курс = создать_курс(f"Анонс {frappe.generate_hash(length=6)}")
 
 	def от_имени(self, кто: str, метод, **аргументы) -> dict:
 		frappe.set_user(кто)
@@ -72,16 +77,19 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 	def test_анонс_без_целей_курса_отклоняется(self):
 		for цели in (None, "", " \n ", []):
-			аргументы = {} if цели is None else {"objectives": цели}
-			ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, **аргументы)
-			self.assertEqual(self.код_отказа(ответ), authoring.НЕТ_ЦЕЛЕЙ_КУРСА, цели)
+			with self.subTest(цели=цели):
+				аргументы = {} if цели is None else {"objectives": цели}
+				ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, **аргументы)
+				self.assertEqual(self.код_отказа(ответ), authoring.НЕТ_ЦЕЛЕЙ_КУРСА, цели)
 		сведения = frappe.db.get_value(
 			"LMS Course", self.курс, ["published", "announce_objectives"], as_dict=True
 		)
 		self.assertFalse(сведения.published)
 		self.assertFalse(сведения.announce_objectives)
 
-	def test_анонс_не_требует_уроков_и_отдаёт_цели(self):
+	def test_анонс_виден_в_списке_и_каталоге_и_снимается(self):
+		"""Анонс не требует уроков и отдаёт цели; список куратора и каталог ученика
+		отмечают анонс; снятие с публикации снимает и анонс."""
 		данные = self.анонсировать()
 		self.assertEqual(
 			данные["objectives"], ["Описать процесс в пять колонок", "Найти стыки между отделами"]
@@ -92,11 +100,25 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		self.assertEqual((сведения.published, сведения.upcoming), (1, 1))
 		self.assertEqual(сведения.announce_objectives, ЦЕЛИ)
 
+		курсы = self.от_имени(self.куратор, authoring.list_courses)["data"]["courses"]
+		self.assertTrue(next(к for к in курсы if к["id"] == self.курс)["upcoming"])
+
+		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
+		строка = next(к for к in курсы if к["id"] == self.курс)
+		self.assertTrue(строка["upcoming"])
+		self.assertEqual(len(строка["objectives"]), 2)
+		self.assertFalse(строка["notify"])
+
+		self.от_имени(self.куратор, authoring.unpublish_course, course=self.курс)
+		сведения = frappe.db.get_value("LMS Course", self.курс, ["published", "upcoming"], as_dict=True)
+		self.assertEqual((сведения.published, сведения.upcoming), (0, 0))
+
 	def test_цели_анонса_списком_и_повторный_анонс_без_целей(self):
 		"""Список и строка JSON — те же цели; без `objectives` действуют записанные."""
 		for цели in (["Первая", " ", "Вторая "], '["Первая", "Вторая"]'):
-			ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, objectives=цели)
-			self.assertEqual(ответ["data"]["objectives"], ["Первая", "Вторая"], цели)
+			with self.subTest(цели=цели):
+				ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс, objectives=цели)
+				self.assertEqual(ответ["data"]["objectives"], ["Первая", "Вторая"], цели)
 		self.от_имени(self.куратор, authoring.unpublish_course, course=self.курс)
 
 		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
@@ -129,32 +151,22 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		self.assertEqual((сведения.published, сведения.upcoming), (0, 0))
 		self.assertFalse(сведения.announce_objectives)
 
-	def test_открытый_курс_анонсом_не_становится(self):
+	def test_открытый_курс_не_анонс(self):
+		"""Открытый курс анонсом не становится, подписки на выход у него нет, а карта
+		курса не несёт признака анонса."""
 		frappe.db.set_value("LMS Course", self.курс, "published", 1)
-		ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
-		self.assertEqual(self.код_отказа(ответ), authoring.КУРС_УЖЕ_ОТКРЫТ)
 
-	def test_снятие_с_публикации_снимает_и_анонс(self):
-		self.анонсировать()
-		self.от_имени(self.куратор, authoring.unpublish_course, course=self.курс)
-		сведения = frappe.db.get_value("LMS Course", self.курс, ["published", "upcoming"], as_dict=True)
-		self.assertEqual((сведения.published, сведения.upcoming), (0, 0))
-
-	def test_список_курсов_отмечает_анонс(self):
-		self.анонсировать()
-		курсы = self.от_имени(self.куратор, authoring.list_courses)["data"]["courses"]
-		строка = next(к for к in курсы if к["id"] == self.курс)
-		self.assertTrue(строка["upcoming"])
+		with self.subTest("анонсировать"):
+			ответ = self.от_имени(self.куратор, authoring.announce_course, course=self.курс)
+			self.assertEqual(self.код_отказа(ответ), authoring.КУРС_УЖЕ_ОТКРЫТ)
+		with self.subTest("подписаться"):
+			ответ = self.от_имени(self.ученик, student.notify_when_released, course=self.курс)
+			self.assertEqual(self.код_отказа(ответ), student.КУРС_НЕ_АНОНС)
+		with self.subTest("карта курса"):
+			данные = self.от_имени("Guest", public.course_map, course=self.курс)["data"]
+			self.assertNotIn("upcoming", данные)
 
 	# --- ученик ---
-
-	def test_каталог_показывает_анонс_с_целями(self):
-		self.анонсировать()
-		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
-		строка = next(к for к in курсы if к["id"] == self.курс)
-		self.assertTrue(строка["upcoming"])
-		self.assertEqual(len(строка["objectives"]), 2)
-		self.assertFalse(строка["notify"])
 
 	def test_на_анонс_не_записаться_ни_лично_ни_в_организации(self):
 		self.анонсировать()
@@ -188,11 +200,6 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		курсы = self.от_имени(self.ученик, student.list_catalog)["data"]["courses"]
 		self.assertFalse(next(к for к in курсы if к["id"] == self.курс)["notify"])
 
-	def test_подписка_только_на_анонс(self):
-		frappe.db.set_value("LMS Course", self.курс, "published", 1)
-		ответ = self.от_имени(self.ученик, student.notify_when_released, course=self.курс)
-		self.assertEqual(self.код_отказа(ответ), student.КУРС_НЕ_АНОНС)
-
 	# --- страница курса ---
 
 	def test_карта_анонса_без_программы(self):
@@ -208,19 +215,15 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		данные = self.от_имени(self.ученик, public.course_map, course=self.курс)["data"]
 		self.assertTrue(данные["notify"])
 
-	def test_карта_открытого_курса_без_признака_анонса(self):
-		frappe.db.set_value("LMS Course", self.курс, "published", 1)
-		данные = self.от_имени("Guest", public.course_map, course=self.курс)["data"]
-		self.assertNotIn("upcoming", данные)
-
 	# --- руководитель ---
 
 	def test_анонс_не_назначить_команде(self):
+		руководитель = создать_менеджера(f"an-m-{frappe.generate_hash(length=6)}@example.com", self.компания)
 		self.анонсировать()
-		данные = self.от_имени(self.руководитель, team.allocations, organization=self.компания)["data"]
+		данные = self.от_имени(руководитель, team.allocations, organization=self.компания)["data"]
 		self.assertNotIn(self.курс, [к["id"] for к in данные["courses"]])
 		ответ = self.от_имени(
-			self.руководитель, team.assign_course, organization=self.компания, course=self.курс
+			руководитель, team.assign_course, organization=self.компания, course=self.курс
 		)
 		self.assertEqual(self.код_отказа(ответ), "course_upcoming")
 		with self.assertRaises(frappe.ValidationError):
@@ -259,8 +262,18 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 	def test_курс_из_релиза_анонсируется_целями_глав(self):
 		"""Цели курса из релиза — цели глав, их названия по порядку: директивы у
-		такого курса нет, и анонс без неё не отказывает (learning-services#500)."""
+		такого курса нет, и анонс без неё не отказывает (learning-services#500).
+		Свои цели курсу из релиза не передаются."""
 		курс = self.опубликовать_релиз()["course"]
+
+		свои = self.от_имени(self.куратор, authoring.announce_course, course=курс, objectives="Своя цель")
+
+		self.assertEqual(self.код_отказа(свои), authoring.КУРС_ИЗ_РЕЛИЗА)
+		сведения = frappe.db.get_value(
+			"LMS Course", курс, ["published", "announce_objectives"], as_dict=True
+		)
+		self.assertFalse(сведения.published)
+		self.assertFalse(сведения.announce_objectives)
 
 		ответ = self.от_имени(self.куратор, authoring.announce_course, course=курс)
 
@@ -269,20 +282,6 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		каталог = self.от_имени(self.ученик, student.list_catalog)["data"]
 		анонс = next(к for к in каталог["courses"] if к["id"] == курс)
 		self.assertEqual(анонс["objectives"], ["Глава первая", "Глава вторая"])
-
-	def test_курсу_из_релиза_цели_не_передаются(self):
-		курс = self.опубликовать_релиз()["course"]
-
-		ответ = self.от_имени(
-			self.куратор, authoring.announce_course, course=курс, objectives="Своя цель"
-		)
-
-		self.assertEqual(self.код_отказа(ответ), authoring.КУРС_ИЗ_РЕЛИЗА)
-		сведения = frappe.db.get_value(
-			"LMS Course", курс, ["published", "announce_objectives"], as_dict=True
-		)
-		self.assertFalse(сведения.published)
-		self.assertFalse(сведения.announce_objectives)
 
 	def test_анонс_с_первым_релизом_берёт_цели_глав(self):
 		"""Цели анонса остаются в поле, но у курса с релизом наружу — главы релиза."""

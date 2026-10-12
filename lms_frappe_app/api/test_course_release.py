@@ -12,13 +12,32 @@ from lms_frappe_app.tests.sample_data import создать_куратора, с
 
 
 class IntegrationTestПросмотрРелиза(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Первый релиз тесты только читают. Тест, который публикует курсу новый
+		релиз или меняет его тестеров, заводит себе свой курс — `свой_курс`."""
+		super().setUpClass()
+		cls.куратор = создать_куратора(f"rel-view-{frappe.generate_hash(length=6)}@example.com")
+		frappe.set_user(cls.куратор)
+		try:
+			cls.ключ, cls.первый = cls._первый_релиз()
+		finally:
+			frappe.set_user("Administrator")
+		cls.курс = cls.первый["course"]
+
+	@staticmethod
+	def _первый_релиз() -> tuple[str, dict]:
+		ключ = f"rel-view-{frappe.generate_hash(length=6)}"
+		ответ = authoring.publish_release(release=пример_релиза(ключ))
+		assert ответ["ok"], ответ
+		return ключ, ответ["data"]
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.куратор = создать_куратора(f"rel-view-{суффикс}@example.com")
-		self.ключ = f"rel-view-{суффикс}"
 		frappe.set_user(self.куратор)
-		self.первый = self.опубликовать()
+
+	def свой_курс(self) -> None:
+		self.ключ, self.первый = self._первый_релиз()
 		self.курс = self.первый["course"]
 
 	def опубликовать(self, релиз: dict | None = None) -> dict:
@@ -89,6 +108,7 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 		self.assertNotIn("agent", данные)
 
 	def test_новый_релиз_виден_сразу(self):
+		self.свой_курс()
 		релиз = пример_релиза(self.ключ)
 		релиз["lessons"][0]["title"] = "Урок первый, переписанный"
 		второй = self.опубликовать(релиз)
@@ -98,13 +118,18 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 		self.assertEqual((данные["course"]["version"], данные["course"]["release"]), (2, второй["release"]))
 		self.assertEqual(данные["lessons"][0]["title"], "Урок первый, переписанный")
 
-	def test_релиз_без_документа(self):
+	def test_релиз_без_документа_и_урок_без_рамки(self):
 		курс = self.опубликовать(релиз_двух_целей(f"{self.ключ}-two"))["course"]
 
 		данные = authoring.course_release(course=курс)["data"]
 
 		self.assertIsNone(данные["document"])
 		self.assertEqual([ц["key"] for ц in данные["lessons"][0]["objectives"]], ["l-1-D1", "l-1-D2"])
+
+		урок = authoring.course_release(course=курс, lesson="l-1")["data"]
+
+		self.assertEqual(set(урок["agent"]), {"lesson"})
+		self.assertTrue(урок["agent"]["lesson"]["directive"])
 
 	# --- урок ---
 
@@ -125,15 +150,8 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 			},
 		)
 
-	def test_урок_без_рамки_в_релизе(self):
-		курс = self.опубликовать(релиз_двух_целей(f"{self.ключ}-two"))["course"]
-
-		данные = authoring.course_release(course=курс, lesson="l-1")["data"]
-
-		self.assertEqual(set(данные["agent"]), {"lesson"})
-		self.assertTrue(данные["agent"]["lesson"]["directive"])
-
 	def test_неизвестный_урок_и_урок_снятый_из_релиза(self):
+		self.свой_курс()
 		ответ = authoring.course_release(course=self.курс, lesson="l-9")
 		self.assertEqual(self.код(ответ), "lesson_not_in_release")
 		self.assertEqual(
@@ -167,6 +185,7 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 	def test_ученику_тестеру_и_гостю_просмотр_и_история_закрыты(self):
 		"""Ответы квиза — только авторским ролям: тестер курса — ученик с
 		ранним доступом, а не автор. Гостю — 401: сначала вход."""
+		self.свой_курс()
 		тестер = создать_ученика(f"rel-view-t-{frappe.generate_hash(length=6)}@example.com")
 		self.assertTrue(authoring.add_testers(course=self.курс, users=тестер)["ok"])
 		for пользователь, ошибка in (
@@ -192,6 +211,7 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 	# --- история ---
 
 	def test_история_свежие_вперёд(self):
+		self.свой_курс()
 		релиз = пример_релиза(self.ключ)
 		релиз["document"] = None
 		for урок in релиз["lessons"]:

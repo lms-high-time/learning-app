@@ -26,8 +26,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-
-		self.ученик = создать_ученика(f"map-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок карты {суффикс}")
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		self.курс = frappe.db.get_value("Course Chapter", глава, "course")
@@ -39,32 +37,39 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 	# --- программа курса: зачин, пройденность, следующий урок (learning-services#322) ---
 
 	def test_гость_видит_зачин_но_не_свой_путь(self):
-		frappe.db.set_value("Course Lesson", self.урок, "lesson_hook", "  Зачем это вам  ")
-		frappe.set_user("Guest")
+		"""Зачин — без пробелов по краям, пустой — `null`; пройденности и
+		следующего урока у гостя нет."""
+		for зачин, видит in (("  Зачем это вам  ", "Зачем это вам"), (None, None)):
+			with self.subTest(зачин=зачин):
+				frappe.set_user("Administrator")
+				frappe.db.set_value("Course Lesson", self.урок, "lesson_hook", зачин)
+				frappe.set_user("Guest")
 
-		карта = self.карта()
-		урок = карта["chapters"][0]["lessons"][0]
+				карта = self.карта()
+				урок = карта["chapters"][0]["lessons"][0]
 
-		self.assertEqual(урок["hook"], "Зачем это вам")
-		self.assertNotIn("completed", урок, "пройденность — только своя, у гостя ключа нет")
-		self.assertNotIn("next_lesson", карта)
-
-	def test_пустой_зачин_приходит_null(self):
-		frappe.set_user("Guest")
-
-		self.assertIsNone(self.карта()["chapters"][0]["lessons"][0]["hook"])
+				self.assertEqual(урок["hook"], видит)
+				self.assertNotIn("completed", урок, "пройденность — только своя, у гостя ключа нет")
+				self.assertNotIn("next_lesson", карта)
 
 	def test_зачисленный_видит_пройденность_и_следующий_урок(self):
+		"""У пройденного курса следующего урока нет; новый урок — следующий."""
+		ученик = создать_ученика(f"map-{frappe.generate_hash(length=6)}@example.com")
+		зачислить(ученик, self.урок)
+		frappe.get_doc(
+			{"doctype": "LMS Course Progress", "member": ученик, "lesson": self.урок, "status": "Complete"}
+		).insert(ignore_permissions=True)
+		frappe.set_user(ученик)
+
+		self.assertIsNone(self.карта()["next_lesson"])
+
+		frappe.set_user("Administrator")
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		второй = frappe.get_doc(
 			{"doctype": "Course Lesson", "title": f"Второй {frappe.generate_hash(length=6)}", "chapter": глава}
 		).insert(ignore_permissions=True).name
 		привязать_урок(глава, второй)
-		зачислить(self.ученик, self.урок)
-		frappe.get_doc(
-			{"doctype": "LMS Course Progress", "member": self.ученик, "lesson": self.урок, "status": "Complete"}
-		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
+		frappe.set_user(ученик)
 
 		карта = self.карта()
 		уроки = {у["id"]: у for у in карта["chapters"][0]["lessons"]}
@@ -72,15 +77,6 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 		self.assertTrue(уроки[self.урок]["completed"])
 		self.assertFalse(уроки[второй]["completed"])
 		self.assertEqual(карта["next_lesson"], второй, "тот же урок, что у lesson_entry(course)")
-
-	def test_у_пройденного_курса_следующего_нет(self):
-		зачислить(self.ученик, self.урок)
-		frappe.get_doc(
-			{"doctype": "LMS Course Progress", "member": self.ученик, "lesson": self.урок, "status": "Complete"}
-		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-
-		self.assertIsNone(self.карта()["next_lesson"])
 
 	def test_непубликованный_курс_гостю_отказ(self):
 		frappe.db.set_value("LMS Course", self.курс, "published", 0)
@@ -119,7 +115,6 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"map-doc-{суффикс}@example.com")
 		self.урок = создать_урок(f"Урок документа {суффикс}")
 		глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		self.курс = frappe.db.get_value("Course Chapter", глава, "course")
@@ -141,6 +136,7 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		return public.course_map(course=self.курс)["data"]
 
 	def test_гость_видит_документ_и_блоки_урока_без_заполненности(self):
+		"""Без документа у курса — пустые списки документов и блоков урока."""
 		frappe.set_user("Guest")
 		карта = self.карта()
 
@@ -151,9 +147,16 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		)
 		self.assertNotIn("Секрет для агента", json.dumps(карта, ensure_ascii=False))
 
+		frappe.db.delete("Agent Course Artifact", {"course": self.курс})
+		карта = self.карта()
+
+		self.assertEqual(карта["documents"], [])
+		self.assertEqual(карта["chapters"][0]["lessons"][0]["blocks"], [])
+
 	def test_ученик_видит_заполненность(self):
-		зачислить(self.ученик, self.урок)
-		frappe.set_user(self.ученик)
+		ученик = создать_ученика(f"map-doc-{frappe.generate_hash(length=6)}@example.com")
+		зачислить(ученик, self.урок)
+		frappe.set_user(ученик)
 		from lms_frappe_app.api import student
 
 		student.update_artifact(self.курс, "summary", "goal", "Открыть седьмую кофейню")
@@ -162,11 +165,3 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		документ = карта["documents"][0]
 		self.assertEqual((документ["blocks_filled"], документ["blocks_total"]), (1, 2))
 		self.assertTrue(карта["chapters"][0]["lessons"][0]["blocks"][0]["filled"])
-
-	def test_курс_без_документа(self):
-		frappe.db.delete("Agent Course Artifact", {"course": self.курс})
-		frappe.set_user("Guest")
-		карта = self.карта()
-
-		self.assertEqual(карта["documents"], [])
-		self.assertEqual(карта["chapters"][0]["lessons"][0]["blocks"], [])
