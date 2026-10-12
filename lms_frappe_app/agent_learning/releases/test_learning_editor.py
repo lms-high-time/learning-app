@@ -6,7 +6,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from lms.lms import api as learning
 
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
@@ -19,13 +19,33 @@ def вызвать(метод: str, **параметры):
 	return frappe.call(frappe.override_whitelisted_method(f"lms.lms.api.{метод}"), **параметры)
 
 
+class TestПодменаМетодовРедактора(UnitTestCase):
+	def test_запросы_редактора_уходят_в_подмену(self):
+		"""`Why:` без хука редактор снова зовёт метод Learning, и порядок курса из
+		релиза правится мимо `validate` — тест на сам модуль этого не заметит."""
+		for метод in learning_editor.ПОДМЕНЯЕМЫЕ:
+			self.assertEqual(
+				frappe.override_whitelisted_method(f"lms.lms.api.{метод}"),
+				f"lms_frappe_app.agent_learning.releases.learning_editor.{метод}",
+			)
+
+
 class IntegrationTestРедакторLearning(IntegrationTestCase):
+	"""Курс из релиза тесты только читают: редактор его не правит, — он общий на
+	класс. Курс без релиза тесты правят — он свой у каждого теста."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.addClassCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		cls.курс, _ = курс_из_релиза()
+		cls.урок = урок_релиза(cls.курс, "l-1")
+		cls.глава = frappe.db.get_value("Course Lesson", cls.урок, "chapter")
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		frappe.set_user("Administrator")
-		self.курс, _ = курс_из_релиза()
-		self.урок = урок_релиза(self.курс, "l-1")
-		self.глава = frappe.db.get_value("Course Lesson", self.урок, "chapter")
 		self.свободный_урок = создать_урок(f"Без релиза {frappe.generate_hash(length=6)}")
 		self.свободная_глава, self.свободный_курс = frappe.db.get_value(
 			"Course Lesson", self.свободный_урок, ["chapter", "course"]
@@ -42,15 +62,6 @@ class IntegrationTestРедакторLearning(IntegrationTestCase):
 				title="Глава", course=курс, is_scorm_package=False, scorm_package=None, name=глава
 			),
 		}
-
-	def test_запросы_редактора_уходят_в_подмену(self):
-		"""`Why:` без хука редактор снова зовёт метод Learning, и порядок курса из
-		релиза правится мимо `validate` — тест на сам модуль этого не заметит."""
-		for метод in learning_editor.ПОДМЕНЯЕМЫЕ:
-			self.assertEqual(
-				frappe.override_whitelisted_method(f"lms.lms.api.{метод}"),
-				f"lms_frappe_app.agent_learning.releases.learning_editor.{метод}",
-			)
 
 	def test_курс_из_релиза_отказ(self):
 		вызовы = self.вызовы(self.урок, self.глава, self.курс)
