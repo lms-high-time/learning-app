@@ -2,7 +2,7 @@
 # See license.txt
 """Читатели целей урока курса из релиза — по прохождению (learning-services#506).
 
-`course_outline`, `public.course_map`, `lesson_session`, прогресс в `remember`
+`course_outline`, `public.course_map` и `lesson_entry`, `lesson_session`, прогресс в `remember`
 и `update_artifact`, `manager.student_detail`: уровень целей урока, статусы —
 сохранённые в прохождении. Читающие методы прохождений не заводят и не сверяют.
 """
@@ -141,6 +141,11 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 			карта = self.данные(public.course_map(course=курс))
 
 			self.assertEqual(карта["chapters"][0]["lessons"][0]["objectives"], [])
+			глава = {к: в for к, в in карта["chapters"][0].items() if к != "lessons"}
+			self.assertEqual(глава, {"title": глава["title"], "description": None})
+
+		with self.subTest("lesson_entry"):
+			self.assertEqual(self.данные(public.lesson_entry(lesson=урок))["objectives"], [])
 
 	# --- public.course_map ---
 
@@ -157,9 +162,35 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		# Не начатая цель — без `status`, как «не дошли».
 		self.assertEqual(второй["objectives"], [{"text": "Цель урока «Урок второй»"}])
 		self.assertEqual(карта["next_lesson"], self.урок)
+		# Глава — описание из релиза и прогресс, как у `course_outline` (learning-services#547).
+		self.assertEqual(
+			[{к: в for к, в in г.items() if к != "lessons"} for г in карта["chapters"]],
+			[
+				{
+					"title": "Глава первая",
+					"description": "Что изменится после первой главы.",
+					"status": "in_progress",
+					"lessons_total": 2,
+					"lessons_passed": 0,
+				},
+				{
+					"title": "Глава вторая",
+					"description": "Что изменится после второй.",
+					"status": "not_started",
+					"lessons_total": 1,
+					"lessons_passed": 0,
+				},
+			],
+		)
+		# Цели урока на его странице — те же, что у урока карты.
+		self.assertEqual(self.данные(public.lesson_entry(lesson=self.урок))["objectives"], первый["objectives"])
 		frappe.set_user("Guest")
-		гостю = self.данные(public.course_map(course=self.курс))["chapters"][0]["lessons"][0]
-		self.assertEqual(гостю["objectives"], [{"text": ЦЕЛЬ_1["text"]}])
+		гостю = self.данные(public.course_map(course=self.курс))["chapters"][0]
+		self.assertEqual(гостю["lessons"][0]["objectives"], [{"text": ЦЕЛЬ_1["text"]}])
+		self.assertEqual(
+			{к: в for к, в in гостю.items() if к != "lessons"},
+			{"title": "Глава первая", "description": "Что изменится после первой главы."},
+		)
 
 	# --- lesson_session ---
 

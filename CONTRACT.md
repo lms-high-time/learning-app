@@ -193,7 +193,9 @@ JSON или где тег не закрыт, а Desk выводит часть �
   "documents": [ { "artifact": "project_summary", "title": "Резюме проекта",
                    "blocks_total": 6, "blocks_filled": 2 } ],
   "chapters": [
-    { "title": "Запуск", "lessons": [
+    { "title": "Запуск", "description": "Проект получает спонсора и цель.",
+      "status": "in_progress", "lessons_total": 3, "lessons_passed": 1,
+      "lessons": [
       { "id": "lesson-1", "number": 1, "title": "Запуск проекта",
         "hook": "Проект без спонсора глохнет на первом споре о деньгах.",
         "completed": true,
@@ -207,6 +209,13 @@ JSON или где тег не закрыт, а Desk выводит часть �
 
 `hook` — зачин урока, обращённый к ученику; виден всем, `null`, если автор
 его не задал.
+
+У главы `description` — описание главы из действующего релиза, видно всем;
+у курса без релиза — `null` (learning-services#547). Зачисленному на курс из
+релиза — ещё прогресс главы, тот же, что у `course_outline`: `status` —
+`not_started`, `in_progress` или `passed`, `lessons_total` — уроков главы в
+релизе, `lessons_passed` — пройденных из них. Прочим и у курса без релиза
+этих ключей нет.
 
 `documents` — документы, которые ученик собирает по ходу курса, у урока
 `blocks` — какие их блоки собирают на этом уроке (learning-services#340). Видны
@@ -309,6 +318,8 @@ JSON или где тег не закрыт, а Desk выводит часть �
   "lesson": "lesson-1", "course": "p3-express", "title": "Запуск проекта",
   "hook": "Проект без спонсора глохнет на первом споре о деньгах — разберём, кто он у вас.",
   "completed": false,
+  "objectives": [ { "text": "Назвать спонсора проекта", "status": "touched" },
+                  { "text": "Отличить проект от операций" } ],
   "study": { "channel": "web", "url": "https://lms.example.com/chat?lesson=lesson-1", "demo_left": 2 },
   "program_lock": null,
   "blocks": [ { "artifact": "project_summary", "key": "sponsor",
@@ -331,6 +342,11 @@ JSON или где тег не закрыт, а Desk выводит часть �
 Материал и директива сюда не выходят: материал написан для агента.
 
 `completed` — урок закрыт квизом или `complete_lesson`.
+
+`objectives` — цели урока, как у урока в `course_map`: тексты целей
+действующего релиза; зачисленному — `status` у цели, начатой в его
+прохождении (`touched`, `covered`), не начатая — без ключа. У курса без
+релиза — `[]` (learning-services#547).
 
 `program_lock` — курс заперт программой (learning-services#405): ученик —
 участник программы с обязательным порядком, а предыдущий курс не пройден
