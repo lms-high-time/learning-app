@@ -83,8 +83,10 @@ class IntegrationTestAgentCourseReport(IntegrationTestCase):
 		организация = создать_организацию(f"Компания {суффикс}")
 		руководитель = создать_менеджера(f"rep-m-{суффикс}@example.com", организация)
 
-		frappe.set_user(self.ученик)
-		self.assertFalse(frappe.has_permission("Agent Course Report", "read"))
-
-		frappe.set_user(руководитель)
-		self.assertFalse(frappe.has_permission("Agent Course Report", "read"))
+		for кто, пользователь in (("ученик", self.ученик), ("руководитель", руководитель)):
+			with self.subTest(кто):
+				frappe.set_user(пользователь)
+				try:
+					self.assertFalse(frappe.has_permission("Agent Course Report", "read"))
+				finally:
+					frappe.set_user("Administrator")

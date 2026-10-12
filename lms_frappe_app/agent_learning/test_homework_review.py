@@ -100,11 +100,11 @@ class IntegrationTestHomeworkReview(IntegrationTestCase):
 		self.assertEqual(self.отказ("accept").код, "wrong_status")
 
 	def test_комментарий_обязателен(self):
+		"""Отказ ничего не пишет: случаи идут по очереди на одной сдаче, как и шли."""
 		for действие in ("send_back", "reopen"):
 			for комментарий in (None, "", "   "):
-				self.assertEqual(
-					self.отказ(действие, комментарий).код, "comment_required", (действие, комментарий)
-				)
+				with self.subTest(действие=действие, комментарий=комментарий):
+					self.assertEqual(self.отказ(действие, комментарий).код, "comment_required")
 		self.assertEqual(len(frappe.get_doc(домашка.СДАЧА, self.сдача.name).history), 1)
 
 	def test_проверенная_версия_и_комментарий(self):
@@ -159,7 +159,10 @@ class IntegrationTestMayReview(IntegrationTestCase):
 		зачислить(self.методист, урок)
 		self.своя = домашка.сохранить(self.методист, урок, None, answer="моя")
 
-	def test_матрица(self):
+	def test_кто_проверяет(self):
+		"""Матрица ролей по рабочей и личной сдаче; свою сдачу методист не
+		проверяет, модератор — проверяет; архивную не проверяет никто. Архивная —
+		последней: она правит сдачу в памяти."""
 		for user, рабочая, личная in (
 			(self.ученик, False, False),
 			(self.сосед, False, False),
@@ -169,15 +172,21 @@ class IntegrationTestMayReview(IntegrationTestCase):
 			(self.модератор, True, True),
 			("Administrator", True, True),
 		):
-			self.assertEqual(permissions.может_проверять(self.рабочая, user), рабочая, user)
-			self.assertEqual(permissions.может_проверять(self.личная, user), личная, user)
+			with self.subTest(user):
+				self.assertEqual(
+					(
+						permissions.может_проверять(self.рабочая, user),
+						permissions.может_проверять(self.личная, user),
+					),
+					(рабочая, личная),
+				)
 
-	def test_свою_не_проверяет(self):
-		self.assertFalse(permissions.может_проверять(self.своя, self.методист))
-		self.assertTrue(permissions.может_проверять(self.своя, self.модератор))
+		for user, может in ((self.методист, False), (self.модератор, True)):
+			with self.subTest(f"своя сдача методиста: {user}"):
+				self.assertEqual(permissions.может_проверять(self.своя, user), может)
 
-	def test_архивную_не_проверяет_никто(self):
 		self.рабочая.member = None
 		self.рабочая.archived_student = self.ученик
 		for user in (self.менеджер, self.методист, "Administrator"):
-			self.assertFalse(permissions.может_проверять(self.рабочая, user), user)
+			with self.subTest(f"архивную: {user}"):
+				self.assertFalse(permissions.может_проверять(self.рабочая, user), user)

@@ -47,10 +47,22 @@ def убрать_пункт(релиз: dict, ключ: str) -> None:
 
 
 class IntegrationTestПрохождение(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Два курса, которые тесты только читают: `двух_целей` — из
+		`релиз_двух_целей`, `примера` — из `пример_релиза`; прохождения и отметки —
+		у ученика своего теста. Тест, который публикует новую версию курса, правит
+		его или считает прохождения всего курса, заводит свой — `self.ключ`."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		cls.куратор = создать_куратора(f"run-svc-{суффикс}@example.com")
+		cls.двух_целей = релизы.опубликовать(релиз_двух_целей(f"runs-2-{суффикс}"), None, cls.куратор)
+		cls.примера = релизы.опубликовать(пример_релиза(f"runs-x-{суффикс}"), None, cls.куратор)["course"]
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		self.куратор = создать_куратора(f"run-svc-{суффикс}@example.com")
 		self.ученик = создать_ученика(f"run-svc-pupil-{суффикс}@example.com")
 		self.ключ = f"runs-{суффикс}"
 		frappe.set_user(self.куратор)
@@ -86,7 +98,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		return frappe.get_doc(ПРОХОЖДЕНИЕ, run.name)
 
 	def test_новое_прохождение(self):
-		ответ = self.опубликовать(релиз_двух_целей(self.ключ))
+		ответ = self.двух_целей
 
 		run = service.прохождение(self.ученик, ответ["course"], "l-1")
 
@@ -112,7 +124,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(frappe.db.count(ПРОХОЖДЕНИЕ, {"student": self.ученик}), 1)
 
 	def test_повторное_обращение_отдаёт_то_же_прохождение(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		первое = service.прохождение(self.ученик, курс, "l-1")
 
 		второе = service.прохождение(self.ученик, курс, "l-1")
@@ -121,7 +133,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertFalse(service.сверить(второе))
 
 	def test_пройденный_урок_не_снимается_пересчётом(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
 		frappe.db.set_value(ПРОХОЖДЕНИЕ, run.name, "status", "passed")
 
@@ -561,7 +573,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		return пойман.exception.подробности
 
 	def test_отказы_формы_отметки(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
 		свидетельство = "Ученик объяснил сам"
 
@@ -635,7 +647,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertIsNone(self.перечитать(run).started_at)
 
 	def test_чужое_занятие(self):
-		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+		курс = self.примера
 		run = service.прохождение(self.ученик, курс, "l-1")
 		другой = создать_ученика(f"run-svc-other-{frappe.generate_hash(length=6)}@example.com")
 		другое = service.прохождение(self.ученик, курс, "l-2")
@@ -653,7 +665,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertIsNone(self.перечитать(run).started_at)
 
 	def test_архивное_прохождение_не_отмечается(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
 		архив = {"student": None, "archived_student": self.ученик, "archived_at": now_datetime()}
 		frappe.db.set_value(ПРОХОЖДЕНИЕ, run.name, архив)
@@ -662,7 +674,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertIsNone(self.перечитать(run).started_at)
 
 	def test_отметка_пишет_пункт_и_начинает_урок(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
 		занятие = создать_занятие(self.ученик, run.lesson)
 
@@ -700,7 +712,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		self.assertEqual(run.started_at, начат)
 
 	def test_статусы_по_отметкам(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		имя = service.прохождение(self.ученик, курс, "l-1").name
 
 		# Необязательный пункт цель не двигает, но урок начинает.
@@ -776,7 +788,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		"""Две отметки подряд при устаревшей копии у вызывающего — обе записаны.
 
 		Без `TimestampMismatchError`: `отметить` берёт имя и читает прохождение сама."""
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		первая = service.прохождение(self.ученик, курс, "l-1")
 		вторая = frappe.get_doc(ПРОХОЖДЕНИЕ, первая.name)
 
@@ -790,7 +802,7 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 		)
 
 	def test_отметка_не_пишет_журнал_занятия(self):
-		курс = self.опубликовать(релиз_двух_целей(self.ключ))["course"]
+		курс = self.двух_целей["course"]
 		run = service.прохождение(self.ученик, курс, "l-1")
 		занятие = создать_занятие(self.ученик, run.lesson)
 
@@ -812,31 +824,40 @@ class IntegrationTestПрохождение(IntegrationTestCase):
 			for г in service.главы(self.ученик, курс)
 		}
 
-	def test_главы_без_прохождений(self):
-		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
+	def test_главы_по_прохождениям(self):
+		"""Без прохождений глава не начата; прохождение, принятое без отметок, урок
+		не начинает, и `главы` прохождений не заводит. Начатый урок — глава в
+		работе, пройденный — пройдена; пройден один урок из двух — глава ещё в
+		работе; чужие прохождения в счёт не идут."""
+		курс = self.примера
+		with self.subTest("без прохождений"):
+			self.assertEqual([г["key"] for г in service.главы(self.ученик, курс)], ["ch-1", "ch-2"])
+			self.assertEqual(
+				self.главы(курс), {"ch-1": ("not_started", 2, 0, 0), "ch-2": ("not_started", 1, 0, 0)}
+			)
 
-		self.assertEqual([г["key"] for г in service.главы(self.ученик, курс)], ["ch-1", "ch-2"])
-		self.assertEqual(
-			self.главы(курс), {"ch-1": ("not_started", 2, 0, 0), "ch-2": ("not_started", 1, 0, 0)}
-		)
-		# Прохождение, принятое без отметок, урок не начинает; `главы` прохождений не заводит.
-		service.прохождение(self.ученик, курс, "l-1")
-		self.assertEqual(self.главы(курс)["ch-1"], ("not_started", 2, 0, 0))
-		self.assertEqual(frappe.db.count(ПРОХОЖДЕНИЕ, {"student": self.ученик}), 1)
+		начатое = service.прохождение(self.ученик, курс, "l-1")
+		with self.subTest("прохождение без отметок урок не начинает"):
+			self.assertEqual(self.главы(курс)["ch-1"], ("not_started", 2, 0, 0))
+			self.assertEqual(frappe.db.count(ПРОХОЖДЕНИЕ, {"student": self.ученик}), 1)
 
-	def test_главы_начатая_и_пройденная(self):
-		курс = self.опубликовать(пример_релиза(self.ключ))["course"]
-		начатое = self.отметить(service.прохождение(self.ученик, курс, "l-1"), "term:T1")
+		начатое = self.отметить(начатое, "term:T1")
 		пройденное = service.прохождение(self.ученик, курс, "l-3")
 		frappe.db.set_value(ПРОХОЖДЕНИЕ, пройденное.name, "status", "passed")
+		with self.subTest("начатая и пройденная"):
+			self.assertEqual(
+				self.главы(курс), {"ch-1": ("in_progress", 2, 1, 0), "ch-2": ("passed", 1, 1, 1)}
+			)
 
-		self.assertEqual(self.главы(курс), {"ch-1": ("in_progress", 2, 1, 0), "ch-2": ("passed", 1, 1, 1)})
-		# Пройден один урок из двух — глава ещё в работе.
 		frappe.db.set_value(ПРОХОЖДЕНИЕ, начатое.name, "status", "passed")
-		self.assertEqual(self.главы(курс)["ch-1"], ("in_progress", 2, 1, 1))
-		# Чужие прохождения в счёт не идут.
+		with self.subTest("пройден один урок из двух — глава ещё в работе"):
+			self.assertEqual(self.главы(курс)["ch-1"], ("in_progress", 2, 1, 1))
+
 		другой = создать_ученика(f"run-svc-other-{frappe.generate_hash(length=6)}@example.com")
-		self.assertEqual([г["status"] for г in service.главы(другой, курс)], ["not_started", "not_started"])
+		with self.subTest("чужие прохождения в счёт не идут"):
+			self.assertEqual(
+				[г["status"] for г in service.главы(другой, курс)], ["not_started", "not_started"]
+			)
 
 	def test_главы_снятый_урок_не_в_счёт(self):
 		курс = self.опубликовать(пример_релиза(self.ключ))["course"]

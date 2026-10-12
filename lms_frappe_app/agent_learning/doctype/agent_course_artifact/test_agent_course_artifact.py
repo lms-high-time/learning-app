@@ -31,42 +31,45 @@ class IntegrationTestAgentCourseArtifact(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 
-	def test_версия_считается_по_курсу_и_ключу(self):
+	def test_версии_по_курсу_и_ключу(self):
 		"""Ради этого миксин и обобщали: в курсе несколько документов, и
-		версии у каждого свои."""
+		версии у каждого свои; новая версия того же документа вытесняет прежнюю."""
 		резюме = self.схема("project_summary")
 		карта = self.схема("deliverables_map")
 		резюме.reload()
+		with self.subTest("версия считается по курсу и ключу"):
+			self.assertEqual(резюме.version, 1)
+			self.assertEqual(карта.version, 1)
+			self.assertTrue(резюме.is_active, "схема другого документа не снимает эту с действия")
+			self.assertTrue(карта.is_active)
 
-		self.assertEqual(резюме.version, 1)
-		self.assertEqual(карта.version, 1)
-		self.assertTrue(резюме.is_active, "схема другого документа не снимает эту с действия")
-		self.assertTrue(карта.is_active)
+		вторая = self.схема("project_summary")
+		резюме.reload()
+		карта.reload()
+		with self.subTest("новая версия того же документа вытесняет прежнюю"):
+			self.assertEqual(вторая.version, 2)
+			self.assertTrue(вторая.is_active)
+			self.assertFalse(резюме.is_active)
+			self.assertTrue(карта.is_active, "новая версия другого документа не снимает карту с действия")
 
-	def test_новая_версия_того_же_документа_вытесняет_прежнюю(self):
-		первая = self.схема()
-		вторая = self.схема()
-		первая.reload()
+	def test_ключи_блоков(self):
+		"""Повторяющийся ключ блока отклоняется — до первой схемы курса; ключи
+		схемы и блоков нормализуются."""
+		with self.subTest("повторяющийся ключ блока отклоняется"):
+			with self.assertRaises(frappe.ValidationError):
+				self.схема(
+					blocks=[
+						{"block_key": "goal", "title": "Цель"},
+						{"block_key": "GOAL", "title": "Цель ещё раз"},
+					]
+				)
 
-		self.assertEqual(вторая.version, 2)
-		self.assertTrue(вторая.is_active)
-		self.assertFalse(первая.is_active)
+		with self.subTest("ключи нормализуются"):
+			схема = self.схема(" Project_Summary ", blocks=[{"block_key": " Goal ", "title": "Цель"}])
 
-	def test_ключи_нормализуются(self):
-		схема = self.схема(" Project_Summary ", blocks=[{"block_key": " Goal ", "title": "Цель"}])
-
-		self.assertEqual(схема.slug, "project_summary")
-		self.assertEqual(схема.blocks[0].block_key, "goal")
-		self.assertEqual(схема.blocks[0].span, 1)
-
-	def test_повторяющийся_ключ_блока_отклоняется(self):
-		with self.assertRaises(frappe.ValidationError):
-			self.схема(
-				blocks=[
-					{"block_key": "goal", "title": "Цель"},
-					{"block_key": "GOAL", "title": "Цель ещё раз"},
-				]
-			)
+			self.assertEqual(схема.slug, "project_summary")
+			self.assertEqual(схема.blocks[0].block_key, "goal")
+			self.assertEqual(схема.blocks[0].span, 1)
 
 	def test_ученик_не_имеет_доступа_к_схеме(self):
 		"""Схема адресована автору; ученику блоки приходят через метод."""

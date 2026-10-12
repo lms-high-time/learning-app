@@ -28,15 +28,20 @@ from lms_frappe_app.tests.sample_data import (
 
 
 class IntegrationTestAgentQuizAnswer(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Курс из релиза тесты только читают: попытка — у ученика своего теста."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс = релизы.опубликовать(
+			релиз_двух_целей(f"answer-{frappe.generate_hash(length=6)}", вопросов=1), None, "Administrator"
+		)["course"]
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		политика_по_умолчанию()
-		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"answer-{суффикс}@example.com")
-		курс = релизы.опубликовать(
-			релиз_двух_целей(f"answer-{суффикс}", вопросов=1), None, "Administrator"
-		)["course"]
-		run = прохождения.прохождение(self.ученик, курс, "l-1")
+		self.ученик = создать_ученика(f"answer-{frappe.generate_hash(length=6)}@example.com")
+		run = прохождения.прохождение(self.ученик, self.курс, "l-1")
 		зачислить(self.ученик, run.lesson)
 		self.попытка = release_quiz.начать(run, создать_занятие(self.ученик, run.lesson))["attempt"]
 

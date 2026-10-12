@@ -128,7 +128,11 @@ class TestWhoseTurn(UnitTestCase):
 				self.assertEqual(ждёт(статус, via, ответы), ожидаемое)
 
 	def test_группа_очереди(self):
-		self.assertEqual(группа("done", "author"), "check")
-		self.assertEqual(группа("open", "author"), "question")
-		self.assertEqual(группа("open", "agent"), "agent")
-		self.assertEqual(группа("accepted", None), "accepted")
+		for статус, via, ожидаемое in (
+			("done", "author", "check"),
+			("open", "author", "question"),
+			("open", "agent", "agent"),
+			("accepted", None, "accepted"),
+		):
+			with self.subTest(статус=статус, via=via):
+				self.assertEqual(группа(статус, via), ожидаемое)

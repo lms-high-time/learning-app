@@ -43,15 +43,13 @@ class IntegrationTestLearningOrganization(IntegrationTestCase):
 		self.assertEqual((политика["max_attempts"], политика["retry_delay_minutes"]), (0, 10))
 
 	def test_требование_квиза_перекрывается_и_наследуется(self):
-		self.правка(quiz_required="No")
-		self.assertFalse(политика_квиза(self.организация)["quiz_required"])
+		"""Пустое — как в общих настройках, где квиз обязателен. Случаи идут по
+		порядку на одной организации, как и шли."""
+		for значение, обязателен in (("No", False), ("Yes", True), ("", True)):
+			with self.subTest(quiz_required=значение):
+				self.правка(quiz_required=значение)
 
-		self.правка(quiz_required="Yes")
-		self.assertTrue(политика_квиза(self.организация)["quiz_required"])
-
-		# Пустое — как в общих настройках, где квиз обязателен.
-		self.правка(quiz_required="")
-		self.assertTrue(политика_квиза(self.организация)["quiz_required"])
+				self.assertEqual(политика_квиза(self.организация)["quiz_required"], обязателен)
 
 	# --- проверки при сохранении ---
 
@@ -62,17 +60,18 @@ class IntegrationTestLearningOrganization(IntegrationTestCase):
 
 	# --- список курсов ---
 
-	def test_пустой_список_курсов_означает_весь_каталог(self):
-		"""`Why:` у большинства клиентов ограничений нет, и перечислять курс за
-		курсом они не обязаны — список рано или поздно разъедется с каталогом."""
-		организация = frappe.get_doc("Learning Organization", self.организация)
+	def test_список_курсов(self):
+		"""Пустой список — весь каталог: `Why:` у большинства клиентов ограничений
+		нет, и перечислять курс за курсом они не обязаны — список рано или поздно
+		разъедется с каталогом. Непустой — закрывает остальные курсы."""
+		with self.subTest("пустой список означает весь каталог"):
+			организация = frappe.get_doc("Learning Organization", self.организация)
 
-		self.assertTrue(организация.разрешает_курс(создать_курс("Любой курс")))
+			self.assertTrue(организация.разрешает_курс(создать_курс("Любой курс")))
 
-	def test_непустой_список_закрывает_остальные_курсы(self):
 		разрешённый = создать_курс(f"Разрешённый {frappe.generate_hash(length=6)}")
 		посторонний = создать_курс(f"Посторонний {frappe.generate_hash(length=6)}")
 		организация = self.правка(allowed_courses=[{"course": разрешённый}])
-
-		self.assertTrue(организация.разрешает_курс(разрешённый))
-		self.assertFalse(организация.разрешает_курс(посторонний))
+		with self.subTest("непустой список закрывает остальные курсы"):
+			self.assertTrue(организация.разрешает_курс(разрешённый))
+			self.assertFalse(организация.разрешает_курс(посторонний))

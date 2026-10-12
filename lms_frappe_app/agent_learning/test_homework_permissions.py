@@ -42,36 +42,55 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 
 	def видит(self, user):
 		frappe.set_user(user)
-		return set(frappe.get_list("Agent Homework Submission", pluck="name"))
+		try:
+			return set(frappe.get_list("Agent Homework Submission", pluck="name"))
+		finally:
+			frappe.set_user("Administrator")
 
-	def test_ученик_видит_свои(self):
-		self.assertEqual(
-			self.видит(self.ученик), {self.личная.name, self.рабочая.name, self.чужая.name}
-		)
+	def читает(self, user, сдача) -> bool:
+		frappe.set_user(user)
+		try:
+			return bool(frappe.has_permission("Agent Homework Submission", "read", doc=сдача))
+		finally:
+			frappe.set_user("Administrator")
 
-	def test_чужой_ученик_не_видит_ничего(self):
-		self.assertEqual(self.видит(self.сосед), set())
-		self.assertFalse(frappe.has_permission("Agent Homework Submission", "read", doc=self.личная))
+	def test_кто_видит_сдачу(self):
+		"""Ученик видит свои; чужой ученик — ничего; руководитель — только
+		пространство своей организации; методист и модератор — и личное."""
+		все = {self.личная.name, self.рабочая.name, self.чужая.name}
+		with self.subTest("ученик видит свои"):
+			self.assertEqual(self.видит(self.ученик), все)
 
-	def test_руководитель_видит_только_пространство_своей_организации(self):
-		self.assertEqual(self.видит(self.менеджер), {self.рабочая.name})
-		self.assertFalse(frappe.has_permission("Agent Homework Submission", "read", doc=self.личная))
-		self.assertFalse(frappe.has_permission("Agent Homework Submission", "read", doc=self.чужая))
-		self.assertTrue(frappe.has_permission("Agent Homework Submission", "read", doc=self.рабочая))
+		with self.subTest("чужой ученик не видит ничего"):
+			self.assertEqual(self.видит(self.сосед), set())
+			self.assertFalse(self.читает(self.сосед, self.личная))
 
-	def test_методист_видит_и_личное(self):
-		for user in (self.методист, self.модератор):
-			self.assertTrue(
-				{self.личная.name, self.рабочая.name, self.чужая.name} <= self.видит(user), user
+		with self.subTest("руководитель видит только пространство своей организации"):
+			self.assertEqual(self.видит(self.менеджер), {self.рабочая.name})
+			self.assertEqual(
+				{
+					"личная": self.читает(self.менеджер, self.личная),
+					"чужая": self.читает(self.менеджер, self.чужая),
+					"рабочая": self.читает(self.менеджер, self.рабочая),
+				},
+				{"личная": False, "чужая": False, "рабочая": True},
 			)
-			self.assertTrue(frappe.has_permission("Agent Homework Submission", "read", doc=self.личная))
+
+		for кто, user in (("методист", self.методист), ("модератор", self.модератор)):
+			with self.subTest(f"{кто} видит и личное"):
+				self.assertTrue(все <= self.видит(user), user)
+				self.assertTrue(self.читает(user, self.личная))
 
 	def test_запись_мимо_методов_запрещена(self):
 		for user in (self.ученик, self.менеджер, self.методист, self.модератор):
-			frappe.set_user(user)
-			self.assertFalse(
-				frappe.has_permission("Agent Homework Submission", "write", doc=self.рабочая), user
-			)
+			with self.subTest(user):
+				frappe.set_user(user)
+				try:
+					self.assertFalse(
+						frappe.has_permission("Agent Homework Submission", "write", doc=self.рабочая), user
+					)
+				finally:
+					frappe.set_user("Administrator")
 
 	def test_файл_сдачи_видят_те_же_кто_сдачу(self):
 		"""Права на `File` Frappe берёт у сдачи: файл открывают те, кто видит сдачу.
@@ -93,5 +112,9 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 			(self.менеджер, True),
 			(self.ученик, True),
 		):
-			frappe.set_user(user)
-			self.assertEqual(bool(frappe.has_permission("File", "read", doc=файл)), видит, user)
+			with self.subTest(user):
+				frappe.set_user(user)
+				try:
+					self.assertEqual(bool(frappe.has_permission("File", "read", doc=файл)), видит, user)
+				finally:
+					frappe.set_user("Administrator")

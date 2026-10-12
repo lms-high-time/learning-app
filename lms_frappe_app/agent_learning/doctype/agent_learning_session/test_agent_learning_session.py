@@ -21,10 +21,16 @@ DOCTYPE = "Agent Learning Session"
 class IntegrationTestAgentLearningSession(IntegrationTestCase):
 	"""Занятие: изоляция по ученику, переходы статусов, закрытие брошенных."""
 
-	def setUp(self):
-		self.lesson = создать_урок()
+	@classmethod
+	def setUpClass(cls):
+		"""Урок и учеников тесты только читают: занятия у каждого теста свои."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.lesson = создать_урок()
 		создать_ученика(ПЕРВЫЙ)
 		создать_ученика(ВТОРОЙ)
+
+	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 
 	def занятие(self, student=ПЕРВЫЙ, **поля):
@@ -34,25 +40,24 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 
 	# --- изоляция ---
 
-	def test_ученик_видит_в_списке_только_свои_занятия(self):
+	def test_ученик_видит_только_свои_занятия(self):
+		"""В списке — только свои. Фильтр списка сам по себе не защищает: чужую
+		запись попробуют открыть по имени, а не искать в списке."""
 		своё = self.занятие(student=ПЕРВЫЙ)
 		чужое = self.занятие(student=ВТОРОЙ)
 
 		frappe.set_user(ПЕРВЫЙ)
-		видимые = frappe.get_list(DOCTYPE, pluck="name")
+		try:
+			with self.subTest("в списке только свои"):
+				видимые = frappe.get_list(DOCTYPE, pluck="name")
 
-		self.assertIn(своё.name, видимые)
-		self.assertNotIn(чужое.name, видимые)
-
-	def test_чужое_занятие_недоступно_по_прямому_обращению(self):
-		"""Фильтр списка сам по себе не защищает: чужую запись попробуют
-		открыть по имени, а не искать в списке."""
-		своё = self.занятие(student=ПЕРВЫЙ)
-		чужое = self.занятие(student=ВТОРОЙ)
-
-		frappe.set_user(ПЕРВЫЙ)
-		self.assertTrue(frappe.has_permission(DOCTYPE, "read", doc=своё.name))
-		self.assertFalse(frappe.has_permission(DOCTYPE, "read", doc=чужое.name))
+				self.assertIn(своё.name, видимые)
+				self.assertNotIn(чужое.name, видимые)
+			with self.subTest("чужое недоступно по прямому обращению"):
+				self.assertTrue(frappe.has_permission(DOCTYPE, "read", doc=своё.name))
+				self.assertFalse(frappe.has_permission(DOCTYPE, "read", doc=чужое.name))
+		finally:
+			frappe.set_user("Administrator")
 
 	# --- переходы ---
 
@@ -62,20 +67,18 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 		)
 		self.assertEqual(self.занятие().course, ожидаемый)
 
-	def test_недопустимый_переход_отклоняется(self):
+	def test_завершение_занятия(self):
+		"""Завершение проставляет время; из завершённого назад в работу — нельзя."""
 		занятие = self.занятие()
 		занятие.status = "Completed"
 		занятие.save(ignore_permissions=True)
+		with self.subTest("завершение проставляет время"):
+			self.assertTrue(занятие.finished_at)
 
-		занятие.status = "In Progress"
-		with self.assertRaises(frappe.ValidationError):
-			занятие.save(ignore_permissions=True)
-
-	def test_завершение_проставляет_время(self):
-		занятие = self.занятие()
-		занятие.status = "Completed"
-		занятие.save(ignore_permissions=True)
-		self.assertTrue(занятие.finished_at)
+		with self.subTest("недопустимый переход отклоняется"):
+			занятие.status = "In Progress"
+			with self.assertRaises(frappe.ValidationError):
+				занятие.save(ignore_permissions=True)
 
 	# --- журнал ---
 
@@ -168,7 +171,8 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 	def test_взаимоблокировка_уходит_наружу(self):
 		"""После взаимоблокировки точки сохранения нет: задача падает, а не
 		откатывается к ней."""
-		_, сбойное, _ = self.три_брошенных()
+		занятия = self.три_брошенных()
+		сбойное = занятия[1]
 		записать = AgentLearningSession.записать_событие
 
 		def записать_или_упасть(занятие, *args, **kwargs):
@@ -180,24 +184,30 @@ class IntegrationTestAgentLearningSession(IntegrationTestCase):
 			with self.assertRaises(frappe.QueryDeadlockError):
 				закрыть_брошенные_занятия()
 
-	def test_свежее_занятие_не_трогается(self):
-		занятие = self.занятие()
-		закрыть_брошенные_занятия()
-		занятие.reload()
-		self.assertEqual(занятие.status, "In Progress")
+		# Свои занятия тест закрывает сам: незакрытые брошенные попали бы в задачу
+		# закрытия следующих тестов класса.
+		for занятие in занятия:
+			frappe.db.set_value(DOCTYPE, занятие.name, "status", "Abandoned")
 
-	def test_завершённое_занятие_не_переоткрывается(self):
-		занятие = self.занятие()
-		занятие.status = "Completed"
-		занятие.save(ignore_permissions=True)
+	def test_завершённое_и_свежее_не_трогаются(self):
+		"""Завершённое давно — не переоткрывается; свежее занятие остаётся в работе."""
+		свежее = self.занятие()
+		завершённое = self.занятие()
+		завершённое.status = "Completed"
+		завершённое.save(ignore_permissions=True)
 		frappe.db.set_value(
-			DOCTYPE, занятие.name, "last_activity_at", add_to_date(now_datetime(), hours=-24)
+			DOCTYPE, завершённое.name, "last_activity_at", add_to_date(now_datetime(), hours=-24)
 		)
 
 		закрыть_брошенные_занятия()
-		занятие.reload()
 
-		self.assertEqual(занятие.status, "Completed")
+		for что, занятие, статус in (
+			("завершённое занятие не переоткрывается", завершённое, "Completed"),
+			("свежее занятие не трогается", свежее, "In Progress"),
+		):
+			with self.subTest(что):
+				занятие.reload()
+				self.assertEqual(занятие.status, статус)
 
 
 class IntegrationTestDropObjectiveOutcomes(IntegrationTestCase):
