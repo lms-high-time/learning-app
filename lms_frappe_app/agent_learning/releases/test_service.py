@@ -7,11 +7,11 @@ import json
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from lms.lms.utils import get_chapters, get_lessons
 
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
-from lms_frappe_app.agent_learning.releases import index, places, service
+from lms_frappe_app.agent_learning.releases import index, places, schema, service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -150,28 +150,9 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists(РЕЛИЗ, {"course_key": self.ключ}))
 
 	def test_отказы_схемы_и_проверок(self):
+		"""Разбор и проверки — до первой записи: по строке проводки на каждую
+		ступень. Сами ступени целиком проверяет `TestРазборИПроверкаРелиза`."""
 		self.отказ(service.РЕЛИЗ_НЕВЕРЕН, "{не json")
-		self.отказ(service.РЕЛИЗ_НЕВЕРЕН, "[]")
-		отказ = self.отказ(service.РЕЛИЗ_НЕВЕРЕН, '{"format": "lms-release/1", "x": NaN}')
-		self.assertIn("NaN", отказ.подробности["errors"][0]["message"])
-		релиз = пример_релиза(self.ключ)
-		релиз["agent"] = {"порог": float("inf"), "список": [1, float("nan")]}
-		отказ = self.отказ(service.РЕЛИЗ_НЕВЕРЕН, релиз)
-		self.assertEqual(
-			[о["path"] for о in отказ.подробности["errors"]], ["$.agent.порог", "$.agent.список[1]"]
-		)
-		релиз = пример_релиза(self.ключ)
-		релиз["map"] = {"вес": float("-inf")}
-		self.отказ(service.РЕЛИЗ_НЕВЕРЕН, json.dumps(релиз))
-		релиз = пример_релиза(self.ключ)
-		релиз["format"] = "lms-release/2"
-		отказ = self.отказ(service.ФОРМАТ_НЕ_ТОТ, релиз)
-		self.assertEqual(отказ.подробности["supported"], ["lms-release/1"])
-		релиз = пример_релиза(self.ключ)
-		релиз["lessons"][0]["body"] = "материал"
-		отказ = self.отказ(service.РЕЛИЗ_НЕВЕРЕН, релиз)
-		self.assertEqual(отказ.подробности["errors"][0]["path"], "$.lessons[0].body")
-		self.assertEqual(отказ.подробности["total"], 1)
 		релиз = пример_релиза(self.ключ)
 		вопрос = релиз["lessons"][0]["quiz"]["questions"][0]["key"]
 		релиз["lessons"][0]["quiz"]["answers"][вопрос]["correct"] = "V9"
@@ -394,3 +375,134 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		with self.assertRaises(Отказ) as пойман:
 			frappe.delete_doc("Course Lesson", урок_релиза(другой["course"], "l-1"))
 		self.assertEqual(пойман.exception.код, КУРС_ИЗ_РЕЛИЗА)
+
+
+def _релиз(**правки) -> dict:
+	"""`пример_релиза` с правкой по пути: `{"lessons.0.body": "x"}`."""
+	релиз = пример_релиза("unit")
+	for путь, значение in правки.items():
+		*до, последний = путь.split(".")
+		узел = релиз
+		for шаг in до:
+			узел = узел[int(шаг)] if isinstance(узел, list) else узел[шаг]
+		узел[int(последний) if isinstance(узел, list) else последний] = значение
+	return релиз
+
+
+class TestРазборИПроверкаРелиза(UnitTestCase):
+	"""Без базы: первые ступени публикации — `_разобрать` и `_проверить` (learning-services#536)."""
+
+	def отказ(self, функция, релиз) -> Отказ:
+		with self.assertRaises(Отказ) as пойман:
+			функция(релиз)
+		return пойман.exception
+
+	def test_разбор_принимает_объект_и_строку(self):
+		релиз = пример_релиза("unit")
+		with self.subTest("объект — он же"):
+			self.assertIs(service._разобрать(релиз), релиз)
+		with self.subTest("строка JSON — объект"):
+			self.assertEqual(service._разобрать(json.dumps(релиз, ensure_ascii=False)), релиз)
+
+	def test_отказы_разбора(self):
+		"""Отказ `release_invalid`: `errors` — не больше `ОШИБОК_НЕ_БОЛЬШЕ`, `total` — все."""
+		с_нечислами = пример_релиза("unit")
+		с_нечислами["agent"] = {"порог": float("inf"), "список": [1, float("nan")]}
+		с_бесконечностью_строкой = пример_релиза("unit")
+		с_бесконечностью_строкой["map"] = {"вес": float("-inf")}
+		много = пример_релиза("unit")
+		много["agent"] = {"много": [float("nan")] * 25}
+		случаи = (
+			("не JSON", "{не json", ("$",), 1),
+			("JSON-массив строкой", "[]", ("$",), 1),
+			("массив", [], ("$",), 1),
+			("None", None, ("$",), 1),
+			("NaN в строке JSON", '{"format": "lms-release/1", "x": NaN}', ("$",), 1),
+			("-Infinity в строке JSON", json.dumps(с_бесконечностью_строкой), ("$",), 1),
+			("нечисла в agent", с_нечислами, ("$.agent.порог", "$.agent.список[1]"), 2),
+			(
+				"нечисел больше предела",
+				много,
+				tuple(f"$.agent.много[{номер}]" for номер in range(schema.ОШИБОК_НЕ_БОЛЬШЕ)),
+				25,
+			),
+		)
+		for что, релиз, пути, всего in случаи:
+			with self.subTest(что):
+				отказ = self.отказ(service._разобрать, релиз)
+				self.assertEqual(
+					(отказ.код, tuple(о["path"] for о in отказ.подробности["errors"]), отказ.подробности["total"]),
+					(service.РЕЛИЗ_НЕВЕРЕН, пути, всего),
+				)
+		with self.subTest("строка JSON называет константу"):
+			отказ = self.отказ(service._разобрать, '{"format": "lms-release/1", "x": NaN}')
+			self.assertIn("NaN", отказ.подробности["errors"][0]["message"])
+
+	def test_проверка_отдаёт_предупреждения(self):
+		случаи = (
+			("годный релиз", _релиз(), []),
+			(
+				"пустое описание курса",
+				_релиз(**{"course.summary": ""}),
+				[{"code": "public_text_empty", "where": "course.summary"}],
+			),
+		)
+		for что, релиз, ожидание in случаи:
+			with self.subTest(что):
+				предупреждения = service._проверить(релиз)
+				for предупреждение in ожидание:
+					self.assertIn(предупреждение, предупреждения)
+				if not ожидание:
+					self.assertEqual(предупреждения, [])
+
+	def test_отказы_проверки(self):
+		"""Ступени по очереди: формат, публичная схема, правила сервера."""
+		лишние = _релиз()
+		for номер in range(25):
+			лишние[f"x{номер}"] = 1
+		вопрос = пример_релиза("unit")["lessons"][0]["quiz"]["questions"][0]["key"]
+		неверный_ответ = _релиз(**{f"lessons.0.quiz.answers.{вопрос}.correct": "V9"})
+		случаи = (
+			(
+				"другой формат",
+				_релиз(format="lms-release/2"),
+				(service.ФОРМАТ_НЕ_ТОТ, {"format": "lms-release/2", "supported": [schema.ФОРМАТ]}),
+			),
+			("без формата", {}, (service.ФОРМАТ_НЕ_ТОТ, {"format": None, "supported": [schema.ФОРМАТ]})),
+			(
+				"формат раньше схемы",
+				{"format": "lms-release/2", "lessons": "не список"},
+				(service.ФОРМАТ_НЕ_ТОТ, {"format": "lms-release/2", "supported": [schema.ФОРМАТ]}),
+			),
+			(
+				"поле вне схемы",
+				_релиз(**{"lessons.0.body": "материал"}),
+				(service.РЕЛИЗ_НЕВЕРЕН, {"paths": ["$.lessons[0].body"], "total": 1}),
+			),
+			(
+				"ошибок схемы больше предела",
+				лишние,
+				(service.РЕЛИЗ_НЕВЕРЕН, {"paths": schema.ОШИБОК_НЕ_БОЛЬШЕ, "total": 25}),
+			),
+			(
+				"части не сходятся",
+				неверный_ответ,
+				(service.РЕЛИЗ_НЕ_СХОДИТСЯ, {"codes": ["quiz_correct"], "total": 1}),
+			),
+		)
+		for что, релиз, ожидание in случаи:
+			with self.subTest(что):
+				отказ = self.отказ(service._проверить, релиз)
+				подробности = отказ.подробности
+				if отказ.код == service.РЕЛИЗ_НЕВЕРЕН:
+					пути = [о["path"] for о in подробности["errors"]]
+					подробности = {
+						"paths": пути if isinstance(ожидание[1]["paths"], list) else len(пути),
+						"total": подробности["total"],
+					}
+				elif отказ.код == service.РЕЛИЗ_НЕ_СХОДИТСЯ:
+					подробности = {
+						"codes": [п["code"] for п in подробности["problems"]],
+						"total": подробности["total"],
+					}
+				self.assertEqual((отказ.код, подробности), ожидание)
