@@ -10,7 +10,7 @@
 """
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.api import student
@@ -34,6 +34,13 @@ from lms_frappe_app.tests.sample_data import (
 
 
 class IntegrationTestQuizLog(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Курс тесты только читают; ученик, организация и попытка — у каждого теста свои."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.курс, _ = курс_из_релиза(релиз=релиз_двух_целей(f"qlog-{frappe.generate_hash(length=6)}"))
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		политика_по_умолчанию()
@@ -42,9 +49,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		self.организация = создать_организацию(f"Компания {суффикс}")
 		self.ученик = создать_ученика(f"qlog-{суффикс}@example.com")
 		добавить_в_организацию(self.ученик, self.организация)
-		self.менеджер = создать_менеджера(f"qlogm-{суффикс}@example.com", self.организация)
 
-		self.курс, _ = курс_из_релиза(релиз=релиз_двух_целей(f"qlog-{суффикс}"))
 		зачислить_на_курс(self.ученик, self.курс)
 		self.первый, self.второй = "S1/l-1-D1", "S2/l-1-D1"
 		self.занятие = занятие_релиза(self.ученик, self.курс, "l-1")
@@ -120,25 +125,26 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 
 	# --- слова ученика обязательны ---
 
-	def test_без_слов_ученика_ответ_не_принят(self):
-		for слова in (None, "", "   \n\t"):
-			with self.subTest(слова=слова):
-				ответ = self.ответить(self.первый, "V1", слова)
+	def test_отказ_в_ответе_ничего_не_пишет(self):
+		"""Без слов ученика ответ не принят, ответ на чужой вопрос отклонён. Ни
+		ответа, ни записи о нём: отказ ничего не меняет, и тот же вопрос остаётся
+		открытым для ответа со словами."""
+		отказы = {
+			"слова: None": (self.первый, None, quiz.НУЖНЫ_СЛОВА),
+			"слова: пустая строка": (self.первый, "", quiz.НУЖНЫ_СЛОВА),
+			"слова: пробелы": (self.первый, "   \n\t", quiz.НУЖНЫ_СЛОВА),
+			"чужой вопрос": ("S9/l-1-D1", "да", quiz.ЧУЖОЙ_ВОПРОС),
+		}
+		for что, (вопрос, слова, код) in отказы.items():
+			with self.subTest(что):
+				ответ = self.ответить(вопрос, "V1", слова)
 
 				self.assertFalse(ответ["ok"])
-				self.assertEqual(ответ["error"]["code"], quiz.НУЖНЫ_СЛОВА)
+				self.assertEqual(ответ["error"]["code"], код)
+				self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": self.попытка}))
+				self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
 
-		# Ни ответа, ни записи о нём: отказ ничего не меняет, и тот же вопрос
-		# остаётся открытым для ответа со словами.
-		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": self.попытка}))
-		self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
 		self.assertTrue(self.ответить(self.первый, "V1", "Первый")["ok"])
-
-	def test_отклонённый_ответ_в_журнал_не_попадает(self):
-		ответ = self.ответить("S9/l-1-D1", "V1", "да")
-
-		self.assertEqual(ответ["error"]["code"], quiz.ЧУЖОЙ_ВОПРОС)
-		self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
 
 	def test_длинные_слова_обрезаются_а_не_отклоняются(self):
 		ответ = self.ответить(self.первый, "V1", "я" * (quiz.ДЛИНА_СЛОВ + 500))
@@ -155,35 +161,44 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 
 	# --- кто читает ---
 
-	def test_ученик_и_руководитель_журнал_не_читают(self):
-		"""В журнале ответы рядом с вердиктом — готовые эталоны. Руководитель
-		попытку своего сотрудника читает, а журнал по ней — нет."""
+	def test_журнал_читают_только_администраторы_платформы(self):
+		"""В журнале ответы рядом с вердиктом — готовые эталоны. Ученик журнал не
+		читает. Руководитель попытку своего сотрудника читает, а журнал по ней —
+		нет. Модератор журнал читает, но не правит."""
 		self.ответить(self.первый, "V1", "Первый")
-		событие = frappe.get_all(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name", limit=1)[0]
+		frappe.set_user("Administrator")
+		события = frappe.get_all(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name")
+		событие = события[0]
+		менеджер = создать_менеджера(f"qlogm-{frappe.generate_hash(length=6)}@example.com", self.организация)
+		модератор = создать_куратора(f"qlogmod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator")
 
-		frappe.set_user(self.менеджер)
+		frappe.set_user(менеджер)
 		self.assertTrue(frappe.has_permission("Agent Quiz Attempt", "read", doc=self.попытка))
 
-		for кто in (self.ученик, self.менеджер):
-			with self.subTest(кто=кто):
+		случаи = {
+			"ученик": (self.ученик, False, []),
+			"руководитель": (менеджер, False, []),
+			"модератор": (модератор, True, sorted(события)),
+		}
+		for что, (кто, читает, видно) in случаи.items():
+			with self.subTest(что):
 				frappe.set_user(кто)
-				self.assertFalse(frappe.has_permission(ЖУРНАЛ, "read"))
-				self.assertFalse(frappe.has_permission(ЖУРНАЛ, "read", doc=событие))
-				self.assertEqual(self._видно_списком(), [])
+				self.assertEqual(frappe.has_permission(ЖУРНАЛ, "read"), читает)
+				self.assertEqual(frappe.has_permission(ЖУРНАЛ, "read", doc=событие), читает)
+				self.assertEqual(sorted(self._видно_списком()), видно)
+				for право in ("write", "create", "delete"):
+					self.assertFalse(frappe.has_permission(ЖУРНАЛ, право, doc=событие), право)
 
-	def test_модератор_журнал_читает_но_не_правит(self):
-		self.ответить(self.первый, "V1", "Первый")
-		событие = frappe.get_all(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name", limit=1)[0]
-		модератор = создать_куратора(
-			f"qlogmod-{frappe.generate_hash(length=6)}@example.com", роль="Moderator"
-		)
+	def _видно_списком(self) -> list[str]:
+		"""Что пользователь получает списком — как через `/api/resource`."""
+		try:
+			return frappe.get_list(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name")
+		except frappe.PermissionError:
+			return []
 
-		frappe.set_user(модератор)
 
-		self.assertTrue(frappe.has_permission(ЖУРНАЛ, "read", doc=событие))
-		self.assertIn(событие, self._видно_списком())
-		for право in ("write", "create", "delete"):
-			self.assertFalse(frappe.has_permission(ЖУРНАЛ, право, doc=событие), право)
+class TestQuizLogSchema(UnitTestCase):
+	"""Схема журнала: читает метаданные, в базу не пишет."""
 
 	def test_роли_журнала_только_администраторы_платформы(self):
 		"""Пин на схему: право, выданное ещё одной роли, открыло бы эталоны."""
@@ -198,10 +213,3 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		связи = {(с.link_doctype, с.link_fieldname) for с in frappe.get_meta("Agent Quiz Attempt").links}
 
 		self.assertIn((ЖУРНАЛ, "attempt"), связи)
-
-	def _видно_списком(self) -> list[str]:
-		"""Что пользователь получает списком — как через `/api/resource`."""
-		try:
-			return frappe.get_list(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name")
-		except frappe.PermissionError:
-			return []

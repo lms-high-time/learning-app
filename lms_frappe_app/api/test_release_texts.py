@@ -57,18 +57,37 @@ def релиз_с_тегами(ключ: str) -> dict:
 
 
 class IntegrationTestТекстыРелиза(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		"""Первую публикацию тесты только читают. Тест, который публикует курсу
+		новую версию или заводит ему схему, публикует себе свой курс."""
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.куратор = создать_куратора(f"texts-{frappe.generate_hash(length=6)}@example.com")
+		cls.релиз, cls.первая = cls._опубликовать_новый(cls.куратор)
+		cls.курс = cls.первая["course"]
+
+	@staticmethod
+	def _опубликовать_новый(куратор: str) -> tuple[dict, dict]:
+		релиз = релиз_с_тегами(f"texts-{frappe.generate_hash(length=6)}")
+		frappe.set_user(куратор)
+		try:
+			ответ = authoring.publish_release(release=релиз)
+		finally:
+			frappe.set_user("Administrator")
+		if not ответ["ok"]:
+			raise AssertionError(ответ)
+		return релиз, ответ["data"]
+
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
-		суффикс = frappe.generate_hash(length=6)
-		self.куратор = создать_куратора(f"texts-{суффикс}@example.com")
-		self.ключ = f"texts-{суффикс}"
-		self.релиз = релиз_с_тегами(self.ключ)
-		self.первая = self.опубликовать(self.релиз)
-		self.курс = self.первая["course"]
 
 	def опубликовать(self, релиз: dict) -> dict:
 		frappe.set_user(self.куратор)
-		ответ = authoring.publish_release(release=релиз)
+		try:
+			ответ = authoring.publish_release(release=релиз)
+		finally:
+			frappe.set_user("Administrator")
 		self.assertTrue(ответ["ok"], ответ)
 		return ответ["data"]
 
@@ -76,33 +95,35 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 		self.assertTrue(ответ["ok"], ответ)
 		return ответ["data"]
 
-	def test_индекс_хранит_тексты_как_есть(self):
+	def test_публикация_хранит_тексты_как_есть(self):
+		"""Индекс релиза и проекция хранят тексты как есть; карточка курса
+		очищается с предупреждением."""
 		релиз = self.первая["release"]
 		у = self.релиз["lessons"][0]
 		вопрос = у["quiz"]["questions"][0]
 		раздел = self.релиз["document"]["sections"][0]
 
-		self.assertEqual(index.главы(релиз)[0]["description"], f"Глава про {ТЕГ}")
-		self.assertEqual(index.урок(релиз, "l-1").hook, у["hook"])
-		[цель] = index.цели_урока(релиз, "l-1")
-		self.assertEqual(
-			(цель["text"], цель["goals"][0]["title"]), (у["objectives"][0]["text"], f"Термин {ТЕГ}")
-		)
-		[строка] = index.вопросы_урока(релиз, "l-1", с_ответами=True)
-		self.assertEqual(
-			(строка["text"], строка["options"][0]["text"], строка["explanation"]),
-			(
-				вопрос["text"],
-				вопрос["options"][0]["text"],
-				у["quiz"]["answers"][вопрос["key"]]["explanation"],
-			),
-		)
-		self.assertEqual(
-			(index.разделы(релиз)["log"]["title"], index.разделы(релиз)["log"]["description"]),
-			(раздел["title"], раздел["description"]),
-		)
+		with self.subTest("индекс"):
+			self.assertEqual(index.главы(релиз)[0]["description"], f"Глава про {ТЕГ}")
+			self.assertEqual(index.урок(релиз, "l-1").hook, у["hook"])
+			[цель] = index.цели_урока(релиз, "l-1")
+			self.assertEqual(
+				(цель["text"], цель["goals"][0]["title"]), (у["objectives"][0]["text"], f"Термин {ТЕГ}")
+			)
+			[строка] = index.вопросы_урока(релиз, "l-1", с_ответами=True)
+			self.assertEqual(
+				(строка["text"], строка["options"][0]["text"], строка["explanation"]),
+				(
+					вопрос["text"],
+					вопрос["options"][0]["text"],
+					у["quiz"]["answers"][вопрос["key"]]["explanation"],
+				),
+			)
+			self.assertEqual(
+				(index.разделы(релиз)["log"]["title"], index.разделы(релиз)["log"]["description"]),
+				(раздел["title"], раздел["description"]),
+			)
 
-	def test_проекция_хранит_тексты_как_есть(self):
 		урок = урок_релиза(self.курс, "l-1")
 		глава = frappe.db.get_value("Course Lesson", урок, "chapter")
 		домашка = frappe.db.get_value(
@@ -111,30 +132,40 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 		документ = frappe.get_doc(
 			"Agent Course Artifact", {"course": self.курс, "slug": "notebook", "is_active": 1}
 		)
+		with self.subTest("проекция"):
+			self.assertEqual(frappe.db.get_value("Course Lesson", урок, "lesson_hook"), f"Зачин: {СКОБКИ}")
+			self.assertEqual(
+				frappe.db.get_value("Course Chapter", глава, "chapter_description"), f"Глава про {ТЕГ}"
+			)
+			self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "course_promise"), f"Обещание: {ТЕГ}")
+			self.assertEqual(домашка, ("Задание", f"Опишите `{ТЕГ}` и {СКОБКИ}."))
+			self.assertEqual((документ.title, документ.purpose), ("Тетрадь", f"Зачем {СКОБКИ}"))
+			self.assertEqual(
+				(документ.blocks[0].title, документ.blocks[0].description),
+				(f"Журнал {ТЕГ}", f"Что пишут: {СКОБКИ}"),
+			)
 
-		self.assertEqual(frappe.db.get_value("Course Lesson", урок, "lesson_hook"), f"Зачин: {СКОБКИ}")
-		self.assertEqual(
-			frappe.db.get_value("Course Chapter", глава, "chapter_description"), f"Глава про {ТЕГ}"
-		)
-		self.assertEqual(frappe.db.get_value("LMS Course", self.курс, "course_promise"), f"Обещание: {ТЕГ}")
-		self.assertEqual(домашка, ("Задание", f"Опишите `{ТЕГ}` и {СКОБКИ}."))
-		self.assertEqual((документ.title, документ.purpose), ("Тетрадь", f"Зачем {СКОБКИ}"))
-		self.assertEqual(
-			(документ.blocks[0].title, документ.blocks[0].description),
-			(f"Журнал {ТЕГ}", f"Что пишут: {СКОБКИ}"),
-		)
+		with self.subTest("карточка курса"):
+			self.assertIn(
+				{"code": "course_card_markup", "where": "course.summary", "chars": ["<", ">"]},
+				self.первая["warnings"],
+			)
+			self.assertEqual(
+				frappe.db.get_value("LMS Course", self.курс, "short_introduction"), "Карточка &lt;role>"
+			)
 
 	def test_повторная_публикация_не_переписывает_проекцию(self):
 		"""Записанное совпадает с релизом: новая версия с другим названием курса
 		не трогает ни глав, ни уроков, ни схемы документа."""
-		self.релиз["course"]["title"] = "Курс с новым названием"
+		релиз, первая = self._опубликовать_новый(self.куратор)
+		релиз["course"]["title"] = "Курс с новым названием"
 
-		вторая = self.опубликовать(self.релиз)
+		вторая = self.опубликовать(релиз)
 
 		self.assertEqual(вторая["version"], 2)
 		for вид in ("chapters", "lessons"):
 			self.assertEqual(вторая[вид]["updated"], [], вид)
-		self.assertEqual(вторая["document"], self.первая["document"])
+		self.assertEqual(вторая["document"], первая["document"])
 
 	def test_ученик_получает_тексты_как_есть(self):
 		у = self.релиз["lessons"][0]
@@ -192,19 +223,11 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 		self.assertNotIn(ТЕГ, html)
 		self.assertNotIn("<b and c>", html)
 
-	def test_карточка_курса_очищается_с_предупреждением(self):
-		self.assertIn(
-			{"code": "course_card_markup", "where": "course.summary", "chars": ["<", ">"]},
-			self.первая["warnings"],
-		)
-		self.assertEqual(
-			frappe.db.get_value("LMS Course", self.курс, "short_introduction"), "Карточка &lt;role>"
-		)
-
 	def test_подсказка_блока_хранится_как_есть(self):
+		_, первая = self._опубликовать_новый(self.куратор)
 		frappe.set_user("Administrator")
 		ответ = схема_документа(
-			self.курс, "hints", "Подсказки", [{"key": "note", "title": "Заметка", "hint": f"Ждём {ТЕГ}"}]
+			первая["course"], "hints", "Подсказки", [{"key": "note", "title": "Заметка", "hint": f"Ждём {ТЕГ}"}]
 		)
 		self.assertTrue(ответ["ok"], ответ)
 
