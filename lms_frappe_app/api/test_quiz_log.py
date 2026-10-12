@@ -183,11 +183,14 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		for что, (кто, читает, видно) in случаи.items():
 			with self.subTest(что):
 				frappe.set_user(кто)
-				self.assertEqual(frappe.has_permission(ЖУРНАЛ, "read"), читает)
-				self.assertEqual(frappe.has_permission(ЖУРНАЛ, "read", doc=событие), читает)
-				self.assertEqual(sorted(self._видно_списком()), видно)
-				for право in ("write", "create", "delete"):
-					self.assertFalse(frappe.has_permission(ЖУРНАЛ, право, doc=событие), право)
+				try:
+					self.assertEqual(frappe.has_permission(ЖУРНАЛ, "read"), читает)
+					self.assertEqual(frappe.has_permission(ЖУРНАЛ, "read", doc=событие), читает)
+					self.assertEqual(sorted(self._видно_списком()), видно)
+					for право in ("write", "create", "delete"):
+						self.assertFalse(frappe.has_permission(ЖУРНАЛ, право, doc=событие), право)
+				finally:
+					frappe.set_user("Administrator")
 
 	def _видно_списком(self) -> list[str]:
 		"""Что пользователь получает списком — как через `/api/resource`."""

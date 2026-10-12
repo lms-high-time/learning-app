@@ -153,6 +153,7 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 				self.assertEqual(
 					(ответ["error"]["code"], ответ["error"]["key"]), ("busy", КЛЮЧ), функция
 				)
+		self.assertIsNone(self.запись(), "busy записи не оставляет")
 
 		for функция, вызов in self.вызовы():
 			for ошибка in (
@@ -207,17 +208,21 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 
 	def test_ученики_с_одним_ключом_не_смешиваются(self):
 		frappe.set_user("Administrator")
-		другой = создать_ученика(f"scenario-other-{frappe.generate_hash(length=6)}@example.com")
-		frappe.set_user(self.ученик)
+		try:
+			другой = создать_ученика(f"scenario-other-{frappe.generate_hash(length=6)}@example.com")
+		finally:
+			frappe.set_user(self.ученик)
 		student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
 		student.count_scenario_turn(КЛЮЧ)
 
 		frappe.set_user(другой)
-		self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
-		self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 1)
-		student.reset_scenario_state(КЛЮЧ)
+		try:
+			self.assertIsNone(student.scenario_state(КЛЮЧ)["data"]["state"])
+			self.assertEqual(student.count_scenario_turn(КЛЮЧ)["data"]["turns"], 1)
+			student.reset_scenario_state(КЛЮЧ)
+		finally:
+			frappe.set_user(self.ученик)
 
-		frappe.set_user(self.ученик)
 		self.assertEqual(student.scenario_state(КЛЮЧ)["data"]["state"], СОСТОЯНИЕ)
 		self.assertEqual(self.запись().turns, 1)
 

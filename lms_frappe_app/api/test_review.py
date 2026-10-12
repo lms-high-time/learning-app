@@ -180,6 +180,11 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 		for что, (кто, метод, параметры, код) in отказы.items():
 			with self.subTest(что):
 				self.assertEqual(self.код(self.вызвать(кто, метод, **параметры)), код)
+		with self.subTest("отказы сдачи не меняют"):
+			self.assertEqual(
+				frappe.db.get_value(домашка.СДАЧА, self.рабочая.name, ["status", "version"]), ("Submitted", 1)
+			)
+			self.assertEqual(frappe.db.get_value(домашка.СДАЧА, self.личная.name, ["status", "version"]), ("Submitted", 1))
 
 		карточка = self.вызвать(self.менеджер, "submission", submission=self.рабочая.name)["data"]
 		self.assertEqual(карточка["actions"], ["accept", "send_back"])

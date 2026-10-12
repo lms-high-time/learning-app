@@ -197,9 +197,11 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 
 		with self.subTest("автор не правит напрямую"):
 			frappe.set_user(self.сотрудник)
-			self.assertFalse(
-				frappe.has_permission("Agent Student Artifact", "write", doc=self.документы["икс"])
-			)
+			try:
+				правит = frappe.has_permission("Agent Student Artifact", "write", doc=self.документы["икс"])
+			finally:
+				frappe.set_user("Administrator")
+			self.assertFalse(правит)
 
 	def test_участник_читает_документы_коллег_только_если_открыто_всем(self):
 		"""Ушедший участник документов коллег не читает — последним, на той же
