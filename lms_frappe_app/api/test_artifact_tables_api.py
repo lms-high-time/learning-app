@@ -119,42 +119,47 @@ class IntegrationTestArtifactTables(IntegrationTestCase):
 		from unittest.mock import patch
 
 		перечень = student.artifact(self.курс)["data"]["artifacts"]
-		self.assertIsNone(перечень[0]["modified"])
-		self.assertIsNone(перечень[0]["purpose"], "автор не написал — null, а не пустая строка")
 		пустой = student.artifact(self.курс, "risk_register")["data"]
-		self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
+		with self.subTest("#462 пустой документ: modified null"):
+			self.assertIsNone(перечень[0]["modified"])
+			self.assertIsNone(перечень[0]["purpose"], "автор не написал — null, а не пустая строка")
+		with self.subTest("#342 пустой документ: время и версия"):
+			self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
 
 		with patch("frappe.publish_realtime") as publish:
 			self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
 
-		события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
-		self.assertEqual(len(события), 1)
-		self.assertEqual(события[0].kwargs["user"], self.ученик)
-		self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
-		self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
-		self.assertTrue(события[0].kwargs["after_commit"])
+		with self.subTest("#348 событие только ученику"):
+			события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
+			self.assertEqual(len(события), 1)
+			self.assertEqual(события[0].kwargs["user"], self.ученик)
+			self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
+			self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
+			self.assertTrue(события[0].kwargs["after_commit"])
 
 		перечень = student.artifact(self.курс)["data"]["artifacts"]
-		self.assertIsNotNone(перечень[0]["modified"])
-		# Со смещением пояса сайта: браузер читает строку без него в своём поясе.
-		self.assertIsNotNone(datetime.fromisoformat(перечень[0]["modified"]).tzinfo)
-		self.assertEqual(
-			student.artifact(self.курс, "risk_register")["data"]["modified"], перечень[0]["modified"]
-		)
-		документы = student.get_my_progress()["data"]["courses"]
-		self.assertEqual(
-			next(к for к in документы if к["id"] == self.курс)["documents"][0]["modified"],
-			перечень[0]["modified"],
-		)
+		with self.subTest("#462 после записи: время записи"):
+			self.assertIsNotNone(перечень[0]["modified"])
+			# Со смещением пояса сайта: браузер читает строку без него в своём поясе.
+			self.assertIsNotNone(datetime.fromisoformat(перечень[0]["modified"]).tzinfo)
+			self.assertEqual(
+				student.artifact(self.курс, "risk_register")["data"]["modified"], перечень[0]["modified"]
+			)
+			документы = student.get_my_progress()["data"]["courses"]
+			self.assertEqual(
+				next(к for к in документы if к["id"] == self.курс)["documents"][0]["modified"],
+				перечень[0]["modified"],
+			)
 
 		self.записать("assessment", fields={"threshold": 12})
 		документ = student.artifact(self.курс, "risk_register")["data"]
 
-		self.assertTrue(документ["modified"])
-		# Журнал `Version` Frappe пишет после коммита, а тест идёт в
-		# транзакции без него: здесь проверяется форма, число — на стенде.
-		self.assertIsInstance(документ["version"], int)
-		self.assertNotIn("versions", документ)
+		with self.subTest("#342 после записи: время и версия без истории"):
+			self.assertTrue(документ["modified"])
+			# Журнал `Version` Frappe пишет после коммита, а тест идёт в
+			# транзакции без него: здесь проверяется форма, число — на стенде.
+			self.assertIsInstance(документ["version"], int)
+			self.assertNotIn("versions", документ)
 
 	def test_прежний_текст_засчитан_пока_таблица_пуста(self):
 		self.записать("risks", content="| ID | Событие |\n| --- | --- |\n| R1 | Подрядчик уйдёт |")

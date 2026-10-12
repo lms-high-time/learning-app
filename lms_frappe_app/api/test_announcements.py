@@ -268,20 +268,22 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 		свои = self.от_имени(self.куратор, authoring.announce_course, course=курс, objectives="Своя цель")
 
-		self.assertEqual(self.код_отказа(свои), authoring.КУРС_ИЗ_РЕЛИЗА)
-		сведения = frappe.db.get_value(
-			"LMS Course", курс, ["published", "announce_objectives"], as_dict=True
-		)
-		self.assertFalse(сведения.published)
-		self.assertFalse(сведения.announce_objectives)
+		with self.subTest("свои цели курсу из релиза — отказ"):
+			self.assertEqual(self.код_отказа(свои), authoring.КУРС_ИЗ_РЕЛИЗА)
+			сведения = frappe.db.get_value(
+				"LMS Course", курс, ["published", "announce_objectives"], as_dict=True
+			)
+			self.assertFalse(сведения.published)
+			self.assertFalse(сведения.announce_objectives)
 
 		ответ = self.от_имени(self.куратор, authoring.announce_course, course=курс)
-
-		self.assertTrue(ответ["ok"], ответ)
-		self.assertEqual(ответ["data"]["objectives"], ["Глава первая", "Глава вторая"])
 		каталог = self.от_имени(self.ученик, student.list_catalog)["data"]
-		анонс = next(к for к in каталог["courses"] if к["id"] == курс)
-		self.assertEqual(анонс["objectives"], ["Глава первая", "Глава вторая"])
+
+		with self.subTest("#500 анонс без директивы — цели глав"):
+			self.assertTrue(ответ["ok"], ответ)
+			self.assertEqual(ответ["data"]["objectives"], ["Глава первая", "Глава вторая"])
+			анонс = next(к for к in каталог["courses"] if к["id"] == курс)
+			self.assertEqual(анонс["objectives"], ["Глава первая", "Глава вторая"])
 
 	def test_анонс_с_первым_релизом_берёт_цели_глав(self):
 		"""Цели анонса остаются в поле, но у курса с релизом наружу — главы релиза."""

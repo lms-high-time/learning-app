@@ -78,9 +78,10 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 
 	def сбросить(self, кто: str = "Administrator") -> dict:
 		frappe.set_user(кто)
-		ответ = admin.reset_student_progress(self.запись())
-		frappe.set_user("Administrator")
-		return ответ
+		try:
+			return admin.reset_student_progress(self.запись())
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_сброс_архивирует_прогресс_и_снимает_запись(self):
 		"""Занятия, попытки, документ и заметки — в архив; запись на курс снята;

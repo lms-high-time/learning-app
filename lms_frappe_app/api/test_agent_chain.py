@@ -31,8 +31,8 @@ from lms_frappe_app.tests.sample_data import (
 class IntegrationTestAgentChain(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
-		"""Курс из релиза тесты только читают: у каждого свой ученик. Тест, который
-		правит строки релиза, заводит себе свой курс — `свой_курс`."""
+		"""Строки курса и релиза тесты не меняют; записи и прохождения учеников пишут
+		свои. Тест, который правит строки релиза, заводит себе свой курс — `свой_курс`."""
 		super().setUpClass()
 		frappe.set_user("Administrator")
 		cls.курс, cls.релиз = курс_из_релиза()
@@ -285,10 +285,10 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 				self.assertEqual({к: ошибка[к] for к in подробности}, подробности)
 				self.assertFalse(frappe.db.exists(прохождения.ПРОХОЖДЕНИЕ, {"student": self.ученик}))
 				self.assertFalse(frappe.db.get_value("Agent Learning Session", где, "run"))
-		with self.subTest("квиз и закрытие курса без релиза"):
-			for вызов in (student.request_quiz, student.complete_lesson):
+		for вызов in (student.request_quiz, student.complete_lesson):
+			with self.subTest(f"курс без релиза: {вызов.__name__}"):
 				self.отказ(вызов(старое), "course_not_released")
-			self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": старое}))
+				self.assertFalse(frappe.db.exists("Agent Quiz Attempt", {"session": старое}))
 
 	def test_гонка_за_прохождение_busy(self):
 		"""Гонка за прохождение — `busy` с откатом: и у отметки, и у квиза."""

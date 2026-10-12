@@ -29,7 +29,8 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 	def _первый_релиз() -> tuple[str, dict]:
 		ключ = f"rel-view-{frappe.generate_hash(length=6)}"
 		ответ = authoring.publish_release(release=пример_релиза(ключ))
-		assert ответ["ok"], ответ
+		if not ответ["ok"]:
+			raise AssertionError(ответ)
 		return ключ, ответ["data"]
 
 	def setUp(self):

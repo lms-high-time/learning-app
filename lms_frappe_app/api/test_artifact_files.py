@@ -96,9 +96,14 @@ class IntegrationTestArtifactFiles(IntegrationTestCase):
 		перечень = student.artifact(self.курс)["data"]["artifacts"][0]
 		self.assertEqual(перечень["blocks_filled"], 1, "файл без текста — блок заполнен")
 
-		файл = frappe.get_doc("File", self.запись_файла())
-		документ = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "course": self.курс})
-		self.assertEqual((файл.attached_to_doctype, файл.attached_to_name), ("Agent Student Artifact", документ))
+		with self.subTest("#343 файл первой загрузки привязан к документу"):
+			файл = frappe.get_doc("File", self.запись_файла())
+			документ = frappe.db.get_value(
+				"Agent Student Artifact", {"student": self.ученик, "course": self.курс}
+			)
+			self.assertEqual(
+				(файл.attached_to_doctype, файл.attached_to_name), ("Agent Student Artifact", документ)
+			)
 
 		блоки = _блоки_урока(self.ученик, self.курс, self.урок, пространство_курса(self.ученик, self.курс))
 		self.assertEqual([б["key"] for б in блоки], ["money"])

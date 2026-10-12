@@ -37,9 +37,9 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 	# --- программа курса: зачин, пройденность, следующий урок (learning-services#322) ---
 
 	def test_гость_видит_зачин_но_не_свой_путь(self):
-		"""Зачин — без пробелов по краям, пустой — `null`; пройденности и
+		"""Зачин — без пробелов по краям, пустой или из одних пробелов — `null`; пройденности и
 		следующего урока у гостя нет."""
-		for зачин, видит in (("  Зачем это вам  ", "Зачем это вам"), (None, None)):
+		for зачин, видит in (("  Зачем это вам  ", "Зачем это вам"), ("   ", None), (None, None)):
 			with self.subTest(зачин=зачин):
 				frappe.set_user("Administrator")
 				frappe.db.set_value("Course Lesson", self.урок, "lesson_hook", зачин)
