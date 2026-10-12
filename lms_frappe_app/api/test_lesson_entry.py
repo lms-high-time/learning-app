@@ -61,42 +61,41 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		self.assertTrue(ответ["ok"], ответ.get("error"))
 		return ответ["data"]
 
-	def test_пока_есть_пробные_ведёт_в_чат_на_этот_урок(self):
-		вход = self.войти(self.уроки[0])
+	def test_дорога_на_занятие(self):
+		"""Пока есть пробные — в веб-чат на этот урок; кончились — к своему агенту;
+		урок, начатый в чате, ведёт в чат и без пробных — тем же правилом, что
+		`start_lesson` с каналом `web`: возврат в урок пробного не тратит; без
+		сервиса агента — на страницу агента."""
+		with self.subTest("пока есть пробные"):
+			вход = self.войти(self.уроки[0])
 
-		self.assertEqual(вход["study"]["channel"], "web")
-		self.assertEqual(вход["study"]["url"], f"{СЕРВИС}/chat?lesson={quote(self.уроки[0], safe='')}")
-		self.assertEqual(вход["study"]["demo_left"], 2)
+			self.assertEqual(вход["study"]["channel"], "web")
+			self.assertEqual(вход["study"]["url"], f"{СЕРВИС}/chat?lesson={quote(self.уроки[0], safe='')}")
+			self.assertEqual(вход["study"]["demo_left"], 2)
 
-	def test_пробные_кончились_ведёт_к_своему_агенту(self):
 		self.пробный_урок(self.уроки[0])
 		self.пробный_урок(self.уроки[1])
+		with self.subTest("пробные кончились"):
+			вход = self.войти(self.уроки[2])
 
-		вход = self.войти(self.уроки[2])
+			self.assertEqual(вход["study"], {"channel": "agent", "url": "/lms/agent", "demo_left": 0})
 
-		self.assertEqual(вход["study"], {"channel": "agent", "url": "/lms/agent", "demo_left": 0})
+		with self.subTest("начатый в чате урок"):
+			вход = self.войти(self.уроки[0])
 
-	def test_начатый_в_чате_урок_ведёт_в_чат_и_без_пробных(self):
-		"""Тем же правилом, что `start_lesson` с каналом `web`: возврат в урок пробного не тратит."""
-		self.пробный_урок(self.уроки[0])
-		self.пробный_урок(self.уроки[1])
+			self.assertEqual(вход["study"]["channel"], "web")
+			self.assertEqual(вход["study"]["demo_left"], 0)
 
-		вход = self.войти(self.уроки[0])
-
-		self.assertEqual(вход["study"]["channel"], "web")
-		self.assertEqual(вход["study"]["demo_left"], 0)
-
-	def test_без_сервиса_агента_ведёт_на_страницу_агента(self):
 		frappe.set_user("Administrator")
 		self.задать("agent_service_url", "")
 		frappe.set_user(self.ученик)
+		with self.subTest("без сервиса агента"):
+			вход = self.войти(self.уроки[0])
 
-		вход = self.войти(self.уроки[0])
+			self.assertEqual(вход["study"]["channel"], "agent")
+			self.assertEqual(вход["study"]["url"], "/lms/agent")
 
-		self.assertEqual(вход["study"]["channel"], "agent")
-		self.assertEqual(вход["study"]["url"], "/lms/agent")
-
-	def test_зачин_и_пройденность(self):
+	def test_зачин_пройденность_и_блоки_документа(self):
 		frappe.set_user("Administrator")
 		frappe.db.set_value("Course Lesson", self.уроки[0], "lesson_hook", "  Зачем это вам  ")
 		frappe.get_doc(
@@ -107,19 +106,6 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 				"status": "Complete",
 			}
 		).insert(ignore_permissions=True)
-		frappe.set_user(self.ученик)
-
-		вход = self.войти(self.уроки[0])
-		пустой = self.войти(self.уроки[1])
-
-		self.assertEqual(вход["hook"], "Зачем это вам")
-		self.assertTrue(вход["completed"])
-		self.assertIsNone(пустой["hook"], "пустой зачин — null, а не пустая строка")
-		self.assertFalse(пустой["completed"])
-
-	def test_называет_блоки_документа_этого_урока(self):
-		"""Что из документа курса собирают на занятии (learning-services#340)."""
-		frappe.set_user("Administrator")
 		курс = frappe.db.get_value("Course Lesson", self.уроки[0], "course")
 		frappe.get_doc(
 			{
@@ -135,10 +121,20 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
 
-		self.assertEqual(
-			self.войти(self.уроки[0])["blocks"],
-			[{"artifact": "summary", "key": "goal", "title": "Цель", "filled": False}],
-		)
+		вход = self.войти(self.уроки[0])
+		пустой = self.войти(self.уроки[1])
+
+		with self.subTest("зачин и пройденность"):
+			self.assertEqual(вход["hook"], "Зачем это вам")
+			self.assertTrue(вход["completed"])
+			self.assertIsNone(пустой["hook"], "пустой зачин — null, а не пустая строка")
+			self.assertFalse(пустой["completed"])
+
+		with self.subTest("learning-services#340: блоки документа этого урока"):
+			self.assertEqual(
+				вход["blocks"],
+				[{"artifact": "summary", "key": "goal", "title": "Цель", "filled": False}],
+			)
 
 	def test_гостю_вход_закрыт(self):
 		frappe.set_user("Guest")
@@ -165,25 +161,25 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 
 	def test_по_курсу_ведёт_в_первый_незакрытый_урок(self):
+		"""Пройденный курс ведёт в первый урок — для повтора."""
 		курс, (первый, второй) = self.курс_из_двух_уроков()
 		self.пройти(первый)
 		frappe.set_user(self.ученик)
 
-		вход = public.lesson_entry(course=курс)["data"]
+		with self.subTest("первый незакрытый"):
+			вход = public.lesson_entry(course=курс)["data"]
 
-		self.assertEqual(вход["lesson"], второй)
-		self.assertIn(quote(второй, safe=""), вход["study"]["url"])
+			self.assertEqual(вход["lesson"], второй)
+			self.assertIn(quote(второй, safe=""), вход["study"]["url"])
 
-	def test_пройденный_курс_ведёт_в_первый_урок_для_повтора(self):
-		курс, (первый, второй) = self.курс_из_двух_уроков()
-		self.пройти(первый)
+		frappe.set_user("Administrator")
 		self.пройти(второй)
 		frappe.set_user(self.ученик)
+		with self.subTest("пройденный курс — первый урок для повтора"):
+			вход = public.lesson_entry(course=курс)["data"]
 
-		вход = public.lesson_entry(course=курс)["data"]
-
-		self.assertEqual(вход["lesson"], первый)
-		self.assertTrue(вход["completed"])
+			self.assertEqual(вход["lesson"], первый)
+			self.assertTrue(вход["completed"])
 
 	def test_курс_без_уроков_и_пустой_вызов_отказываются(self):
 		for параметры in ({"lesson": "нет-такого-урока"}, {"course": "нет-такого-курса"}, {}):

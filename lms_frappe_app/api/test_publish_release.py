@@ -47,21 +47,22 @@ class IntegrationTestPublishRelease(IntegrationTestCase):
 					authoring.publish_release(release=пример_релиза(self.ключ))
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
 
-	def test_строка_json_то_же_что_объект(self):
-		frappe.set_user(self.куратор)
-		authoring.publish_release(release=пример_релиза(self.ключ))
-
-		ответ = authoring.publish_release(release=json.dumps(пример_релиза(self.ключ), ensure_ascii=False))
-
-		self.assertTrue(ответ["data"]["unchanged"], ответ)
-
-	def test_пустой_course_ищет_по_ключу(self):
+	def test_повторная_публикация_того_же_релиза(self):
+		"""Строка JSON — то же, что объект; пустой `course` ищет курс по ключу."""
 		frappe.set_user(self.куратор)
 		первый = authoring.publish_release(release=пример_релиза(self.ключ))["data"]
 
-		ответ = authoring.publish_release(release=пример_релиза(self.ключ), course="")
+		with self.subTest("строка JSON"):
+			ответ = authoring.publish_release(
+				release=json.dumps(пример_релиза(self.ключ), ensure_ascii=False)
+			)
 
-		self.assertEqual(ответ["data"]["course"], первый["course"])
+			self.assertTrue(ответ["data"]["unchanged"], ответ)
+
+		with self.subTest("пустой course"):
+			ответ = authoring.publish_release(release=пример_релиза(self.ключ), course="")
+
+			self.assertEqual(ответ["data"]["course"], первый["course"])
 
 	def test_знак_не_для_имени_в_названии_отказ_до_записи(self):
 		"""`<` и `>` в названии главы или урока — отказ по контракту до первой
@@ -135,10 +136,22 @@ class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
 		return релиз
 
 	def test_без_списка_новый_курс_получает_публикатора(self):
-		данные = self.опубликовать()["data"]
+		"""Список применяется и к неизменному релизу: инструкторы не входят в
+		дайджест — смена кураторов без новой версии."""
+		with self.subTest("без списка — публикатор"):
+			данные = self.опубликовать()["data"]
+			курс = данные["course"]
 
-		self.assertEqual(данные["instructors"], [self.публикатор])
-		self.assertEqual(self.инструкторы(данные["course"]), [self.публикатор])
+			self.assertEqual(данные["instructors"], [self.публикатор])
+			self.assertEqual(self.инструкторы(курс), [self.публикатор])
+
+		with self.subTest("список к неизменному релизу"):
+			данные = self.опубликовать(instructors=[self.первый])["data"]
+
+			self.assertTrue(данные["unchanged"])
+			self.assertEqual((данные["version"], данные["instructors"]), (1, [self.первый]))
+			self.assertEqual(self.инструкторы(курс), [self.первый])
+			self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
 
 	def test_список_заменяет_набор_и_публикатор_не_добавляется(self):
 		данные = self.опубликовать(instructors=[self.первый, self.второй.upper()])["data"]
@@ -150,42 +163,40 @@ class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
 
 		self.assertEqual((данные["version"], данные["instructors"]), (2, [self.второй]))
 
-	def test_без_списка_инструкторы_не_трогаются(self):
+	def test_отказы_до_первой_записи_и_без_списка(self):
+		"""Отказ по списку — до первой записи, и у нового курса, и у прежнего.
+		Отключённая учётная запись курс не ведёт — даже с авторской ролью. Без
+		списка инструкторы курса не трогаются."""
+		отключённый = создать_куратора(f"rel-off-{frappe.generate_hash(length=6)}@example.com")
+		frappe.db.set_value("User", отключённый, "enabled", 0)
 		курс = self.опубликовать(instructors=[self.первый])["data"]["course"]
-
-		данные = self.опубликовать(self.другой_релиз())["data"]
-
-		self.assertEqual((данные["version"], данные["instructors"]), (2, [self.первый]))
-		self.assertEqual(self.инструкторы(курс), [self.первый])
-
-	def test_список_применяется_к_неизменному_релизу(self):
-		"""Инструкторы не входят в дайджест: смена кураторов — без новой версии."""
-		курс = self.опубликовать()["data"]["course"]
-
-		данные = self.опубликовать(instructors=[self.первый])["data"]
-
-		self.assertTrue(данные["unchanged"])
-		self.assertEqual((данные["version"], данные["instructors"]), (1, [self.первый]))
-		self.assertEqual(self.инструкторы(курс), [self.первый])
-		self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
-
-	def test_отказы_до_первой_записи(self):
-		курс = self.опубликовать(instructors=[self.первый])["data"]["course"]
-		for инструкторы, код, лишние in (
-			([], "instructors_empty", None),
-			("[]", "instructors_empty", None),
-			([self.первый, "nobody-here@example.com"], "instructor_not_found", ["nobody-here@example.com"]),
-			([self.второй, self.ученик], "instructor_not_author", [self.ученик]),
+		for что, инструкторы, код, подробности in (
+			("пустой список", [], "instructors_empty", {}),
+			("пустой список строкой", "[]", "instructors_empty", {}),
+			(
+				"нет такого",
+				[self.первый, "nobody-here@example.com"],
+				"instructor_not_found",
+				{"users": ["nobody-here@example.com"]},
+			),
+			("не автор", [self.второй, self.ученик], "instructor_not_author", {"users": [self.ученик]}),
+			("отключённый", [self.первый, отключённый], "instructor_not_found", {"users": [отключённый]}),
 		):
 			for релиз in (self.другой_релиз(), пример_релиза(f"new-{self.ключ}")):
-				ответ = self.опубликовать(релиз, instructors=инструкторы)
+				with self.subTest(что, ключ=релиз["course"]["key"]):
+					ответ = self.опубликовать(релиз, instructors=инструкторы)
 
-				self.assertEqual(ответ.get("error", {}).get("code"), код, (инструкторы, ответ))
-				if лишние:
-					self.assertEqual(ответ["error"]["users"], лишние)
+					self.assertEqual(ответ.get("error", {}).get("code"), код, (инструкторы, ответ))
+					self.assertEqual({к: ответ["error"][к] for к in подробности}, подробности)
 		self.assertEqual(self.инструкторы(курс), [self.первый])
 		self.assertEqual(frappe.db.count("Agent Course Release", {"course": курс}), 1)
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": f"new-{self.ключ}"}))
+
+		with self.subTest("без списка инструкторы не трогаются"):
+			данные = self.опубликовать(self.другой_релиз())["data"]
+
+			self.assertEqual((данные["version"], данные["instructors"]), (2, [self.первый]))
+			self.assertEqual(self.инструкторы(курс), [self.первый])
 
 	def test_другой_куратор_переопубликует_курс(self):
 		"""Уроки курса, опубликованного одним куратором, правит релиз другого:
@@ -218,17 +229,6 @@ class IntegrationTestИнструкторыРелиза(IntegrationTestCase):
 			frappe.db.get_value("Course Lesson", {"course": курс, "title": "Урок первый, второе издание"}, "owner"),
 			"Administrator",
 		)
-
-	def test_отключённый_пользователь_не_инструктор(self):
-		"""Отключённая учётная запись курс не ведёт — даже с авторской ролью."""
-		отключённый = создать_куратора(f"rel-off-{frappe.generate_hash(length=6)}@example.com")
-		frappe.db.set_value("User", отключённый, "enabled", 0)
-
-		ответ = self.опубликовать(instructors=[self.первый, отключённый])
-
-		self.assertEqual(ответ.get("error", {}).get("code"), "instructor_not_found", ответ)
-		self.assertEqual(ответ["error"]["users"], [отключённый])
-		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
 
 
 class IntegrationTestКоммитРелиза(IntegrationTestCase):
@@ -265,41 +265,22 @@ class IntegrationTestКоммитРелиза(IntegrationTestCase):
 		]
 
 	def test_коммит_пишется_в_новую_версию(self):
+		"""Тот же релиз из другого коммита — `unchanged`: коммит в дайджест не
+		входит, а запись версии неизменяема. Неверный коммит — отказ до первой
+		записи, и у нового курса, и у прежнего."""
 		данные = self.опубликовать(commit=self.КОММИТ)["data"]
+		курс = данные["course"]
 
 		self.assertEqual((данные["version"], данные["commit"]), (1, self.КОММИТ))
 
-		данные = self.опубликовать(self.другой_релиз(), commit=self.ДРУГОЙ)["data"]
-
-		self.assertEqual((данные["version"], данные["commit"]), (2, self.ДРУГОЙ))
-		self.assertEqual(self.коммиты(данные["course"]), [(1, self.КОММИТ), (2, self.ДРУГОЙ)])
-		история = authoring.course_releases(course=данные["course"])["data"]["releases"]
-		self.assertEqual([(р["version"], р["commit"]) for р in история], [(2, self.ДРУГОЙ), (1, self.КОММИТ)])
-
-	def test_на_unchanged_коммит_первой_публикации(self):
-		"""Тот же релиз из другого коммита — `unchanged`: коммит в дайджест не
-		входит, а запись версии неизменяема."""
-		курс = self.опубликовать(commit=self.КОММИТ)["data"]["course"]
-
 		for коммит in (self.ДРУГОЙ, None):
-			with self.subTest(коммит=коммит):
+			with self.subTest("unchanged", коммит=коммит):
 				данные = self.опубликовать(commit=коммит)["data"]
 
 				self.assertTrue(данные["unchanged"])
 				self.assertEqual((данные["version"], данные["commit"]), (1, self.КОММИТ))
 		self.assertEqual(self.коммиты(курс), [(1, self.КОММИТ)])
 
-	def test_без_параметра_коммита_нет(self):
-		данные = self.опубликовать()["data"]
-
-		self.assertIn("commit", данные)
-		self.assertIsNone(данные["commit"])
-		self.assertEqual(self.коммиты(данные["course"]), [(1, None)])
-		[версия] = authoring.course_releases(course=данные["course"])["data"]["releases"]
-		self.assertIsNone(версия["commit"])
-
-	def test_неверный_коммит_отказ_до_первой_записи(self):
-		курс = self.опубликовать(commit=self.КОММИТ)["data"]["course"]
 		for коммит in (
 			"",
 			self.КОММИТ[:7],
@@ -314,7 +295,7 @@ class IntegrationTestКоммитРелиза(IntegrationTestCase):
 		):
 			for релиз in (self.другой_релиз(), пример_релиза(f"new-{self.ключ}")):
 				with (
-					self.subTest(коммит=коммит, ключ=релиз["course"]["key"]),
+					self.subTest("неверный", коммит=коммит, ключ=релиз["course"]["key"]),
 					mock.patch.object(service, "_разобрать") as разобрать,
 				):
 					ответ = self.опубликовать(релиз, commit=коммит)
@@ -323,6 +304,22 @@ class IntegrationTestКоммитРелиза(IntegrationTestCase):
 					разобрать.assert_not_called()
 		self.assertEqual(self.коммиты(курс), [(1, self.КОММИТ)])
 		self.assertFalse(frappe.db.exists("LMS Course", {"course_key": f"new-{self.ключ}"}))
+
+		данные = self.опубликовать(self.другой_релиз(), commit=self.ДРУГОЙ)["data"]
+
+		self.assertEqual((данные["version"], данные["commit"]), (2, self.ДРУГОЙ))
+		self.assertEqual(self.коммиты(данные["course"]), [(1, self.КОММИТ), (2, self.ДРУГОЙ)])
+		история = authoring.course_releases(course=данные["course"])["data"]["releases"]
+		self.assertEqual([(р["version"], р["commit"]) for р in история], [(2, self.ДРУГОЙ), (1, self.КОММИТ)])
+
+	def test_без_параметра_коммита_нет(self):
+		данные = self.опубликовать()["data"]
+
+		self.assertIn("commit", данные)
+		self.assertIsNone(данные["commit"])
+		self.assertEqual(self.коммиты(данные["course"]), [(1, None)])
+		[версия] = authoring.course_releases(course=данные["course"])["data"]["releases"]
+		self.assertIsNone(версия["commit"])
 
 
 class IntegrationTestКурсыИОткрытие(IntegrationTestCase):

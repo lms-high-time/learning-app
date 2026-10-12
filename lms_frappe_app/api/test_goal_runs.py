@@ -28,8 +28,10 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 
 	def опубликовать(self, релиз: dict) -> str:
 		frappe.set_user(self.автор)
-		ответ = authoring.publish_release(release=релиз)
-		frappe.set_user("Administrator")
+		try:
+			ответ = authoring.publish_release(release=релиз)
+		finally:
+			frappe.set_user("Administrator")
 		self.assertTrue(ответ["ok"], ответ)
 		return ответ["data"]["course"]
 
@@ -121,7 +123,10 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 			},
 		)
 
-	def test_модератор_и_администратор_видят_прохождения_чужого_курса(self):
+	def test_доступ_к_прохождениям_по_роли(self):
+		"""Курс ведут его инструкторы: Course Creator, который курс не ведёт,
+		прохождений не видит, как и сам ученик. Модератор и администратор видят
+		прохождения чужого курса."""
 		self.пройти(self.ученик, "l-1", ("term:T1", "done", "Назвал термин сам"))
 		frappe.set_user("Administrator")
 		for роль in ("Moderator", "System Manager"):
@@ -130,10 +135,7 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 				[run] = self.прохождения(кто)["runs"]
 				self.assertEqual(run["goals"][0]["evidence"], "Назвал термин сам")
 
-	def test_чужому_куратору_и_ученику_403_гостю_401(self):
-		"""Курс ведут его инструкторы: Course Creator, который курс не ведёт,
-		прохождений не видит, как и сам ученик."""
-		self.пройти(self.ученик, "l-1", ("term:T1", "done", "Назвал термин сам"))
+		frappe.set_user("Administrator")
 		чужой = создать_куратора(f"goal-runs-other-{self.суффикс}@example.com")
 		for кто, ошибка in (
 			(чужой, frappe.PermissionError),
@@ -161,7 +163,8 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 
 	# --- отбор ---
 
-	def test_архивные_прохождения_не_отдаются(self):
+	def test_отбор_архивных_и_по_ключу_урока(self):
+		"""Архивное прохождение не отдаётся; `lesson` отбирает прохождения урока."""
 		self.пройти(self.ученик, "l-1", ("term:T1", "done", "Назвал термин сам"))
 		архивное, _ = self.пройти(self.второй, "l-1", ("term:T1", "done", "Тоже назвал"))
 		frappe.db.set_value(
@@ -169,28 +172,27 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 			архивное,
 			{"student": None, "archived_student": self.второй, "archived_at": now_datetime()},
 		)
+		with self.subTest("архивные не отдаются"):
+			self.assertEqual([r["student"]["id"] for r in self.прохождения()["runs"]], [self.ученик])
 
-		self.assertEqual([r["student"]["id"] for r in self.прохождения()["runs"]], [self.ученик])
-
-	def test_фильтр_по_ключу_урока(self):
-		self.пройти(self.ученик, "l-1", ("term:T1", "done", "Назвал термин сам"))
 		self.пройти(self.ученик, "l-2", ("term:T1", "done", "Назвал термин сам"))
 		self.пройти(self.второй, "l-2")
-
-		второй_урок = self.прохождения(lesson="l-2")
-		self.assertEqual(второй_урок["lesson"], "l-2")
-		self.assertEqual(
-			sorted((r["student"]["id"], r["lesson"]["key"]) for r in второй_урок["runs"]),
-			sorted([(self.ученик, "l-2"), (self.второй, "l-2")]),
-		)
-		self.assertEqual({r["lesson"]["title"] for r in второй_урок["runs"]}, {"Урок второй"})
-		self.assertEqual(self.прохождения(lesson="нет-такого")["runs"], [])
-		self.assertEqual(len(self.прохождения(lesson="")["runs"]), 3)
+		with self.subTest("фильтр по ключу урока"):
+			второй_урок = self.прохождения(lesson="l-2")
+			self.assertEqual(второй_урок["lesson"], "l-2")
+			self.assertEqual(
+				sorted((r["student"]["id"], r["lesson"]["key"]) for r in второй_урок["runs"]),
+				sorted([(self.ученик, "l-2"), (self.второй, "l-2")]),
+			)
+			self.assertEqual({r["lesson"]["title"] for r in второй_урок["runs"]}, {"Урок второй"})
+			self.assertEqual(self.прохождения(lesson="нет-такого")["runs"], [])
+			self.assertEqual(len(self.прохождения(lesson="")["runs"]), 3)
 
 	# --- страницы ---
 
 	def test_порядок_и_страницы(self):
-		"""Свежее начало сверху, не начатые — в конце; страницы не перекрываются."""
+		"""Свежее начало сверху, не начатые — в конце; страницы не перекрываются;
+		`limit` ограничен пределом сервера."""
 		начатые = []
 		for ученик in (self.ученик, self.второй):
 			for ключ in ("l-1", "l-2"):
@@ -205,47 +207,47 @@ class IntegrationTestGoalRuns(IntegrationTestCase):
 		def ключи(данные):
 			return [(r["student"]["id"], r["lesson"]["key"]) for r in данные["runs"]]
 
-		self.assertEqual(ключи(self.прохождения()), ожидаемый)
-		self.assertIsNone(self.прохождения()["runs"][-1]["started_at"])
-		страницы = [self.прохождения(start=начало, limit=2) for начало in (0, 2, 4)]
-		self.assertEqual([ключ for с in страницы for ключ in ключи(с)], ожидаемый)
-		self.assertEqual([с["has_more"] for с in страницы], [True, True, False])
-		# Параметры строкой — как их отдаёт Frappe из запроса.
-		self.assertEqual(ключи(self.прохождения(start="1", limit="1")), ожидаемый[1:2])
-		self.assertEqual(self.прохождения(start=5)["runs"], [])
+		with self.subTest("порядок и страницы"):
+			self.assertEqual(ключи(self.прохождения()), ожидаемый)
+			self.assertIsNone(self.прохождения()["runs"][-1]["started_at"])
+			страницы = [self.прохождения(start=начало, limit=2) for начало in (0, 2, 4)]
+			self.assertEqual([ключ for с in страницы for ключ in ключи(с)], ожидаемый)
+			self.assertEqual([с["has_more"] for с in страницы], [True, True, False])
+			# Параметры строкой — как их отдаёт Frappe из запроса.
+			self.assertEqual(ключи(self.прохождения(start="1", limit="1")), ожидаемый[1:2])
+			self.assertEqual(self.прохождения(start=5)["runs"], [])
 
-	def test_limit_ограничен_пределом_сервера(self):
-		for ученик in (self.ученик, self.второй):
-			self.пройти(ученик, "l-1")
-		self.assertEqual(self.прохождения(limit=1000)["limit"], authoring.ПРОХОЖДЕНИЙ_ЗА_РАЗ)
+		with self.subTest("limit ограничен пределом сервера"):
+			self.assertEqual(self.прохождения(limit=1000)["limit"], authoring.ПРОХОЖДЕНИЙ_ЗА_РАЗ)
 		with patch.object(authoring, "ПРОХОЖДЕНИЙ_ЗА_РАЗ", 1):
 			for limit in (None, 5):
 				with self.subTest(limit=limit):
 					данные = self.прохождения(limit=limit)
 					self.assertEqual((len(данные["runs"]), данные["limit"], данные["has_more"]), (1, 1, True))
 
-	def test_неверная_страница_отказ(self):
-		for аргументы, поле in (
-			({"limit": 0}, "limit"),
-			({"limit": "-1"}, "limit"),
-			({"limit": "десять"}, "limit"),
-			({"limit": 2.5}, "limit"),
-			({"start": -1}, "start"),
-			({"start": "1a"}, "start"),
-		):
-			with self.subTest(**{k: str(v) for k, v in аргументы.items()}):
-				код, ошибка = self.код(course=self.курс, **аргументы)
-				self.assertEqual((код, ошибка["where"]), ("invalid_page", поле))
-
-	def test_курс_без_релиза_и_неизвестный_курс(self):
+	def test_отказы(self):
+		"""Неверная страница, курс без релиза, неизвестный курс."""
 		frappe.set_user("Administrator")
 		анонс = frappe.get_doc("LMS Course", создать_курс(f"Анонс {self.суффикс}"))
 		анонс.append("instructors", {"instructor": self.автор})
 		анонс.save(ignore_permissions=True)
 		анонс = анонс.name
 
-		self.assertEqual(self.код(course=анонс)[0], "course_not_released")
-		self.assertEqual(self.код(course="такого-курса-нет")[0], "course_not_found")
+		отказы = [
+			({"limit": 0}, "invalid_page", {"where": "limit"}),
+			({"limit": "-1"}, "invalid_page", {"where": "limit"}),
+			({"limit": "десять"}, "invalid_page", {"where": "limit"}),
+			({"limit": 2.5}, "invalid_page", {"where": "limit"}),
+			({"start": -1}, "invalid_page", {"where": "start"}),
+			({"start": "1a"}, "invalid_page", {"where": "start"}),
+			({"course": анонс}, "course_not_released", {}),
+			({"course": "такого-курса-нет"}, "course_not_found", {}),
+		]
+		for аргументы, код, подробности in отказы:
+			with self.subTest(**{k: str(v) for k, v in аргументы.items()}):
+				получен, ошибка = self.код(**{"course": self.курс, **аргументы})
+				self.assertEqual(получен, код)
+				self.assertEqual({к: ошибка[к] for к in подробности}, подробности)
 
 	# --- релизы ---
 

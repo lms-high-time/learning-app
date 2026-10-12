@@ -61,22 +61,51 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		frappe.set_user(self.менеджер)
 		return manager.org_report(**аргументы)["data"]["rows"]
 
-	def test_ученики_чужой_организации_в_отчёт_не_попадают(self):
-		строки = self.отчёт()
-		self.assertIn(self.ученик_а, {с["user"] for с in строки})
-		self.assertNotIn(self.ученик_б, {с["user"] for с in строки})
+	def строка_ученика_а(self) -> dict:
+		return next(с for с in self.отчёт() if с["user"] == self.ученик_а)
 
-	def test_отчёт_несёт_дедлайн_статус_и_долю_пройденного(self):
-		строка = next(с for с in self.отчёт() if с["user"] == self.ученик_а)
+	def test_отчёт_организации(self):
+		"""Только своя организация: строка несёт дедлайн, статус, долю пройденного,
+		итог квиза и заполненность документа; фильтры по статусу и курсу."""
+		with self.subTest("ученики чужой организации в отчёт не попадают"):
+			строки = self.отчёт()
+			self.assertIn(self.ученик_а, {с["user"] for с in строки})
+			self.assertNotIn(self.ученик_б, {с["user"] for с in строки})
 
-		self.assertEqual(строка["status"], "not_started")
-		self.assertEqual(строка["progress"], 0.0)
-		self.assertEqual(str(строка["deadline"]), "2026-12-31")
-		self.assertTrue(строка["mandatory"])
-		self.assertFalse(строка["overdue"])
+		with self.subTest("дедлайн, статус и доля пройденного"):
+			строка = self.строка_ученика_а()
 
-	def test_отчёт_показывает_с_какой_попытки_сдан_урок(self):
-		"""Зачёт — за 100% без лимита: «сдан» не отличает понявшего от перебравшего (#353)."""
+			self.assertEqual(строка["status"], "not_started")
+			self.assertEqual(строка["progress"], 0.0)
+			self.assertEqual(str(строка["deadline"]), "2026-12-31")
+			self.assertTrue(строка["mandatory"])
+			self.assertFalse(строка["overdue"])
+
+		with self.subTest("курс без документа даёт нули"):
+			строка = self.строка_ученика_а()
+
+			self.assertEqual(строка["document"], {"blocks_total": 0, "blocks_filled": 0})
+
+		with self.subTest("фильтр по статусу"):
+			self.assertEqual(self.отчёт(status="completed"), [])
+			self.assertTrue(self.отчёт(status="not_started"))
+
+		with self.subTest("фильтр по курсу"):
+			self.assertTrue(self.отчёт(course=self.курс))
+			self.assertEqual(self.отчёт(course="несуществующий-курс"), [])
+
+		with self.subTest("менеджер без организаций видит пустой отчёт"):
+			# Роль сама по себе не открывает ничего — нужна связка с членством.
+			frappe.set_user("Administrator")
+			одиночка = создать_пользователя(
+				f"lone-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Organization Manager"
+			)
+
+			frappe.set_user(одиночка)
+
+			self.assertEqual(manager.org_report()["data"]["rows"], [])
+
+		frappe.set_user("Administrator")
 		занятие = создать_занятие(self.ученик_а, self.урок)
 		for номер, сдана in ((1, 0), (2, 1)):
 			frappe.get_doc(
@@ -91,13 +120,13 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 					"passed": сдана,
 				}
 			).insert(ignore_permissions=True)
+		with self.subTest("#353: с какой попытки сдан урок"):
+			# Зачёт — за 100% без лимита: «сдан» не отличает понявшего от перебравшего.
+			строка = self.строка_ученика_а()
 
-		строка = next(с for с in self.отчёт() if с["user"] == self.ученик_а)
+			self.assertEqual(строка["quiz"], {"passed": 1, "first_try": 0})
 
-		self.assertEqual(строка["quiz"], {"passed": 1, "first_try": 0})
-
-	def test_отчёт_показывает_заполненность_документа(self):
-		"""Урок засчитывает квиз — документ виден отдельно (learning-services#296)."""
+		frappe.set_user("Administrator")
 		frappe.get_doc(
 			{
 				"doctype": "Agent Course Artifact",
@@ -124,74 +153,78 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 				],
 			}
 		).insert(ignore_permissions=True)
+		with self.subTest("learning-services#296: заполненность документа"):
+			# Урок засчитывает квиз — документ виден отдельно.
+			строка = self.строка_ученика_а()
 
-		строка = next(с for с in self.отчёт() if с["user"] == self.ученик_а)
+			self.assertEqual(строка["document"], {"blocks_total": 2, "blocks_filled": 1})
 
-		self.assertEqual(строка["document"], {"blocks_total": 2, "blocks_filled": 1})
+	def test_подробности_ученика(self):
+		"""Отчёт про результат, а не про содержание диалога с агентом.
 
-	def test_курс_без_документа_даёт_нули(self):
-		строка = next(с for с in self.отчёт() if с["user"] == self.ученик_а)
-
-		self.assertEqual(строка["document"], {"blocks_total": 0, "blocks_filled": 0})
-
-	def test_фильтр_по_статусу_отсекает_остальных(self):
-		self.assertEqual(self.отчёт(status="completed"), [])
-		self.assertTrue(self.отчёт(status="not_started"))
-
-	def test_фильтр_по_курсу(self):
-		self.assertTrue(self.отчёт(course=self.курс))
-		self.assertEqual(self.отчёт(course="несуществующий-курс"), [])
-
-	def test_менеджер_без_организаций_видит_пустой_отчёт(self):
-		# Роль сама по себе не открывает ничего — нужна связка с членством.
-		одиночка = создать_пользователя(
-			f"lone-{frappe.generate_hash(length=6)}@example.com", "LMS Student", "Organization Manager"
-		)
-
-		frappe.set_user(одиночка)
-
-		self.assertEqual(manager.org_report()["data"]["rows"], [])
-
-	def test_подробности_ученика_без_текстов_ответов(self):
-		# Отчёт про результат, а не про содержание диалога с агентом.
+		Руководителю нужно знать, какие темы разобраны, а какие нет. Это тот же
+		учебный результат, что и зачёт, просто мельче: в отличие от заметок об
+		ученике, он про результат, а не про разговор. Покрытие — цели урока из
+		прохождения, без пунктов и свидетельств; у занятия курса без релиза его
+		нет. Попытка квиза — урок, номер, статус, доля, зачёт и время; ни
+		вопросов, ни ответов.
+		"""
 		занятие = создать_занятие(self.ученик_а, self.урок)
 		frappe.get_doc("Agent Learning Session", занятие).записать_событие(
 			"Directive Issued", "ученик спросил про вложенные циклы"
 		)
+		with self.subTest("без текстов ответов"):
+			frappe.set_user(self.менеджер)
+			данные = manager.student_detail(self.ученик_а)["data"]
 
-		frappe.set_user(self.менеджер)
-		данные = manager.student_detail(self.ученик_а)["data"]
+			self.assertEqual(данные["user"], self.ученик_а)
+			self.assertTrue(данные["sessions"])
+			self.assertNotIn("вложенные циклы", json.dumps(данные, ensure_ascii=False, default=str))
 
-		self.assertEqual(данные["user"], self.ученик_а)
-		self.assertTrue(данные["sessions"])
-		self.assertNotIn("вложенные циклы", json.dumps(данные, ensure_ascii=False, default=str))
-
-	def test_подробности_показывают_покрытие_целей(self):
-		"""Руководителю нужно знать, какие темы разобраны, а какие нет.
-
-		Это тот же учебный результат, что и зачёт, просто мельче: в отличие
-		от заметок об ученике, он про результат, а не про разговор. Покрытие —
-		цели урока из прохождения, без пунктов и свидетельств
-		(learning-services#506); у занятия курса без релиза его нет.
-		"""
+		frappe.set_user("Administrator")
 		курс, _ = курс_из_релиза()
 		frappe.get_doc(
 			{"doctype": "Course Allocation", "organization": self.компания_а, "course": курс}
 		).insert(ignore_permissions=True)
+		зачислить_на_курс(self.ученик_а, курс)
 		run = прохождения.прохождение(self.ученик_а, курс, "l-1")
 		занятие = создать_занятие(self.ученик_а, run.lesson, run=run.name)
 		прохождения.отметить(run.name, "term:T1", "done", "Свидетельство агента", занятие=занятие)
 		создать_занятие(self.ученик_а, self.урок)
+		with self.subTest("learning-services#506: покрытие целей"):
+			frappe.set_user(self.менеджер)
+			сессии = {с["course"]: с for с in manager.student_detail(self.ученик_а)["data"]["sessions"]}
 
-		frappe.set_user(self.менеджер)
-		сессии = {с["course"]: с for с in manager.student_detail(self.ученик_а)["data"]["sessions"]}
+			self.assertEqual(
+				сессии[курс]["objectives"],
+				[{"key": "l-1-D1", "text": "Цель урока «Урок первый»", "status": "touched"}],
+			)
+			self.assertEqual(сессии[self.курс]["objectives"], [])
+			self.assertNotIn("Свидетельство агента", json.dumps(сессии, ensure_ascii=False, default=str))
 
-		self.assertEqual(
-			сессии[курс]["objectives"],
-			[{"key": "l-1-D1", "text": "Цель урока «Урок первый»", "status": "touched"}],
-		)
-		self.assertEqual(сессии[self.курс]["objectives"], [])
-		self.assertNotIn("Свидетельство агента", json.dumps(сессии, ensure_ascii=False, default=str))
+		frappe.set_user("Administrator")
+		начало = release_quiz.начать(run, создать_занятие(self.ученик_а, run.lesson, run=run.name))
+		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "V1", "слова ученика")
+		with self.subTest("итог попытки квиза из релиза"):
+			frappe.set_user(self.менеджер)
+			данные = manager.student_detail(self.ученик_а)["data"]
+
+			[попытка] = данные["quiz_attempts"]
+			закончена = frappe.db.get_value("Agent Quiz Attempt", начало["attempt"], "finished_at")
+			self.assertEqual(
+				попытка,
+				{
+					"lesson": run.lesson,
+					"attempt": 1,
+					"status": "Passed",
+					"score": 1.0,
+					"passed": True,
+					"finished_at": закончена.isoformat(),
+				},
+			)
+			выдано = json.dumps(данные, ensure_ascii=False, default=str)
+			for закрытое in (начало["question"]["id"], "слова ученика", "V1", "Первый", "is_correct"):
+				self.assertNotIn(закрытое, выдано)
 
 	def test_подробности_по_снятому_уроку_без_индекса_его_релиза(self):
 		"""Цели урока, снятого из релиза, — с текстами последней версии, где он был,
@@ -219,37 +252,6 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 			сессии[курс]["objectives"],
 			[{"key": "l-2-D1", "text": "Цель урока «Урок второй»", "status": "touched"}],
 		)
-
-	def test_подробности_несут_итог_попытки_квиза_из_релиза(self):
-		"""Попытка — урок, номер, статус, доля, зачёт и время; ни вопросов, ни ответов."""
-		курс, _ = курс_из_релиза()
-		frappe.get_doc(
-			{"doctype": "Course Allocation", "organization": self.компания_а, "course": курс}
-		).insert(ignore_permissions=True)
-		зачислить_на_курс(self.ученик_а, курс)
-		run = прохождения.прохождение(self.ученик_а, курс, "l-1")
-		начало = release_quiz.начать(run, создать_занятие(self.ученик_а, run.lesson, run=run.name))
-		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "V1", "слова ученика")
-
-		frappe.set_user(self.менеджер)
-		данные = manager.student_detail(self.ученик_а)["data"]
-
-		[попытка] = данные["quiz_attempts"]
-		закончена = frappe.db.get_value("Agent Quiz Attempt", начало["attempt"], "finished_at")
-		self.assertEqual(
-			попытка,
-			{
-				"lesson": run.lesson,
-				"attempt": 1,
-				"status": "Passed",
-				"score": 1.0,
-				"passed": True,
-				"finished_at": закончена.isoformat(),
-			},
-		)
-		выдано = json.dumps(данные, ensure_ascii=False, default=str)
-		for закрытое in (начало["question"]["id"], "слова ученика", "V1", "Первый", "is_correct"):
-			self.assertNotIn(закрытое, выдано)
 
 
 class IntegrationTestManagerRole(IntegrationTestCase):

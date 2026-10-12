@@ -32,14 +32,8 @@ class IntegrationTestProfile(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		политика_по_умолчанию()
 		self.addCleanup(политика_по_умолчанию)
-		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"profile-{суффикс}@example.com")
-		self.другой = создать_ученика(f"profile-other-{суффикс}@example.com")
-		организация = создать_организацию(f"Профиль {суффикс}")
-		добавить_в_организацию(self.ученик, организация)
-		self.руководитель = создать_менеджера(f"profile-boss-{суффикс}@example.com", организация)
-		self.модератор = создать_куратора(f"profile-mod-{суффикс}@example.com", роль="Moderator")
-		self.админ = создать_куратора(f"profile-admin-{суффикс}@example.com", роль="System Manager")
+		self.суффикс = frappe.generate_hash(length=6)
+		self.ученик = создать_ученика(f"profile-{self.суффикс}@example.com")
 		frappe.set_user(self.ученик)
 
 	def факт(self, ключ: str, текст: str = "да") -> None:
@@ -50,23 +44,25 @@ class IntegrationTestProfile(IntegrationTestCase):
 
 	# --- раскладка ---
 
-	def test_пустой_профиль(self):
-		данные = student.my_profile()["data"]
+	def test_раскладка_по_блокам(self):
+		"""Пустой профиль — все ключи без текста; факт профиля — в своём блоке,
+		прочий — отдельно, курсовой — мимо профиля."""
+		with self.subTest("пустой профиль"):
+			данные = student.my_profile()["data"]
 
-		self.assertEqual([блок["id"] for блок in данные["blocks"]], [блок for блок, *_ in ПРОФИЛЬ])
-		факты = self.факты_по_ключам(данные)
-		self.assertEqual(set(факты), КЛЮЧИ_ПРОФИЛЯ)
-		self.assertTrue(all(ф["text"] is None and ф["updated"] is None for ф in факты.values()))
-		self.assertEqual(данные["other_facts"], [])
-		self.assertEqual(
-			(данные["filled"], данные["total"], данные["complete"]),
-			(0, len(КЛЮЧИ_ПРОФИЛЯ), False),
-		)
-		self.assertEqual(данные["user"], self.ученик)
-		self.assertIn("full_name", данные)
-		self.assertIn("user_image", данные)
+			self.assertEqual([блок["id"] for блок in данные["blocks"]], [блок for блок, *_ in ПРОФИЛЬ])
+			факты = self.факты_по_ключам(данные)
+			self.assertEqual(set(факты), КЛЮЧИ_ПРОФИЛЯ)
+			self.assertTrue(all(ф["text"] is None and ф["updated"] is None for ф in факты.values()))
+			self.assertEqual(данные["other_facts"], [])
+			self.assertEqual(
+				(данные["filled"], данные["total"], данные["complete"]),
+				(0, len(КЛЮЧИ_ПРОФИЛЯ), False),
+			)
+			self.assertEqual(данные["user"], self.ученик)
+			self.assertIn("full_name", данные)
+			self.assertIn("user_image", данные)
 
-	def test_факт_профиля_в_блоке_прочий_отдельно_курсовой_мимо(self):
 		self.факт("role", "Руководитель отдела продаж")
 		self.факт("language", "Python")
 		frappe.set_user("Administrator")
@@ -82,111 +78,123 @@ class IntegrationTestProfile(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.ученик)
+		with self.subTest("факт профиля в блоке, прочий отдельно, курсовой мимо"):
+			данные = student.my_profile()["data"]
 
-		данные = student.my_profile()["data"]
+			работа = next(блок for блок in данные["blocks"] if блок["id"] == "work")
+			роль = next(факт for факт in работа["facts"] if факт["key"] == "role")
+			self.assertEqual(роль["text"], "Руководитель отдела продаж")
+			self.assertTrue(роль["updated"])
+			self.assertTrue(роль["label"])
+			self.assertEqual([факт["key"] for факт in данные["other_facts"]], ["language"])
+			self.assertNotIn("label", данные["other_facts"][0])
+			self.assertEqual(данные["filled"], 1)
+			self.assertNotIn("Торопится", frappe.as_json(данные))
 
-		работа = next(блок for блок in данные["blocks"] if блок["id"] == "work")
-		роль = next(факт for факт in работа["facts"] if факт["key"] == "role")
-		self.assertEqual(роль["text"], "Руководитель отдела продаж")
-		self.assertTrue(роль["updated"])
-		self.assertTrue(роль["label"])
-		self.assertEqual([факт["key"] for факт in данные["other_facts"]], ["language"])
-		self.assertNotIn("label", данные["other_facts"][0])
-		self.assertEqual(данные["filled"], 1)
-		self.assertNotIn("Торопится", frappe.as_json(данные))
-
-	def test_подписи_переводятся(self):
+	def test_подписи_переводятся_только_в_профиле(self):
+		"""`ru.csv` действует на всю платформу: без контекста «Experience»
+		переименовал бы любую строку upstream с тем же текстом."""
 		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
 		frappe.local.lang = "ru"
 
-		данные = student.my_profile()["data"]
+		with self.subTest("подписи профиля"):
+			данные = student.my_profile()["data"]
 
-		self.assertEqual(данные["blocks"][0]["title"], "Контекст работы")
-		self.assertEqual(данные["blocks"][0]["facts"][0]["label"], "Роль")
-		уровень = next(блок for блок in данные["blocks"] if блок["id"] == "level")
-		self.assertEqual(уровень["facts"][0]["label"], "Опыт в теме")
+			self.assertEqual(данные["blocks"][0]["title"], "Контекст работы")
+			self.assertEqual(данные["blocks"][0]["facts"][0]["label"], "Роль")
+			уровень = next(блок for блок in данные["blocks"] if блок["id"] == "level")
+			self.assertEqual(уровень["facts"][0]["label"], "Опыт в теме")
 
-	def test_перевод_подписей_не_трогает_ту_же_строку_вне_профиля(self):
-		"""`ru.csv` действует на всю платформу: без контекста «Experience»
-		переименовал бы любую строку upstream с тем же текстом."""
-		self.assertNotEqual(_("Experience", lang="ru"), "Опыт в теме")
-		self.assertNotEqual(_("Learning style", lang="ru"), "Подача")
+		with self.subTest("та же строка вне профиля"):
+			self.assertNotEqual(_("Experience", lang="ru"), "Опыт в теме")
+			self.assertNotEqual(_("Learning style", lang="ru"), "Подача")
 
 	# --- сводка ---
 
-	def test_сводка_только_заполненность(self):
+	def test_сводка_и_заполненность(self):
+		"""Прочие факты заполненность не двигают; сводка — только заполненность;
+		профиль заполнен с порога."""
+		self.факт("language")
+		with self.subTest("прочие факты заполненность не двигают"):
+			self.assertEqual(student.my_profile(summary=1)["data"]["filled"], 0)
+
 		self.факт("role")
-
 		for summary in (1, "1", True):
-			данные = student.my_profile(summary=summary)["data"]
-			self.assertEqual(set(данные), ПОЛЯ_СВОДКИ, summary)
-			self.assertEqual((данные["filled"], данные["total"]), (1, len(КЛЮЧИ_ПРОФИЛЯ)))
+			with self.subTest("сводка только заполненность", summary=summary):
+				данные = student.my_profile(summary=summary)["data"]
+				self.assertEqual(set(данные), ПОЛЯ_СВОДКИ, summary)
+				self.assertEqual((данные["filled"], данные["total"]), (1, len(КЛЮЧИ_ПРОФИЛЯ)))
 
-	def test_профиль_заполнен_с_порога(self):
 		ключи = [ключ for _блок, _имя, поля in ПРОФИЛЬ for ключ, _подпись in поля]
 		for ключ in ключи[: ПОРОГ_ЗАПОЛНЕННОСТИ - 1]:
 			self.факт(ключ)
-		self.assertFalse(student.my_profile(summary=1)["data"]["complete"])
+		with self.subTest("профиль заполнен с порога"):
+			self.assertFalse(student.my_profile(summary=1)["data"]["complete"])
 
-		self.факт(ключи[ПОРОГ_ЗАПОЛНЕННОСТИ - 1])
+			self.факт(ключи[ПОРОГ_ЗАПОЛНЕННОСТИ - 1])
 
-		self.assertTrue(student.my_profile(summary=1)["data"]["complete"])
-		self.assertTrue(student.my_profile()["data"]["complete"])
-
-	def test_прочие_факты_заполненность_не_двигают(self):
-		self.факт("language")
-
-		self.assertEqual(student.my_profile(summary=1)["data"]["filled"], 0)
+			self.assertTrue(student.my_profile(summary=1)["data"]["complete"])
+			self.assertTrue(student.my_profile()["data"]["complete"])
 
 	# --- адрес интервью ---
 
 	def test_адрес_интервью_у_своего_профиля(self):
-		for данные in (student.my_profile()["data"], student.my_profile(summary=1)["data"]):
-			self.assertTrue(данные["interview_url"].endswith("/chat?mode=profile"), данные)
+		"""Без сервиса агента адреса интервью нет."""
+		with self.subTest("сервис агента задан"):
+			for данные in (student.my_profile()["data"], student.my_profile(summary=1)["data"]):
+				self.assertTrue(данные["interview_url"].endswith("/chat?mode=profile"), данные)
 
-	def test_без_сервиса_агента_адреса_интервью_нет(self):
 		frappe.set_user("Administrator")
 		frappe.db.set_single_value("Agent Learning Settings", "agent_service_url", "")
 		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
 		frappe.set_user(self.ученик)
-
-		self.assertIsNone(student.my_profile()["data"]["interview_url"])
-		self.assertIsNone(student.my_profile(summary=1)["data"]["interview_url"])
+		with self.subTest("без сервиса агента"):
+			self.assertIsNone(student.my_profile()["data"]["interview_url"])
+			self.assertIsNone(student.my_profile(summary=1)["data"]["interview_url"])
 
 	# --- чужой профиль ---
 
-	def test_чужой_профиль_закрыт(self):
+	def test_чужой_профиль(self):
 		"""Другому ученику, руководителю организации ученика и автору курсов —
-		отказ: заметки агента им не видны, и профиль эту границу не сдвигает."""
+		отказ: заметки агента им не видны, и профиль эту границу не сдвигает.
+		Несуществующий пользователь неотличим от чужого — иначе отказ
+		подтверждал бы, есть ли такой логин на платформе. Платформа видит чужой
+		профиль без адреса интервью, а о несуществующем пользователе отвечает
+		прямо."""
 		self.факт("role", "Руководитель отдела продаж")
-		for кто in (self.другой, self.руководитель, self.модератор):
+		frappe.set_user("Administrator")
+		другой = создать_ученика(f"profile-other-{self.суффикс}@example.com")
+		организация = создать_организацию(f"Профиль {self.суффикс}")
+		добавить_в_организацию(self.ученик, организация)
+		руководитель = создать_менеджера(f"profile-boss-{self.суффикс}@example.com", организация)
+		модератор = создать_куратора(f"profile-mod-{self.суффикс}@example.com", роль="Moderator")
+		админ = создать_куратора(f"profile-admin-{self.суффикс}@example.com", роль="System Manager")
+
+		for кто in (другой, руководитель, модератор):
 			frappe.set_user(кто)
 			for summary in (None, 1):
-				ответ = student.my_profile(user=self.ученик, summary=summary)
-				self.assertFalse(ответ["ok"], кто)
-				self.assertEqual(ответ["error"]["code"], student.ЧУЖОЙ_ПРОФИЛЬ, кто)
-				self.assertNotIn("Руководитель отдела продаж", frappe.as_json(ответ))
+				with self.subTest("чужой профиль закрыт", кто=кто, summary=summary):
+					ответ = student.my_profile(user=self.ученик, summary=summary)
+					self.assertFalse(ответ["ok"], кто)
+					self.assertEqual(ответ["error"]["code"], student.ЧУЖОЙ_ПРОФИЛЬ, кто)
+					self.assertNotIn("Руководитель отдела продаж", frappe.as_json(ответ))
 
-	def test_несуществующий_пользователь_неотличим_от_чужого(self):
-		"""Иначе отказ подтверждал бы, есть ли такой логин на платформе."""
-		ответ = student.my_profile(user="nobody-here@example.com")
+		with self.subTest("несуществующий пользователь неотличим от чужого"):
+			frappe.set_user(self.ученик)
+			ответ = student.my_profile(user="nobody-here@example.com")
 
-		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЙ_ПРОФИЛЬ)
+			self.assertEqual(ответ["error"]["code"], student.ЧУЖОЙ_ПРОФИЛЬ)
 
-	def test_платформа_видит_чужой_профиль_без_адреса_интервью(self):
-		self.факт("role", "Руководитель отдела продаж")
-		frappe.set_user(self.админ)
+		frappe.set_user(админ)
+		with self.subTest("платформа видит чужой профиль без адреса интервью"):
+			данные = student.my_profile(user=self.ученик)["data"]
 
-		данные = student.my_profile(user=self.ученик)["data"]
+			self.assertEqual(данные["user"], self.ученик)
+			self.assertEqual(self.факты_по_ключам(данные)["role"]["text"], "Руководитель отдела продаж")
+			self.assertIsNone(данные["interview_url"])
+			self.assertIsNone(student.my_profile(user=self.ученик, summary=1)["data"]["interview_url"])
 
-		self.assertEqual(данные["user"], self.ученик)
-		self.assertEqual(self.факты_по_ключам(данные)["role"]["text"], "Руководитель отдела продаж")
-		self.assertIsNone(данные["interview_url"])
-		self.assertIsNone(student.my_profile(user=self.ученик, summary=1)["data"]["interview_url"])
+		with self.subTest("платформе несуществующий пользователь отвечает прямо"):
+			ответ = student.my_profile(user="nobody-here@example.com")
 
-	def test_платформе_несуществующий_пользователь_отвечает_прямо(self):
-		frappe.set_user(self.админ)
-
-		ответ = student.my_profile(user="nobody-here@example.com")
-
-		self.assertEqual(ответ["error"]["code"], student.ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН)
+			self.assertEqual(ответ["error"]["code"], student.ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН)
