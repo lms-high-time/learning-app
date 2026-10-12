@@ -3,6 +3,7 @@
 
 """Вход по почте с паролем рядом со входом через Google (learning-services#460)."""
 
+from contextlib import contextmanager, nullcontext
 from unittest.mock import patch
 
 import frappe
@@ -49,114 +50,125 @@ def ключ(пользователь: str) -> str:
 class IntegrationTestResetKey(IntegrationTestCase):
 	"""Состояние ключа сброса: страница пароля решает по нему, что показать."""
 
-	def test_просроченный_ключ_устарел(self):
-		пользователь = ученик()
-		свой = ключ(пользователь)
-		frappe.db.set_value(
-			"User", пользователь, "last_reset_password_key_generated_on", add_to_date(now_datetime(), days=-1)
-		)
+	def test_состояние_ключа(self):
+		"""Срок ключа и его следы в записи пользователя. Ключ без даты выдачи
+		устарел: без даты срок не проверить, а Frappe на таком ключе падает с
+		500. Frappe очищает ключ после смены пароля: использованный неотличим от
+		опечатки. Каждый случай — у своего пользователя."""
+		выдан = "last_reset_password_key_generated_on"
+		случаи = {
+			"просроченный ключ устарел": (выдан, add_to_date(now_datetime(), days=-1), 3600, КЛЮЧ_УСТАРЕЛ),
+			"без срока ключ не стареет": (выдан, add_to_date(now_datetime(), days=-30), 0, КЛЮЧ_ДЕЙСТВУЕТ),
+			"ключ без даты выдачи устарел": (выдан, None, 3600, КЛЮЧ_УСТАРЕЛ),
+			"использованный ключ не найден": ("reset_password_key", "", None, КЛЮЧ_НЕ_НАЙДЕН),
+		}
+		for что, (поле, значение, срок, состояние) in случаи.items():
+			with self.subTest(что):
+				пользователь = ученик()
+				свой = ключ(пользователь)
+				frappe.db.set_value("User", пользователь, поле, значение)
 
-		with со_сроком(3600):
-			self.assertEqual(состояние_ключа(свой), КЛЮЧ_УСТАРЕЛ)
+				with со_сроком(срок) if срок is not None else nullcontext():
+					self.assertEqual(состояние_ключа(свой), состояние)
 
-	def test_без_срока_ключ_не_стареет(self):
-		пользователь = ученик()
-		свой = ключ(пользователь)
-		frappe.db.set_value(
-			"User", пользователь, "last_reset_password_key_generated_on", add_to_date(now_datetime(), days=-30)
-		)
-
-		with со_сроком(0):
-			self.assertEqual(состояние_ключа(свой), КЛЮЧ_ДЕЙСТВУЕТ)
-
-	def test_ключ_без_даты_выдачи_устарел(self):
-		"""Без даты срок не проверить; Frappe на таком ключе падает с 500."""
-		пользователь = ученик()
-		свой = ключ(пользователь)
-		frappe.db.set_value("User", пользователь, "last_reset_password_key_generated_on", None)
-
-		with со_сроком(3600):
-			self.assertEqual(состояние_ключа(свой), КЛЮЧ_УСТАРЕЛ)
-
-	def test_использованный_и_выдуманный_ключ_не_найдены(self):
-		"""Frappe очищает ключ после смены пароля: использованный неотличим от опечатки."""
-		пользователь = ученик()
-		свой = ключ(пользователь)
-		frappe.db.set_value("User", пользователь, "reset_password_key", "")
-
-		self.assertEqual(состояние_ключа(свой), КЛЮЧ_НЕ_НАЙДЕН)
-		self.assertEqual(состояние_ключа("выдуманный"), КЛЮЧ_НЕ_НАЙДЕН)
-		self.assertEqual(состояние_ключа(""), КЛЮЧ_НЕ_НАЙДЕН)
+		with self.subTest("выдуманный и пустой ключ не найдены"):
+			self.assertEqual(состояние_ключа("выдуманный"), КЛЮЧ_НЕ_НАЙДЕН)
+			self.assertEqual(состояние_ключа(""), КЛЮЧ_НЕ_НАЙДЕН)
 
 
 НОВЫЙ_ПАРОЛЬ = "Новый-пароль-460!"
 
 
+def менявший_пароль() -> tuple[str, str]:
+	"""(ключ, пользователь): пароль уже менялся — дата смены есть."""
+	пользователь = ученик()
+	frappe.db.set_value("User", пользователь, "last_password_reset_date", "2026-01-01")
+	return ключ(пользователь), пользователь
+
+
+def без_пароля() -> tuple[str, str]:
+	"""(ключ, пользователь): после регистрации или входа через Google человек
+	пароля не менял."""
+	пользователь = ученик()
+	return ключ(пользователь), пользователь
+
+
+def с_просроченным_ключом() -> tuple[str, str]:
+	"""(ключ, пользователь): пароль менялся, ключ выдан сутки назад."""
+	свой, пользователь = менявший_пароль()
+	frappe.db.set_value(
+		"User", пользователь, "last_reset_password_key_generated_on", add_to_date(now_datetime(), days=-1)
+	)
+	return свой, пользователь
+
+
+def с_выдуманным_ключом() -> tuple[str, None]:
+	return "выдуманный", None
+
+
 class IntegrationTestPasswordChanged(IntegrationTestCase):
 	"""Письмо «Пароль изменён» после смены пароля по ссылке."""
 
-	def setUp(self):
+	@contextmanager
+	def запрос(self):
+		"""Запрос, вход и почта — заново на каждый случай.
+
+		`update_password` Frappe входит под пользователем — нужен запрос.
+		"""
 		from frappe.auth import CookieManager, LoginManager
 		from frappe.utils import set_request
 
-		self.прежнее = {
+		прежнее = {
 			имя: getattr(frappe.local, имя, None) for имя in ("request", "cookie_manager", "login_manager")
 		}
-		# `update_password` Frappe входит под пользователем — нужен запрос.
 		set_request(method="POST", path="/")
 		frappe.local.cookie_manager = CookieManager()
 		frappe.local.login_manager = LoginManager()
-		self.письма = patch("frappe.sendmail").start()
-		patch("lms_frappe_app.access.почта_есть", return_value=True).start()
+		try:
+			with (
+				patch("frappe.sendmail") as письма,
+				patch("lms_frappe_app.access.почта_есть", return_value=True),
+			):
+				yield письма
+		finally:
+			frappe.local.response.pop("http_status_code", None)
+			frappe.set_user("Administrator")
+			for имя, значение in прежнее.items():
+				setattr(frappe.local, имя, значение)
 
-	def tearDown(self):
-		patch.stopall()
-		frappe.local.response.pop("http_status_code", None)
-		frappe.set_user("Administrator")
-		for имя, значение in self.прежнее.items():
-			setattr(frappe.local, имя, значение)
+	def test_письмо_только_после_смены_пароля(self):
+		"""Письмо — только когда пароль менялся раньше и сменился сейчас.
+		Первое задание пароля — без письма. Просроченный ключ найден, но Frappe
+		отказал (410): пароль не менялся. Недействительный ключ — тоже 410."""
+		случаи = {
+			"смена пароля по ссылке присылает письмо": (менявший_пароль, None, "Пароль изменён", None),
+			"первое задание пароля без письма": (без_пароля, None, None, None),
+			"просроченный ключ без письма": (с_просроченным_ключом, 3600, None, 410),
+			"недействительный ключ без письма": (с_выдуманным_ключом, None, None, 410),
+		}
+		for что, (подготовка, срок, тема, код) in случаи.items():
+			with self.subTest(что), self.запрос() as письма:
+				свой, пользователь = подготовка()
 
-	def test_смена_пароля_по_ссылке_присылает_письмо(self):
-		пользователь = ученик()
-		frappe.db.set_value("User", пользователь, "last_password_reset_date", "2026-01-01")
+				with со_сроком(срок) if срок is not None else nullcontext():
+					update_password(НОВЫЙ_ПАРОЛЬ, key=свой)
 
-		update_password(НОВЫЙ_ПАРОЛЬ, key=ключ(пользователь))
+				self.assertEqual(frappe.local.response.get("http_status_code"), код)
+				self.assertEqual(
+					[(в.kwargs["recipients"], в.kwargs["subject"]) for в in письма.call_args_list],
+					[([пользователь], тема)] if тема else [],
+				)
 
-		письмо = self.письма.call_args.kwargs
-		self.assertEqual(письмо["recipients"], [пользователь])
-		self.assertEqual(письмо["subject"], "Пароль изменён")
-
-	def test_первое_задание_пароля_без_письма(self):
-		"""После регистрации или входа через Google человек пароля не менял."""
-		update_password(НОВЫЙ_ПАРОЛЬ, key=ключ(ученик()))
-
-		self.письма.assert_not_called()
-
-	def test_просроченный_ключ_без_письма(self):
-		"""Ключ найден, но Frappe отказал (410): пароль не менялся."""
-		пользователь = ученик()
-		frappe.db.set_value("User", пользователь, "last_password_reset_date", "2026-01-01")
-		свой = ключ(пользователь)
-		frappe.db.set_value(
-			"User", пользователь, "last_reset_password_key_generated_on", add_to_date(now_datetime(), days=-1)
-		)
-
-		with со_сроком(3600):
-			update_password(НОВЫЙ_ПАРОЛЬ, key=свой)
-
-		self.assertEqual(frappe.local.response.get("http_status_code"), 410)
-		self.письма.assert_not_called()
-
-	def test_недействительный_ключ_без_письма(self):
-		update_password(НОВЫЙ_ПАРОЛЬ, key="выдуманный")
-
-		self.письма.assert_not_called()
-
-	def test_перекрытие_подключено(self):
-		self.assertEqual(
-			frappe.get_hooks("override_whitelisted_methods")["frappe.core.doctype.user.user.update_password"][-1],
-			"lms_frappe_app.access.update_password",
-		)
+	def test_перекрытия_подключены(self):
+		"""Смена пароля и обе формы регистрации идут через приложение."""
+		перекрытия = frappe.get_hooks("override_whitelisted_methods")
+		for метод, наш in (
+			("frappe.core.doctype.user.user.update_password", "lms_frappe_app.access.update_password"),
+			("frappe.core.doctype.user.user.sign_up", "lms_frappe_app.access.sign_up"),
+			("lms.lms.user.sign_up", "lms_frappe_app.access.sign_up_learning"),
+		):
+			with self.subTest(метод):
+				self.assertEqual(перекрытия[метод][-1], наш)
 
 
 class IntegrationTestSignUp(IntegrationTestCase):
@@ -308,10 +320,3 @@ class IntegrationTestSignUp(IntegrationTestCase):
 
 		self.assertEqual(sign_up_learning(адрес, "Новый Ученик", 1, ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
 		self.assertTrue(frappe.db.exists("User", адрес))
-
-	def test_обе_формы_перекрыты(self):
-		перекрытия = frappe.get_hooks("override_whitelisted_methods")
-		self.assertEqual(перекрытия["lms.lms.user.sign_up"][-1], "lms_frappe_app.access.sign_up_learning")
-		self.assertEqual(
-			перекрытия["frappe.core.doctype.user.user.sign_up"][-1], "lms_frappe_app.access.sign_up"
-		)
