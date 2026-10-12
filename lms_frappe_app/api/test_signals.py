@@ -2,19 +2,19 @@
 # See license.txt
 """Сигналы агенту — выводы сервера из истории ученика (learning-services#416)."""
 
+from datetime import date, datetime, timedelta
+
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_days, nowdate
 
 from lms_frappe_app.agent_learning import signals
 from lms_frappe_app.agent_learning.runs import service as прохождения
-from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_занятие,
 	создать_организацию,
 	создать_ученика,
-	зачислить_на_курс,
 	курс_из_релиза,
 	урок_релиза,
 )
@@ -35,6 +35,70 @@ class TestSignalsPriority(UnitTestCase):
 		self.assertEqual([с["code"] for с in отобраны], ["abandoned_in_row", "blocks_empty", "deadline_pace"])
 		занятие.signals_shown = записано["signals_shown"]
 		self.assertEqual(signals.отобрать(занятие, кандидаты), [])
+
+
+class TestПорогиСигналов(UnitTestCase):
+	"""Без базы: пороги `документ_пуст` и `темп_к_сроку`."""
+
+	def test_документ_пуст(self):
+		"""Сигнал — когда `covered` не меньше половины целей и ни один блок не
+		заполнен; без целей или блоков — нет."""
+
+		def блок(ключ: str = "log", **поля) -> dict:
+			return {"artifact": "notebook", "key": ключ, "title": "Журнал", "content": "", "file": None, "url": None, **поля}
+
+		сигнал = [{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}]
+		случаи = {
+			"половина целей разобрана": (["covered", "touched"], [блок()], сигнал),
+			"все цели разобраны": (["covered"], [блок()], сигнал),
+			"больше половины": (["covered", "covered", "touched"], [блок()], сигнал),
+			"меньше половины": (["covered", "touched", "not_started"], [блок()], []),
+			"начатые не в счёт": (["touched", "touched"], [блок()], []),
+			"без целей": ([], [блок()], []),
+			"без блоков": (["covered"], [], []),
+			"блок с текстом": (["covered"], [блок(content="Запись")], []),
+			"текст из пробелов — пуст": (["covered"], [блок(content="  \n ")], сигнал),
+			"блок с файлом": (["covered"], [блок(file="/files/a.txt")], []),
+			"блок со ссылкой": (["covered"], [блок(url="https://example.com")], []),
+			"заполнен хоть один из блоков": (["covered"], [блок(), блок("plan", content="План")], []),
+			"признак filled важнее содержимого": (["covered"], [блок(content="Запись", filled=False)], сигнал),
+			"таблица заполнена": (["covered"], [блок(filled=True)], []),
+		}
+		for что, (статусы, блоки, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				self.assertEqual(signals.документ_пуст(статусы, блоки), ожидаемо)
+
+	def test_темп_к_сроку(self):
+		"""Темп — `⌈уроков × 7 / дней⌉`, дней не меньше одного; сигнал — от трёх
+		уроков в неделю; просроченному — без темпа."""
+		сегодня = date(2026, 10, 13)
+
+		def темп(уроков: int, в_неделю: int) -> list[dict]:
+			return [{"code": "deadline_pace", "lessons_left": уроков, "lessons_per_week": в_неделю, "overdue": False}]
+
+		случаи = {
+			"срок жмёт": (сегодня + timedelta(days=2), False, 3, темп(3, 11)),
+			"ровно три в неделю": (сегодня + timedelta(days=7), False, 3, темп(3, 3)),
+			"с округлением вверх до трёх": (сегодня + timedelta(days=10), False, 3, темп(3, 3)),
+			"меньше трёх в неделю": (сегодня + timedelta(days=11), False, 3, []),
+			"срок сегодня — один день": (сегодня, False, 1, темп(1, 7)),
+			"срок прошёл без отметки просрочки — один день": (сегодня - timedelta(days=3), False, 1, темп(1, 7)),
+			"срок строкой": ("2026-10-15", False, 3, темп(3, 11)),
+			"срок с временем": (datetime(2026, 10, 15, 23, 59), False, 3, темп(3, 11)),
+			"просрочен": (
+				сегодня - timedelta(days=3),
+				True,
+				3,
+				[{"code": "deadline_pace", "lessons_left": 3, "lessons_per_week": None, "overdue": True}],
+			),
+			"просрочен, а уроков не осталось": (сегодня - timedelta(days=3), True, 0, []),
+			"без срока": (None, False, 3, []),
+			"без срока и с просрочкой": (None, True, 3, []),
+			"уроков не осталось": (сегодня + timedelta(days=2), False, 0, []),
+		}
+		for что, (срок, просрочен, уроков, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				self.assertEqual(signals.темп_к_сроку(срок, просрочен, уроков, сегодня), ожидаемо)
 
 
 class IntegrationTestStartSignals(IntegrationTestCase):
@@ -111,37 +175,14 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 		self.assertEqual(self.старт()["signals"], [])
 
 	def test_половина_целей_разобрана_а_документ_пуст(self):
+		"""Проводка `документ_пуст` на старте: статусы целей прохождения и блоки
+		документа урока. Пороги — `TestПорогиСигналов`."""
 		self.цель_разобрана()
 
 		self.assertEqual(
 			self.старт()["signals"],
 			[{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}],
 		)
-
-	def test_меньше_половины_целей_разобрано_не_сигнал(self):
-		"""Урок из трёх целей, разобрана одна: документ пуст, но сигнала нет."""
-		frappe.set_user("Administrator")
-		релиз = пример_релиза(f"sig-third-{frappe.generate_hash(length=6)}")
-		for номер in (2, 3):
-			релиз["lessons"][0]["objectives"].append(
-				{
-					"key": f"l-1-D{номер}",
-					"text": f"Цель {номер}",
-					"goals": [
-						{"key": f"exec:E{номер}", "kind": "execution", "required": True, "title": "Сделать"}
-					],
-				}
-			)
-		курс, _ = курс_из_релиза(релиз=релиз)
-		зачислить_на_курс(self.ученик, курс)
-		frappe.set_user(self.ученик)
-		run = прохождения.прохождение(self.ученик, курс, "l-1").name
-		прохождения.отметить(run, "term:T1", "done", "Назвал термин")
-		прохождения.отметить(run, "l-1-D1/V1", "done", "Выбрал первый")
-
-		ответ = student.start_lesson(lesson=урок_релиза(курс, "l-1"))
-
-		self.assertEqual(ответ["data"]["signals"], [])
 
 	def test_начатый_документ_не_сигнал(self):
 		self.цель_разобрана()
@@ -164,17 +205,11 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 		self.assertEqual(повтор["signals"], [])
 
 	def test_срок_жмёт_темп_в_уроках_без_дат(self):
+		"""Проводка `темп_к_сроку`: срок назначения, непройденные уроки курса и
+		дата сайта. Пороги темпа и просрочка — `TestПорогиСигналов`."""
 		self.срок(add_days(nowdate(), 2))
 
 		self.assertEqual(
 			self.старт()["signals"],
 			[{"code": "deadline_pace", "lessons_left": 3, "lessons_per_week": 11, "overdue": False}],
-		)
-
-	def test_срок_прошёл(self):
-		self.срок(add_days(nowdate(), -3))
-
-		self.assertEqual(
-			self.старт()["signals"],
-			[{"code": "deadline_pace", "lessons_left": 3, "lessons_per_week": None, "overdue": True}],
 		)

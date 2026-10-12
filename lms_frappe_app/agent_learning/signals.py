@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from math import ceil
 
 import frappe
-from frappe.utils import getdate, nowdate
+from frappe.utils import getdate
 
 from lms_frappe_app.agent_learning.artifacts.document import заполнен
 from lms_frappe_app.agent_learning.constants import ЗАНЯТИЕ_БРОШЕНО, ПРОЙДЕН
@@ -114,10 +115,12 @@ def осталось_уроков(ученик: str, курс: str) -> int:
 	)[0][0]
 
 
-def темп_к_сроку(срок, просрочен: bool, осталось_уроков: int) -> list[dict]:
+def темп_к_сроку(срок, просрочен: bool, осталось_уроков: int, сегодня: date) -> list[dict]:
 	"""Темп к сроку курса в уроках в неделю — когда срок жмёт или прошёл.
 
-	Даты наружу не идут: агенту нужен вывод «успеваем ли», а не календарь.
+	`сегодня` — дата сайта. Дней до срока — не меньше одного; темп —
+	`⌈уроков × 7 / дней⌉`, сигнал — от `УРОКОВ_В_НЕДЕЛЮ`. Даты наружу не
+	идут: агенту нужен вывод «успеваем ли», а не календарь.
 	"""
 	if not срок or осталось_уроков <= 0:
 		return []
@@ -125,7 +128,7 @@ def темп_к_сроку(срок, просрочен: bool, осталось_
 		return [
 			{"code": ТЕМП_К_СРОКУ, "lessons_left": осталось_уроков, "lessons_per_week": None, "overdue": True}
 		]
-	дней = max((getdate(срок) - getdate(nowdate())).days, 1)
+	дней = max((getdate(срок) - сегодня).days, 1)
 	в_неделю = ceil(осталось_уроков * 7 / дней)
 	if в_неделю < УРОКОВ_В_НЕДЕЛЮ:
 		return []

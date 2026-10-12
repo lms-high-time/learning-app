@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 import frappe
 from frappe.query_builder import Order
-from frappe.utils import now_datetime
+from frappe.utils import getdate, now_datetime, nowdate
 
 from lms_frappe_app.agent_learning import announcements, html_text, quiz, release_quiz
 from lms_frappe_app.agent_learning import homework as домашка
@@ -1227,6 +1227,7 @@ def _сигналы_старта(
 			сведения.get("deadline"),
 			bool(сведения.get("overdue")),
 			сигналы.осталось_уроков(ученик, курс) if сведения.get("deadline") else 0,
+			getdate(nowdate()),
 		),
 	)
 
