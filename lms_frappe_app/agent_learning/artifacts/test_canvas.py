@@ -72,32 +72,43 @@ class TestХолст(unittest.TestCase):
 		self.assertIsNone(canvas.проверить_холст(None, холст_документа()))
 		self.assertIsNone(canvas.проверить_холст("", холст_документа()))
 
-	def test_строки_разной_длины_отказ(self):
-		self.отказ(grid=[*СЕТКА[:2], "costs revenue"])
-
-	def test_неизвестный_блок_отказ(self):
-		self.assertEqual(
-			self.отказ(grid=[СЕТКА[0], СЕТКА[1], "costs costs revenue revenue nope"]).подробности["key"],
-			"nope",
-		)
-
-	def test_область_не_прямоугольник_отказ(self):
-		self.отказ(grid=["problem solution uvp", "problem problem uvp"])
-		self.отказ(grid=["problem solution problem", "metrics metrics uvp"])
-
-	def test_подписи_наброска_и_сводки_проверяются(self):
-		self.отказ(labels={"first_sketch": "Набросок"})
-		self.отказ(labels={"uvp": ""})
-		self.отказ(sketch="nope")
-		self.отказ(sketch="problem")
-		# У наброска нет полей — ему нечего держать.
-		self.отказ(grid=["problem solution", "problem solution"], sketch="uvp")
-		self.отказ(summary={"revenue": ["nope"]})
-		self.отказ(summary={"problem": ["source"]})
-		self.отказ(summary={"nope": ["price"]})
-
-	def test_набросок_не_ячейка(self):
-		self.отказ(grid=["problem first_sketch", "problem first_sketch"], sketch="first_sketch")
+	def test_неверный_холст_отказ(self):
+		for случай, холст, ключ in (
+			("строки разной длины", {"grid": [*СЕТКА[:2], "costs revenue"]}, None),
+			("неизвестный блок", {"grid": [СЕТКА[0], СЕТКА[1], "costs costs revenue revenue nope"]}, "nope"),
+			(
+				"область не прямоугольник: ступенька",
+				{"grid": ["problem solution uvp", "problem problem uvp"]},
+				None,
+			),
+			(
+				"область не прямоугольник: разрыв",
+				{"grid": ["problem solution problem", "metrics metrics uvp"]},
+				None,
+			),
+			("подпись не ячейки сетки", {"labels": {"first_sketch": "Набросок"}}, None),
+			("пустая подпись", {"labels": {"uvp": ""}}, None),
+			("набросок не блок документа", {"sketch": "nope"}, None),
+			("набросок без полей: блок сетки", {"sketch": "problem"}, None),
+			# У наброска нет полей — ему нечего держать.
+			(
+				"набросок без полей: блок вне сетки",
+				{"grid": ["problem solution", "problem solution"], "sketch": "uvp"},
+				None,
+			),
+			("сводка: неизвестное поле", {"summary": {"revenue": ["nope"]}}, None),
+			("сводка: колонка чужой таблицы", {"summary": {"problem": ["source"]}}, None),
+			("сводка не ячейки сетки", {"summary": {"nope": ["price"]}}, None),
+			(
+				"набросок — ячейка сетки",
+				{"grid": ["problem first_sketch", "problem first_sketch"], "sketch": "first_sketch"},
+				None,
+			),
+		):
+			with self.subTest(случай):
+				отказ = self.отказ(**холст)
+				if ключ:
+					self.assertEqual(отказ.подробности["key"], ключ)
 
 
 if __name__ == "__main__":
