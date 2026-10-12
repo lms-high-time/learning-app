@@ -10,11 +10,12 @@
 
 import json
 import re
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta
 
 import frappe
 from frappe.query_builder import Order
-from frappe.utils import now_datetime
+from frappe.utils import getdate, now_datetime, nowdate
 
 from lms_frappe_app.agent_learning import announcements, html_text, quiz, release_quiz
 from lms_frappe_app.agent_learning import homework as домашка
@@ -1227,6 +1228,7 @@ def _сигналы_старта(
 			сведения.get("deadline"),
 			bool(сведения.get("overdue")),
 			сигналы.осталось_уроков(ученик, курс) if сведения.get("deadline") else 0,
+			getdate(nowdate()),
 		),
 	)
 
@@ -1985,13 +1987,8 @@ def _состояние_старта(ученик: str, курс: str, lesson: s
 
 	Решает сервер, а не агент: разбирать признаки заново на каждом старте —
 	место для ошибки, а жалоба, с которой всё началось, была ровно на начало
-	занятия (#238). Порядок проверок — порядок приоритета:
-
-	- `repeat` — урок уже проходили, зачин и мостик лишние;
-	- `first_in_course` — других занятий по курсу нет: обещание, зачин, цели;
-	- `return` — у прошлых уроков есть незакрытые цели (`есть_незакрытое`), а
-	  прошлое занятие старше перерыва: мостик;
-	- `new_lesson` — всё остальное: зачин и цели.
+	занятия (#238). Правило — `начало_занятия`; здесь — выборка прочих
+	занятий, время и перерыв для мостика из настроек.
 
 	«Другое занятие» — любое, кроме текущего: незакрытое занятие того же урока
 	переиспользуется, и продолжение не должно выглядеть повтором.
@@ -2024,12 +2021,47 @@ def _состояние_старта(ученик: str, курс: str, lesson: s
 		{"student": ученик, "course": курс, "session": занятие, "done": ПРОЙДЕН},
 		as_dict=True,
 	)
-	последнее = max((з.last_activity_at or з.started_at for з in прочие if з.last_activity_at or з.started_at), default=None)
-	if any(з.lesson == lesson for з in прочие):
+	return начало_занятия(
+		прочие, lesson, есть_незакрытое, now_datetime(), lambda: timedelta(hours=перерыв_для_мостика())
+	)
+
+
+def начало_занятия(
+	прочие: list[dict],
+	lesson: str,
+	есть_незакрытое: bool,
+	сейчас: datetime,
+	перерыв: Callable[[], timedelta],
+) -> dict:
+	"""`{opening, last_session_at}` по прочим занятиям ученика по курсу — без базы.
+
+	`прочие` — занятия со следом, кроме текущего (`lesson`, `started_at`,
+	`last_activity_at`); `сейчас` — время сайта, `перерыв` — функция,
+	отдающая перерыв для мостика. Время занятия — `last_activity_at`, без него — `started_at`;
+	`last_session_at` — самое позднее из них. Порядок проверок — порядок
+	приоритета:
+
+	- `repeat` — среди прочих есть занятие этого урока;
+	- `first_in_course` — прочих нет;
+	- `return` — `есть_незакрытое`, а с последнего занятия прошло больше
+	  `перерыв`;
+	- `new_lesson` — всё остальное.
+
+	`перерыв` зовётся только на проверке `return` — при незакрытом и
+	известном последнем занятии. `Why:` перерыв — настройка, она читается
+	через кеш документов, и первое обращение стоит запроса к базе; на
+	ветках без мостика обращения нет, как до выноса правила. `сейчас`
+	вычисляется всегда — время сайта запросов не стоит.
+	"""
+	последнее = max(
+		(з["last_activity_at"] or з["started_at"] for з in прочие if з["last_activity_at"] or з["started_at"]),
+		default=None,
+	)
+	if any(з["lesson"] == lesson for з in прочие):
 		opening = "repeat"
 	elif not прочие:
 		opening = "first_in_course"
-	elif есть_незакрытое and последнее and now_datetime() - последнее > timedelta(hours=перерыв_для_мостика()):
+	elif есть_незакрытое and последнее and сейчас - последнее > перерыв():
 		opening = "return"
 	else:
 		opening = "new_lesson"

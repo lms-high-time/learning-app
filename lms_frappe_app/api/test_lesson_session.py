@@ -10,9 +10,10 @@
 """
 
 import json
+from datetime import datetime, timedelta
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import quiz
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -49,9 +50,7 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 		return frappe.db.count("Agent Session Event", {"session": занятие})
 
 	def занятий(self) -> int:
-		return frappe.db.count(
-			"Agent Learning Session", {"student": self.ученик, "lesson": self.урок}
-		)
+		return frappe.db.count("Agent Learning Session", {"student": self.ученик, "lesson": self.урок})
 
 	def test_последнее_своё_занятие_урока(self):
 		"""Чужое занятие не видно; отдаётся последнее занятие урока; метод ничего
@@ -170,37 +169,24 @@ class IntegrationTestStartState(IntegrationTestCase):
 		self.assertIsNone(данные["lesson"]["hook"])
 
 	def test_мостик_после_перерыва(self):
-		"""Мостик срабатывает на «есть незакрытое и прошло больше N», а не на
-		время само по себе: без незакрытого строить его не из чего. Перерыв
-		читается из настроек. История каждого случая — у своего ученика."""
-		случаи = {
-			"возвращение после перерыва с незакрытым": (48, True, None, "return", [("l-1", ["l-1-D1"])]),
-			"перерыв без незакрытого — не возвращение": (48, False, None, "new_lesson", None),
-			"перерыв из настроек": (2, True, 1, "return", None),
-		}
-		for что, (часов_назад, незакрыто, перерыв, opening, история) in случаи.items():
-			with self.subTest(что):
-				self.новый_ученик()
-				прежний = frappe.db.get_single_value("Agent Learning Settings", "bridge_after_hours")
-				if перерыв is not None:
-					self.перерыв(перерыв)
-				try:
-					self.прошлое("l-1", часов_назад=часов_назад, незакрыто=незакрыто)
+		"""Проводка `начало_занятия`: прочие занятия со следом, незакрытое из
+		истории и перерыв из настроек — 2 часа назад при перерыве в 1 час
+		дают `return`. Граничные случаи правила — `TestНачалоЗанятия`."""
+		прежний = frappe.db.get_single_value("Agent Learning Settings", "bridge_after_hours")
+		self.перерыв(1)
+		try:
+			self.прошлое("l-1", часов_назад=2, незакрыто=True)
 
-					данные = self.начало(self.второй)
-				finally:
-					if перерыв is not None:
-						self.перерыв(прежний)
+			данные = self.начало(self.второй)
+		finally:
+			self.перерыв(прежний)
 
-				self.assertEqual(данные["start"]["opening"], opening)
-				if история is not None:
-					self.assertEqual(
-						[
-							(у["key"], [ц["key"] for ц in у["objectives_open"]])
-							for у in данные["history"]["lessons"]
-						],
-						история,
-					)
+		self.assertEqual(данные["start"]["opening"], "return")
+		self.assertIsNotNone(данные["start"]["last_session_at"])
+		self.assertEqual(
+			[(у["key"], [ц["key"] for ц in у["objectives_open"]]) for у in данные["history"]["lessons"]],
+			[("l-1", ["l-1-D1"])],
+		)
 
 	def перерыв(self, часов: int) -> None:
 		"""`bridge_after_hours` в настройках — под Administrator, с возвратом ученика."""
@@ -254,3 +240,67 @@ class IntegrationTestStartState(IntegrationTestCase):
 		ещё_раз = self.начало(self.урок)
 		self.assertEqual(ещё_раз["session"], первый_раз["session"])
 		self.assertEqual(ещё_раз["start"]["opening"], "first_in_course")
+
+
+class TestНачалоЗанятия(UnitTestCase):
+	"""Без базы: с чего начинать занятие — `начало_занятия` (#238)."""
+
+	def test_opening_по_прочим_занятиям(self):
+		"""Приоритет `repeat` → `first_in_course` → `return` → `new_lesson`;
+		`return` — только при незакрытом и строго больше перерыва. Перерыв
+		запрашивается только на проверке `return` — последнее число строки."""
+		сейчас = datetime(2026, 10, 13, 12, 0)
+
+		def занятие(
+			урок: str = "L0", часов_назад: float | None = 48, начато_часов_назад: float | None = None
+		):
+			"""Прочее занятие: `last_activity_at` и `started_at` — часов назад, `None` — пусто."""
+			return {
+				"lesson": урок,
+				"last_activity_at": None if часов_назад is None else сейчас - timedelta(hours=часов_назад),
+				"started_at": None
+				if начато_часов_назад is None
+				else сейчас - timedelta(hours=начато_часов_назад),
+			}
+
+		случаи = {
+			"прочих нет": ([], True, ("first_in_course", None, 0)),
+			"этот урок уже проходили": ([занятие("L1")], False, ("repeat", 48, 0)),
+			"повтор важнее мостика": ([занятие("L0"), занятие("L1")], True, ("repeat", 48, 0)),
+			"незакрытое и перерыв прошёл": ([занятие()], True, ("return", 48, 1)),
+			"перерыв прошёл, незакрытого нет": ([занятие()], False, ("new_lesson", 48, 0)),
+			"незакрытое, перерыв не прошёл": ([занятие(часов_назад=2)], True, ("new_lesson", 2, 1)),
+			"ровно на перерыве — не мостик": ([занятие(часов_назад=24)], True, ("new_lesson", 24, 1)),
+			"последнее — самое позднее из занятий": (
+				[занятие(часов_назад=48), занятие(часов_назад=3)],
+				True,
+				("new_lesson", 3, 1),
+			),
+			"без last_activity_at — по started_at": (
+				[занятие(часов_назад=None, начато_часов_назад=30)],
+				True,
+				("return", 30, 1),
+			),
+			"last_activity_at важнее started_at": (
+				[занятие(часов_назад=2, начато_часов_назад=30)],
+				True,
+				("new_lesson", 2, 1),
+			),
+			"без времени — не мостик": ([занятие(часов_назад=None)], True, ("new_lesson", None, 0)),
+		}
+		for что, (прочие, незакрыто, (opening, часов_назад, запросов)) in случаи.items():
+			with self.subTest(что):
+				запрошен = []
+
+				def перерыв() -> timedelta:
+					запрошен.append(1)
+					return timedelta(hours=24)
+
+				начало = student.начало_занятия(прочие, "L1", незакрыто, сейчас, перерыв)
+
+				последнее = (
+					None if часов_назад is None else (сейчас - timedelta(hours=часов_назад)).isoformat()
+				)
+				self.assertEqual(
+					(начало, len(запрошен)), ({"opening": opening, "last_session_at": последнее}, запросов)
+				)

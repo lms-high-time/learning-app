@@ -293,54 +293,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			],
 		)
 
-	def test_ответ_текстом_варианта_засчитан(self):
-		run, занятие = self.урок(курс=self.общий())
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		self.assertTrue(self.ответить(попытка, С1, "  пеРвый ")["verdict"]["correct"])
-		self.assertFalse(self.ответить(попытка, С2, "Второй")["verdict"]["correct"])
-		self.assertEqual(
-			frappe.get_all(
-				"Agent Quiz Answer", filters={"attempt": попытка}, pluck="is_correct", order_by="creation"
-			),
-			[1, 0],
-		)
-		self.assertEqual(
-			[
-				(з.marks, з.marks_out_of)
-				for з in frappe.get_all(
-					ОТВЕТ, filters={"attempt": попытка}, fields=["marks", "marks_out_of"], order_by="creation"
-				)
-			],
-			[(1, 1), (0, 1)],
-		)
-
-	def test_ключ_важнее_текста(self):
-		"""Текст варианта `V2` совпадает с ключом `V1`: ответ `V1` — это вариант `V1`."""
-		релиз = релиз_двух_целей(self.ключ)
-		[вопрос] = [в for в in релиз["lessons"][0]["quiz"]["questions"] if в["key"] == С1]
-		[второй] = [в for в in вопрос["options"] if в["key"] == "V2"]
-		второй["text"] = "V1"
-		self.assertEqual(релиз["lessons"][0]["quiz"]["answers"][С1]["correct"], "V1")
-		run, занятие = self.урок(релиз)
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		self.assertTrue(self.ответить(попытка, С1, "V1")["verdict"]["correct"])
-
-	def test_ключ_варианта_без_учёта_регистра_и_списком_из_одного(self):
-		run, занятие = self.урок(релиз_двух_целей(self.ключ, вопросов=3))
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		self.assertTrue(self.ответить(попытка, С1, " v1 ")["verdict"]["correct"])
-		self.assertTrue(self.ответить(попытка, С2, ["V1"])["verdict"]["correct"])
-		self.assertFalse(self.ответить(попытка, "S3/l-1-D1", ["V1", "V2"])["verdict"]["correct"])
-
-	def test_неизвестный_ответ_неверен_а_не_ошибка(self):
-		run, занятие = self.урок(курс=self.общий())
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-
-		self.assertEqual(self.ответить(попытка, С1, "Третий")["verdict"], {"correct": False})
-
 	# --- отказы ответа ---
 
 	def test_параллельный_ответ_на_тот_же_вопрос_отклоняется(self):
@@ -464,28 +416,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 
 	# --- итог ---
 
-	def test_порог_урока_из_релиза_в_целых(self):
-		"""4 вопроса, 3 верных (75%): порог 70 — сдан, 80 — нет."""
-		for порог, сдан in ((70, True), (75, True), (80, False)):
-			with self.subTest(порог=порог):
-				релиз = релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=4)
-				run, занятие = self.урок(релиз)
-
-				ответ = self.сдать(run, занятие, ["V1", "V1", "V1", "V2"])
-
-				self.assertTrue(ответ["attempt_finished"])
-				итог = ответ["result"]
-				self.assertEqual(
-					(итог["passed"], итог["score"], итог["correct"], итог["total"], итог["pass_threshold"]),
-					(сдан, 0.75, 3, 4, порог / 100),
-				)
-				попытка = frappe.get_doc(ПОПЫТКА, ответ["attempt"])
-				self.assertEqual(
-					(попытка.status, попытка.passed, попытка.score),
-					(ПОПЫТКА_ЗАЧТЕНА if сдан else ПОПЫТКА_НЕ_ЗАЧТЕНА, int(сдан), 0.75),
-				)
-				self.assertIsNotNone(попытка.finished_at)
-
 	def релиз_по_целям(self) -> dict:
 		"""4 вопроса: `S1/l-1-D1`, `S2/l-1-D1` — на `l-1-D1`, `S3/l-1-D2`, `S4/l-1-D2` — на `l-1-D2`."""
 		релиз = релиз_двух_целей(self.ключ, вопросов=4)
@@ -505,16 +435,25 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		return {с.objective_key: с.quiz_confirmed for с in строки}
 
 	def test_итог_по_целям_и_подтверждение_квизом(self):
+		"""Проводка `итог_ответов`: снимок, верные ответы и порог попытки дают итог
+		в ответе и в записи попытки; граничные случаи зачёта — `TestИтогОтветов`.
+		Проводка `_выбранный` по снимку: верный ответ текстом варианта в ином
+		регистре и с пробелами, неизвестный ответ — неверный, а не ошибка."""
 		run, занятие = self.урок(self.релиз_по_целям())
 
-		ответ = self.сдать(run, занятие, ["V1", "V1", "V1", "V2"])
+		ответ = self.сдать(run, занятие, ["  пеРвый ", "V1", "V1", "Третий"])
 
 		ожидаемо = {"l-1-D1": {"correct": 2, "total": 2}, "l-1-D2": {"correct": 1, "total": 2}}
-		self.assertTrue(ответ["result"]["passed"])
-		self.assertEqual(ответ["result"]["objective_results"], ожидаемо)
+		итог = ответ["result"]
 		self.assertEqual(
-			frappe.parse_json(frappe.db.get_value(ПОПЫТКА, ответ["attempt"], "objective_results")), ожидаемо
+			(итог["passed"], итог["score"], итог["correct"], итог["total"], итог["pass_threshold"]),
+			(True, 0.75, 3, 4, 0.7),
 		)
+		self.assertEqual(итог["objective_results"], ожидаемо)
+		попытка = frappe.get_doc(ПОПЫТКА, ответ["attempt"])
+		self.assertEqual((попытка.status, попытка.passed, попытка.score), (ПОПЫТКА_ЗАЧТЕНА, 1, 0.75))
+		self.assertIsNotNone(попытка.finished_at)
+		self.assertEqual(frappe.parse_json(попытка.objective_results), ожидаемо)
 		self.assertEqual(self.подтверждены(run), {"l-1-D1": 1, "l-1-D2": 0})
 
 	def test_несданная_попытка_не_подтверждает_а_позже_не_снимает(self):
@@ -569,6 +508,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		for утечка in ("V1", "Первый", ПОЯСНЕНИЕ, "explanation", "why_wrong"):
 			self.assertNotIn(утечка, выдано)
 		self.assertEqual(итог["attempts_left"], 2)
+		# Неверный ответ записан без балла из одного.
+		self.assertEqual(
+			[
+				(з.is_correct, з.marks, з.marks_out_of)
+				for з in frappe.get_all(
+					ОТВЕТ,
+					filters={"attempt": ответ["attempt"], "is_correct": 0},
+					fields=["is_correct", "marks", "marks_out_of"],
+				)
+			],
+			[(0, 0, 1)],
+		)
 		закончена = frappe.db.get_value(ПОПЫТКА, ответ["attempt"], "finished_at")
 		момент = datetime.fromisoformat(итог["retry_after"])
 		self.assertIsNotNone(момент.tzinfo, "время пересдачи — с поясом сайта")
@@ -662,7 +613,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		урок = index.урок(frappe.db.get_value("LMS Course", курс, "active_release"), "l-1")["lesson"]
 		зачислить(self.ученик, урок)
 
-		quiz.отметить_урок_пройденным(frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, урок)))
+		quiz.отметить_урок_пройденным(
+			frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, урок))
+		)
 
 		self.assertEqual(
 			frappe.db.get_value(
@@ -673,17 +626,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			прохождения.ПРОЙДЕН,
 		)
 		self.assertEqual(прохождения.главы(self.ученик, курс)[0]["status"], прохождения.ПРОЙДЕН)
-
-	def test_дробный_порог_в_целых(self):
-		"""3 вопроса, 2 верных (66,666…%): порог 66.67 не сдан, 66.66 — сдан."""
-		for порог, сдан in ((66.67, False), (66.66, True)):
-			with self.subTest(порог=порог):
-				релиз = релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=3)
-				run, занятие = self.урок(релиз)
-
-				итог = self.сдать(run, занятие, ["V1", "V1", "V2"])["result"]
-
-				self.assertEqual(итог["passed"], сдан)
 
 	def test_порог_из_релиза_попытки_а_не_нового(self):
 		"""Новый релиз сменил только порог: попытка перенесена и оценивается порогом своего старта."""
@@ -724,15 +666,6 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		попытка = self.сдать(run, занятие, ["V1"])["attempt"]
 
 		self.отказ(ПОПЫТКА_ЗАВЕРШЕНА, release_quiz.завершить, frappe.get_doc(ПОПЫТКА, попытка))
-
-	def test_попытка_без_вопросов_не_сдана(self):
-		run, занятие = self.урок(курс=self.общий())
-		попытка = release_quiz.начать(run, занятие)["attempt"]
-		frappe.db.set_value(ПОПЫТКА, попытка, "questions", "[]")
-
-		итог = release_quiz.завершить(frappe.get_doc(ПОПЫТКА, попытка))
-
-		self.assertEqual((итог["passed"], итог["total"], итог["score"]), (False, 0, 0.0))
 
 	def test_снятая_цель_не_подтверждается(self):
 		run, _ = self.урок(курс=self.общий())
@@ -1180,18 +1113,18 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		)
 
 	def test_порог_снимается_в_попытку_на_старте(self):
-		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=55.5))
+		"""Дробный порог и порог 0 — без подмены умолчанием поля (`100`): попытка
+		без верных при пороге 0 зачтена."""
+		for порог in (55.5, 0):
+			with self.subTest(порог=порог):
+				run, занятие = self.урок(релиз_двух_целей(f"{self.ключ}-{порог}", порог=порог, вопросов=1))
 
-		попытка = release_quiz.начать(run, занятие)["attempt"]
+				попытка = release_quiz.начать(run, занятие)["attempt"]
 
-		self.assertEqual(self.попытка(попытка).pass_percentage, 55.5)
-
-	def test_порог_ноль_зачитывает_попытку_без_верных(self):
-		run, занятие = self.урок(релиз_двух_целей(self.ключ, порог=0))
-
-		итог = self.сдать(run, занятие, ["V2", "V2"])["result"]
-
-		self.assertEqual((итог["passed"], итог["correct"], итог["pass_threshold"]), (True, 0, 0))
+				self.assertEqual(self.попытка(попытка).pass_percentage, порог)
+				if порог == 0:
+					итог = self.ответить(попытка, С1, "V2")["result"]
+					self.assertEqual((итог["passed"], итог["correct"], итог["pass_threshold"]), (True, 0, 0))
 
 	def test_publish_release_при_взаимоблокировке_и_таймауте_busy(self):
 		"""Попытку под публикацией изменил или держит ответ ученика: откат целиком и `busy`."""
@@ -1271,6 +1204,113 @@ class TestСравнениеКвиза(UnitTestCase):
 		):
 			with self.subTest(что):
 				self.assertEqual(release_quiz.квиз_тот_же(было, стало), тот_же)
+
+
+class TestВыбранныйВариант(UnitTestCase):
+	"""Без базы: сравнение ответа с вариантами вопроса — `_выбранный`."""
+
+	def test_ответ_и_варианты(self):
+		"""Ключ, затем текст варианта, без учёта регистра и пробелов; список — только из одного."""
+		варианты = [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "Второй"}]
+		# Текст варианта `V2` совпадает с ключом `V1`.
+		спорные = [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "V1"}]
+		случаи = {
+			"ключ": ("V1", варианты, "V1"),
+			"ключ без учёта регистра и пробелов": (" v1 ", варианты, "V1"),
+			"текст варианта": ("Второй", варианты, "V2"),
+			"текст без учёта регистра и пробелов": ("  пеРвый ", варианты, "V1"),
+			"пробелы внутри текста сводятся": ("Пер вый", [{"key": "V1", "text": "Пер   вый"}], "V1"),
+			"ключ важнее текста": ("V1", спорные, "V1"),
+			"список из одного": (["V1"], варианты, "V1"),
+			"кортеж из одного текстом": (("второй",), варианты, "V2"),
+			"список из двух": (["V1", "V2"], варианты, None),
+			"пустой список": ([], варианты, None),
+			"неизвестный ответ": ("Третий", варианты, None),
+			"пустой ответ": ("", варианты, None),
+			"нет ответа": (None, варианты, None),
+			"число — по строке": (1, [{"key": "1", "text": "Один"}], "1"),
+			"нет вариантов": ("V1", [], None),
+		}
+		for что, (ответ, список, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				self.assertEqual(release_quiz._выбранный(ответ, список), ожидаемо)
+
+
+class TestИтогОтветов(UnitTestCase):
+	"""Без базы: зачёт попытки — `итог_ответов` и `подтверждённые_цели`."""
+
+	@staticmethod
+	def вопросы(*цели: str) -> list[dict]:
+		"""Снимок: вопрос `Q{номер}` на цель из `цели` по порядку."""
+		return [{"key": f"Q{номер}", "objective": цель} for номер, цель in enumerate(цели, 1)]
+
+	def test_порог_и_доля(self):
+		"""Зачёт — `верных × 100 ≥ порог × всего` в целых; доля — три знака."""
+		четыре = self.вопросы(*["D1"] * 4)
+		три = self.вопросы(*["D1"] * 3)
+		случаи = {
+			"3 из 4, порог 70 — сдан": (четыре, {"Q1", "Q2", "Q3"}, 70, (True, 0.75, 3, 4)),
+			"3 из 4, порог 75 — ровно на пороге, сдан": (четыре, {"Q1", "Q2", "Q3"}, 75, (True, 0.75, 3, 4)),
+			"3 из 4, порог 80 — не сдан": (четыре, {"Q1", "Q2", "Q3"}, 80, (False, 0.75, 3, 4)),
+			"2 из 3, дробный порог 66.67 — не сдан": (три, {"Q1", "Q2"}, 66.67, (False, 0.667, 2, 3)),
+			"2 из 3, дробный порог 66.66 — сдан": (три, {"Q1", "Q2"}, 66.66, (True, 0.667, 2, 3)),
+			"57 из 100, порог 57 — без потери границы": (
+				self.вопросы(*["D1"] * 100),
+				{f"Q{н}" for н in range(1, 58)},
+				57,
+				(True, 0.57, 57, 100),
+			),
+			"порог 0 — сдан и без верных": (self.вопросы("D1", "D1"), set(), 0, (True, 0.0, 0, 2)),
+			"порог 100 — все верны": (три, {"Q1", "Q2", "Q3"}, 100, (True, 1.0, 3, 3)),
+			"порог 100 — одна ошибка": (три, {"Q1", "Q2"}, 100, (False, 0.667, 2, 3)),
+			"порог числом с плавающей точкой": (четыре, {"Q1", "Q2", "Q3"}, 75.0, (True, 0.75, 3, 4)),
+			"без вопросов — не сдан и при пороге 0": ([], set(), 0, (False, 0.0, 0, 0)),
+			"верный вне снимка не в счёт": (self.вопросы("D1"), {"Q9"}, 50, (False, 0.0, 0, 1)),
+		}
+		for что, (вопросы, верные, порог, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				итог = release_quiz.итог_ответов(вопросы, верные, порог)
+				self.assertEqual((итог["passed"], итог["score"], итог["correct"], итог["total"]), ожидаемо)
+
+	def test_итог_по_целям_и_подтверждение(self):
+		"""Цели — в порядке снимка; подтверждена цель, все вопросы которой верны."""
+		вопросы = self.вопросы("D2", "D1", "D2", "D1", "D3")
+		случаи = {
+			"часть целей верна целиком": (
+				{"Q1", "Q2", "Q3", "Q4"},
+				{
+					"D2": {"correct": 2, "total": 2},
+					"D1": {"correct": 2, "total": 2},
+					"D3": {"correct": 0, "total": 1},
+				},
+				{"D1", "D2"},
+			),
+			"в цели одна ошибка": (
+				{"Q1", "Q3", "Q4", "Q5"},
+				{
+					"D2": {"correct": 2, "total": 2},
+					"D1": {"correct": 1, "total": 2},
+					"D3": {"correct": 1, "total": 1},
+				},
+				{"D2", "D3"},
+			),
+			"ни одного верного": (
+				set(),
+				{
+					"D2": {"correct": 0, "total": 2},
+					"D1": {"correct": 0, "total": 2},
+					"D3": {"correct": 0, "total": 1},
+				},
+				set(),
+			),
+		}
+		for что, (верные, по_целям, подтверждены) in случаи.items():
+			with self.subTest(что):
+				итог = release_quiz.итог_ответов(вопросы, верные, 70)
+				self.assertEqual(итог["objective_results"], по_целям)
+				self.assertEqual(list(итог["objective_results"]), ["D2", "D1", "D3"])
+				self.assertEqual(release_quiz.подтверждённые_цели(итог["objective_results"]), подтверждены)
+		self.assertEqual(release_quiz.итог_ответов([], set(), 70)["objective_results"], {})
 
 
 class IntegrationTestПубликацияИЧужиеПопытки(IntegrationTestCase):
