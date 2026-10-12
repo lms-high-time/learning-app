@@ -18,6 +18,7 @@ unit и integration и без подготовки интеграционных 
 """
 
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -57,6 +58,11 @@ def split(modules: dict[str, int], parts: int) -> list[list[str]]:
 
 def main() -> None:
 	site, app, part, parts = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+	# Why: число частей — `strategy.job-total`, оно равно числу частей, только
+	# пока матрица одномерная. Второе измерение удвоило бы его, и половина
+	# модулей досталась бы частям, которых никто не запускает.
+	if "MATRIX" in os.environ:
+		assert set(json.loads(os.environ["MATRIX"])) == {"part"}, "в матрице CI что-то кроме part"
 	modules = test_modules(app)
 	buckets = split(modules, parts)
 
