@@ -4,11 +4,11 @@
    адресах этих страниц: кабинет автора и прочие страницы www/ держат свои
    стили. Разметку и путь входа не трогаем — только вид. */
 
+/* Диапазоны весов, а не по весу на файл: тема ставит тексту 420, и с
+   файлами 400 и 500 браузер берёт 500 — страница выходила полужирной. */
 @font-face {
 	font-family: "IBM Plex Sans";
 	font-style: normal;
-	/* Диапазон, а не один вес: тема Frappe ставит тексту 420, и с файлами 400
-	   и 500 браузер берёт 500 — страница выходила полужирной. */
 	font-weight: 300 449;
 	font-display: swap;
 	src: url("../fonts/ibm-plex-sans-cyrillic-400-normal.woff2") format("woff2");
@@ -20,12 +20,14 @@
 	font-weight: 300 449;
 	font-display: swap;
 	src: url("../fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
-	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+		U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+		U+FEFF, U+FFFD;
 }
 @font-face {
 	font-family: "IBM Plex Sans";
 	font-style: normal;
-	font-weight: 450 900;
+	font-weight: 450 549;
 	font-display: swap;
 	src: url("../fonts/ibm-plex-sans-cyrillic-500-normal.woff2") format("woff2");
 	unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
@@ -33,10 +35,30 @@
 @font-face {
 	font-family: "IBM Plex Sans";
 	font-style: normal;
-	font-weight: 450 900;
+	font-weight: 450 549;
 	font-display: swap;
 	src: url("../fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
-	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+		U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+		U+FEFF, U+FFFD;
+}
+@font-face {
+	font-family: "IBM Plex Sans";
+	font-style: normal;
+	font-weight: 550 900;
+	font-display: swap;
+	src: url("../fonts/ibm-plex-sans-cyrillic-600-normal.woff2") format("woff2");
+	unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+	font-family: "IBM Plex Sans";
+	font-style: normal;
+	font-weight: 550 900;
+	font-display: swap;
+	src: url("../fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+		U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+		U+FEFF, U+FFFD;
 }
 @font-face {
 	font-family: "Literata";
@@ -52,10 +74,16 @@
 	font-weight: 400 900;
 	font-display: swap;
 	src: url("../fonts/literata-latin-500-normal.woff2") format("woff2");
-	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+		U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+		U+FEFF, U+FFFD;
 }
 
-:is(body[data-path="login"], body[data-path="update-password"]) {
+/* Палитра и переменные Frappe. У веб-страниц Frappe на <html> нет
+   data-theme, поэтому тема — только по настройке системы. Переменные Frappe
+   переопределены здесь же: правила login.bundle, которых ниже нет (ссылка
+   «Resend», ошибки, иконки полей), берут нашу палитру и в тёмной теме. */
+body:is([data-path="login"], [data-path="update-password"]) {
 	--ht-bg: #f6f6f3;
 	--ht-paper: #ffffff;
 	--ht-ink: #1b1e24;
@@ -64,12 +92,19 @@
 	--ht-accent: #0e6f7b;
 	--ht-btn: #1b1e24;
 	--ht-btn-ink: #ffffff;
+	--text-color: var(--ht-ink);
+	--surface-white: var(--ht-paper);
+	--control-bg: var(--ht-paper);
+	--outline-gray-2: var(--ht-line);
+	--ink-gray-5: var(--ht-muted);
+	--gray-900: var(--ht-btn);
+	--gray-100: var(--ht-bg);
 	background: var(--ht-bg);
 	color: var(--ht-ink);
 	font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-	:is(body[data-path="login"], body[data-path="update-password"]) {
+	body:is([data-path="login"], [data-path="update-password"]) {
 		--ht-bg: #14171b;
 		--ht-paper: #1c2026;
 		--ht-ink: #e7e9ec;
@@ -82,35 +117,50 @@
 	}
 }
 
-:is(body[data-path="login"], body[data-path="update-password"]) :is(.page-card, .login-content) {
+/* Каркас селекторов — как у login.bundle (`.for-login .page-card
+   .page-card-body input`): body, атрибут и section[class] — класс есть у
+   каждой секции входа — поднимают наши правила над правилами Frappe без
+   !important, сразу для всех секций. */
+body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card {
 	background: var(--ht-paper);
 	border: 1px solid var(--ht-line);
 	border-radius: 3px;
 	padding: 36px 40px 32px;
 	box-shadow: 0 30px 60px -40px rgba(20, 30, 40, 0.35);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) .page-card-head h4 {
+body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card-head h4 {
 	font-family: "Literata", Georgia, serif;
 	font-weight: 500;
 	font-size: 1.6rem;
 	letter-spacing: -0.01em;
 	color: var(--ht-ink);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) :is(.page-card-subtitle, .form-label, .sign-up-message, .forgot-password-message) {
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	:is(.page-card-subtitle, .form-label, .sign-up-message, .forgot-password-message > *) {
 	color: var(--ht-muted);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) .form-control {
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	.page-card-body
+	:is(.form-control, input) {
 	min-height: 40px;
 	border: 1px solid var(--ht-line);
 	border-radius: 6px;
 	background: var(--ht-paper);
 	color: var(--ht-ink);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) .form-control:focus {
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	.page-card-body
+	:is(.form-control, input):focus {
 	border-color: var(--ht-accent);
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--ht-accent) 25%, transparent);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) .btn {
+body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card .btn {
 	min-height: 42px;
 	border-radius: 6px;
 	font-weight: 500;
@@ -120,21 +170,30 @@
 	justify-content: center;
 	gap: 8px;
 }
-/* .btn.btn-default — специфичность правил Frappe: одним классом их не перебить. */
-:is(body[data-path="login"], body[data-path="update-password"]) :is(.btn.btn-default.btn-login, .btn.btn-primary) {
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	.page-card-actions
+	:is(.btn-login, .btn-primary) {
 	background: var(--ht-btn);
 	border: 1.5px solid var(--ht-btn);
 	color: var(--ht-btn-ink);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) .btn.btn-default.btn-login-option {
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	.btn-login-option {
 	background: transparent;
 	border: 1px solid var(--ht-line);
 	color: var(--ht-ink);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) .btn.btn-default.btn-login-option:hover {
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	.btn-login-option:hover {
 	border-color: var(--ht-muted);
 }
-:is(body[data-path="login"], body[data-path="update-password"]) :is(.page-card, .login-content) a:not(.btn) {
+body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card a:not(.btn) {
 	color: var(--ht-accent);
 	text-underline-offset: 3px;
 }
