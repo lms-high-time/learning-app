@@ -299,10 +299,15 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 			"обязательна, если заполнено «decision»",
 		):
 			self.assertIn(текст, html)
-		# Пакет агента — только на странице урока.
+		# Пакет агента урока — на странице урока, ссылка на неё — в строке урока без
+		# раскрытия; рамка курса — и здесь, над главами (learning-services#559).
 		self.assertNotIn(ПАКЕТ_УРОКА, html)
+		self.assertEqual([ч["name"] for ч in с["frame"]], ["frame", "learn_about_student"])
+		self.assertIn("Рамка курса: ученик, граница, контур ведения.", html)
+		строка = re.search(r'<details class="row lesson-row"[^>]*>\s*<summary>(.*?)</summary>', html, re.S)
+		self.assertIn(f'href="/author?course={quote(self.курс)}&amp;lesson=l-1" aria-label="Пакет агента: Урок первый">Пакет агента →', строка.group(1))
 
-	def test_урок_с_пакетом_агента_свёрнутым(self):
+	def test_урок_с_пакетом_агента_открытым(self):
 		с = сведения_для(self.куратор, course=self.курс, lesson="l-2")
 
 		урок = с["lesson"]
@@ -324,10 +329,10 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 
 		html = страница(self.куратор, course=self.курс, lesson="l-2")
 		self.assertIn(ПОЯСНЕНИЕ, html)
-		# Пакет — в свёрнутом блоке: `details` без `open`, текст пакета внутри.
+		# Пакет урока — открытым блоком: ради него на страницу и приходят.
 		пакет = re.search(r'<details class="pack"[^>]*>(.*?)</details>', html, re.S)
 		self.assertIsNotNone(пакет)
-		self.assertNotIn(" open", пакет.group(0).split(">", 1)[0])
+		self.assertIn(" open", пакет.group(0).split(">", 1)[0])
 		self.assertIn("Директива урока l-2", пакет.group(1))
 		self.assertEqual(html.count("Директива урока l-2"), 1)
 
@@ -539,7 +544,8 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertLessEqual(
 			страница_урока - {"agent.lesson.l-1", "agent.item.l-1/term:T1"}, места_заметок(курс)
 		)
-		self.assertFalse({м for м in места_заметок(курс) if м.startswith("agent.")})
+		# Из пакета агента на экране курса — только рамка курса.
+		self.assertEqual({м for м in места_заметок(курс) if м.startswith("agent.")}, {"agent.frame"})
 
 	def test_очередь_и_заметки_без_места(self):
 		ждёт_агента = self.заметка("lesson.l-1")

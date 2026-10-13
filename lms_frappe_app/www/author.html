@@ -243,6 +243,7 @@
 	.author-page .row[open] > summary { border-bottom: 1px solid var(--line); }
 	.author-page .row > summary .row-title { font-weight: 500; }
 	.author-page .row > summary .row-side { margin-left: auto; font-size: 13px; color: var(--muted); }
+	.author-page .row > summary .row-link { font-size: 13px; white-space: nowrap; }
 	.author-page .row-body { padding: 8px 12px 12px; }
 	.author-page .note-count {
 		display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 12px;
@@ -362,14 +363,15 @@
 	</section>
 
 	{#
-		Пакет агента — то, по чему агент ученика ведёт урок. Он длинный и
-		служебный, поэтому свёрнут; заметка ко всему пакету — без раскрытия.
+		Пакет агента — то, по чему агент ученика ведёт урок: на странице урока
+		он открыт сразу. Рамка курса общая для всех уроков и длинная — свёрнута;
+		она же на вкладке «Релиз» курса. Заметка ко всему пакету — без раскрытия.
 	#}
 	<section class="panel" id="section-agent">
 		<h2>Пакет агента</h2>
 		{{ место(lesson.agent_target, lesson.agent_label, заметки.get(lesson.agent_target, []), lesson.agent_anchor, "Заметка к пакету урока") }}
 		{% if lesson.agent %}
-		<details class="pack" {{ атрибуты(lesson.agent_target, lesson.agent_label) }}>
+		<details class="pack" open {{ атрибуты(lesson.agent_target, lesson.agent_label) }}>
 			<summary>Пакет агента урока</summary>
 			{{ части_пакета(lesson.agent, заметки) }}
 		</details>
@@ -492,6 +494,16 @@
 	{% set заметки = release.notes %}
 	{{ место("course", "Курс", заметки.get("course", []), course_anchor, "Заметка к курсу") }}
 
+	{% if frame %}
+	<section class="panel" id="section-frame">
+		<details class="pack" {{ атрибуты("agent.frame", "Пакет агента · рамка курса") }}>
+			<summary>Рамка курса — указания агенту, общие для всех уроков</summary>
+			{{ части_пакета(frame, заметки) }}
+		</details>
+		{{ место("agent.frame", "Пакет агента · рамка курса", заметки.get("agent.frame", []), frame_anchor, "Заметка к рамке") }}
+	</section>
+	{% endif %}
+
 	{% for г in release.chapters %}
 	<section class="chapter ch{{ г.color | e }}" {{ атрибуты(г.target, г.label) }}>
 		<div class="chapter-head">
@@ -507,6 +519,7 @@
 				<code>{{ у.key | e }}</code>
 				<span data-live="{{ у.anchor | e }}-count">{% if у.open_notes %}<span class="note-count" title="Открытых заметок к уроку">✎ {{ у.open_notes | e }}</span>{% endif %}</span>
 				<span class="row-side">целей {{ у.objectives | length | e }} · вопросов {{ у.questions | length | e }}{% if у.homework %} · домашка{% endif %}</span>
+				<a class="row-link" href="{{ у.url | e }}" aria-label="Пакет агента: {{ у.title | e }}">Пакет агента →</a>
 			</summary>
 			<div class="row-body">
 				<p class="meta"><a href="{{ у.url | e }}">Урок целиком и пакет агента →</a></p>
