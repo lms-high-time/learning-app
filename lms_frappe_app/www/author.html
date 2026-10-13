@@ -88,6 +88,169 @@
 	{% endfor %}
 {% endmacro %}
 
+{#
+	Карта урока — срез карты курса из релиза. Форма карты — компилятора
+	курса: поля, которых страница не знает, — записями «ключ — значение»
+	(`extra`). У узла с текстом — место заметки `map.<узел>`; ссылка на узел
+	этой страницы ведёт к его месту.
+#}
+{% macro ссылка_карты(с) -%}
+	{%- if с -%}
+	{%- if с.anchor %}<a href="#{{ с.anchor | e }}"><code>{{ с.key | e }}</code></a>{% else %}<code>{{ с.key | e }}</code>{% endif -%}
+	{%- if с.text %} «{{ с.text | e }}»{% endif -%}
+	{%- endif -%}
+{%- endmacro %}
+
+{% macro ссылки_карты(ссылки) -%}
+	{%- for с in ссылки %}{{ ссылка_карты(с) }}{{ "" if loop.last else "; " }}{% endfor -%}
+{%- endmacro %}
+
+{% macro находки_узла(у, находки) %}
+	{% for н in находки.get(у.key, []) %}<p class="finding"><code>{{ н.code | e }}</code> {{ н.message | e }}</p>{% endfor %}
+{% endmacro %}
+
+{% macro прочее_узла(у) %}
+	{% if у.extra %}<dl class="map-fields">{% for п in у.extra %}<dt><code>{{ п.key | e }}</code></dt><dd class="pre">{{ (п.text or "") | e }}</dd>{% endfor %}</dl>{% endif %}
+{% endmacro %}
+
+{% macro заметка_узла(у, заметки) %}
+	{% if у.target %}{{ место(у.target, у.label, заметки.get(у.target, []), у.anchor, "Заметка") }}{% endif %}
+{% endmacro %}
+
+{% macro причины(список) %}
+	{% if список %}<p class="why">Причина: {% for п in список %}{{ (п.kind or "") | e }}{% if п.ref %} — {{ ссылка_карты(п.ref) }}{% endif %}{{ "" if loop.last else "; " }}{% endfor %}</p>{% endif %}
+{% endmacro %}
+
+{% macro решение_карты(р, заметки, находки) %}
+	<div class="map-node"{% if р.target %} {{ атрибуты(р.target, р.label) }}{% endif %}>
+		<div class="part-head"><strong>{{ (р.text or "") | e }}</strong> <code>{{ р.key | e }}</code></div>
+		{{ находки_узла(р, находки) }}
+		{% if р.goal %}<p class="why">Цель: {{ ссылка_карты(р.goal) }}</p>{% endif %}
+		{% if р.note %}<p class="why pre">{{ р.note | e }}</p>{% endif %}
+		{% if р.relies_on %}<p class="why">Опирается на: {{ ссылки_карты(р.relies_on) }}</p>{% endif %}
+		{% if р.uses %}<p class="why">Использует: {{ р.uses | join("; ") | e }}</p>{% endif %}
+		{% for в in р.variants %}
+		<div class="map-variant{% if в.never %} never{% endif %}"{% if в.target %} {{ атрибуты(в.target, в.label) }}{% endif %}>
+			<div class="part-head"><span>{{ (в.text or "") | e }}{% if в.never %} <span class="kind never">никогда</span>{% endif %}</span> <code>{{ в.key | e }}</code></div>
+			{{ находки_узла(в, находки) }}
+			<dl class="map-fields">
+				{% for поле, подпись in [("gives", "Что даёт"), ("costs", "Чего стоит"), ("tempts", "Чем тянет"), ("unfit_when", "Не подходит, когда")] %}
+				{% if в[поле] %}<dt>{{ подпись | e }}</dt><dd class="pre">{{ в[поле] | e }}</dd>{% endif %}
+				{% endfor %}
+			</dl>
+			{% for о in в.errors %}
+			<div class="map-error"{% if о.target %} {{ атрибуты(о.target, о.label) }}{% endif %}>
+				<div class="part-head"><span>Ловушка: {{ (о.when or о.text or "") | e }}</span> <code>{{ о.key | e }}</code></div>
+				{{ находки_узла(о, находки) }}
+				{{ причины(о.causes) }}
+				{% if о.consequence %}<p class="why">Последствие: {{ о.consequence | e }}</p>{% endif %}
+				{{ прочее_узла(о) }}
+				{{ заметка_узла(о, заметки) }}
+			</div>
+			{% endfor %}
+			{{ прочее_узла(в) }}
+			{{ заметка_узла(в, заметки) }}
+		</div>
+		{% endfor %}
+		{% set рез = р.result %}
+		{% if рез %}
+		<div class="map-variant"{% if рез.target %} {{ атрибуты(рез.target, рез.label) }}{% endif %}>
+			<div class="part-head"><span>Результат: {{ (рез.text or "") | e }}</span> <code>{{ рез.key | e }}</code></div>
+			{{ находки_узла(рез, находки) }}
+			{% if рез.sample %}<p class="why pre">Образец: {{ рез.sample | e }}</p>{% endif %}
+			{% for т in рез.requirements %}
+			<div class="map-error"{% if т.target %} {{ атрибуты(т.target, т.label) }}{% endif %}>
+				<div class="part-head"><span>Требование: {{ (т.text or "") | e }}</span> <code>{{ т.key | e }}</code></div>
+				{{ находки_узла(т, находки) }}
+				{% if т.violation %}<p class="why">Нарушение: {{ т.violation | e }}</p>{% endif %}
+				{{ причины(т.causes) }}
+				{% if т.consequence %}<p class="why">Последствие: {{ т.consequence | e }}</p>{% endif %}
+				{% if т.relies_on %}<p class="why">Опирается на: {{ ссылки_карты(т.relies_on) }}</p>{% endif %}
+				{{ прочее_узла(т) }}
+				{{ заметка_узла(т, заметки) }}
+			</div>
+			{% endfor %}
+			{{ прочее_узла(рез) }}
+			{{ заметка_узла(рез, заметки) }}
+		</div>
+		{% elif р.result_key %}<p class="why">Результат <code>{{ р.result_key | e }}</code> — его нет в карте.</p>{% endif %}
+		{{ прочее_узла(р) }}
+		{{ заметка_узла(р, заметки) }}
+	</div>
+{% endmacro %}
+
+{% macro ситуация_карты(с, заметки, находки) %}
+	<div class="map-node"{% if с.target %} {{ атрибуты(с.target, с.label) }}{% endif %}>
+		<div class="part-head"><strong>{{ (с.text or "") | e }}</strong> <code>{{ с.key | e }}</code></div>
+		{{ находки_узла(с, находки) }}
+		{% if с.role %}<p class="why">Роль: {{ с.role | e }}</p>{% endif %}
+		{% if с.conditions %}<ul class="map-list">{% for у in с.conditions %}<li>{{ (у or "") | e }}</li>{% endfor %}</ul>{% endif %}
+		{% for н in с.sets %}
+		<div class="map-set">
+			<p>{{ ссылка_карты(н.decision) }}{% if н.about %} · {{ н.about | e }}{% endif %}</p>
+			<p>Ожидается: {{ ссылка_карты(н.expected) }}</p>
+			{% if н.deciding %}<p class="why">Решающие условия: {{ н.deciding | e }}</p>{% endif %}
+			{{ прочее_узла(н) }}
+		</div>
+		{% endfor %}
+		{% if с.traps %}<p class="why">Ловушки: {{ ссылки_карты(с.traps) }}</p>{% endif %}
+		{{ прочее_узла(с) }}
+		{{ заметка_узла(с, заметки) }}
+	</div>
+{% endmacro %}
+
+{% macro тезис_карты(т, заметки, находки) %}
+	<div class="map-node"{% if т.target %} {{ атрибуты(т.target, т.label) }}{% endif %}>
+		<div class="part-head"><span>{{ (т.text or "") | e }}</span> <code>{{ т.key | e }}</code></div>
+		{{ находки_узла(т, находки) }}
+		<p class="why">{% if т.kind %}{{ т.kind | e }} · {% endif %}происхождение: {{ (т.origin or "не указано") | e }}</p>
+		{% for ц in т.quotes %}<blockquote class="map-quote">{{ (ц.quote or "") | e }}{% if ц.source %} <span class="muted">— {{ ц.source | e }}</span>{% endif %}</blockquote>{% endfor %}
+		{% if т.origin_extra %}<dl class="map-fields">{% for п in т.origin_extra %}<dt><code>{{ п.key | e }}</code></dt><dd class="pre">{{ (п.text or "") | e }}</dd>{% endfor %}</dl>{% endif %}
+		{% if т.refutes %}<p class="why">Опровергает: {{ ссылки_карты(т.refutes) }}</p>{% endif %}
+		{% if т.relies_on %}<p class="why">Опирается на: {{ ссылки_карты(т.relies_on) }}</p>{% endif %}
+		{{ прочее_узла(т) }}
+		{{ заметка_узла(т, заметки) }}
+	</div>
+{% endmacro %}
+
+{% macro заблуждение_карты(з, заметки, находки) %}
+	<div class="map-node"{% if з.target %} {{ атрибуты(з.target, з.label) }}{% endif %}>
+		<div class="part-head"><span>{{ (з.text or "") | e }}</span> <code>{{ з.key | e }}</code></div>
+		{{ находки_узла(з, находки) }}
+		{% if з.note %}<p class="why pre">{{ з.note | e }}</p>{% endif %}
+		{{ прочее_узла(з) }}
+		{{ заметка_узла(з, заметки) }}
+	</div>
+{% endmacro %}
+
+{#
+	Блоки карты урока свёрнуты: карта длинная. Вызовы макросов — по имени, а
+	не переменной: правило экранирования (`test_author_page`) пропускает только
+	вызов макроса шаблона.
+#}
+{% macro карта_урока(к, заметки, находки) %}
+	<details class="row map-block">
+		<summary><span class="row-title">Решения</span> <span class="row-side">{{ к.decisions | length | e }}</span></summary>
+		<div class="row-body">{% for у in к.decisions %}{{ решение_карты(у, заметки, находки) }}{% else %}<p class="muted">Решений у урока нет.</p>{% endfor %}</div>
+	</details>
+	<details class="row map-block">
+		<summary><span class="row-title">Практика</span> <span class="row-side">{{ к.situations | length | e }}</span></summary>
+		<div class="row-body">{% for у in к.situations %}{{ ситуация_карты(у, заметки, находки) }}{% else %}<p class="muted">Ситуаций практики нет.</p>{% endfor %}</div>
+	</details>
+	<details class="row map-block">
+		<summary><span class="row-title">Зачёт</span> <span class="row-side">{{ к.quiz | length | e }}</span></summary>
+		<div class="row-body">{% for у in к.quiz %}{{ ситуация_карты(у, заметки, находки) }}{% else %}<p class="muted">Ситуаций зачёта нет.</p>{% endfor %}</div>
+	</details>
+	<details class="row map-block">
+		<summary><span class="row-title">Тезисы решений</span> <span class="row-side">{{ к.theses | length | e }}</span></summary>
+		<div class="row-body">{% for у in к.theses %}{{ тезис_карты(у, заметки, находки) }}{% else %}<p class="muted">Тезисов нет.</p>{% endfor %}</div>
+	</details>
+	<details class="row map-block">
+		<summary><span class="row-title">Заблуждения</span> <span class="row-side">{{ к.misconceptions | length | e }}</span></summary>
+		<div class="row-body">{% for у in к.misconceptions %}{{ заблуждение_карты(у, заметки, находки) }}{% else %}<p class="muted">Заблуждений нет.</p>{% endfor %}</div>
+	</details>
+{% endmacro %}
+
 {% macro обязательность(значение) -%}
 	{%- if значение is mapping -%}обязательна, если заполнено «{{ значение.if_column | e }}»
 	{%- elif значение -%}обязательна
@@ -272,6 +435,32 @@
 	.author-page .pack-entries li { border-left: 3px solid var(--line); padding-left: 10px; font-size: 14px; }
 	.author-page .pack > summary { font-size: 15px; color: var(--accent); }
 
+	/* Карта урока: узлы — полосой слева, вложенные варианты и ловушки — отступом. */
+	.author-page .map-block + .map-block { margin-top: 6px; }
+	.author-page .map-node { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; margin: 10px 0; font-size: 14px; }
+	.author-page .map-variant { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; margin: 8px 0 0 4px; }
+	.author-page .map-variant.never { border-left-color: var(--gap); }
+	.author-page .map-error { border-left: 3px solid var(--warn-soft); padding: 2px 0 2px 10px; margin: 6px 0 0 4px; }
+	.author-page .map-set { background: var(--bg); border-radius: 6px; padding: 6px 10px; margin-top: 6px; }
+	.author-page .map-set p { margin: 0; }
+	.author-page .map-list { margin: 4px 0; padding-left: 20px; }
+	.author-page .map-fields { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 4px 0; font-size: 14px; }
+	.author-page .map-fields dt { font-weight: 500; color: var(--muted); }
+	.author-page .map-fields dd { margin: 0; }
+	.author-page .map-quote { margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13px; }
+	.author-page .kind.never { color: var(--gap); }
+	/* Проверка публикации: находки — тревожным цветом, изменения — спокойным. */
+	.author-page .finding { margin: 4px 0; padding: 2px 8px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 13px; }
+	.author-page .finding code { color: inherit; }
+	.author-page .review-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; font-size: 14px; }
+	.author-page .op { display: inline-block; min-width: 1.4em; text-align: center; font-family: "IBM Plex Mono", monospace; border-radius: 4px; }
+	.author-page .op-add { background: var(--accent-soft); color: var(--accent); }
+	.author-page .op-del { background: var(--gap-soft); color: var(--gap); }
+	.author-page .op-mod { background: var(--warn-soft); color: var(--warn); }
+	.author-page .flag { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 12px; background: var(--warn-soft); color: var(--warn); }
+	.author-page .flag.calm { background: var(--ch1s); color: var(--ch1); }
+	@media (max-width: 720px) { .author-page .map-fields { grid-template-columns: 1fr; } }
+
 	.author-page .history { width: 100%; border-collapse: collapse; font-size: 14px; }
 	.author-page .history th { text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); padding: 0 10px 6px 0; }
 	.author-page .history td { padding: 8px 10px 8px 0; border-top: 1px solid var(--line); vertical-align: top; }
@@ -353,6 +542,8 @@
 		<nav class="lesson-nav" aria-label="Разделы урока">
 			<a href="#section-lesson">Урок</a>
 			<a href="#section-agent">Пакет агента</a>
+			<a href="#section-map">Карта урока</a>
+			{% if lesson.findings or lesson.changed_paths %}<a href="#section-review">Проверка{% if lesson.findings %} <span class="note-count">{{ lesson.findings | length | e }}</span>{% endif %}</a>{% endif %}
 			<a href="#section-notes">Заметки<span data-live="nav-notes">{% if lesson.open_notes %} <span class="note-count">{{ lesson.open_notes | e }}</span>{% endif %}</span></a>
 		</nav>
 	</div>
@@ -383,6 +574,43 @@
 		</details>
 		{{ место("agent.frame", "Пакет агента · рамка курса", заметки.get("agent.frame", []), frame_anchor, "Заметка к рамке") }}
 		{% endif %}
+	</section>
+
+	{#
+		Карта урока — по чему собран урок: решения с вариантами, ситуации
+		практики и зачёта, тезисы и заблуждения. Свёрнута блоками: она длинная.
+	#}
+	{#
+		Проверка публикации: находки проверки карты у узлов урока и пути,
+		которыми версия изменила урок, — как их передал публикатор.
+	#}
+	{% if lesson.findings or lesson.changed_paths %}
+	<section class="panel" id="section-review">
+		{% if lesson.findings %}
+		<h2>Замечания проверки карты <span class="muted num">{{ lesson.findings | length | e }}</span></h2>
+		<ul class="review-list">
+			{% for н in lesson.findings %}
+			<li><code>{{ н.code | e }}</code> {% if н.anchor %}<a href="#{{ н.anchor | e }}"><code>{{ н.target | e }}</code></a>{% else %}<code>{{ н.target | e }}</code>{% endif %} — {{ н.message | e }}</li>
+			{% endfor %}
+		</ul>
+		{% endif %}
+		{% if lesson.changed_paths %}
+		{% set изм = release.changes %}
+		<h2>Изменено в версии {{ release.version | e }} <span class="muted num">{{ lesson.changed_paths | length | e }}</span></h2>
+		{% if изм.against != release.version - 1 %}<p class="muted">Сравнение — с версией v{{ изм.against | e }}.</p>{% endif %}
+		{% if изм.truncated %}<p class="muted">Список путей публикатор обрезал: изменений больше, чем здесь.</p>{% endif %}
+		<ul class="review-list">
+			{% for п in lesson.changed_paths %}
+			<li><span class="op op-{{ 'add' if п.op == '+' else ('del' if п.op == '-' else 'mod') }}">{{ п.op | e }}</span> <code>{{ п.path | e }}</code></li>
+			{% endfor %}
+		</ul>
+		{% endif %}
+	</section>
+	{% endif %}
+
+	<section class="panel" id="section-map">
+		<h2>Карта урока</h2>
+		{% if lesson.map %}{{ карта_урока(lesson.map, заметки, lesson.findings_by_node) }}{% elif lesson.map_unavailable %}<p class="muted">Карта недоступна: вышла новая версия курса. Обновите страницу.</p>{% else %}<p class="muted">Урока нет в карте релиза.</p>{% endif %}
 	</section>
 
 	<section class="panel" id="section-notes" data-live="notes-index">
@@ -450,13 +678,15 @@
 		<p class="intro">Курс правится только новым релизом. Действующий — тот, что видят ученики и по ключам которого пишутся заметки.</p>
 		<div class="scroll">
 		<table class="history">
-			<thead><tr><th>Версия</th><th>Опубликован</th><th>Кем</th><th>Документ</th><th>Коммит</th><th>Дайджест</th></tr></thead>
+			<thead><tr><th>Версия</th><th>Опубликован</th><th>Кем</th><th>Изменения</th><th>Находки</th><th>Документ</th><th>Коммит</th><th>Дайджест</th></tr></thead>
 			<tbody>
 			{% for р in history %}
 			<tr>
 				<td class="num">v{{ р.version | e }}{% if р.active %} <span class="status live">действующий</span>{% endif %}</td>
 				<td>{{ дата(р.published_at) }}</td>
 				<td>{{ (р.published_by_name or р.published_by or "—") | e }}</td>
+				<td>{% set изм = р.changes %}{% if not изм %}<span class="muted">—</span>{% elif изм.against is none %}<span class="muted">сравнения не было</span>{% else %}<span class="num">{{ изм.count | e }}{% if изм.truncated %}+{% endif %}</span> против v{{ изм.against | e }}{% endif %}</td>
+				<td>{% if р.findings_count is none %}<span class="muted">—</span>{% else %}<span class="num">{{ р.findings_count | e }}</span>{% endif %}</td>
 				<td>{% if р.document_key %}<code>{{ р.document_key | e }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
 				<td>{% if р.commit %}<code title="{{ р.commit | e }}">{{ р.commit[:8] | e }}</code>{% else %}<span class="muted">нет</span>{% endif %}</td>
 				<td><code title="{{ р.digest | e }}">{{ (р.digest or "")[:12] | e }}</code></td>
@@ -504,6 +734,17 @@
 	</section>
 	{% endif %}
 
+	{% if release.findings_elsewhere %}
+	<details class="panel">
+		<summary>Замечания проверки карты вне уроков · {{ release.findings_elsewhere | length | e }}</summary>
+		<ul class="review-list">
+			{% for н in release.findings_elsewhere %}
+			<li><code>{{ н.code | e }}</code>{% if н.target %} <code>{{ н.target | e }}</code>{% endif %} — {{ н.message | e }}</li>
+			{% endfor %}
+		</ul>
+	</details>
+	{% endif %}
+
 	{% for г in release.chapters %}
 	<section class="chapter ch{{ г.color | e }}" {{ атрибуты(г.target, г.label) }}>
 		<div class="chapter-head">
@@ -518,6 +759,8 @@
 				<span class="row-title">{{ у.title | e }}</span>
 				<code>{{ у.key | e }}</code>
 				<span data-live="{{ у.anchor | e }}-count">{% if у.open_notes %}<span class="note-count" title="Открытых заметок к уроку">✎ {{ у.open_notes | e }}</span>{% endif %}</span>
+				{% if у.findings %}<span class="flag" title="Замечаний проверки карты у урока">находок {{ у.findings | length | e }}</span>{% endif %}
+				{% if у.changed_paths %}<span class="flag calm" title="Публикация этой версии изменила урок">изменён в v{{ release.version | e }}</span>{% endif %}
 				<span class="row-side">целей {{ у.objectives | length | e }} · вопросов {{ у.questions | length | e }}{% if у.homework %} · домашка{% endif %}</span>
 				<a class="row-link" href="{{ у.url | e }}" aria-label="Пакет агента: {{ у.title | e }}">Пакет агента →</a>
 			</summary>

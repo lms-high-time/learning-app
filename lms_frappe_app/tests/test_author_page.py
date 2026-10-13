@@ -14,8 +14,9 @@ import jinja2.nodes
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning import notices
+from lms_frappe_app.agent_learning.releases import lesson_map
 from lms_frappe_app.api import authoring
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import пример_карты, пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 from lms_frappe_app.www import author
 
@@ -68,7 +69,8 @@ def отравленный_релиз(ключ: str) -> dict:
 	Названия курса, глав, уроков, домашки и документа — сущностями: курс в
 	`<title>` списка и экрана курса, урок — страницы урока; `<` и `>` в
 	названиях глав, уроков, домашки и документа релиз не пускает. Урок `l-2` —
-	с кавычкой, которая закрыла бы атрибут. Остальные тексты — с тегом.
+	с кавычкой, которая закрыла бы атрибут. Остальные тексты — с тегом, и
+	ключи и тексты карты тоже.
 	"""
 	р = пример_релиза(ключ)
 	к = р["course"]
@@ -96,6 +98,7 @@ def отравленный_релиз(ключ: str) -> dict:
 			д = у["homework"]
 			д["title"], д["description"] = f"{д['title']} {СУЩНОСТИ}", f"{д['description']} {ВРЕД}"
 	р["lessons"][1]["title"] = 'Урок второй x" data-x="1'
+	р["map"] = пример_карты(f" {ВРЕД}")
 	д = р["document"]
 	д["title"], д["purpose"] = f"{д['title']} {СУЩНОСТИ}", f"{д['purpose']} {ВРЕД}"
 	for раздел in д["sections"]:
@@ -350,7 +353,12 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 		пакет = релиз["agent"]["lessons"]["l-1"]
 		пакет[ВРЕД] = "Часть пакета с таким ключом"
 		пакет["extra"] = {ВРЕД: "Запись с таким ключом"}
-		ответ = authoring.publish_release(release=релиз)
+		находки = [
+			{"code": f"c{ВРЕД}", "severity": ВРЕД, "target": f"S1 {ВРЕД}", "message": f"Находка {ВРЕД}"},
+			{"code": "x", "severity": "attention", "target": ВРЕД, "message": f"Вне уроков {ВРЕД}"},
+		]
+		изменения = {"against": 1, "paths": [{"op": "~", "path": f"agent.lessons.l-1.{ВРЕД}"}]}
+		ответ = authoring.publish_release(release=релиз, findings=находки, changes=изменения)
 		self.assertTrue(ответ["ok"], ответ)
 		курс = ответ["data"]["course"]
 		строка = {
@@ -367,9 +375,13 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 		for параметры, дошло in (
 			({}, сущности),
 			({"course": курс}, "Урок второй x&#34; data-x=&#34;1"),
+			({"course": курс}, "Вне уроков x&#34;&gt;&lt;img"),
 			({"course": курс, "view": "notes"}, "Заметка x&#34;"),
 			({"course": курс, "lesson": "l-1"}, "Пункт пакета с таким ключом"),
 			({"course": курс, "lesson": "l-1"}, "onerror=alert(1)&gt;"),
+			({"course": курс, "lesson": "l-1"}, "Цитата источника x&#34;&gt;&lt;img"),
+			({"course": курс, "lesson": "l-1"}, "Находка x&#34;&gt;&lt;img"),
+			({"course": курс, "lesson": "l-1"}, "agent.lessons.l-1.x&#34;&gt;&lt;img"),
 		):
 			with self.subTest(**параметры):
 				html = страница(self.куратор, **параметры)
@@ -580,6 +592,134 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		self.assertIn("Заметка к курсу", html)
 		self.assertNotIn("амечани", html)
 
+	def test_карта_урока_с_заметками_на_узлах(self):
+		"""Карта урока — на его странице: решения, практика, зачёт, тезисы и
+		заблуждения, у каждого узла с текстом — место заметки `map.<узел>`.
+		Заметка на узле урока — в указателе урока и в его счёте, ссылка ведёт
+		на страницу урока; на узле вне уроков — в очередь (learning-services#560)."""
+		релиз = пример_релиза(self.ключ)
+		релиз["map"] = пример_карты()
+		self.assertTrue(authoring.publish_release(release=релиз)["ok"])
+		тезис = self.заметка("map.T2")
+		ловушка = self.заметка("map.E1")
+		цель = self.заметка("map.G1")
+
+		с = сведения_для(self.куратор, course=self.курс, lesson="l-1")
+
+		карта = с["lesson"]["map"]
+		self.assertEqual(
+			{часть: [у["key"] for у in карта[часть]] for часть in карта},
+			{
+				"decisions": ["D1", "D2"],
+				"situations": ["S1"],
+				"quiz": ["S2"],
+				"theses": ["T4", "T0", "T1", "T2", "T3"],
+				"misconceptions": ["M1", "M2"],
+			},
+		)
+		первое, второе = карта["decisions"]
+		self.assertEqual([в["never"] for в in первое["variants"]], [False, True])
+		self.assertEqual(первое["extra"], [{"key": "weight", "text": "3"}])
+		self.assertEqual(
+			[(т["key"], т["violation"]) for т in второе["result"]["requirements"]], [("K1", "Нарушение требования")]
+		)
+		набор = карта["situations"][0]["sets"][1]
+		self.assertEqual(
+			(набор["decision"]["text"], набор["expected"]["text"], набор["expected"]["anchor"], набор["about"]),
+			("Решение другого урока", "Вариант другого урока", None, "О чём этот набор"),
+		)
+		self.assertEqual(карта["situations"][0]["traps"][0]["anchor"], author.якорь("map.E1"))
+		self.assertEqual({з["id"] for з in с["lesson"]["notes_index"]}, {тезис, ловушка})
+		self.assertEqual(с["lesson"]["open_notes"], 2)
+
+		html = страница(self.куратор, course=self.курс, lesson="l-1")
+		узлы = {"D1", "V1a", "V1b", "E1", "D2", "R1", "K1", "S1", "S2", "T0", "T1", "T2", "T3", "T4", "M1", "M2"}
+		self.assertEqual({м for м in места_заметок(html) if м.startswith("map.")}, {f"map.{у}" for у in узлы})
+		for текст in (
+			'href="#section-map"',
+			"Чем тянет вариант",
+			"Когда вариант не подходит",
+			"никогда",
+			"Ловушка: Когда спешат",
+			"думает иначе",
+			"Последствие ловушки",
+			"Образец результата",
+			"Последствие нарушения",
+			"Роль ученика",
+			"Условие второе",
+			"Решающие условия практики",
+			"Решающие условия зачёта",
+			"Цитата источника",
+			"источник-цитаты",
+			"Заметка о происхождении",
+			"Примечание к заблуждению",
+		):
+			self.assertIn(текст, html)
+		self.assertIn(f'id="note-card-{тезис}"', html)
+
+		очередь = {
+			з["id"]: з
+			for записи in сведения_для(self.куратор, course=self.курс, view="notes")["notes_queue"].values()
+			for з in записи
+		}
+		self.assertEqual(
+			очередь[тезис]["url"], f"/author?course={quote(self.курс)}&lesson=l-1#{author.якорь('map.T2')}"
+		)
+		self.assertTrue(очередь[цель]["url"].endswith(f"&view=notes#note-card-{цель}"))
+		уроки = сведения_для(self.куратор, course=self.курс)["release"]["lessons"]
+		self.assertEqual([у["open_notes"] for у in уроки], [2, 0, 0])
+		# У урока, которого нет в карте, — пометка, а не ошибка.
+		self.assertIsNone(сведения_для(self.куратор, course=self.курс, lesson="l-2")["lesson"]["map"])
+		self.assertIn("Урока нет в карте релиза", страница(self.куратор, course=self.курс, lesson="l-2"))
+
+	def test_находки_и_изменения_публикации_в_кабинете(self):
+		"""Находки проверки карты и изменения версии — у урока и его узлов, в
+		строке урока на вкладке «Релиз» и числом в «Истории»; находки вне уроков
+		— отдельно на вкладке «Релиз» (learning-services#560)."""
+		релиз = пример_релиза(self.ключ)
+		релиз["map"] = пример_карты()
+		находки = [
+			{"code": "quiz_echo", "severity": "attention", "target": "S2", "message": "Зачёт повторяет практику"},
+			{"code": "lesson_check", "severity": "attention", "target": "l-1", "message": "Замечание к уроку"},
+			{"code": "unused", "severity": "attention", "target": "D9", "message": "Решение вне уроков"},
+			{"code": "course_check", "severity": "attention", "target": None, "message": "Без цели"},
+		]
+		изменения = {
+			"against": 1,
+			"paths": [
+				{"op": "~", "path": "agent.lessons.l-1.directive"},
+				{"op": "+", "path": "map.situations.S2"},
+				{"op": "-", "path": "lessons[l-2].hook"},
+				{"op": "~", "path": "course.summary"},
+			],
+		}
+		ответ = authoring.publish_release(release=релиз, findings=находки, changes=изменения)
+		self.assertTrue(ответ["ok"], ответ)
+
+		урок = сведения_для(self.куратор, course=self.курс, lesson="l-1")["lesson"]
+
+		# Что к какому уроку относится, проверяет `TestПроверкаПубликации`;
+		# здесь — якоря на странице и вывод.
+		self.assertEqual(
+			[(н["code"], н["anchor"]) for н in урок["findings"]],
+			[("quiz_echo", author.якорь("map.S2")), ("lesson_check", author.якорь("lesson.l-1"))],
+		)
+		self.assertEqual(set(урок["findings_by_node"]), {"S2"})
+		html = страница(self.куратор, course=self.курс, lesson="l-1")
+		for текст in ('href="#section-review"', "Замечания проверки карты", "Изменено в версии 2", "map.situations.S2"):
+			self.assertIn(текст, html)
+		# Находка узла — и в списке урока, и у самого узла в карте.
+		self.assertEqual(html.count("Зачёт повторяет практику"), 2)
+		self.assertNotIn("Решение вне уроков", html)
+
+		html = страница(self.куратор, course=self.курс)
+		for текст in ("находок 2", "изменён в v2", "Замечания проверки карты вне уроков · 2", "Решение вне уроков"):
+			self.assertIn(текст, html)
+
+		html = страница(self.куратор, course=self.курс, view="history")
+		self.assertIn('<span class="num">4</span> против v1', html)
+		self.assertIn('<span class="num">4</span></td>', html)
+
 	def test_тестеры(self):
 		тестер = self.тестер()
 
@@ -612,6 +752,78 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		с = сведения_для(self.куратор, course=self.курс)
 		self.assertNotEqual(с["course"]["revision"], отметки["revision"])
 		self.assertIsNotNone(с["course"]["notes_revision"])
+
+
+class TestКартаУрока(UnitTestCase):
+	def test_карта_чужой_формы_не_роняет_страницу(self):
+		"""Форма карты — компилятора курса: поле не той формы выводится текстом
+		или JSON, неизвестное — записью «ключ — значение», узел без текста —
+		без места заметки (learning-services#560)."""
+		карта = пример_карты()
+		карта["decisions"]["D1"]["variants"]["V1a"]["gives"] = {"вложено": [1, 2]}
+		карта["situations"]["S1"]["sets"].append("строка")
+		карта["situations"]["S1"]["conditions"] = "Одно условие строкой"
+		карта["theses"]["T1"]["origin"] = "строкой"
+		карта["misconceptions"]["M1"] = {"title": "Только заголовок"}
+		карта["misconceptions"]["M2"] = {"note": "Ни текста, ни заголовка"}
+
+		к = author._карта_урока(lesson_map.срез(карта, "l-1"))
+
+		вариант = к["decisions"][0]["variants"][0]
+		self.assertEqual(json.loads(вариант["gives"]), {"вложено": [1, 2]})
+		ситуация = к["situations"][0]
+		self.assertEqual(ситуация["conditions"], ["Одно условие строкой"])
+		self.assertEqual(ситуация["sets"][-1]["extra"], [{"key": "", "text": "строка"}])
+		тезис = next(т for т in к["theses"] if т["key"] == "T1")
+		self.assertEqual((тезис["origin"], тезис["origin_extra"]), (None, [{"key": "origin", "text": "строкой"}]))
+		первое, второе = к["misconceptions"]
+		self.assertEqual((первое["text"], первое["target"]), (None, "map.M1"))
+		self.assertEqual(первое["extra"], [{"key": "title", "text": "Только заголовок"}])
+		self.assertIsNone(второе["target"])
+		self.assertIsNone(author._карта_урока(None))
+
+
+class TestПроверкаПубликации(UnitTestCase):
+	def test_находки_и_пути_раскладываются_по_урокам(self):
+		"""Находка урока — с целью-уроком или узлом его среза карты, остальные —
+		вне уроков; путь урока — по `lesson_map.путь_урока` (learning-services#560)."""
+		находки = [
+			{"code": "a", "target": "S2"},
+			{"code": "b", "target": "l-1"},
+			{"code": "c", "target": "M1"},
+			{"code": "d", "target": "D9"},
+			{"code": "e", "target": None},
+		]
+		пути = [
+			{"op": "~", "path": "agent.lessons.l-1.directive"},
+			{"op": "+", "path": "map.situations.S2"},
+			{"op": "-", "path": "lessons[l-2].hook"},
+			{"op": "~", "path": "course.summary"},
+		]
+		релиз = {
+			"release": "REL-X",
+			"digest": "d",
+			"findings": находки,
+			"changes": {"against": 1, "paths": пути, "truncated": False},
+			"lessons": [{"key": к, "findings": [], "changed_paths": []} for к in ("l-1", "l-2")],
+			"findings_elsewhere": [],
+		}
+		карта = author._Карта(релиз)
+		карта.данные = lesson_map.собрать(пример_карты())
+
+		author._проверка_публикации(релиз, карта)
+
+		self.assertEqual(
+			[([н["code"] for н in у["findings"]], [п["path"] for п in у["changed_paths"]]) for у in релиз["lessons"]],
+			[(["a", "b", "c"], ["agent.lessons.l-1.directive", "map.situations.S2"]), ([], ["lessons[l-2].hook"])],
+		)
+		self.assertEqual([н["code"] for н in релиз["findings_elsewhere"]], ["d", "e"])
+
+	def test_без_находок_и_путей_карта_не_читается(self):
+		релиз = {"findings": None, "changes": {"against": None, "paths": [], "truncated": False}, "lessons": []}
+		карта = author._Карта(релиз)
+		author._проверка_публикации(релиз, карта)
+		self.assertNotIn("данные", vars(карта))
 
 
 class TestЯкорьЗаметки(UnitTestCase):
