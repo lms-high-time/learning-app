@@ -81,6 +81,7 @@ Confirm Your Action,Подтвердите действие
 Confirm clearing demo data?,Удалить демоданные?
 Connect a Google Meet account to schedule and host live classes.,"Подключите аккаунт Google Meet, чтобы планировать и проводить онлайн-уроки."
 Connect a Zoom account to schedule and host live classes.,"Подключите аккаунт Zoom, чтобы планировать и проводить онлайн-уроки."
+Continue,Продолжить
 Could not create the course ZIP file. Please try again later. Error: {0},Не удалось создать ZIP-файл курса. Попробуйте позже. Ошибка: {0}
 Could not delete the quiz,Не удалось удалить тест
 Could not update publish status,Не удалось изменить статус публикации
@@ -133,9 +134,10 @@ Edit Question,Изменить вопрос
 Edit lesson,Изменить урок
 Edit member,Изменить участника
 Edit your reusable email template.,Отредактируйте свой многоразовый шаблон письма.
+Email,Почта
 Email Account deleted successfully,Почтовый аккаунт успешно удалён
 Email Template deleted successfully,Шаблон письма успешно удалён
-Email is required,Укажите email
+Email is required,Укажите почту
 Email is required.,Укажите почту.
 Email service {0} is not supported,Почтовый сервис {0} не поддерживается
 Enable evaluations for batch participants.,Включить оценки для участников потока.
@@ -169,6 +171,7 @@ Failed to assign badge,Не удалось назначить бейдж
 Failed to refresh session,Не удалось обновить сессию
 File type of {0} is not allowed in quiz answers.,Файлы типа {0} нельзя прикреплять к ответам на тест.
 File upload failed. Please try again.,Не удалось загрузить файл. Попробуйте ещё раз.
+Forgot Password?,Забыли пароль?
 Forgot password?,Забыли пароль?
 Frappe Learning,Frappe Learning
 Full name is required.,Укажите имя.
@@ -195,6 +198,7 @@ In-app,В приложении
 Include in preview,Включить в предпросмотр
 Industry,Отрасль,Learner profile
 Instructor notes,Заметки инструктора
+Invalid Email.,Проверьте адрес почты.
 Invalid ZIP file,Некорректный ZIP-файл
 Invalid chapter.,Некорректная глава.
 Invalid course ZIP: Missing course.json,Некорректный ZIP курса: отсутствует course.json
@@ -221,10 +225,11 @@ Lesson created,Урок создан
 Lesson title,Название урока
 Lesson updated,Урок обновлён
 Let users enroll themselves.,Разрешить пользователям записываться самостоятельно.
-Let's setup your account.,Создадим вам аккаунт.
+Let's setup your account.,Создайте аккаунт.
 Live answer checking is not enabled for this quiz.,Мгновенная проверка ответов для этого теста отключена.
 Login with Email Link,Войти по ссылке из письма
 Login with password,Войти по паролю
+Login with {0},Войти через {0}
 Make Announcement,Сделать объявление
 Make this certificate visible to the participant.,Показывать этот сертификат участнику.
 "Manage batches, review and grade submissions","Ведение потоков, проверка и оценка работ"
@@ -272,7 +277,9 @@ Or copy and paste this link:,Или скопируйте ссылку в адр�
 "Oversee all users, content, and system settings","Контроль всех пользователей, контента и настроек системы"
 Paid certificate,Платный сертификат
 Paid course,Платный курс
+Password,Пароль
 Password Reset,Сброс пароля
+Password is required.,Укажите пароль.
 Paste a YouTube link,Вставьте ссылку на YouTube
 "Paste a YouTube link, or upload a video file (MP4, WebM, or OGG) to show a preview on the course page.","Вставьте ссылку на YouTube или загрузите видеофайл (MP4, WebM или OGG), чтобы показать превью на странице курса."
 Payment gateways deleted successfully,Платёжные шлюзы успешно удалены
@@ -338,6 +345,8 @@ Send Notification for Published Batches,Отправлять уведомлен�
 Send Notification for Published Courses,Отправлять уведомления об опубликованных курсах
 Send Payment Reminders for Batch,Отправлять напоминания об оплате потока
 Send Payment Reminders for Course,Отправлять напоминания об оплате курса
+Send login link,Отправить ссылку для входа
+Sent,Отправлено
 Session refreshed successfully,Сессия успешно обновлена
 "Set the discount, validity, and the courses or batches this coupon applies to.","Задайте скидку, срок действия и курсы или потоки, к которым применяется купон."
 Set the name of your brand. Appears in the left sidebar.,Укажите название бренда. Оно отображается в левой панели.
@@ -346,6 +355,8 @@ Short introduction,Краткое вступление
 Sign In,Вход
 Sign Up,Регистрация
 Sign up,Зарегистрироваться
+Signup Disabled,Регистрация отключена
+Signups have been disabled for this website.,Регистрация на этом сайте отключена.
 Skip for now,Пропустить
 Slots,Слоты
 Sort by,Сортировать по
@@ -466,6 +477,7 @@ data must be an object,data должен быть объектом
 e.g. Course Champion,"например, Мастер курса"
 e.g. WELCOME10,"например, WELCOME10"
 file_url must be a string,file_url должен быть строкой
+jane@example.com,ivan@example.com
 name must be a string,name должен быть строкой
 sections,разделов
 service must be a string,service должен быть строкой

@@ -103,7 +103,7 @@ class IntegrationTestTranslations(IntegrationTestCase):
 
 	def test_страница_входа_переведена_целиком(self):
 		"""Вход, регистрация, «забыли пароль» и вход по ссылке — шаблон Frappe
-		`frappe/www/login.html`.
+		`frappe/www/login.html` и его скрипт `templates/includes/login/login.js`.
 
 		`Why:` у Frappe часть его строк в `ru.po` пустая, и русскоязычный
 		посетитель видел вход вперемешку: «Sign In», «Forgot password?»,
@@ -116,6 +116,18 @@ class IntegrationTestTranslations(IntegrationTestCase):
 		строки = (
 			"Sign In",
 			"Welcome! Please sign in to continue.",
+			"Email",
+			"jane@example.com",
+			"Password",
+			"Continue",
+			"Forgot Password?",
+			"Send login link",
+			"Login with {0}",
+			"Signup Disabled",
+			"Signups have been disabled for this website.",
+			"Password is required.",
+			"Invalid Email.",
+			"Sent",
 			"Forgot password?",
 			"Don't have an account?",
 			"Sign up",
@@ -136,7 +148,8 @@ class IntegrationTestTranslations(IntegrationTestCase):
 			"Invalid credentials, try again.",
 		)
 
-		свои = {оригинал for оригинал, *_ in _строки()}
+		# Действует именно наш перевод: «где-то переведено» прошло бы и с чужим.
+		свои = {оригинал: перевод for оригинал, перевод, *_ in _строки()}
 		self.assertEqual([с for с in строки if с not in свои], [])
-		self.assertEqual([с for с in строки if not словарь.get(с)], [])
+		self.assertEqual({с: словарь.get(с) for с in строки}, {с: свои[с] for с in строки})
 		self.assertEqual(словарь["Sign up"], "Зарегистрироваться")
