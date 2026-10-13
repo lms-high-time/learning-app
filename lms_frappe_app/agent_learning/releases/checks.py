@@ -12,7 +12,7 @@
 Содержание текстов не проверяется: это методика, её держит компилятор.
 """
 
-from lms_frappe_app.agent_learning.artifacts.schema import ЗАНЯТЫЕ_КЛЮЧИ_БЛОКОВ, КЛЮЧ
+from lms_frappe_app.agent_learning.artifacts.schema import КЛЮЧ
 from lms_frappe_app.agent_learning.errors import НАЗВАНИЕ_С_УГЛОВЫМИ, УГЛОВЫЕ
 
 ДЛИНА_DATA = 140
@@ -40,7 +40,7 @@ def проблемы(релиз: dict) -> tuple[list[dict], list[dict]]:
 	_ссылки(релиз, критичные)
 	_порядок_глав(релиз, критичные)
 	_квиз(релиз, критичные, предупреждения)
-	_документ(релиз, критичные, предупреждения)
+	_документ(релиз, критичные)
 	_длины(релиз, критичные)
 	_названия(релиз, критичные)
 	критичные.extend(ответы_в_пакете(релиз.get("agent", {})))
@@ -170,9 +170,9 @@ def _квиз(р: dict, к: list, п: list) -> None:
 				п.append({"code": "explanation_missing", "where": где})
 
 
-def _документ(р: dict, к: list, п: list) -> None:
+def _документ(р: dict, к: list) -> None:
 	"""Документ ложится на движок документов: ключи — `artifacts.schema.КЛЮЧ`,
-	поля разделов `one` не совпадают друг с другом и с колонками таблиц."""
+	поля разделов `one` не совпадают друг с другом и с колонками разделов `many`."""
 	д = р["document"]
 	if not д:
 		return
@@ -181,7 +181,7 @@ def _документ(р: dict, к: list, п: list) -> None:
 	поля: list[str] = []
 	колонки: set[str] = set()
 	for с in д["sections"]:
-		if not КЛЮЧ.match(с["key"]) or с["key"] in ЗАНЯТЫЕ_КЛЮЧИ_БЛОКОВ:
+		if not КЛЮЧ.match(с["key"]):
 			к.append({"code": "document_key", "where": f"sections[{с['key']}]", "key": с["key"]})
 		for кол in с["columns"]:
 			if not КЛЮЧ.match(кол["key"]) or кол["key"] == "id":
@@ -190,14 +190,6 @@ def _документ(р: dict, к: list, п: list) -> None:
 				)
 			if с["rows"] == "one":
 				поля.append(кол["key"])
-				if isinstance(кол["required"], dict):
-					# Поля движка обязательны только безусловно — условие у раздела «один раз» теряется.
-					п.append(
-						{
-							"code": "required_condition_ignored",
-							"where": f"sections[{с['key']}].columns[{кол['key']}]",
-						}
-					)
 			else:
 				колонки.add(кол["key"])
 	for ключ in sorted({имя for имя in поля if поля.count(имя) > 1} | (set(поля) & колонки)):

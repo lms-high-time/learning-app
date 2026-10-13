@@ -1,458 +1,359 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Поля и таблицы документа без базы (learning-services#330).
+"""Разделы документа без базы: схема, запись, заполненность, выгрузка
+(learning-services#515).
 
-Схема — реестр рисков из курса «Риски проекта» в миниатюре: блок рисков
-заводит строки, блок оценки дописывает им баллы, ранг и отметку «в работе»
-считает сервер, ответ обязателен только у рисков в работе.
+Схема — журнал договорённостей в миниатюре: раздел `many` с условной
+колонкой («кто отвечает» — когда есть решение) и раздел `one` с полями.
 """
 
-import unittest
-from functools import partial
+import io
+
+from frappe.tests import UnitTestCase
 
 from lms_frappe_app.agent_learning.artifacts import codes, data, export, fill, schema
 from lms_frappe_app.agent_learning.errors import Отказ
 
-ЦЕЛИ = {
-	"block_key": "goals",
-	"spec": {
-		"table": "goals",
-		"prefix": "G",
+ЖУРНАЛ = schema.проверить_раздел(
+	{
+		"key": "agreements",
+		"title": "Договорённости",
+		"rows": "many",
 		"columns": [
-			{"key": "goal", "title": "Цель", "type": "text", "required": True},
-			{"key": "measure", "title": "Мера отклонения", "type": "text"},
+			{"key": "topic", "title": "Тема", "required": True},
+			{"key": "decision", "title": "Решение", "required": False},
+			{"key": "owner", "title": "Кто отвечает", "required": {"if_column": "decision"}},
 		],
-	},
-}
-РИСКИ = {
-	"block_key": "risks",
-	"spec": {
-		"table": "register",
-		"prefix": "R",
-		"title": "Реестр",
+	}
+)
+ПРАВИЛА = schema.проверить_раздел(
+	{
+		"key": "how_we_decide",
+		"title": "Как мы решаем",
+		"rows": "one",
 		"columns": [
-			{
-				"key": "kind",
-				"title": "Вид",
-				"type": "select",
-				"options": ["угроза", "возможность"],
-				"required": True,
-			},
-			{"key": "event", "title": "Событие", "type": "text", "required": True},
-			{"key": "goal_ref", "title": "Цель", "type": "ref", "ref": "goals"},
+			{"key": "method", "title": "Способ", "required": True},
+			{"key": "exception", "title": "Исключение", "required": False},
+			{"key": "who_breaks", "title": "Кто снимает", "required": {"if_column": "exception"}},
 		],
-		"views": [{"type": "matrix", "x": "impact", "y": "probability", "highlight": "in_work"}],
-	},
-}
-ШКАЛА = {
-	"block_key": "scales",
-	"spec": {
-		"table": "probability_scale",
-		"prefix": "P",
-		"columns": [
-			{"key": "score", "title": "Балл", "type": "number"},
-			{"key": "level", "title": "Уровень", "type": "text"},
-		],
-		"rows": [{"score": 1, "level": "Редко"}, {"score": 5, "level": "Почти наверняка"}],
-	},
-}
-ОЦЕНКА = {
-	"block_key": "assessment",
-	"spec": {
-		"table": "register",
-		"fields": [{"key": "threshold", "title": "Порог внимания", "type": "number", "required": True}],
-		"columns": [
-			{
-				"key": "probability",
-				"title": "Вероятность",
-				"type": "scale",
-				"labels": "probability_scale",
-				"required": True,
-			},
-			{"key": "impact", "title": "Влияние", "type": "scale", "required": True},
-			{"key": "rank", "title": "Ранг", "type": "formula", "formula": "probability * impact"},
-			{"key": "in_work", "title": "В работе", "type": "formula", "formula": "rank >= threshold"},
-		],
-	},
-}
-ОТВЕТЫ = {
-	"block_key": "responses",
-	"spec": {
-		"table": "register",
-		"columns": [
-			{"key": "measure_text", "title": "Мера", "type": "text", "required": "in_work"},
-			{"key": "due", "title": "Срок", "type": "date"},
-			{"key": "sponsor", "title": "Спонсору", "type": "check", "max": 1},
-		],
-	},
-}
-ТЕКСТ = {"block_key": "worries", "spec": None}
+	}
+)
 
 
-def схема():
-	блоки = [dict(б) for б in (ТЕКСТ, ЦЕЛИ, РИСКИ, ШКАЛА, ОЦЕНКА, ОТВЕТЫ)]
-	for б in блоки:
-		б["spec"] = schema.проверить_спек(б["spec"], б["block_key"])
-	schema.проверить_документ(блоки)
-	return блоки
+def отказ(тест, код: str, действие, **подробности) -> None:
+	with тест.assertRaises(Отказ) as пойман:
+		действие()
+	тест.assertEqual(пойман.exception.код, код, пойман.exception.сообщение)
+	for ключ, значение in подробности.items():
+		тест.assertEqual(пойман.exception.подробности.get(ключ), значение, ключ)
 
 
-class TestСхема(unittest.TestCase):
-	def test_таблица_собирает_колонки_всех_блоков_и_хозяина(self):
-		таблица = schema.таблицы_схемы(схема())["register"]
-		self.assertEqual(таблица["owner"], "risks")
+class TestСхема(UnitTestCase):
+	def test_раздел_в_каноническом_виде(self):
 		self.assertEqual(
-			[к["key"] for к in таблица["columns"]],
+			ЖУРНАЛ,
+			{
+				"key": "agreements",
+				"title": "Договорённости",
+				"description": None,
+				"lesson": None,
+				"rows": "many",
+				"columns": [
+					{"key": "topic", "title": "Тема", "required": True},
+					{"key": "decision", "title": "Решение", "required": False},
+					{"key": "owner", "title": "Кто отвечает", "required": {"if_column": "decision"}},
+				],
+			},
+		)
+		self.assertEqual(
+			schema.проверить_раздел({"key": " Notes ", "rows": "one", "columns": [{"key": "text"}]}),
+			{
+				"key": "notes",
+				"title": "notes",
+				"description": None,
+				"lesson": None,
+				"rows": "one",
+				"columns": [{"key": "text", "title": "text", "required": False}],
+			},
+		)
+
+	def test_неверный_раздел_отказ(self):
+		def раздел(**правка):
+			return {"key": "log", "rows": "many", "columns": [{"key": "topic"}], **правка}
+
+		for имя, описание in {
+			"ключ не латиницей": раздел(key="Лог"),
+			"вид строк не из двух": раздел(rows="table"),
+			"колонки не список": раздел(columns={"topic": {}}),
+			"колонка id": раздел(columns=[{"key": "id"}]),
+			"ключ колонки с заглавной": раздел(columns=[{"key": "Topic"}]),
+			"колонка дважды": раздел(columns=[{"key": "topic"}, {"key": "topic"}]),
+			"условие на чужую колонку": раздел(columns=[{"key": "a", "required": {"if_column": "b"}}]),
+			"условие на себя": раздел(columns=[{"key": "a", "required": {"if_column": "a"}}]),
+			"required строкой": раздел(columns=[{"key": "a"}, {"key": "b", "required": "a"}]),
+			"лишний ключ условия": раздел(
+				columns=[{"key": "a"}, {"key": "b", "required": {"if_column": "a", "x": 1}}]
+			),
+		}.items():
+			with self.subTest(имя):
+				отказ(self, codes.НЕВЕРНАЯ_СХЕМА, lambda описание=описание: schema.проверить_раздел(описание))
+
+	def test_документ_целиком(self):
+		def раздел(ключ: str, rows: str, *колонки: str) -> dict:
+			return schema.проверить_раздел(
+				{"key": ключ, "rows": rows, "columns": [{"key": к} for к in колонки]}
+			)
+
+		schema.проверить_документ(
+			[раздел("a", "many", "topic"), раздел("b", "many", "topic"), раздел("c", "one", "x")]
+		)
+		for имя, разделы in {
+			"раздел дважды": [раздел("a", "one", "x"), раздел("a", "many", "y")],
+			"поле совпало с полем": [раздел("a", "one", "x"), раздел("b", "one", "x")],
+			"поле совпало с колонкой": [раздел("a", "many", "x"), раздел("b", "one", "x")],
+		}.items():
+			with self.subTest(имя):
+				отказ(self, codes.НЕВЕРНАЯ_СХЕМА, lambda разделы=разделы: schema.проверить_документ(разделы))
+
+
+class TestЗапись(UnitTestCase):
+	def test_строки_заводятся_правятся_и_удаляются(self):
+		д = data.записать(
+			ЖУРНАЛ, None, rows=[{"topic": "  Ретро раз в две недели  "}, {"topic": "Созвоны", "decision": 12}]
+		)
+		self.assertEqual(
+			д["tables"]["agreements"],
 			[
-				"kind",
-				"event",
-				"goal_ref",
-				"probability",
-				"impact",
-				"rank",
-				"in_work",
-				"measure_text",
-				"due",
-				"sponsor",
+				{"id": "A1", "topic": "Ретро раз в две недели"},
+				{"id": "A2", "topic": "Созвоны", "decision": "12"},
 			],
 		)
-		self.assertEqual(таблица["columns"][3]["block"], "assessment")
-
-	def test_неверная_схема_отказ(self):
-		"""Строка таблицы — правка: по свежей схеме она готовит проверку, которая отказывает."""
-
-		def документ(правка):
-			def подготовить(блоки):
-				правка(блоки)
-				return partial(schema.проверить_документ, блоки)
-
-			return подготовить
-
-		def спек(значение: dict):
-			return lambda _блоки: partial(schema.проверить_спек, значение, "x")
-
-		for случай, правка, код in (
-			(
-				"формула на неизвестное имя",
-				документ(lambda б: б[4]["spec"]["columns"][2].update(formula="probability * weight")),
-				codes.НЕВЕРНАЯ_СХЕМА,
-			),
-			(
-				"ссылка на таблицу, которой нет",
-				документ(lambda б: б[2]["spec"]["columns"][2].update(ref="nope")),
-				None,
-			),
-			("выбор без вариантов", спек({"columns": [{"key": "kind", "type": "select"}]}), None),
-			("колонка id занята", спек({"columns": [{"key": "id"}]}), None),
-		):
-			with self.subTest(случай):
-				проверка = правка(схема())
-				with self.assertRaises(Отказ) as отказ:
-					проверка()
-				if код:
-					self.assertEqual(отказ.exception.код, код)
-
-	def test_набор_колонок_с_названием(self):
-		спек = schema.проверить_спек(
-			{"columns": [{"key": "a"}], "views": [{"type": "columns", "title": "Кратко", "columns": ["a"]}]},
-			"x",
-		)
-		self.assertEqual(спек["views"], [{"type": "columns", "title": "Кратко", "columns": ["a"]}])
-		with self.assertRaises(Отказ):
-			schema.проверить_спек({"columns": [{"key": "a"}], "views": [{"type": "columns", "columns": ["a"]}]}, "x")
-
-	def test_ключ_блока_занят_видом_страницы(self):
-		for ключ in schema.ЗАНЯТЫЕ_КЛЮЧИ_БЛОКОВ:
-			блоки = [{"block_key": ключ.upper()}]
-			with self.assertRaises(Отказ) as отказ:
-				schema.проверить_документ(блоки)
-			self.assertEqual(отказ.exception.код, codes.НЕВЕРНАЯ_СХЕМА)
-			self.assertEqual(отказ.exception.подробности, {"key": ключ})
-		schema.проверить_документ([{"block_key": "tables"}])
-
-
-class TestЗапись(unittest.TestCase):
-	def setUp(self):
-		self.блоки = схема()
-		д = data.записать(self.блоки, "goals", {}, rows=[{"goal": "Запуск до 1 марта"}])
-		self.д = data.записать(
-			self.блоки,
-			"risks",
-			д,
-			rows=[
-				{"kind": "Угроза", "event": "Подрядчик уйдёт на другой объект", "goal_ref": "g1"},
-				{"kind": "возможность", "event": "Готовый модуль сэкономит месяц"},
-			],
-		)
-
-	def test_хозяин_заводит_строки_с_номерами(self):
-		строки = self.д["tables"]["register"]
-		self.assertEqual([с["id"] for с in строки], ["R1", "R2"])
-		# Выбор и ссылка — к каноническому написанию.
-		self.assertEqual(строки[0]["kind"], "угроза")
-		self.assertEqual(строки[0]["goal_ref"], "G1")
-
-	def test_чужой_блок_дописывает_колонки_но_не_заводит_строки(self):
-		д = data.записать(self.блоки, "assessment", self.д, rows=[{"id": "R1", "probability": "4", "impact": 5}])
-		self.assertEqual(д["tables"]["register"][0]["probability"], 4)
-		with self.assertRaises(Отказ) as отказ:
-			data.записать(self.блоки, "assessment", self.д, rows=[{"probability": 4}])
-		self.assertEqual(отказ.exception.код, codes.СТРОКИ_НЕ_ЗАВОДИТ)
-
-	def test_запись_не_по_правилам_отказ(self):
-		for случай, блок, правка, код in (
-			("чужую колонку", "assessment", {"rows": [{"id": "R1", "event": "другое"}]}, codes.НЕТ_КОЛОНКИ),
-			("формулу", "assessment", {"rows": [{"id": "R1", "rank": 20}]}, None),
-			("балл вне шкалы", "assessment", {"rows": [{"id": "R1", "probability": 6}]}, None),
-			("неизвестный вариант выбора", "risks", {"rows": [{"id": "R1", "kind": "проблема"}]}, None),
-			("ссылку на несуществующую строку", "risks", {"rows": [{"id": "R1", "goal_ref": "G9"}]}, None),
-			("удаление строки не хозяином", "assessment", {"delete_rows": ["R1"]}, None),
-		):
-			with self.subTest(случай):
-				with self.assertRaises(Отказ) as отказ:
-					data.записать(self.блоки, блок, self.д, **правка)
-				if код:
-					self.assertEqual(отказ.exception.код, код)
-
-	def test_дата_по_русски_приводится_к_iso(self):
-		д = data.записать(self.блоки, "responses", self.д, rows=[{"id": "R1", "due": "05.03.2027"}])
-		self.assertEqual(д["tables"]["register"][0]["due"], "2027-03-05")
-
-	def test_флажков_не_больше_предела(self):
-		д = data.записать(self.блоки, "responses", self.д, rows=[{"id": "R1", "sponsor": True}])
-		with self.assertRaises(Отказ) as отказ:
-			data.записать(self.блоки, "responses", д, rows=[{"id": "R2", "sponsor": True}])
-		self.assertEqual(отказ.exception.код, codes.ФЛАЖКОВ_СЛИШКОМ_МНОГО)
-
-	def test_удалённый_номер_не_возвращается(self):
-		д = data.записать(self.блоки, "risks", self.д, delete_rows=["R2"])
-		д = data.записать(self.блоки, "risks", д, rows=[{"kind": "угроза", "event": "Сезон начнётся раньше"}])
-		self.assertEqual([с["id"] for с in д["tables"]["register"]], ["R1", "R3"])
-
-	def test_поле_блока_и_чужое_поле(self):
-		д = data.записать(self.блоки, "assessment", self.д, fields={"threshold": "12"})
-		self.assertEqual(д["fields"]["threshold"], 12)
-		with self.assertRaises(Отказ) as отказ:
-			data.записать(self.блоки, "risks", self.д, fields={"threshold": 12})
-		self.assertEqual(отказ.exception.код, codes.НЕТ_ПОЛЯ)
-
-
-class TestВычисленияИЗаполненность(unittest.TestCase):
-	def setUp(self):
-		self.блоки = схема()
-		д = data.записать(
-			self.блоки,
-			"risks",
-			{},
-			rows=[{"kind": "угроза", "event": "A"}, {"kind": "угроза", "event": "B"}],
-		)
-		д = data.записать(self.блоки, "assessment", д, fields={"threshold": 12})
-		self.д = data.записать(
-			self.блоки,
-			"assessment",
-			д,
-			rows=[{"id": "R1", "probability": 4, "impact": 4}, {"id": "R2", "probability": 2, "impact": 3}],
-		)
-
-	def блок(self, ключ):
-		return next(б for б in self.блоки if б["block_key"] == ключ)
-
-	def test_ранг_и_в_работе_считаются(self):
-		ряды = data.вычисленные(schema.таблицы_схемы(self.блоки)["register"], self.д, self.блоки)
-		self.assertEqual([(р["rank"], р["in_work"]) for р in ряды], [(16, True), (6, False)])
-
-	def test_ответ_обязателен_только_у_рисков_в_работе(self):
-		ответы = self.блок("responses")
-		self.assertFalse(fill.заполнен(ответы, self.д, self.блоки))
+		д = data.записать(ЖУРНАЛ, д, rows=[{"id": "a2", "decision": "", "owner": "Маша"}])
+		self.assertEqual(д["tables"]["agreements"][1], {"id": "A2", "topic": "Созвоны", "owner": "Маша"})
+		д = data.записать(ЖУРНАЛ, д, delete_rows=["A2"], rows=[{"topic": "Третья"}])
 		self.assertEqual(
-			fill.пустые_клетки(ответы, self.д, self.блоки), [{"row": "R1", "column": "measure_text"}]
+			[с["id"] for с in д["tables"]["agreements"]], ["A1", "A3"], "номера не переиспользуются"
 		)
-		д = data.записать(
-			self.блоки, "responses", self.д, rows=[{"id": "R1", "measure_text": "уточнить у Анны"}]
-		)
-		self.assertTrue(fill.заполнен(ответы, д, self.блоки))
+		self.assertEqual(д["seq"], {"agreements": 3})
 
-	def test_оценка_заполнена_когда_поле_и_колонки_есть(self):
-		self.assertTrue(fill.заполнен(self.блок("assessment"), self.д, self.блоки))
-		д = data.записать(self.блоки, "risks", self.д, rows=[{"kind": "угроза", "event": "C"}])
-		self.assertFalse(fill.заполнен(self.блок("assessment"), д, self.блоки))
+	def test_поля_пишутся_и_стираются(self):
+		д = data.записать(ПРАВИЛА, None, fields={"method": " Согласие ", "exception": "Бюджет"})
+		д = data.записать(ПРАВИЛА, д, fields={"exception": "  "})
+		self.assertEqual(д["fields"], {"method": "Согласие"})
 
-	def test_прежний_текст_считается_пока_значений_нет(self):
-		цели = self.блок("goals")
-		self.assertTrue(fill.заполнен(цели, self.д, self.блоки, "| G1 | запуск |"))
-		self.assertFalse(fill.заполнен(цели, self.д, self.блоки, ""))
-
-	def test_текстовый_блок_не_касается_таблиц(self):
-		self.assertIsNone(fill.заполнен(self.блок("worries"), self.д, self.блоки, "тревоги"))
-
-	def test_нетронутая_заготовка_не_заполняет_блок(self):
-		шкала = self.блок("scales")
-		self.assertFalse(fill.заполнен(шкала, self.д, self.блоки))
-		д = data.записать(self.блоки, "scales", self.д, rows=[{"id": "P1", "level": "На памяти не было"}])
-		self.assertTrue(fill.заполнен(шкала, д, self.блоки))
-
-	def test_заготовка_помечена_пока_её_не_тронули(self):
-		self.assertTrue(export.таблицы_документа(self.блоки, self.д)["probability_scale"]["preset"])
-		self.assertFalse(export.таблицы_документа(self.блоки, self.д)["register"]["preset"])
-		д = data.записать(self.блоки, "scales", self.д, rows=[{"id": "P1", "level": "Никогда"}])
-		self.assertFalse(export.таблицы_документа(self.блоки, д)["probability_scale"]["preset"])
-
-	def test_заготовка_строк_видна_до_первой_правки(self):
-		шкала = export.таблицы_документа(self.блоки, self.д)["probability_scale"]
-		self.assertEqual([р["id"] for р in шкала["rows"]], ["P1", "P2"])
-		д = data.записать(self.блоки, "scales", self.д, rows=[{"id": "P2", "level": "Наверняка"}])
-		self.assertEqual(д["tables"]["probability_scale"][1], {"id": "P2", "score": 5, "level": "Наверняка"})
-
-	def test_markdown_для_агента(self):
-		текст = export.таблицы_документа(self.блоки, self.д)["register"]["markdown"]
-		self.assertIn("| ID | Вид | Событие |", текст)
-		self.assertIn("| R1 | угроза | A |  | 4 | 4 | 16 | да |", текст)
-
-	def test_xlsx_держит_формулы(self):
-		from io import BytesIO
-
-		from openpyxl import load_workbook
-
-		книга = load_workbook(BytesIO(export.книга_xlsx("Реестр", self.блоки, self.д)))
-		self.assertEqual(книга.sheetnames[0], "Шапка")
-		self.assertIn("Реестр", книга.sheetnames)
-		лист = книга["Реестр"]
-		шапка = [к.value for к in лист[1]]
-		ранг = шапка.index("Ранг")
-		self.assertEqual(лист.cell(row=2, column=ранг + 1).value, "=E2*F2")
-		в_работе = лист.cell(row=2, column=шапка.index("В работе") + 1).value
-		self.assertEqual(в_работе, "=G2>='Шапка'!$B$2")
-
-
-# Экономика этапа из Lean Canvas (learning-services#351): сколько клиентов
-# нужно — вывод из цели этапа и цены, хватит ли сегмента — вывод из вывода.
-ЭКОНОМИКА = {
-	"block_key": "economics",
-	"spec": {
-		"fields": [
-			{"key": "stage_goal", "title": "Цель этапа", "type": "number"},
-			{"key": "price", "title": "Цена", "type": "number"},
-			{
-				"key": "clients_needed",
-				"title": "Клиентов нужно",
-				"type": "formula",
-				"formula": "stage_goal / price",
-			},
-			{
-				"key": "enough",
-				"title": "Сегмента хватит",
-				"type": "formula",
-				"formula": "segment_size >= clients_needed",
-			},
-		],
-	},
-}
-СЕГМЕНТ = {
-	"block_key": "segments",
-	"spec": {
-		"fields": [{"key": "segment_size", "title": "Размер сегмента", "type": "number"}],
-		"table": "segments",
-		"columns": [
-			{"key": "segment", "title": "Сегмент", "type": "text"},
-			{"key": "share", "title": "Доля плана", "type": "formula", "formula": "clients_needed / 10"},
-		],
-	},
-}
-
-
-def экономика():
-	блоки = [{**б, "spec": schema.проверить_спек(б["spec"], б["block_key"])} for б in (ЭКОНОМИКА, СЕГМЕНТ)]
-	schema.проверить_документ(блоки)
-	return блоки
-
-
-class TestФормулыПолей(unittest.TestCase):
-	def setUp(self):
-		self.блоки = экономика()
-		д = data.записать(self.блоки, "economics", {}, fields={"stage_goal": 300000, "price": 5000})
-		self.д = data.записать(self.блоки, "segments", д, fields={"segment_size": 40})
-
-	def test_формула_поля_считается_цепочкой_и_не_хранится(self):
-		self.assertEqual(
-			data.поля_документа(self.блоки, self.д),
-			{"stage_goal": 300000, "price": 5000, "clients_needed": 60, "enough": False, "segment_size": 40},
-		)
-		self.assertNotIn("clients_needed", self.д["fields"])
-
-	def test_дробь_формулы_поля_до_сотых(self):
-		д = data.записать(self.блоки, "economics", self.д, fields={"stage_goal": 1000000, "price": 30000})
-		self.assertEqual(data.поля_документа(self.блоки, д)["clients_needed"], 33.33)
-		д = data.записать(self.блоки, "economics", self.д, fields={"stage_goal": 10, "price": 4})
-		self.assertEqual(data.поля_документа(self.блоки, д)["clients_needed"], 2.5)
-
-	def test_пустой_операнд_пусто(self):
-		д = data.записать(self.блоки, "economics", {}, fields={"stage_goal": 300000})
-		значения = data.поля_документа(self.блоки, д)
-		self.assertIsNone(значения["clients_needed"])
-		self.assertIsNone(значения["enough"])
-
-	def test_формула_поля_не_по_правилам_отказ(self):
-		"""Строка таблицы — правка: по свежей схеме она готовит проверку, которая отказывает."""
-
-		def документ(формула: str):
-			def подготовить(блоки):
-				блоки[0]["spec"]["fields"][2]["formula"] = формула
-				return partial(schema.проверить_документ, блоки)
-
-			return подготовить
-
-		for случай, правка, код in (
-			(
-				"запись в формулу поля",
-				lambda _блоки: partial(
-					data.записать, self.блоки, "economics", self.д, fields={"clients_needed": 10}
-				),
+	def test_отказы(self):
+		журнал = data.записать(ЖУРНАЛ, None, rows=[{"topic": "Ретро"}])
+		длинно = "я" * 4001
+		for имя, (раздел, параметры, код, подробности) in {
+			"строки у раздела one": (
+				ПРАВИЛА,
+				{"rows": [{"method": "x"}]},
+				codes.НЕ_ТОТ_РАЗДЕЛ,
+				{"rows": "one"},
+			),
+			"удаление у раздела one": (
+				ПРАВИЛА,
+				{"delete_rows": ["H1"]},
+				codes.НЕ_ТОТ_РАЗДЕЛ,
+				{"rows": "one"},
+			),
+			"поля у раздела many": (
+				ЖУРНАЛ,
+				{"fields": {"topic": "x"}},
+				codes.НЕ_ТОТ_РАЗДЕЛ,
+				{"rows": "many"},
+			),
+			"нечего писать": (ЖУРНАЛ, {"rows": [], "fields": {}}, codes.НЕЧЕГО_ПИСАТЬ, {}),
+			"нет колонки": (
+				ЖУРНАЛ,
+				{"rows": [{"topik": "x"}]},
+				codes.НЕТ_КОЛОНКИ,
+				{"column": "topik", "columns": ["topic", "decision", "owner"]},
+			),
+			"нет поля": (
+				ПРАВИЛА,
+				{"fields": {"metod": "x"}},
+				codes.НЕТ_ПОЛЯ,
+				{"field": "metod", "fields": ["method", "exception", "who_breaks"]},
+			),
+			"правка строки, которой нет": (
+				ЖУРНАЛ,
+				{"rows": [{"id": "A9", "topic": "x"}]},
+				codes.НЕТ_СТРОКИ,
+				{"row": "A9"},
+			),
+			"удаление строки, которой нет": (
+				ЖУРНАЛ,
+				{"delete_rows": ["A9"]},
+				codes.НЕТ_СТРОКИ,
+				{"row": "A9"},
+			),
+			"длинная клетка": (
+				ЖУРНАЛ,
+				{"rows": [{"topic": длинно}]},
 				codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ,
+				{"column": "topic", "max": 4000},
 			),
+			"длинное поле": (
+				ПРАВИЛА,
+				{"fields": {"method": длинно}},
+				codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ,
+				{"field": "method", "max": 4000},
+			),
+			"не текст": (ЖУРНАЛ, {"rows": [{"topic": ["a"]}]}, codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ, {"column": "topic"}),
+			"флажок не текст": (
+				ПРАВИЛА,
+				{"fields": {"method": True}},
+				codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ,
+				{"field": "method"},
+			),
+			"строки не список": (ЖУРНАЛ, {"rows": "{}"}, codes.НЕВЕРНОЕ_ЗНАЧЕНИЕ, {"param": "rows"}),
+		}.items():
+			with self.subTest(имя):
+				до = repr(журнал)
+				отказ(
+					self,
+					код,
+					lambda раздел=раздел, параметры=параметры: data.записать(раздел, журнал, **параметры),
+					**подробности,
+				)
+				self.assertEqual(repr(журнал), до, "отказ не меняет данных")
+
+	def test_больше_предела_строк_отказ(self):
+		д = data.записать(ЖУРНАЛ, None, rows=[{"topic": str(н)} for н in range(data.СТРОК_МАКС)])
+		отказ(
+			self,
+			codes.СТРОК_СЛИШКОМ_МНОГО,
+			lambda: data.записать(ЖУРНАЛ, д, rows=[{"topic": "лишняя"}]),
+			max=data.СТРОК_МАКС,
+		)
+
+	def test_строки_и_json_строкой(self):
+		"""Тело запроса формой приносит списки и объекты строками JSON."""
+		д = data.записать(ЖУРНАЛ, None, rows='[{"topic": "Ретро"}]')
+		д = data.записать(ПРАВИЛА, д, fields='{"method": "Согласие"}')
+		self.assertEqual(
+			(д["tables"]["agreements"][0]["topic"], д["fields"]["method"]), ("Ретро", "Согласие")
+		)
+
+	def test_очистка(self):
+		д = data.записать(ЖУРНАЛ, None, rows=[{"topic": "Ретро"}])
+		д = data.записать(ПРАВИЛА, д, fields={"method": "Согласие"})
+		д["fields"]["other_field"] = "чужое"
+
+		без_журнала = data.очистить(ЖУРНАЛ, д)
+		self.assertNotIn("agreements", без_журнала["tables"])
+		self.assertEqual(без_журнала["seq"], {"agreements": 1}, "номера после очистки не переиспользуются")
+		self.assertEqual(data.очистить(ПРАВИЛА, д)["fields"], {"other_field": "чужое"})
+
+
+class TestЗаполненность(UnitTestCase):
+	def test_раздел_many(self):
+		for имя, строки, заполнен, пустые in (
+			("строк нет", [], False, []),
+			# Страница заводит пустую строку и заполняет её потом: такая строка не в счёт.
+			("только пустая строка", [{}], False, []),
+			("обязательное непусто", [{"topic": "Ретро"}], True, []),
+			("пустая строка рядом с полной", [{"topic": "Ретро"}, {}], True, []),
 			(
-				"required у формулы поля",
-				lambda _блоки: partial(
-					schema.проверить_спек,
-					{"fields": [{"key": "a", "type": "formula", "formula": "b", "required": True}]},
-					"x",
-				),
-				None,
+				"нет обязательного и условного",
+				[{"decision": "Раз в две недели"}],
+				False,
+				[{"row": "A1", "column": "topic"}, {"row": "A1", "column": "owner"}],
 			),
-			# Формула поля — только на поля документа.
-			("формула поля на колонку", документ("stage_goal / segment"), codes.НЕВЕРНАЯ_СХЕМА),
-			("формула поля на формулу ниже", документ("enough"), None),
+			("условие выполнено", [{"topic": "Ретро", "decision": "Да", "owner": "Маша"}], True, []),
 		):
-			with self.subTest(случай):
-				проверка = правка(экономика())
-				with self.assertRaises(Отказ) as отказ:
-					проверка()
-				if код:
-					self.assertEqual(отказ.exception.код, код)
+			with self.subTest(имя):
+				д = data.записать(ЖУРНАЛ, None, rows=строки) if строки else data.данные(None)
+				self.assertEqual(fill.заполнен(ЖУРНАЛ, д), заполнен)
+				self.assertEqual(fill.пустые_клетки(ЖУРНАЛ, д), пустые)
 
-	def test_заполненность_не_смотрит_на_формулы(self):
-		блок = self.блоки[0]
-		self.assertTrue(fill.заполнен(блок, self.д, self.блоки))
-		# Посчитанная формула — не ввод ученика: блок без ввода не тронут.
-		пустой = {"tables": {}, "fields": {}, "seq": {}}
-		self.assertFalse(fill.заполнен(блок, пустой, self.блоки))
-		self.assertEqual(fill.пустые_клетки(блок, пустой, self.блоки), [])
+	def test_раздел_one(self):
+		нет_обязательных = schema.проверить_раздел(
+			{"key": "notes", "rows": "one", "columns": [{"key": "note"}]}
+		)
+		for имя, раздел, поля, заполнен, пустые in (
+			("пусто", ПРАВИЛА, {}, False, [{"field": "method"}]),
+			("обязательное есть", ПРАВИЛА, {"method": "Согласие"}, True, []),
+			(
+				"условное не хватает",
+				ПРАВИЛА,
+				{"method": "Согласие", "exception": "Бюджет"},
+				False,
+				[{"field": "who_breaks"}],
+			),
+			("без обязательных — пусто", нет_обязательных, {}, False, []),
+			("без обязательных — есть значение", нет_обязательных, {"note": "x"}, True, []),
+		):
+			with self.subTest(имя):
+				д = data.данные({"fields": поля})
+				self.assertEqual(fill.заполнен(раздел, д), заполнен)
+				self.assertEqual(fill.пустые_клетки(раздел, д), пустые)
 
-	def test_колонка_видит_формулу_поля(self):
-		д = data.записать(self.блоки, "segments", self.д, rows=[{"segment": "Кофейни у вокзала"}])
-		ряды = export.таблицы_документа(self.блоки, д)["segments"]["rows"]
-		self.assertEqual(ряды[0]["share"], 6)
+	def test_колонка_вне_схемы_не_видна(self):
+		"""Клетка колонки, убранной из схемы, хранится, но в строках раздела её нет."""
+		д = data.данные(
+			{"tables": {"agreements": [{"id": "A1", "topic": "Ретро", "old": "x", "decision": ""}]}}
+		)
+		self.assertEqual(data.строки(ЖУРНАЛ, д), [{"id": "A1", "topic": "Ретро"}])
 
-	def test_markdown_и_xlsx_полей_со_значением_формулы(self):
-		from io import BytesIO
 
+class TestВыгрузка(UnitTestCase):
+	def данные(self) -> dict:
+		д = data.записать(ЖУРНАЛ, None, rows=[{"topic": "Ретро | раз\nв две недели", "decision": "=1+1"}])
+		д = data.записать(ПРАВИЛА, д, fields={"method": "Согласие\nили голосование"})
+		# Данные, записанные раньше движком с числами, хранят число.
+		д["fields"]["exception"] = 5
+		return д
+
+	def test_markdown(self):
+		д = self.данные()
+		self.assertEqual(
+			export.markdown(ЖУРНАЛ, д),
+			"| ID | Тема | Решение | Кто отвечает |\n| --- | --- | --- | --- |\n"
+			"| A1 | Ретро \\| раз в две недели | =1+1 |  |",
+		)
+		self.assertEqual(
+			export.markdown(ПРАВИЛА, д), "- Способ: Согласие\n  или голосование\n- Исключение: 5"
+		)
+		self.assertEqual(export.markdown(ЖУРНАЛ, data.данные(None)), "")
+		self.assertEqual(
+			export.собрать_markdown("Журнал", [ПРАВИЛА, ЖУРНАЛ], data.данные(None)),
+			"# Журнал\n\n## Как мы решаем\n\n_Не заполнено._\n\n## Договорённости\n\n_Не заполнено._\n",
+		)
+
+	def test_книга_xlsx(self):
 		from openpyxl import load_workbook
 
-		значения = data.поля_документа(self.блоки, self.д)
-		self.assertIn("- Клиентов нужно: 60", export.markdown_полей(self.блоки[0]["spec"]["fields"], значения))
-		шапка = load_workbook(BytesIO(export.книга_xlsx("План", self.блоки, self.д)))["Шапка"]
-		self.assertEqual([шапка["A4"].value, шапка["B4"].value], ["Клиентов нужно", 60])
+		второй = {**ЖУРНАЛ, "key": "areas", "title": "Договорённости"}
+		странный = {**ЖУРНАЛ, "key": "odd", "title": "Что/где: [итог]?" + "я" * 40}
+		история = {
+			**ЖУРНАЛ,
+			"key": "history",
+			"title": "History",
+			"columns": [{"key": "sum", "title": "=SUM(A1)", "required": False}],
+		}
+		книга = load_workbook(
+			io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА, второй, странный, история], self.данные()))
+		)
 
-
-if __name__ == "__main__":
-	unittest.main()
+		self.assertEqual(
+			книга.sheetnames,
+			["Договорённости", "Поля", "Договорённости (2)", "Что где   итог  " + "я" * 15, "History (2)"],
+			"имя History Excel держит за собой",
+		)
+		self.assertEqual(книга["History (2)"]["B1"].data_type, "s", "шапка с «=» — не формула")
+		журнал = книга["Договорённости"]
+		self.assertEqual([к.value for к in журнал[1]], ["ID", "Тема", "Решение", "Кто отвечает"])
+		self.assertEqual([к.value for к in журнал[2]][:3], ["A1", "Ретро | раз\nв две недели", "=1+1"])
+		self.assertEqual(журнал["C2"].data_type, "s", "текст с «=» — не формула")
+		self.assertEqual(
+			[[к.value for к in ряд] for ряд in книга["Поля"].iter_rows()],
+			[
+				["Раздел", "Поле", "Значение"],
+				["Как мы решаем", "Способ", "Согласие\nили голосование"],
+				["Как мы решаем", "Исключение", "5"],
+				["Как мы решаем", "Кто снимает", None],
+			],
+		)

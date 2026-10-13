@@ -9,16 +9,13 @@
   "block_key",
   "title",
   "description",
-  "kind",
-  "accept",
   "lesson",
-  "span",
-  "hint",
-  "spec"
+  "rows",
+  "columns"
  ],
  "fields": [
   {
-   "description": "Ключ блока: project_goal. По нему хранится содержимое ученика, и правка схемы его не рушит",
+   "description": "Ключ раздела документа в релизе. По нему хранятся данные ученика, и правка схемы их не рушит",
    "fieldname": "block_key",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -34,7 +31,7 @@
    "reqd": 1
   },
   {
-   "description": "Что сюда записывают — ученику. Подсказка ниже адресована агенту",
+   "description": "Что сюда записывают — ученику",
    "fieldname": "description",
    "fieldtype": "Small Text",
    "ignore_xss_filter": 1,
@@ -43,23 +40,7 @@
    "report_hide": 1
   },
   {
-   "default": "text",
-   "description": "text — markdown в блоке; file — файл ученика (таблица, журнал); link — ссылка на внешний документ.",
-   "fieldname": "kind",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Вид",
-   "options": "text\nfile\nlink"
-  },
-  {
-   "depends_on": "eval:doc.kind=='file'",
-   "description": "Расширения через запятую: xlsx,csv.",
-   "fieldname": "accept",
-   "fieldtype": "Data",
-   "label": "Допустимые файлы"
-  },
-  {
-   "description": "На каком уроке блок обычно заполняется. Подсказка агенту, а не ограничение",
+   "description": "На каком уроке раздел обычно заполняется. Подсказка, а не ограничение",
    "fieldname": "lesson",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -67,36 +48,28 @@
    "options": "Course Lesson"
   },
   {
-   "default": "1",
-   "description": "Ширина в сетке канваса; при раскладке столбцом не используется",
-   "fieldname": "span",
-   "fieldtype": "Int",
+   "fieldname": "rows",
+   "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Ширина"
+   "label": "Строк",
+   "options": "one\nmany",
+   "reqd": 1,
+   "description": "one — раздел заполняется один раз, колонки — его поля; many — строки"
   },
   {
-   "description": "Что должно оказаться в блоке и когда считать его заполненным. Адресована агенту",
-   "fieldname": "hint",
-   "fieldtype": "Small Text",
-   "ignore_xss_filter": 1,
-   "label": "Подсказка",
+   "fieldname": "columns",
+   "fieldtype": "JSON",
+   "label": "Колонки",
+   "description": "Колонки раздела, как в релизе: key, title, required",
    "print_hide": 1,
    "report_hide": 1
-  },
-  {
-   "fieldname": "spec",
-   "fieldtype": "JSON",
-   "label": "Поля и колонки",
-   "description": "Поля блока и его колонки в таблице документа (learning-services#330)",
-   "report_hide": 1,
-   "print_hide": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-09 23:00:00.000000",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Artifact Block",

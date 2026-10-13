@@ -1,273 +1,243 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Документ-таблица через методы ученика (learning-services#330).
+"""Документ курса через методы ученика (learning-services#515).
 
-Логику таблиц проверяет `agent_learning/artifacts/test_tables.py` без базы;
-здесь — что она дошла до методов: запись строк и полей, чтение таблиц,
-заполненность в перечне, очистка, выгрузка и проверка схемы до записи.
+Логику разделов проверяет `agent_learning/artifacts/test_tables.py` без базы;
+здесь — что она дошла до методов: запись строк и полей, чтение документа,
+перечень и прогресс, очистка, отказы самой записи, версия схемы и
+выгрузка.
 """
 
-import json
 from datetime import datetime
 from io import BytesIO
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning.artifacts import codes, write
+from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import student
-from lms_frappe_app.tests.sample_data import зачислить, создать_урок, создать_ученика, схема_документа
+from lms_frappe_app.tests.sample_data import (
+	зачислить,
+	раздел,
+	создать_урок,
+	создать_ученика,
+	схема_документа,
+)
 
-БЛОКИ = [
-	{"key": "worries", "title": "Первый список тревог"},
-	{
-		"key": "risks",
-		"title": "Риски",
-		"spec": {
-			"table": "register",
-			"prefix": "R",
-			"title": "Реестр",
-			"columns": [
-				{"key": "event", "title": "Событие", "type": "text", "required": True},
-			],
-		},
-	},
-	{
-		"key": "assessment",
-		"title": "Оценка",
-		"spec": {
-			"table": "register",
-			"fields": [{"key": "threshold", "title": "Порог внимания", "type": "number", "required": True}],
-			"columns": [
-				{"key": "probability", "title": "Вероятность", "type": "scale", "required": True},
-				{"key": "impact", "title": "Влияние", "type": "scale", "required": True},
-				{"key": "rank", "title": "Ранг", "type": "formula", "formula": "probability * impact"},
-				{"key": "in_work", "title": "В работе", "type": "formula", "formula": "rank >= threshold"},
-			],
-		},
-	},
-	{
-		"key": "responses",
-		"title": "Ответы",
-		"spec": {
-			"table": "register",
-			"columns": [{"key": "measure", "title": "Мера", "type": "text", "required": "in_work"}],
-		},
-	},
-]
+ЖУРНАЛ = раздел(
+	"agreements",
+	"Договорённости",
+	"many",
+	[
+		{"key": "topic", "title": "Тема", "required": True},
+		{"key": "decision", "title": "Решение", "required": False},
+		{"key": "owner", "title": "Кто отвечает", "required": {"if_column": "decision"}},
+	],
+	description="Что команда решила",
+)
+ПРАВИЛА = раздел(
+	"how_we_decide", "Как мы решаем", "one", [{"key": "method", "title": "Способ", "required": True}]
+)
 
 
-class IntegrationTestArtifactTables(IntegrationTestCase):
+class IntegrationTestArtifactAPI(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		self.ученик = создать_ученика(f"table-{суффикс}@example.com")
-		self.курс = зачислить(self.ученик, создать_урок(f"Урок {суффикс}"))
-		ответ = схема_документа(
-			course=self.курс, artifact="risk_register", title="Реестр рисков", blocks=БЛОКИ
-		)
-		self.assertTrue(ответ["ok"], ответ)
+		self.ученик = создать_ученика(f"doc-{суффикс}@example.com")
+		self.урок = создать_урок(f"Урок {суффикс}")
+		self.курс = зачислить(self.ученик, self.урок)
+		self.схема([{**ЖУРНАЛ, "lesson": self.урок}, ПРАВИЛА])
 		frappe.set_user(self.ученик)
 
-	def записать(self, ключ, **параметры):
-		return student.update_artifact(self.курс, "risk_register", ключ, **параметры)
-
-	def test_строки_оценка_и_ответ_по_урокам(self):
-		ответ = self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}, {"event": "Отпуск Анны"}])
+	def схема(self, разделы: list, ключ: str = "agreements_log") -> str:
+		frappe.set_user("Administrator")
+		ответ = схема_документа(self.курс, ключ, "Журнал договорённостей", разделы, purpose="Зачем журнал")
 		self.assertTrue(ответ["ok"], ответ)
-		self.assertEqual(ответ["data"]["created"], ["R1", "R2"])
-		self.assertEqual(ответ["data"]["blocks_filled"], 1)
+		frappe.set_user(self.ученик)
+		return ответ["data"]["id"]
 
+	def записать(self, ключ: str, **параметры) -> dict:
+		return student.update_artifact(self.курс, "agreements_log", ключ, **параметры)
+
+	def документ(self) -> dict:
+		return student.artifact(self.курс, "agreements_log")["data"]
+
+	def test_запись_и_чтение(self):
 		ответ = self.записать(
-			"assessment",
-			fields={"threshold": 12},
-			rows=[{"id": "R1", "probability": 4, "impact": 4}, {"id": "R2", "probability": 2, "impact": 3}],
+			"agreements", rows=[{"topic": "Ретро", "decision": "Раз в две недели"}, {"topic": "Созвоны"}]
 		)
-		self.assertEqual(ответ["data"]["blocks_filled"], 2)
-		self.assertEqual(ответ["data"]["empty_cells"], [])
-
-		документ = student.artifact(self.курс, "risk_register")["data"]
-		реестр = документ["tables"]["register"]
+		self.assertTrue(ответ["ok"], ответ)
 		self.assertEqual(
-			[(р["id"], р["rank"], р["in_work"]) for р in реестр["rows"]], [("R1", 16, True), ("R2", 6, False)]
+			ответ["data"],
+			{
+				"artifact": "agreements_log",
+				"key": "agreements",
+				"blocks_total": 2,
+				"blocks_filled": 0,
+				"empty_cells": [{"row": "A1", "column": "owner"}],
+				"created": ["A1", "A2"],
+			},
 		)
-		self.assertEqual(документ["fields"], {"threshold": 12})
-		ответы = next(б for б in документ["blocks"] if б["key"] == "responses")
-		self.assertFalse(ответы["filled"])
-		self.assertEqual(ответы["empty_cells"], [{"row": "R1", "column": "measure"}])
+		ответ = self.записать("Agreements", rows=[{"id": "A1", "owner": "Маша"}])
+		self.assertEqual((ответ["data"]["blocks_filled"], ответ["data"]["created"]), (1, []))
+		self.записать("how_we_decide", fields={"method": "Согласие"})
 
-		ответ = self.записать(
-			"responses", rows=[{"id": "R1", "measure": "Договор с резервным монтажником до 1 марта"}]
+		документ = self.документ()
+		self.assertEqual(
+			{к: документ[к] for к in ("course", "artifact", "title", "purpose", "space")},
+			{
+				"course": self.курс,
+				"artifact": "agreements_log",
+				"title": "Журнал договорённостей",
+				"purpose": "Зачем журнал",
+				"space": "personal",
+			},
 		)
-		self.assertEqual(ответ["data"]["blocks_filled"], 3)
+		журнал, правила = документ["blocks"]
+		self.assertEqual(
+			журнал,
+			{
+				"key": "agreements",
+				"title": "Договорённости",
+				"description": "Что команда решила",
+				"lesson": self.урок,
+				"rows": "many",
+				"columns": ЖУРНАЛ["columns"],
+				"items": [
+					{"id": "A1", "topic": "Ретро", "decision": "Раз в две недели", "owner": "Маша"},
+					{"id": "A2", "topic": "Созвоны"},
+				],
+				"filled": True,
+				"empty_cells": [],
+			},
+		)
+		self.assertEqual(
+			(правила["rows"], правила["values"], правила["filled"]), ("one", {"method": "Согласие"}, True)
+		)
+		self.assertNotIn("items", правила)
+		self.assertNotIn("values", журнал)
 
-	def test_отказ_не_меняет_документ(self):
-		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
-		ответ = self.записать("assessment", rows=[{"id": "R1", "probability": 9}])
-		self.assertFalse(ответ["ok"])
-		self.assertEqual(ответ["error"]["code"], "artifact_invalid_value")
-		ответ = self.записать("assessment", rows=[{"probability": 3}])
-		self.assertEqual(ответ["error"]["code"], "artifact_rows_owner_only")
-		реестр = student.artifact(self.курс, "risk_register")["data"]["tables"]["register"]
-		self.assertNotIn("probability", реестр["rows"][0])
+		with self.subTest("перечень и прогресс"):
+			[перечень] = student.artifact(self.курс)["data"]["artifacts"]
+			self.assertEqual(
+				{к: перечень[к] for к in ("artifact", "purpose", "blocks_total", "blocks_filled")},
+				{
+					"artifact": "agreements_log",
+					"purpose": "Зачем журнал",
+					"blocks_total": 2,
+					"blocks_filled": 2,
+				},
+			)
+			курс = next(к for к in student.get_my_progress()["data"]["courses"] if к["id"] == self.курс)
+			self.assertEqual(курс["documents"], [перечень])
+
+	def test_очистка(self):
+		"""Очистка незаведённого документа — не отказ и документа не заводит;
+		очистка раздела стирает только его."""
+		ответ = self.записать("agreements", clear="true")
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertFalse(
+			frappe.db.exists("Agent Student Artifact", {"student": self.ученик, "course": self.курс})
+		)
+
+		self.записать("agreements", rows=[{"topic": "Ретро"}])
+		self.записать("how_we_decide", fields={"method": "Согласие"})
+		ответ = self.записать("agreements", clear=True)["data"]
+		self.assertEqual((ответ["blocks_filled"], ответ["created"]), (1, []))
+		журнал, правила = self.документ()["blocks"]
+		self.assertEqual((журнал["items"], правила["values"]), ([], {"method": "Согласие"}))
+		self.assertEqual(self.записать("agreements", rows=[{"topic": "Новая"}])["data"]["created"], ["A2"])
+
+	def test_отказ_записи_доходит_до_метода(self):
+		"""Проводка: отказ сервиса — кодом контракта. Отказы разбора строк и полей
+		— в `test_tables`, отказы самой записи — `test_отказы_записи`."""
+		ответ = self.записать("agreements", fields={"topic": "x"})
+		self.assertEqual(ответ["error"]["code"], codes.НЕ_ТОТ_РАЗДЕЛ)
+
+	def test_отказы_записи(self):
+		"""Отказы, которые даёт сама запись (`write.записать_блок`), — до записи."""
+		self.записать("agreements", rows=[{"topic": "Ретро"}])
+		for что, (параметры, код) in {
+			"нет документа": ({"artifact": "lean_canvas", "key": "agreements"}, codes.АРТЕФАКТ_НЕ_НАЙДЕН),
+			"нет блока": ({"key": "budget", "rows": [{"topic": "x"}]}, codes.БЛОК_НЕ_НАЙДЕН),
+			"очистка с записью": (
+				{"key": "agreements", "rows": [{"topic": "x"}], "clear": True},
+				codes.ОЧИСТКА_С_ЗАПИСЬЮ,
+			),
+		}.items():
+			with self.subTest(что):
+				with self.assertRaises(Отказ) as отказ:
+					write.записать_блок(
+						self.ученик, self.курс, None, **{"artifact": "agreements_log", **параметры}
+					)
+				self.assertEqual(отказ.exception.код, код)
+		self.assertEqual(self.документ()["blocks"][0]["items"], [{"id": "A1", "topic": "Ретро"}])
+
+	def test_правка_схемы_не_теряет_данных_и_помнит_версию(self):
+		self.записать("how_we_decide", fields={"method": "Согласие"})
+		вторая = self.схема([ЖУРНАЛ])
+		self.assertEqual([б["key"] for б in self.документ()["blocks"]], ["agreements"])
+		self.записать("agreements", rows=[{"topic": "Ретро"}])
+		self.assertEqual(
+			frappe.db.get_value(
+				"Agent Student Artifact", {"student": self.ученик, "course": self.курс}, "schema_version"
+			),
+			вторая,
+		)
+		self.схема([ЖУРНАЛ, ПРАВИЛА])
+		self.assertEqual(self.документ()["blocks"][1]["values"], {"method": "Согласие"})
+
+		with self.subTest("документы — в порядке объявления"):
+			self.схема([ПРАВИЛА], ключ="map")
+			self.схема([ЖУРНАЛ, ПРАВИЛА])
+			self.assertEqual(
+				[а["artifact"] for а in student.artifact(self.курс)["data"]["artifacts"]],
+				["agreements_log", "map"],
+			)
 
 	def test_запись_двигает_время_и_версию_и_шлёт_событие(self):
-		"""`modified` в перечне — `null`, пока документ пуст, затем время записи (#462).
-		Сколько раз документ сохранялся и когда — без самой истории (#342).
-		Страница перечитывает документ, когда в него пишет агент: событие — только
-		ученику (#348)."""
-		from unittest.mock import patch
-
-		перечень = student.artifact(self.курс)["data"]["artifacts"]
-		пустой = student.artifact(self.курс, "risk_register")["data"]
-		with self.subTest("#462 пустой документ: modified null"):
-			self.assertIsNone(перечень[0]["modified"])
-			self.assertIsNone(перечень[0]["purpose"], "автор не написал — null, а не пустая строка")
-		with self.subTest("#342 пустой документ: время и версия"):
-			self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
+		"""`modified` — `null`, пока документ пуст, затем время записи со смещением
+		пояса (#462); сколько раз документ сохранялся — без самой истории (#342);
+		событие для открытой страницы — только ученику и после коммита (#348)."""
+		пустой = self.документ()
+		self.assertEqual((пустой["modified"], пустой["version"]), (None, 0))
+		self.assertIsNone(student.artifact(self.курс)["data"]["artifacts"][0]["modified"])
 
 		with patch("frappe.publish_realtime") as publish:
-			self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
+			self.записать("agreements", rows=[{"topic": "Ретро"}])
 
-		with self.subTest("#348 событие только ученику"):
-			события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
-			self.assertEqual(len(события), 1)
-			self.assertEqual(события[0].kwargs["user"], self.ученик)
-			self.assertEqual(события[0].kwargs["message"]["course"], self.курс)
-			self.assertEqual(события[0].kwargs["message"]["artifact"], "risk_register")
-			self.assertTrue(события[0].kwargs["after_commit"])
-
-		перечень = student.artifact(self.курс)["data"]["artifacts"]
-		with self.subTest("#462 после записи: время записи"):
-			self.assertIsNotNone(перечень[0]["modified"])
-			# Со смещением пояса сайта: браузер читает строку без него в своём поясе.
-			self.assertIsNotNone(datetime.fromisoformat(перечень[0]["modified"]).tzinfo)
-			self.assertEqual(
-				student.artifact(self.курс, "risk_register")["data"]["modified"], перечень[0]["modified"]
-			)
-			документы = student.get_my_progress()["data"]["courses"]
-			self.assertEqual(
-				next(к for к in документы if к["id"] == self.курс)["documents"][0]["modified"],
-				перечень[0]["modified"],
-			)
-
-		self.записать("assessment", fields={"threshold": 12})
-		документ = student.artifact(self.курс, "risk_register")["data"]
-
-		with self.subTest("#342 после записи: время и версия без истории"):
-			self.assertTrue(документ["modified"])
-			# Журнал `Version` Frappe пишет после коммита, а тест идёт в
-			# транзакции без него: здесь проверяется форма, число — на стенде.
-			self.assertIsInstance(документ["version"], int)
-			self.assertNotIn("versions", документ)
-
-	def test_прежний_текст_засчитан_пока_таблица_пуста(self):
-		self.записать("risks", content="| ID | Событие |\n| --- | --- |\n| R1 | Подрядчик уйдёт |")
-		перечень = student.artifact(self.курс)["data"]["artifacts"]
-		self.assertEqual(перечень[0]["blocks_filled"], 1)
-
-	def test_очистка_блока_хозяина_уносит_строки(self):
-		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}], content="Заметка")
-		self.записать(
-			"assessment", fields={"threshold": 10}, rows=[{"id": "R1", "probability": 3, "impact": 3}]
+		события = [c for c in publish.call_args_list if c.kwargs.get("event") == "artifact_updated"]
+		self.assertEqual(len(события), 1)
+		self.assertEqual(
+			(
+				события[0].kwargs["user"],
+				события[0].kwargs["message"]["artifact"],
+				события[0].kwargs["after_commit"],
+			),
+			(self.ученик, "agreements_log", True),
 		)
-		self.записать("assessment", clear=True)
-		документ = student.artifact(self.курс, "risk_register")["data"]
-		self.assertEqual(документ["fields"], {"threshold": None})
-		self.assertNotIn("probability", документ["tables"]["register"]["rows"][0])
-
-		self.записать("risks", clear=True)
-		документ = student.artifact(self.курс, "risk_register")["data"]
-		self.assertEqual(документ["tables"]["register"]["rows"], [])
-		self.assertEqual(next(б for б in документ["blocks"] if б["key"] == "risks")["content"], "")
+		перечень = student.artifact(self.курс)["data"]["artifacts"][0]
+		self.assertIsNotNone(datetime.fromisoformat(перечень["modified"]).tzinfo)
+		документ = self.документ()
+		self.assertEqual(документ["modified"], перечень["modified"])
+		self.assertIsInstance(документ["version"], int)
+		self.assertNotIn("versions", документ)
 
 	def test_выгрузка_markdown_и_xlsx(self):
+		"""Проводка выгрузки: имя файла и листы книги; содержимое — в `test_tables`."""
 		from openpyxl import load_workbook
 
 		from lms_frappe_app.www.artifacts import download
 
-		self.записать("risks", rows=[{"event": "Подрядчик уйдёт"}])
-		self.записать(
-			"assessment", fields={"threshold": 12}, rows=[{"id": "R1", "probability": 4, "impact": 4}]
-		)
+		download(self.курс, "agreements_log")
+		self.assertEqual(frappe.response["filename"], "agreements_log.md")
+		self.assertTrue(frappe.response["filecontent"].startswith("# Журнал договорённостей\n"))
 
-		download(self.курс, "risk_register")
-		текст = frappe.response["filecontent"]
-		self.assertIn("- Порог внимания: 12", текст)
-		self.assertIn("| R1 | Подрядчик уйдёт | 4 | 4 | 16 | да |  |", текст)
-
-		download(self.курс, "risk_register", format="xlsx")
-		self.assertEqual(frappe.response["filename"], "risk_register.xlsx")
+		download(self.курс, "agreements_log", format="xlsx")
+		self.assertEqual(frappe.response["filename"], "agreements_log.xlsx")
 		книга = load_workbook(BytesIO(frappe.response["filecontent"]))
-		лист = книга["Реестр"]
-		self.assertEqual(лист["E2"].value, "=C2*D2")
-
-	def test_схему_которую_не_прочесть_или_не_разложить_не_записать(self):
-		frappe.set_user("Administrator")
-		нечитаемая = json.loads(json.dumps(БЛОКИ))
-		нечитаемая[2]["spec"]["columns"][2]["formula"] = "probability * weight"
-		схемы = {
-			"формула с неизвестной колонкой": ({"blocks": нечитаемая}, {}),
-			"холст, который не разложить": (
-				{"blocks": БЛОКИ, "canvas": {"grid": ["risks assessment", "assessment risks"]}},
-				{"key": "risks"},
-			),
-		}
-		for что, (схема, подробности) in схемы.items():
-			with self.subTest(что):
-				ответ = схема_документа(
-					course=self.курс, artifact="risk_register", title="Реестр рисков", **схема
-				)
-				self.assertFalse(ответ["ok"])
-				self.assertEqual(ответ["error"]["code"], "artifact_invalid_spec")
-				self.assertEqual({к: ответ["error"][к] for к in подробности}, подробности)
-
-	def test_холст_и_формула_поля(self):
-		"""Холст схемы и посчитанное поле доходят до ученика (#351)."""
-		frappe.set_user("Administrator")
-		блоки = [
-			{
-				"key": "problem",
-				"title": "Проблема",
-				"spec": {
-					"fields": [
-						{"key": "stage_goal", "title": "Цель этапа", "type": "number"},
-						{"key": "price", "title": "Цена", "type": "number"},
-						{
-							"key": "clients_needed",
-							"title": "Клиентов нужно",
-							"type": "formula",
-							"formula": "stage_goal / price",
-						},
-					]
-				},
-			},
-			{"key": "uvp", "title": "Обещание"},
-			{"key": "first_sketch", "title": "Первый набросок", "spec": {"fields": [{"key": "uvp"}]}},
-		]
-		холст = {
-			"grid": ["problem uvp", "problem uvp"],
-			"labels": {"uvp": "Обещание"},
-			"sketch": "first_sketch",
-			"summary": {"problem": ["clients_needed"]},
-		}
-		ответ = схема_документа(
-			course=self.курс, artifact="lean", title="Холст", blocks=блоки, layout="canvas", canvas=холст
-		)
-		self.assertTrue(ответ["ok"], ответ)
-
-		frappe.set_user(self.ученик)
-		ответ = student.update_artifact(
-			self.курс, "lean", "problem", fields={"stage_goal": 300000, "price": 5000}
-		)
-		self.assertTrue(ответ["ok"], ответ)
-		документ = student.artifact(self.курс, "lean")["data"]
-		self.assertEqual(документ["canvas"], холст)
-		self.assertEqual(документ["fields"]["clients_needed"], 60)
-		проблема = next(б for б in документ["blocks"] if б["key"] == "problem")
-		self.assertEqual(проблема["fields"][2]["value"], 60)
-
-		ответ = student.update_artifact(self.курс, "lean", "problem", fields={"clients_needed": 1})
-		self.assertEqual(ответ["error"]["code"], "artifact_invalid_value")
-		# Документ без холста отвечает `null`, а не пропуском ключа.
-		self.assertIsNone(student.artifact(self.курс, "risk_register")["data"]["canvas"])
+		self.assertEqual(книга.sheetnames, ["Договорённости", "Поля"])

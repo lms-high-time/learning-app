@@ -37,6 +37,16 @@ class TestSignalsPriority(UnitTestCase):
 		self.assertEqual(signals.отобрать(занятие, кандидаты), [])
 
 
+#: Краткий блок журнала образца релиза у ученика, который в него не писал.
+ЖУРНАЛ_ПУСТ = {
+	"artifact": "notebook",
+	"key": "log",
+	"title": "Журнал",
+	"description": "Что сюда записывают.",
+	"filled": False,
+}
+
+
 class TestПорогиСигналов(UnitTestCase):
 	"""Без базы: пороги `документ_пуст` и `темп_к_сроку`."""
 
@@ -44,20 +54,16 @@ class TestПорогиСигналов(UnitTestCase):
 		"""Сигнал — когда `covered` не меньше половины целей и ни один блок не
 		заполнен; без целей или блоков — нет."""
 
-		def блок(ключ: str = "log", **поля) -> dict:
+		def блок(ключ: str = "log", filled: bool = False) -> dict:
 			return {
 				"artifact": "notebook",
 				"key": ключ,
 				"title": "Журнал",
-				"content": "",
-				"file": None,
-				"url": None,
-				**поля,
+				"description": "Что сюда записывают",
+				"filled": filled,
 			}
 
-		сигнал = [
-			{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}
-		]
+		сигнал = [{"code": "blocks_empty", "blocks": [блок()]}]
 		случаи = {
 			"половина целей разобрана": (["covered", "touched"], [блок()], сигнал),
 			"все цели разобраны": (["covered"], [блок()], сигнал),
@@ -66,17 +72,7 @@ class TestПорогиСигналов(UnitTestCase):
 			"начатые не в счёт": (["touched", "touched"], [блок()], []),
 			"без целей": ([], [блок()], []),
 			"без блоков": (["covered"], [], []),
-			"блок с текстом": (["covered"], [блок(content="Запись")], []),
-			"текст из пробелов — пуст": (["covered"], [блок(content="  \n ")], сигнал),
-			"блок с файлом": (["covered"], [блок(file="/files/a.txt")], []),
-			"блок со ссылкой": (["covered"], [блок(url="https://example.com")], []),
-			"заполнен хоть один из блоков": (["covered"], [блок(), блок("plan", content="План")], []),
-			"признак filled важнее содержимого": (
-				["covered"],
-				[блок(content="Запись", filled=False)],
-				сигнал,
-			),
-			"таблица заполнена": (["covered"], [блок(filled=True)], []),
+			"заполнен хоть один из блоков": (["covered"], [блок(), блок("plan", filled=True)], []),
 		}
 		for что, (статусы, блоки, ожидаемо) in случаи.items():
 			with self.subTest(что):
@@ -207,7 +203,7 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 
 		self.assertEqual(
 			self.старт()["signals"],
-			[{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}],
+			[{"code": "blocks_empty", "blocks": [ЖУРНАЛ_ПУСТ]}],
 		)
 
 	def test_начатый_документ_не_сигнал(self):
@@ -226,7 +222,7 @@ class IntegrationTestStartSignals(IntegrationTestCase):
 		self.assertEqual(первая["signals"], [])
 		self.assertEqual(
 			вторая["signals"],
-			[{"code": "blocks_empty", "blocks": [{"artifact": "notebook", "key": "log", "title": "Журнал"}]}],
+			[{"code": "blocks_empty", "blocks": [ЖУРНАЛ_ПУСТ]}],
 		)
 		self.assertEqual(повтор["signals"], [])
 

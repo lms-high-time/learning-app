@@ -41,28 +41,23 @@ class IntegrationTestДокументИзРелиза(IntegrationTestCase):
 
 		self.assertEqual(ответ, {"artifact": "notebook", "version": 1})
 		схема = frappe.get_doc(СХЕМА, {"course": self.курс, "slug": "notebook", "is_active": 1})
-		self.assertEqual(
-			(схема.title, схема.purpose, схема.layout), ("Тетрадь", "Зачем ученику тетрадь.", "sections")
-		)
+		self.assertEqual((схема.title, схема.purpose), ("Тетрадь", "Зачем ученику тетрадь."))
 		блоки = self.блоки()
 		self.assertEqual(list(блоки), ["log", "rules"])
-		журнал = блоки["log"]
-		self.assertEqual(журнал.lesson, self.итог.уроки["l-1"])
-		self.assertEqual(журнал.description, "Что сюда записывают.")
-		спек = json.loads(журнал.spec)
-		self.assertEqual(спек["table"], "log")
-		self.assertEqual([к["key"] for к in спек["columns"]], ["topic", "decision", "responsible"])
-		self.assertEqual(
-			{к["key"]: к.get("required") for к in спек["columns"]},
-			{"topic": True, "decision": None, "responsible": "decision"},
-		)
-		self.assertEqual({к["type"] for к in спек["columns"]}, {"longtext"})
-		правила = блоки["rules"]
-		self.assertEqual(правила.lesson, self.итог.уроки["l-2"])
-		self.assertEqual(
-			json.loads(правила.spec)["fields"],
-			[{"key": "scope", "title": "Что решаем", "type": "longtext", "required": True}],
-		)
+		разделы = {р["key"]: р for р in пример_релиза()["document"]["sections"]}
+		for ключ, урок in (("log", "l-1"), ("rules", "l-2")):
+			with self.subTest(ключ):
+				блок = блоки[ключ]
+				self.assertEqual(
+					(блок.title, блок.description, блок.lesson, блок.rows),
+					(
+						разделы[ключ]["title"],
+						разделы[ключ]["description"],
+						self.итог.уроки[урок],
+						разделы[ключ]["rows"],
+					),
+				)
+				self.assertEqual(json.loads(блок.columns), разделы[ключ]["columns"])
 
 	def test_тот_же_документ_та_же_версия(self):
 		self.спроецировать(пример_релиза())

@@ -288,21 +288,39 @@ def отметить_все_пункты(run: str, занятие: str | None = 
 	return ответ
 
 
-def схема_документа(
-	course: str,
-	artifact: str,
-	title: str,
-	blocks,
-	layout: str = "sections",
-	canvas=None,
-	purpose: str | None = None,
+def раздел(
+	key: str,
+	title: str | None = None,
+	rows: str = "one",
+	columns=None,
+	lesson: str | None = None,
+	description: str | None = None,
 ) -> dict:
+	"""Раздел документа в форме релиза. `columns` — ключи колонок (необязательных,
+	название — ключ) или колонки целиком `{key, title, required}`; без них —
+	одна колонка с ключом раздела: у раздела `one` это поле, и ключи полей
+	разных разделов не сталкиваются."""
+	return {
+		"key": key,
+		"title": title or key,
+		"description": description,
+		"lesson": lesson,
+		"rows": rows,
+		"columns": [
+			к if isinstance(к, dict) else {"key": к, "title": к, "required": False}
+			for к in (columns if columns is not None else [key])
+		],
+	}
+
+
+def схема_документа(course: str, artifact: str, title: str, blocks, purpose: str | None = None) -> dict:
 	"""Схема документа курса новой версией — ответом в форме контракта:
 	`{ok, data: {id, course, artifact, version}}` или `{ok, error}`.
 
-	Схему документа курса пишет релиз, но его разделы — только текст; файлы,
-	ссылки, формулы и холст движка документов тестам нужны и без него. Пишется
-	тем же `записать_схему` и с теми же флагами, что и у релиза.
+	`blocks` — разделы в форме релиза (`раздел`) с `lesson` — уроком, на
+	котором раздел показывается. Схему документа курса пишет релиз; тестам
+	движка нужна схема и без релиза. Пишется тем же `записать_схему` и с теми
+	же флагами, что и у релиза.
 	"""
 	from lms_frappe_app.agent_learning.artifacts.course import записать_схему
 	from lms_frappe_app.agent_learning.releases.document import ФЛАГИ_ЗАПИСИ
@@ -310,9 +328,7 @@ def схема_документа(
 
 	@контракт
 	def записать() -> dict:
-		версия = записать_схему(
-			course, artifact, title, список(blocks), layout, canvas, purpose=purpose, флаги=ФЛАГИ_ЗАПИСИ
-		)
+		версия = записать_схему(course, artifact, title, список(blocks), purpose=purpose, флаги=ФЛАГИ_ЗАПИСИ)
 		return {"id": версия["id"], "course": course, "artifact": версия["slug"], "version": версия["version"]}
 
 	return записать()

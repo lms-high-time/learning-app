@@ -32,6 +32,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_ученика,
 	создать_урок,
+	раздел,
+	схема_документа,
 )
 from lms_frappe_app.api import manager, public, review, student
 
@@ -159,15 +161,7 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		self.менеджер = создать_менеджера(f"leakmg-{суффикс}@example.com", self.организация)
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [{"block_key": "goal", "title": "Цель", "hint": "Одной фразой"}],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель")])
 
 	def проверить(self, что: str, ответ) -> str:
 		"""Ответ без полей эталона и внутренностей Frappe."""
@@ -191,7 +185,7 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 		self.проверить("forget", student.forget(key="role"))
 		self.проверить(
 			"update_artifact",
-			student.update_artifact(self.курс, "summary", "goal", "Открыть кофейню"),
+			student.update_artifact(self.курс, "summary", "goal", fields={"goal": "Открыть кофейню"}),
 		)
 		self.проверить("artifact", student.artifact(self.курс))
 		self.проверить("artifact", student.artifact(self.курс, "summary"))
@@ -238,6 +232,8 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 ПОЯСНЕНИЕ_РЕЛИЗА = "Пояснение верного варианта из релиза"
 ПОЯСНЕНИЕ_ВТОРОГО = "Пояснение второго вопроса из релиза"
 ПАКЕТ_АГЕНТА = "Текст пакета агента из релиза"
+#: Подсказка агенту по разделу документа — тоже пакет агента; отдаёт её только `start_lesson`.
+ПОДСКАЗКА_РАЗДЕЛА = "Подсказка агенту по разделу из релиза"
 КАРТА_КУРСА = "Текст карты курса из релиза"
 #: Свидетельство агента к пункту прохождения: пункты — инструмент агента,
 #: ученику и руководителю они не показываются (learning-services#504).
@@ -246,7 +242,15 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 #: Подробности пункта из пакета агента — отдаёт только `lesson_item`.
 ТЕКСТ_ПУНКТА = "Подробности пункта из пакета агента"
 #: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
-ЗАКРЫТОЕ_РЕЛИЗА = (ПОЯСНЕНИЕ_РЕЛИЗА, ПОЯСНЕНИЕ_ВТОРОГО, ПАКЕТ_АГЕНТА, ТЕКСТ_ПУНКТА, КАРТА_КУРСА, СВИДЕТЕЛЬСТВО)
+ЗАКРЫТОЕ_РЕЛИЗА = (
+	ПОЯСНЕНИЕ_РЕЛИЗА,
+	ПОЯСНЕНИЕ_ВТОРОГО,
+	ПАКЕТ_АГЕНТА,
+	ПОДСКАЗКА_РАЗДЕЛА,
+	ТЕКСТ_ПУНКТА,
+	КАРТА_КУРСА,
+	СВИДЕТЕЛЬСТВО,
+)
 #: Пункты целей агента — ключи и названия: методы уровня целей урока (дерево
 #: курса, карта, занятие урока, прогресс в заметке и документе, отчёт
 #: руководителя) отдают цели без пунктов (learning-services#506).
@@ -288,7 +292,15 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			}
 		)
 		квиз["answers"][ВОПРОС_2] = {"correct": "V2", "explanation": ПОЯСНЕНИЕ_ВТОРОГО}
-		релиз["agent"] = {"lessons": {"l-1": {"directive": ПАКЕТ_АГЕНТА, "items": {"term:T1": ТЕКСТ_ПУНКТА}}}}
+		релиз["agent"] = {
+			"lessons": {
+				"l-1": {
+					"directive": ПАКЕТ_АГЕНТА,
+					"items": {"term:T1": ТЕКСТ_ПУНКТА},
+					"sections": {"log": ПОДСКАЗКА_РАЗДЕЛА},
+				}
+			}
+		}
 		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
 		frappe.set_user("Administrator")
 		self.релиз = релиз
@@ -327,10 +339,12 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.assertTrue(урок["ok"], урок)
 		# Пакет агента — только агентским методам, и старт отдаёт его урок
 		# (learning-services#506); ответы, карта и свидетельство — никому.
+		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА)
 		выдано = проверить_ответ(
-			self, урок, "start_lesson", запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПАКЕТ_АГЕНТА)
+			self, урок, "start_lesson", запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные)
 		)
 		self.assertIn(ПАКЕТ_АГЕНТА, выдано)
+		self.assertIn(ПОДСКАЗКА_РАЗДЕЛА, выдано)
 		занятие = урок["data"]["session"]
 		# Подробности пункта — тоже пакет агента, но только своего пункта.
 		выдано = проверить_ответ(
@@ -371,15 +385,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}]),
 		)
 		self.проверить("artifact", student.artifact(self.курс))
-		# У таблицы документа своё поле `owner` — блок, который её заводит
-		# (CONTRACT.md, «Зачем контракт именно такой»); остальное — полным списком.
-		проверить_ответ(
-			self,
-			student.artifact(self.курс, "notebook"),
-			"artifact",
-			запрещённые_тексты=ЗАКРЫТОЕ_РЕЛИЗА,
-			кроме=("owner",),
-		)
+		проверить_ответ(self, student.artifact(self.курс, "notebook"), "artifact", запрещённые_тексты=ЗАКРЫТОЕ_РЕЛИЗА)
 
 		frappe.set_user(self.менеджер)
 		self.проверить("org_report", manager.org_report())

@@ -12,6 +12,8 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.api import manager, student, team
 from lms_frappe_app.tests.sample_data import (
+	раздел,
+	схема_документа,
 	добавить_в_организацию,
 	зачислить,
 	создать_менеджера,
@@ -36,18 +38,9 @@ class IntegrationTestTeam(IntegrationTestCase):
 		self.руководитель = создать_менеджера(f"team-m-{суффикс}@example.com", self.компания)
 
 		self.курс = зачислить(self.сотрудник, создать_урок(f"Урок {суффикс}"))
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [
-					{"block_key": "goal", "title": "Цель"},
-					{"block_key": "sponsor", "title": "Спонсор"},
-				],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(
+			self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель"), раздел("sponsor", "Спонсор")]
+		)
 		for организация in (self.компания, self.другая):
 			frappe.get_doc(
 				{"doctype": "Course Allocation", "organization": организация, "course": self.курс}
@@ -60,7 +53,7 @@ class IntegrationTestTeam(IntegrationTestCase):
 
 	def написать(self, кто: str, текст: str, space: str) -> None:
 		frappe.set_user(кто)
-		ответ = student.update_artifact(self.курс, "summary", "goal", текст, space=space)
+		ответ = student.update_artifact(self.курс, "summary", "goal", fields={"goal": текст}, space=space)
 		frappe.set_user("Administrator")
 		assert ответ["ok"], ответ
 
@@ -102,8 +95,10 @@ class IntegrationTestTeam(IntegrationTestCase):
 			ответ = self.документы(self.руководитель)["data"]
 
 			цель = next(б for б in ответ["blocks"] if б["key"] == "goal")
-			тексты = {з["user"]: з["content"] for з in цель["entries"]}
-			self.assertEqual(тексты, {self.сотрудник: "Кофейня для компании", self.коллега: "Склад"})
+			тексты = {з["user"]: з["markdown"] for з in цель["entries"]}
+			self.assertEqual(
+				тексты, {self.сотрудник: "- goal: Кофейня для компании", self.коллега: "- goal: Склад"}
+			)
 			спонсор = next(б for б in ответ["blocks"] if б["key"] == "sponsor")
 			self.assertFalse(any(з["filled"] for з in спонсор["entries"]))
 

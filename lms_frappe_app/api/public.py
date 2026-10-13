@@ -19,7 +19,7 @@ from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
-from lms_frappe_app.agent_learning.artifacts.document import _блок_заполнен, _заполненность, _содержимое_курса
+from lms_frappe_app.agent_learning.artifacts.document import _данные_курса, _заполненность, кратко
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
@@ -59,9 +59,11 @@ def course_map(course: str, space: str | None = None) -> dict:
 
 	`documents` — документы курса, которые ученик собирает по ходу, и у урока
 	`blocks` — какие их блоки собирают на нём (learning-services#340). Видны
-	всем: что курс оставит после себя, — его обещание. Зачисленному — ещё
-	заполненность документа и блока. Подсказки автора наружу не выходят: они
-	адресованы агенту.
+	всем: что курс оставит после себя, — его обещание; у блока — описание
+	для ученика. Зачисленному — ещё заполненность документа и блока.
+
+	У главы — описание из действующего релиза; зачисленному — ещё прогресс
+	главы, как у `course_outline` (learning-services#547).
 	"""
 	зачислен = _зачислен(course)
 	if not зачислен and not frappe.db.get_value("LMS Course", course, "published"):
@@ -75,7 +77,10 @@ def course_map(course: str, space: str | None = None) -> dict:
 	порядок = [урок for глава in структура for урок in глава["lessons"]]
 	названия = _названия(порядок)
 	зачины = _зачины(порядок)
-	цели_уроков = _цели_уроков(course, порядок, frappe.session.user if зачислен else None)
+	релиз = прохождения.действующий(course)
+	уроки_релиза = index.уроки(релиз) if релиз else []
+	цели_уроков = _цели_уроков(course, порядок, frappe.session.user if зачислен else None, релиз, уроки_релиза)
+	главы = _главы_карты(course, структура, релиз, уроки_релиза, frappe.session.user if зачислен else None)
 	номера = {урок: номер for номер, урок in enumerate(порядок, start=1)}
 	документы, блоки_уроков = _документы_курса(course, frappe.session.user if зачислен else None, space)
 	ученику = {}
@@ -109,6 +114,7 @@ def course_map(course: str, space: str | None = None) -> dict:
 		"chapters": [
 			{
 				"title": глава["title"],
+				**главы[глава["name"]],
 				"lessons": [_урок(урок) for урок in глава["lessons"]],
 			}
 			for глава in структура
@@ -149,7 +155,8 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	первый урок. Курс пройден целиком — первый урок, для повтора.
 
 	Материал и директива сюда не выходят: материал написан для агента, а зачин
-	(`lesson_hook`) — единственное в уроке, что обращено к ученику.
+	(`lesson_hook`) — единственное в уроке, что обращено к ученику. Цели урока
+	— как у урока в `course_map` (learning-services#547).
 	"""
 	ученик = текущий_пользователь()
 	if not lesson and course:
@@ -163,19 +170,22 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	пройден = frappe.db.exists(
 		"LMS Course Progress", {"member": ученик, "lesson": lesson, "status": ПРОЙДЕН}
 	)
+	зачислен = _зачислен(урок.course)
 	return {
 		"lesson": урок.name,
 		"course": урок.course,
 		"title": урок.title,
 		"hook": (урок.lesson_hook or "").strip() or None,
 		"completed": bool(пройден),
+		# Цели урока — как у урока в `course_map`: статус только зачисленному.
+		"objectives": _цели_уроков(урок.course, [урок.name], ученик if зачислен else None)[урок.name],
 		"study": _куда_на_занятие(ученик, lesson),
 		# Курс заперт программой — страница урока ведёт к предыдущему курсу, а
 		# не на занятие, которое откажет (#405).
 		"program_lock": программы.замок(ученик, урок.course),
 		# Что из документа курса собирают на этом занятии (#340); ученику
 		# курса — с отметкой, готов ли блок.
-		"blocks": _документы_курса(урок.course, ученик if _зачислен(урок.course) else None, space)[1].get(
+		"blocks": _документы_курса(урок.course, ученик if зачислен else None, space)[1].get(
 			урок.name, []
 		),
 	}
@@ -268,7 +278,56 @@ def _анонс(course: str) -> dict:
 	return данные
 
 
-def _цели_уроков(course: str, уроки: list[str], ученик: str | None) -> dict[str, list[dict]]:
+def _главы_карты(
+	course: str, структура: list[dict], релиз: str | None, уроки_релиза: list, ученик: str | None
+) -> dict[str, dict]:
+	"""Глава карты → `{description}` из индекса действующего релиза; `ученик`
+	(зачисленный) получает ещё `status`, `lessons_total` и `lessons_passed` —
+	те же, что у `course_outline` (`runs.прогресс_глав`).
+
+	Глава записи узнаётся по своему ключу (`Course Chapter.chapter_key`,
+	learning-services#514) — одной выборкой на курс. Курс без релиза —
+	`description: null`, без прогресса: его считают прохождения уроков релиза.
+	"""
+	if not релиз:
+		return {глава["name"]: {"description": None} for глава in структура}
+	ключ_главы = dict(
+		frappe.get_all(
+			"Course Chapter",
+			filters={"name": ("in", [г["name"] for г in структура] or [""])},
+			fields=["name", "chapter_key"],
+			as_list=True,
+		)
+	)
+	главы_релиза = {г["key"]: г for г in index.главы(релиз)}
+	прогресс = {}
+	if ученик:
+		уроки_глав = {ключ: [] for ключ in главы_релиза}
+		for у in уроки_релиза:
+			уроки_глав.setdefault(у.chapter_key, []).append(у.lesson_key)
+		прогресс = {
+			п["key"]: {к: п[к] for к in ("status", "lessons_total", "lessons_passed")}
+			for п in прохождения.прогресс_глав(уроки_глав, прохождения.статусы_уроков(ученик, course))
+		}
+	итог = {}
+	for глава in структура:
+		ключ = ключ_главы.get(глава["name"])
+		описание = (главы_релиза.get(ключ) or {}).get("description")
+		итог[глава["name"]] = {"description": описание or None, **прогресс.get(ключ, {})}
+	return итог
+
+
+#: Действующий релиз ещё не прочитан: `None` у релиза — «у курса его нет».
+_НЕ_ПРОЧИТАН = object()
+
+
+def _цели_уроков(
+	course: str,
+	уроки: list[str],
+	ученик: str | None,
+	релиз=_НЕ_ПРОЧИТАН,
+	уроки_релиза: list | None = None,
+) -> dict[str, list[dict]]:
 	"""Цели уроков карты: урок → `[{text, status?}]`.
 
 	Курс из релиза — цели уроков действующего релиза; `ученик` (зачисленный)
@@ -277,11 +336,15 @@ def _цели_уроков(course: str, уроки: list[str], ученик: str
 	сохранённые, простым чтением, без сверки (`runs.статусы_целей`).
 
 	Курс без релиза — пустые списки: цели урока задаёт только релиз.
+	`релиз` и `уроки_релиза` — когда вызывающий их уже прочёл.
 	"""
-	релиз = прохождения.действующий(course)
+	if релиз is _НЕ_ПРОЧИТАН:
+		релиз = прохождения.действующий(course)
 	if not релиз:
 		return {урок: [] for урок in уроки}
-	ключи = {у.lesson: у.lesson_key for у in index.уроки(релиз)}
+	if уроки_релиза is None:
+		уроки_релиза = index.уроки(релиз)
+	ключи = {у.lesson: у.lesson_key for у in уроки_релиза}
 	цели = index.цели(релиз)
 	статусы = прохождения.статусы_целей(ученик, course) if ученик else {}
 	итог = {}
@@ -302,37 +365,25 @@ def _документы_курса(
 ) -> tuple[list[dict], dict[str, list[dict]]]:
 	"""Документы курса и их блоки по урокам; ученику — с заполненностью в пространстве.
 
-	Один проход на курс: схемы документов и, если есть ученик, его содержимое
+	Один проход на курс: схемы документов и, если есть ученик, его данные
 	по всем документам сразу — так же, как перечень у `artifact`. `space` —
 	чей документ показывать; без него — по правилу `spaces.пространство_курса`.
 	"""
 	схемы = _схемы_курса(course)
 	if not схемы:
 		return [], {}
-	содержимое, вложения, данные = (
-		_содержимое_курса(ученик, course, пространства.пространство_курса(ученик, course, space))
-		if ученик
-		else ({}, {}, {})
+	данные = (
+		_данные_курса(ученик, course, пространства.пространство_курса(ученик, course, space)) if ученик else {}
 	)
 	документы: list[dict] = []
 	по_урокам: dict[str, list[dict]] = {}
 	for схема in схемы:
 		документ = {"artifact": схема.slug, "title": схема.title}
-		свои = (содержимое.get(схема.slug, {}), вложения.get(схема.slug, {}), данные.get(схема.slug))
+		свои = (данные.get(схема.slug) or data.данные(None)) if ученик else None
 		if ученик:
-			документ.update(_заполненность(схема, *свои))
+			документ.update(_заполненность(схема, свои))
 		документы.append(документ)
 		for блок in схема.blocks:
-			if not блок.lesson:
-				continue
-			описание = {"artifact": схема.slug, "key": блок.block_key, "title": блок.title}
-			if ученик:
-				описание["filled"] = _блок_заполнен(
-					схема,
-					блок,
-					свои[0],
-					свои[1],
-					свои[2] or data.данные(None),
-				)
-			по_урокам.setdefault(блок.lesson, []).append(описание)
+			if блок.lesson:
+				по_урокам.setdefault(блок.lesson, []).append(кратко(схема, блок, свои))
 	return документы, по_урокам

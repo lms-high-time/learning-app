@@ -11,6 +11,8 @@ from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
+	раздел,
+	схема_документа,
 	зачислить_на_курс,
 	курс_из_релиза,
 	добавить_в_организацию,
@@ -132,18 +134,9 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 			self.assertEqual(строка["quiz"], {"passed": 1, "first_try": 0})
 
 		frappe.set_user("Administrator")
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме",
-				"blocks": [
-					{"block_key": "goal", "title": "Цель"},
-					{"block_key": "sponsor", "title": "Спонсор"},
-				],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(
+			self.курс, "summary", "Резюме", [раздел("goal", "Цель"), раздел("sponsor", "Спонсор")]
+		)
 		frappe.get_doc(
 			{
 				"doctype": "Agent Student Artifact",
@@ -151,11 +144,9 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 				"course": self.курс,
 				"artifact": "summary",
 				"organization": self.компания_а,
-				"blocks": [
-					{"block_key": "goal", "content": "Открыть кофейню"},
-					{"block_key": "sponsor", "content": "  "},
-					{"block_key": "removed", "content": "из старой схемы"},
-				],
+				"data": json.dumps(
+					{"fields": {"goal": "Открыть кофейню", "sponsor": "  ", "removed": "из старой схемы"}}
+				),
 			}
 		).insert(ignore_permissions=True)
 		with self.subTest("learning-services#296: заполненность документа"):

@@ -223,16 +223,11 @@ scheduler_events = {
 # before_install = "lms_frappe_app.install.before_install"
 # Пункты приложения в сайдбаре Frappe Learning — и при установке, и при
 # каждой миграции: на уже развёрнутом стенде after_install не сработает.
-# Проверка каталога документов — последней: сломанный каталог валит
-# `bench migrate`, и выкатка останавливается до переключения (#377).
 after_install = "lms_frappe_app.install.after_install"
 # Индексы по полям фикстур: при установке фикстуры синхронизируются после
 # `after_install`, а `after_sync` — следом за ними.
 after_sync = "lms_frappe_app.install.after_sync"
-after_migrate = [
-	"lms_frappe_app.install.after_migrate",
-	"lms_frappe_app.agent_learning.artifacts.catalog.после_миграции",
-]
+after_migrate = ["lms_frappe_app.install.after_migrate"]
 
 # Uninstallation
 # ------------

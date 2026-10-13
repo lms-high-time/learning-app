@@ -5,7 +5,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
@@ -26,6 +26,19 @@ from lms_frappe_app.tests.sample_data import (
 	создать_ученика,
 	урок_релиза,
 )
+
+
+class TestПодсказкиРазделов(UnitTestCase):
+	def test_пустые_и_не_строки_не_выходят(self):
+		self.assertEqual(
+			student._подсказки_разделов(
+				{"sections": {"log": " Записать решение ", "rules": "", "areas": "  ", "x": 5, "y": None}}
+			),
+			{"log": "Записать решение"},
+		)
+		for пакет in ({}, {"sections": None}, {"sections": ["log"]}):
+			with self.subTest(пакет=пакет):
+				self.assertEqual(student._подсказки_разделов(пакет), {})
 
 
 class IntegrationTestStartLesson(IntegrationTestCase):
@@ -96,6 +109,7 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertEqual(данные["course_promise"], "К концу курса вы умеете пример.")
 		self.assertIn("Директива урока l-1", данные["directive"])
 		self.assertIn("Тезисы урока l-1", данные["material"])
+		self.assertEqual(данные["section_hints"], {"log": "Урок l-1 заполняет раздел log."})
 		self.assertEqual(данные["quiz"], {"required": True, "pass_threshold": 0.7, "attempts_left": 3})
 		self.assertEqual(данные["start"]["opening"], "first_in_course")
 		self.assertIsNone(данные["start"]["last_session_at"])
@@ -110,13 +124,13 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertEqual((занятие.student, занятие.lesson, занятие.course), (self.ученик, self.урок, self.курс))
 		self.assertTrue(занятие.via_trusted_service)
 
-	def test_срез_без_директивы_и_материала_пустые_строки(self):
+	def test_срез_без_директивы_материала_и_подсказок_пустой(self):
 		_, релиз, урок = self.свой_курс()
 		frappe.db.set_value("Agent Release Lesson", {"parent": релиз, "lesson_key": "l-1"}, "agent", "{}")
 
 		данные = self.старт(lesson=урок)
 
-		self.assertEqual((данные["directive"], данные["material"]), ("", ""))
+		self.assertEqual((данные["directive"], данные["material"], данные["section_hints"]), ("", "", {}))
 
 	def test_карта_урока_со_статусами_и_без_снятого(self):
 		курс, урок = self.курс_двух_целей()
@@ -374,14 +388,22 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 
 	# --- блоки документа ---
 
-	def test_блоки_документа_своего_урока_с_содержимым(self):
+	def test_блоки_документа_своего_урока_с_заполненностью(self):
 		student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Первая встреча"}])
 
 		[журнал] = self.старт(lesson=self.урок)["artifact_blocks"]
 		блоки = self.старт(lesson=урок_релиза(self.курс, "l-2"))["artifact_blocks"]
 
-		self.assertEqual((журнал["artifact"], журнал["key"]), ("notebook", "log"))
-		self.assertIn("Первая встреча", журнал["table_markdown"])
+		self.assertEqual(
+			журнал,
+			{
+				"artifact": "notebook",
+				"key": "log",
+				"title": "Журнал",
+				"description": "Что сюда записывают.",
+				"filled": True,
+			},
+		)
 		self.assertEqual([(б["artifact"], б["key"]) for б in блоки], [("notebook", "rules")])
 		self.assertEqual(self.старт(lesson=урок_релиза(self.курс, "l-3"))["artifact_blocks"], [])
 

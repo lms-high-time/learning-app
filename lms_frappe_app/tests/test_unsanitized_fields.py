@@ -31,7 +31,7 @@ from frappe.utils.formatters import format_value
 
 from lms_frappe_app.agent_learning import html_text
 from lms_frappe_app.api import student
-from lms_frappe_app.tests.sample_data import зачислить, создать_урок, создать_ученика
+from lms_frappe_app.tests.sample_data import зачислить, раздел, создать_урок, создать_ученика, схема_документа
 
 КОРЕНЬ = Path(frappe.get_app_path("lms_frappe_app"))
 #: Типы, которые печать выводит экранированными; остальные — сырыми или в обход.
@@ -283,15 +283,7 @@ class IntegrationTestТекстУченикаКакJSON(IntegrationTestCase):
 		суффикс = frappe.generate_hash(length=6)
 		self.ученик = создать_ученика(f"json-text-{суффикс}@example.com")
 		self.курс = зачислить(self.ученик, создать_урок(f"Урок {суффикс}"))
-		frappe.get_doc(
-			{
-				"doctype": "Agent Course Artifact",
-				"course": self.курс,
-				"slug": "summary",
-				"title": "Резюме проекта",
-				"blocks": [{"block_key": "goal", "title": "Цель"}],
-			}
-		).insert(ignore_permissions=True)
+		схема_документа(self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель")])
 		frappe.set_user(self.ученик)
 
 	def проверить(self, doctype: str, name: str) -> None:
@@ -305,14 +297,17 @@ class IntegrationTestТекстУченикаКакJSON(IntegrationTestCase):
 					)
 		self.assertEqual(исполнимое(frappe.get_print(doctype, name)), [])
 
-	def test_блок_документа(self):
-		текст = нагрузка("Agent Artifact Content", "content", "незакрытый")
-		self.assertTrue(student.update_artifact(self.курс, "summary", "goal", текст)["ok"])
+	def test_поле_документа(self):
+		"""Значения документа — в поле JSON `data`: хранятся как есть, а печать
+		записи их не выводит."""
+		текст = нагрузка("Agent Student Artifact", "data", "незакрытый")
+		self.assertTrue(student.update_artifact(self.курс, "summary", "goal", fields={"goal": текст})["ok"])
 
 		имя = frappe.db.get_value("Agent Student Artifact", {"student": self.ученик, "artifact": "summary"})
-		сохранено = frappe.db.get_value("Agent Artifact Content", {"parent": имя}, "content")
-		self.assertEqual(сохранено, "&lt;" + текст[1:])
-		self.проверить("Agent Student Artifact", имя)
+		сохранено = json.loads(frappe.db.get_value("Agent Student Artifact", имя, "data"))
+		self.assertEqual(сохранено["fields"]["goal"], текст.strip())
+		frappe.set_user("Administrator")
+		self.assertEqual(исполнимое(frappe.get_print("Agent Student Artifact", имя)), [])
 
 	def test_заметка(self):
 		ключ = нагрузка("Agent Student Note", "note_key")

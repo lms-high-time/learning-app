@@ -45,6 +45,7 @@ from lms_frappe_app.tests.sample_data import (
 	привязать_главу,
 	привязать_урок,
 	создать_домашку,
+	раздел,
 	схема_документа,
 )
 
@@ -383,7 +384,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			course=курс,
 			artifact="summary",
 			title="Резюме проекта",
-			blocks=[{"key": "goal", "title": "Цель", "hint": "Одной фразой", "lesson": с_квизом}],
+			blocks=[раздел("goal", "Цель", lesson=с_квизом, description="Одной фразой")],
 		)
 
 		self.сверить("authoring.course_revision", authoring.course_revision(course=курс))
@@ -477,7 +478,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить(
 			"student.update_artifact",
 			student.update_artifact(
-				course=курс, artifact="summary", key="goal", content="Открыть седьмую кофейню"
+				course=курс, artifact="summary", key="goal", fields={"goal": "Открыть седьмую кофейню"}
 			),
 		)
 		self.сверить("student.artifact", student.artifact(course=курс))
