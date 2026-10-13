@@ -104,6 +104,7 @@ def сведения(
 		"missing": False,
 		"course_anchor": якорь("course"),
 		"frame_anchor": якорь("agent.frame"),
+		"frame": [],
 	}
 	if основа["is_guest"]:
 		return основа
@@ -145,6 +146,8 @@ def сведения(
 	elif view == ТЕСТЕРЫ:
 		основа["view"] = ТЕСТЕРЫ
 		основа["testers"] = authoring.course_testers(course=course)["data"]["testers"]
+	else:
+		основа["frame"] = _рамка(course, релиз)
 	return основа
 
 
@@ -341,6 +344,20 @@ def _урок_целиком(course: str, ключ: str, релиз: dict, за�
 		"prev": _сосед(уроки, место - 1),
 		"next": _сосед(уроки, место + 1),
 	}
+
+
+def _рамка(course: str, релиз: dict) -> list[dict]:
+	"""Рамка курса для вкладки «Релиз»: та же, что на странице урока.
+
+	`Why:` рамка общая для всех уроков, а показывалась только внутри
+	страницы какого-нибудь урока — с курса её было не найти
+	(learning-services#559). `course_release` отдаёт пакет агента только по
+	уроку, поэтому берётся по первому уроку релиза, без части урока.
+	"""
+	if not релиз["lessons"]:
+		return []
+	агент = authoring.course_release(course=course, lesson=релиз["lessons"][0]["key"])["data"]["agent"]
+	return _части({часть: значение for часть, значение in агент.items() if часть != "lesson"}, None, {}, {})
 
 
 def _части(пакет: dict, урок: dict | None, пункты: dict[str, str], разделы: dict[str, str]) -> list[dict]:
