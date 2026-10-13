@@ -3,25 +3,26 @@
 """Документ курса — одна модель: раздел релиза (learning-services#515).
 
 Схема документа держит раздел в форме релиза — `rows` и колонки; текста,
-файлов и ссылок у блока нет, холста и формул у схемы — тоже. Патч переводит
-данные и убирает лишнее:
+файлов и ссылок у блока нет, холста и формул у схемы — тоже. Проверку, что
+действующие схемы существующих курсов переводятся, делает раньше
+синхронизации схемы доктайпов патч `document_single_model_check`
+(`проверить`); этот патч переводит данные и убирает лишнее:
 
-1. проверка: каждая схема существующего курса переводится в разделы — блок
-   с полями или с колонками своей таблицы, текстовые колонки, без холста и
-   формул. Не переводится хоть одна — патч падает, перечислив все, и ничего
-   не трогает: сторож выкатки не переключает релиз после упавшего `migrate`;
-2. бэкап — приватный `File` `document-model-515-backup.json`, только
-   System Manager: непустые заметки, ссылки и имена файлов блоков с учеником,
+1. бэкап — приватный `File` `document-model-515-backup.json`, только
+   System Manager: непустые заметки, ссылки, файлы и срезы блоков с учеником,
    курсом, документом и блоком; сироты — документы учеников и схемы курсов,
-   которых нет, — целиком; файлы документов учеников. Ничего нет — бэкапа
-   нет;
-3. сироты удаляются — с файлами при них;
-4. файлы блоков — `File`, прикреплённые к документам учеников, — удаляются;
-5. `spec` каждого блока схемы → `rows` и `columns`: поля — раздел `one`,
-   колонки — `many`; `required` строкой — `{"if_column": …}`. Виды таблицы,
-   заготовка строк и `prefix` отбрасываются: ID строк, уже выданные, не
-   меняются;
-6. колонки снятых полей (`Agent Artifact Block`: `kind`, `accept`, `span`,
+   которых нет, — целиком; файлы документов учеников; непереводимые блоки
+   недействующих версий схем — `spec` и холст схемы. Сохранять нечего —
+   бэкапа нет;
+2. сироты удаляются — с файлами при них;
+3. файлы блоков — `File`, прикреплённые к документам учеников, — удаляются;
+4. `spec` каждого блока схемы существующего курса → `rows` и `columns`: поля
+   — раздел `one`, колонки своей таблицы — `many`; `required` строкой —
+   `{"if_column": …}`. Виды таблицы, заготовка строк и `prefix`
+   отбрасываются: ID строк, уже выданные, не меняются. Непереводимый блок
+   недействующей версии остаётся без `rows` и `columns`: ни ученик, ни
+   публикация её не читают;
+5. колонки снятых полей (`Agent Artifact Block`: `kind`, `accept`, `span`,
    `hint`, `spec`; `Agent Course Artifact`: `layout`, `canvas`), доктайп и
    таблица `Agent Artifact Content` и значение `artifact_preview_rows` уходят
    из базы. DDL — последним: он фиксирует транзакцию.
@@ -35,6 +36,8 @@ import json
 
 import frappe
 from frappe.utils import now
+
+from lms_frappe_app.patches.v0_1.drop_removed_columns import колонки as колонки_таблицы
 
 ДОКУМЕНТ = "Agent Student Artifact"
 СХЕМА = "Agent Course Artifact"
@@ -55,11 +58,11 @@ class Непереводимо(ValueError):
 
 def execute():
 	курсы = set(frappe.get_all("LMS Course", pluck="name"))
-	переводы, беды = _переводы(курсы)
-	if беды:
+	перевод = _переводы(курсы)
+	if перевод["беды"]:
 		raise frappe.ValidationError(
-			"document_single_model: схемы существующих курсов не переводятся в разделы релиза, "
-			"база не тронута:\n" + "\n".join(беды)
+			"document_single_model: действующие схемы существующих курсов не переводятся в разделы "
+			"релиза, данные не тронуты:\n" + "\n".join(перевод["беды"])
 		)
 	сироты_учеников = _сироты(
 		ДОКУМЕНТ, курсы, ["name", "student", "archived_student", "course", "artifact", "organization", "data"]
@@ -72,8 +75,9 @@ def execute():
 		fields=["name", "file_name", "file_url", "file_size", "attached_to_name"],
 		order_by="creation asc",
 	)
+	прежние = перевод["прежние"]
 	бэкап = None
-	if заметки or сироты_учеников or сироты_схем or файлы:
+	if заметки or сироты_учеников or сироты_схем or файлы or прежние:
 		бэкап = _сохранить_бэкап(
 			{
 				"patch": "lms_frappe_app.patches.v0_1.document_single_model",
@@ -81,6 +85,7 @@ def execute():
 				"content": заметки,
 				"orphans": {"student_artifacts": сироты_учеников, "course_artifacts": сироты_схем},
 				"files": файлы,
+				"inactive_blocks": прежние,
 			}
 		)
 
@@ -90,11 +95,10 @@ def execute():
 		)
 	for запись in сироты_схем:
 		frappe.delete_doc(СХЕМА, запись["name"], force=True, ignore_permissions=True, delete_permanently=True)
-	удалено_файлов = 0
+	# Файлы сирот ушли вместе с сиротами; остальные — здесь.
 	for файл in frappe.get_all("File", filters={"attached_to_doctype": ДОКУМЕНТ}, pluck="name"):
 		frappe.delete_doc("File", файл, force=True, ignore_permissions=True, delete_permanently=True)
-		удалено_файлов += 1
-	for имя, (rows, columns) in переводы.items():
+	for имя, (rows, columns) in перевод["переводы"].items():
 		if frappe.db.exists(БЛОК, имя):
 			frappe.db.set_value(
 				БЛОК,
@@ -102,6 +106,9 @@ def execute():
 				{"rows": rows, "columns": json.dumps(columns, ensure_ascii=False)},
 				update_modified=False,
 			)
+	for блок in прежние:
+		if блок["block"] and frappe.db.exists(БЛОК, блок["block"]):
+			frappe.db.set_value(БЛОК, блок["block"], {"rows": None, "columns": None}, update_modified=False)
 	настройки = frappe.db.sql(
 		"SELECT field FROM `tabSingles` WHERE doctype = %s AND field IN %s",
 		(НАСТРОЙКИ, ПОЛЯ_НАСТРОЕК),
@@ -112,8 +119,8 @@ def execute():
 	print(
 		f"document_single_model: бэкап {бэкап or 'не нужен'}; заметок блоков {len(заметки)}, "
 		f"сирот: документов учеников {len(сироты_учеников)}, схем {len(сироты_схем)}; "
-		f"удалено файлов документов {удалено_файлов}; блоков переведено {len(переводы)}; "
-		f"значений настроек удалено {len(настройки)}"
+		f"файлов документов удалено {len(файлы)}; блоков переведено {len(перевод['переводы'])}, "
+		f"непереводимых в прежних версиях {len(прежние)}; значений настроек удалено {len(настройки)}"
 	)
 
 	for доктайп, поля in КОЛОНКИ.items():
@@ -129,6 +136,15 @@ def execute():
 	_удалить_заметки()
 
 
+def проверить() -> list[str]:
+	"""Беды действующих схем существующих курсов — строками; пусто — переводятся.
+
+	Только чтение, прямым SQL: зовёт её и `document_single_model_check` до
+	синхронизации схемы доктайпов.
+	"""
+	return _переводы(set(frappe.get_all("LMS Course", pluck="name")))["беды"]
+
+
 def перевести(вид: str | None, спек) -> tuple[str, list[dict]]:
 	"""`rows` и колонки раздела из вида и `spec` блока; не ложится — `Непереводимо`."""
 	if вид and вид != "text":
@@ -136,16 +152,22 @@ def перевести(вид: str | None, спек) -> tuple[str, list[dict]]:
 	if isinstance(спек, str):
 		спек = json.loads(спек) if спек.strip() else {}
 	спек = спек or {}
+	if not isinstance(спек, dict):
+		raise Непереводимо("spec не объект")
 	поля, колонки = спек.get("fields") or [], спек.get("columns") or []
+	if not isinstance(поля, list) or not isinstance(колонки, list):
+		raise Непереводимо("поля или колонки не списком")
 	if поля and колонки:
 		raise Непереводимо("у блока и поля, и колонки")
 	if not поля and not колонки:
 		raise Непереводимо("у блока ни полей, ни колонок")
 	итог = []
 	for описание in поля or колонки:
+		if not isinstance(описание, dict) or not isinstance(описание.get("key"), str):
+			raise Непереводимо("колонка без ключа")
 		тип = описание.get("type") or "text"
 		if тип not in ТЕКСТ:
-			raise Непереводимо(f"колонка {описание.get('key')} типа {тип}")
+			raise Непереводимо(f"колонка {описание['key']} типа {тип}")
 		обязательна = описание.get("required")
 		if isinstance(обязательна, str) and обязательна.strip():
 			обязательна = {"if_column": обязательна.strip()}
@@ -161,11 +183,35 @@ def перевести(вид: str | None, спек) -> tuple[str, list[dict]]:
 	return ("one" if поля else "many"), итог
 
 
-def _переводы(курсы: set[str]) -> tuple[dict[str, tuple[str, list[dict]]], list[str]]:
-	"""Блоки схем существующих курсов — `{блок: (rows, columns)}` — и беды тех,
-	что не переводятся. Колонки `spec` уже нет — переводить нечего."""
+def есть_холст(layout, canvas) -> bool:
+	"""Холст у схемы: раскладка `canvas` или непустой JSON холста.
+
+	Пустые `{}`, `[]`, `null` и пустая строка — не холст.
+	"""
+	if layout == "canvas":
+		return True
+	if isinstance(canvas, str):
+		if not canvas.strip():
+			return False
+		try:
+			canvas = json.loads(canvas)
+		except ValueError:
+			return True
+	return bool(canvas)
+
+
+def _переводы(курсы: set[str]) -> dict:
+	"""Перевод блоков схем существующих курсов:
+
+	- `переводы` — `{блок: (rows, columns)}`;
+	- `беды` — строки о действующих версиях, которые не переводятся;
+	- `прежние` — непереводимые блоки и холсты недействующих версий: для бэкапа.
+
+	Колонки `spec` уже нет — переводить нечего.
+	"""
+	итог: dict = {"переводы": {}, "беды": [], "прежние": []}
 	if "spec" not in колонки_таблицы(БЛОК):
-		return {}, []
+		return итог
 	есть_у_схемы = колонки_таблицы(СХЕМА)
 	холст = ", ".join(f"a.`{поле}`" for поле in ("layout", "canvas") if поле in есть_у_схемы) or "NULL"
 	строки = frappe.db.sql(
@@ -179,42 +225,40 @@ def _переводы(курсы: set[str]) -> tuple[dict[str, tuple[str, list[d
 		""",
 		as_dict=True,
 	)
-	переводы: dict[str, tuple[str, list[dict]]] = {}
-	беды: list[str] = []
-	холсты: set[str] = set()
+	с_холстом: set[str] = set()
 	for с in строки:
 		if с.course not in курсы:
 			continue
 		где = f"  {с.schema_name} (курс {с.course}, документ {с.slug}, v{с.version}{', действующая' if с.is_active else ''})"
-		if (с.get("canvas") or с.get("layout") == "canvas") and с.schema_name not in холсты:
-			холсты.add(с.schema_name)
-			беды.append(f"{где}: холст")
+		прежняя = {
+			"schema": с.schema_name,
+			"course": с.course,
+			"artifact": с.slug,
+			"version": с.version,
+		}
+		if есть_холст(с.get("layout"), с.get("canvas")) and с.schema_name not in с_холстом:
+			с_холстом.add(с.schema_name)
+			if с.is_active:
+				итог["беды"].append(f"{где}: холст")
+			else:
+				итог["прежние"].append(
+					{**прежняя, "block": None, "layout": с.get("layout"), "canvas": с.get("canvas")}
+				)
 		try:
 			спек = json.loads(с.spec) if isinstance(с.spec, str) and с.spec.strip() else (с.spec or {})
+			if not isinstance(спек, dict):
+				raise Непереводимо("spec не объект")
 			if спек.get("columns") and (спек.get("table") or с.block_key) != с.block_key:
 				raise Непереводимо(f"таблица {спек.get('table')} не своя")
-			переводы[с.name] = перевести(с.kind, спек)
-		except (Непереводимо, ValueError) as беда:
-			беды.append(f"{где}: блок {с.block_key} — {беда}")
-	return переводы, беды
-
-
-def колонки_таблицы(доктайп: str) -> set[str]:
-	"""Колонки таблицы доктайпа в базе сайта, мимо кеша; таблицы нет — пусто.
-
-	`Why:` `frappe.db.get_table_columns` ищет таблицу в `information_schema`
-	по имени без базы, а на одном сервере MariaDB бывает несколько сайтов.
-	"""
-	return set(
-		frappe.db.sql(
-			"""
-			SELECT column_name FROM information_schema.columns
-			WHERE table_schema = DATABASE() AND table_name = %s
-			""",
-			f"tab{доктайп}",
-			pluck=True,
-		)
-	)
+			итог["переводы"][с.name] = перевести(с.kind, спек)
+		except (ValueError, KeyError, AttributeError, TypeError) as беда:
+			if с.is_active:
+				итог["беды"].append(f"{где}: блок {с.block_key} — {беда}")
+			else:
+				итог["прежние"].append(
+					{**прежняя, "block": с.name, "block_key": с.block_key, "kind": с.kind, "spec": с.spec}
+				)
+	return итог
 
 
 def _сироты(доктайп: str, курсы: set[str], поля: list[str]) -> list[dict]:
@@ -227,7 +271,7 @@ def _сироты(доктайп: str, курсы: set[str], поля: list[str]
 
 
 def _заметки() -> list[dict]:
-	"""Непустые заметки, ссылки и файлы блоков документов учеников."""
+	"""Непустые заметки, ссылки, файлы и срезы блоков документов учеников."""
 	if not frappe.db.table_exists(ЗАМЕТКИ, cached=False):
 		return []
 	return [
@@ -235,7 +279,7 @@ def _заметки() -> list[dict]:
 		for строка in frappe.db.sql(
 			"""
 			SELECT d.name AS document, d.student, d.archived_student, d.course, d.artifact,
-				d.organization, c.block_key AS block, c.content, c.url, c.file, f.file_name
+				d.organization, c.block_key AS block, c.content, c.url, c.file, f.file_name, c.preview
 			FROM `tabAgent Artifact Content` c
 			JOIN `tabAgent Student Artifact` d ON d.name = c.parent
 			LEFT JOIN `tabFile` f ON f.name = c.file

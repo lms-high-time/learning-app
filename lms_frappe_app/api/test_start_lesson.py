@@ -5,7 +5,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
@@ -26,6 +26,19 @@ from lms_frappe_app.tests.sample_data import (
 	создать_ученика,
 	урок_релиза,
 )
+
+
+class TestПодсказкиРазделов(UnitTestCase):
+	def test_пустые_и_не_строки_не_выходят(self):
+		self.assertEqual(
+			student._подсказки_разделов(
+				{"sections": {"log": " Записать решение ", "rules": "", "areas": "  ", "x": 5, "y": None}}
+			),
+			{"log": "Записать решение"},
+		)
+		for пакет in ({}, {"sections": None}, {"sections": ["log"]}):
+			with self.subTest(пакет=пакет):
+				self.assertEqual(student._подсказки_разделов(пакет), {})
 
 
 class IntegrationTestStartLesson(IntegrationTestCase):

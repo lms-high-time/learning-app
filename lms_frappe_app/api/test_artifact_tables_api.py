@@ -16,7 +16,8 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.agent_learning.artifacts import codes
+from lms_frappe_app.agent_learning.artifacts import codes, write
+from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
@@ -131,7 +132,6 @@ class IntegrationTestArtifactAPI(IntegrationTestCase):
 					"blocks_filled": 2,
 				},
 			)
-			self.assertNotIn("layout", перечень)
 			курс = next(к for к in student.get_my_progress()["data"]["courses"] if к["id"] == self.курс)
 			self.assertEqual(курс["documents"], [перечень])
 
@@ -152,24 +152,29 @@ class IntegrationTestArtifactAPI(IntegrationTestCase):
 		self.assertEqual((журнал["items"], правила["values"]), ([], {"method": "Согласие"}))
 		self.assertEqual(self.записать("agreements", rows=[{"topic": "Новая"}])["data"]["created"], ["A2"])
 
+	def test_отказ_записи_доходит_до_метода(self):
+		"""Проводка: отказ сервиса — кодом контракта. Отказы разбора строк и полей
+		— в `test_tables`, отказы самой записи — `test_отказы_записи`."""
+		ответ = self.записать("agreements", fields={"topic": "x"})
+		self.assertEqual(ответ["error"]["code"], codes.НЕ_ТОТ_РАЗДЕЛ)
+
 	def test_отказы_записи(self):
-		"""Отказы, которые даёт сама запись; отказы разбора строк и полей — в `test_tables`."""
+		"""Отказы, которые даёт сама запись (`write.записать_блок`), — до записи."""
 		self.записать("agreements", rows=[{"topic": "Ретро"}])
-		for что, (вызов, код) in {
-			"нет документа": (lambda: student.artifact(self.курс, "lean_canvas"), codes.АРТЕФАКТ_НЕ_НАЙДЕН),
-			"нет блока": (lambda: self.записать("budget", rows=[{"topic": "x"}]), codes.БЛОК_НЕ_НАЙДЕН),
+		for что, (параметры, код) in {
+			"нет документа": ({"artifact": "lean_canvas", "key": "agreements"}, codes.АРТЕФАКТ_НЕ_НАЙДЕН),
+			"нет блока": ({"key": "budget", "rows": [{"topic": "x"}]}, codes.БЛОК_НЕ_НАЙДЕН),
 			"очистка с записью": (
-				lambda: self.записать("agreements", rows=[{"topic": "x"}], clear=True),
+				{"key": "agreements", "rows": [{"topic": "x"}], "clear": True},
 				codes.ОЧИСТКА_С_ЗАПИСЬЮ,
-			),
-			"не тот вид раздела": (
-				lambda: self.записать("agreements", fields={"topic": "x"}),
-				codes.НЕ_ТОТ_РАЗДЕЛ,
 			),
 		}.items():
 			with self.subTest(что):
-				ответ = вызов()
-				self.assertEqual(ответ["error"]["code"], код)
+				with self.assertRaises(Отказ) as отказ:
+					write.записать_блок(
+						self.ученик, self.курс, None, **{"artifact": "agreements_log", **параметры}
+					)
+				self.assertEqual(отказ.exception.код, код)
 		self.assertEqual(self.документ()["blocks"][0]["items"], [{"id": "A1", "topic": "Ретро"}])
 
 	def test_правка_схемы_не_теряет_данных_и_помнит_версию(self):
@@ -223,23 +228,16 @@ class IntegrationTestArtifactAPI(IntegrationTestCase):
 		self.assertNotIn("versions", документ)
 
 	def test_выгрузка_markdown_и_xlsx(self):
+		"""Проводка выгрузки: имя файла и листы книги; содержимое — в `test_tables`."""
 		from openpyxl import load_workbook
 
 		from lms_frappe_app.www.artifacts import download
 
-		self.записать("agreements", rows=[{"topic": "Ретро"}])
-		self.записать("how_we_decide", fields={"method": "Согласие"})
-
 		download(self.курс, "agreements_log")
 		self.assertEqual(frappe.response["filename"], "agreements_log.md")
-		текст = frappe.response["filecontent"]
-		self.assertIn("## Договорённости\n\n| ID | Тема | Решение | Кто отвечает |", текст)
-		self.assertIn("| A1 | Ретро |  |  |", текст)
-		self.assertIn("## Как мы решаем\n\n- Способ: Согласие", текст)
+		self.assertTrue(frappe.response["filecontent"].startswith("# Журнал договорённостей\n"))
 
 		download(self.курс, "agreements_log", format="xlsx")
 		self.assertEqual(frappe.response["filename"], "agreements_log.xlsx")
 		книга = load_workbook(BytesIO(frappe.response["filecontent"]))
 		self.assertEqual(книга.sheetnames, ["Договорённости", "Поля"])
-		self.assertEqual(книга["Договорённости"]["B2"].value, "Ретро")
-		self.assertEqual(книга["Поля"]["C2"].value, "Согласие")

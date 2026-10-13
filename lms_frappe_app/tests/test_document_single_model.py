@@ -1,7 +1,8 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Патч `document_single_model`: документ курса — одна модель (learning-services#515).
+"""Патчи `document_single_model_check` и `document_single_model`: документ
+курса — одна модель (learning-services#515).
 
 DDL и старые колонки подменены, как в `test_old_model_patches`: колонок
 `spec` и таблицы заметок на мигрированном сайте нет, их строки отдаёт
@@ -17,6 +18,7 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning.uploads import новый_файл
 from lms_frappe_app.patches.v0_1 import document_single_model as патч
+from lms_frappe_app.patches.v0_1 import document_single_model_check as проверка
 from lms_frappe_app.tests.sample_data import раздел, создать_курс, создать_ученика, схема_документа
 from lms_frappe_app.tests.test_old_model_patches import ПРИЛОЖЕНИЕ, Схема, выполнить
 
@@ -72,10 +74,37 @@ class TestПеревод(UnitTestCase):
 			),
 			"число": ("text", {"columns": [{"key": "a", "type": "number"}]}, "колонка a типа number"),
 			"формула поля": ("text", {"fields": [{"key": "a", "type": "formula"}]}, "колонка a типа formula"),
+			"spec не объект": ("text", "[1]", "spec не объект"),
+			"колонки не списком": ("text", {"columns": {"a": {}}}, "не списком"),
+			"колонка без ключа": ("text", {"columns": [{"title": "Без ключа"}]}, "колонка без ключа"),
+			"колонка не объект": ("text", {"columns": ["a"]}, "колонка без ключа"),
 		}.items():
 			with self.subTest(имя):
 				with self.assertRaisesRegex(патч.Непереводимо, причина):
 					патч.перевести(вид, спек)
+
+	def test_холст(self):
+		"""Пустой JSON холста — не холст; раскладка `canvas` — холст."""
+		for canvas, layout, ожидание in (
+			(None, "sections", False),
+			("", "sections", False),
+			("  ", None, False),
+			("{}", "sections", False),
+			("[]", "sections", False),
+			("null", "sections", False),
+			('{"grid": ["a b"]}', "sections", True),
+			("не JSON", "sections", True),
+			(None, "canvas", True),
+		):
+			with self.subTest(canvas=canvas, layout=layout):
+				self.assertIs(патч.есть_холст(layout, canvas), ожидание)
+
+	def test_проверка_идёт_до_синхронизации_схемы(self):
+		"""Проверка — в `pre_model_sync`, перевод — в `post_model_sync`."""
+		строки = (ПРИЛОЖЕНИЕ / "patches.txt").read_text(encoding="utf-8").splitlines()
+		до, после = строки.index("[pre_model_sync]"), строки.index("[post_model_sync]")
+		self.assertTrue(до < строки.index("lms_frappe_app.patches.v0_1.document_single_model_check") < после)
+		self.assertGreater(строки.index("lms_frappe_app.patches.v0_1.document_single_model"), после)
 
 	def test_снятых_полей_нет_в_схемах(self):
 		"""Страховка от удаления живой колонки: поле, вернувшееся в схему, патч снёс бы с данными."""
@@ -283,8 +312,8 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 				frappe.db.exists("Singles", {"doctype": патч.НАСТРОЙКИ, "field": "artifact_preview_rows"})
 			)
 			self.assertIn(
-				"заметок блоков 1, сирот: документов учеников 1, схем 1; удалено файлов документов 1; "
-				"блоков переведено 2; значений настроек удалено 1",
+				"заметок блоков 1, сирот: документов учеников 1, схем 1; файлов документов удалено 2; "
+				"блоков переведено 2, непереводимых в прежних версиях 0; значений настроек удалено 1",
 				первый,
 			)
 
@@ -293,13 +322,15 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 			self.assertEqual(set(self.бэкапы()) - было_бэкапов, {бэкап})
 			self.assertIn(
 				"бэкап не нужен; заметок блоков 0, сирот: документов учеников 0, схем 0; "
-				"удалено файлов документов 0; блоков переведено 0; значений настроек удалено 0",
+				"файлов документов удалено 0; блоков переведено 0, непереводимых в прежних версиях 0; "
+				"значений настроек удалено 0",
 				второй,
 			)
 
-	def test_непереводимая_схема_ничего_не_трогает(self):
-		"""Схема существующего курса с числом, холстом или чужой таблицей — отказ
-		со всеми бедами сразу; ни бэкапа, ни удалений, ни DDL."""
+	def test_непереводимая_действующая_схема_ничего_не_трогает(self):
+		"""Действующая схема существующего курса с числом, холстом или чужой
+		таблицей — отказ со всеми бедами сразу; ни бэкапа, ни удалений, ни DDL.
+		Проверка до синхронизации схемы находит то же."""
 		было_бэкапов = set(self.бэкапы())
 		журнал = {
 			"table": "register",
@@ -322,3 +353,40 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("Agent Student Artifact", self.сирота))
 		self.assertEqual(frappe.db.count("File", {"name": ("in", self.файлы)}), 2)
 		self.assertIsNone(frappe.db.get_value("Agent Artifact Block", self.блоки["rules"], "rows"))
+
+		with схема.подменить({СТАРЫЕ_БЛОКИ: блоки}):
+			with self.assertRaises(frappe.ValidationError) as до_синхронизации:
+				выполнить(проверка)
+		self.assertIn("схема доктайпов и данные не тронуты", str(до_синхронизации.exception))
+		self.assertIn("блок log — таблица register не своя", str(до_синхронизации.exception))
+
+	def test_прежняя_версия_не_валит_патч(self):
+		"""Непереводимый блок и холст недействующей версии — в бэкап, у блока нет
+		`rows` и `columns`; переводимый блок той же версии переводится. Проверка
+		до синхронизации их не считает бедой."""
+		было_бэкапов = set(self.бэкапы())
+		блоки = self.старые_блоки({"table": "register", "columns": [{"key": "topic", "type": "number"}]})
+		for блок in блоки:
+			блок.is_active = 0
+		блоки[0].canvas = '{"grid": ["log"]}'
+		схема = self.старый_сайт()
+		with схема.подменить({СТАРЫЕ_БЛОКИ: блоки}):
+			выполнить(проверка)
+			вывод = выполнить(патч)
+
+		self.assertIn("блоков переведено 1, непереводимых в прежних версиях 2", вывод)
+		self.assertEqual(
+			frappe.db.get_value("Agent Artifact Block", self.блоки["log"], ["rows", "columns"]), (None, None)
+		)
+		self.assertEqual(frappe.db.get_value("Agent Artifact Block", self.блоки["rules"], "rows"), "one")
+		[бэкап] = set(self.бэкапы()) - было_бэкапов
+		файл = frappe.get_doc("File", бэкап)
+		self.addCleanup(lambda: os.path.exists(путь := файл.get_full_path()) and os.remove(путь))
+		прежние = json.loads(файл.get_content())["inactive_blocks"]
+		self.assertEqual(
+			[
+				(п["block"], п.get("canvas"), json.loads(п["spec"])["table"] if п.get("spec") else None)
+				for п in прежние
+			],
+			[(None, '{"grid": ["log"]}', None), (self.блоки["log"], None, "register")],
+		)
