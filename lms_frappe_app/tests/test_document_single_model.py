@@ -12,6 +12,8 @@ DDL и старые колонки подменены, как в `test_old_model
 
 import json
 import os
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -82,6 +84,17 @@ class TestПеревод(UnitTestCase):
 			with self.subTest(имя):
 				with self.assertRaisesRegex(патч.Непереводимо, причина):
 					патч.перевести(вид, спек)
+
+	def test_выборка_заметок_по_колонкам(self):
+		"""Колонки, которой нет в таблице заметок, запрос не называет."""
+		полная = патч.выборка_заметок({"content", "url", "file", "preview"})
+		for колонка in ("c.`content`", "c.`url`", "c.`file`", "c.`preview`", "f.file_name"):
+			self.assertIn(колонка, полная)
+		ранняя = патч.выборка_заметок({"content"})
+		self.assertIn("c.`content`", ранняя)
+		for колонка in ("c.`url`", "c.`file`", "c.`preview`", "tabFile"):
+			self.assertNotIn(колонка, ранняя)
+		self.assertIn("AND (FALSE)", патч.выборка_заметок(set()))
 
 	def test_холст(self):
 		"""Пустой JSON холста — не холст; раскладка `canvas` — холст."""
@@ -178,14 +191,33 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 		документ.db_insert()
 		return документ.name
 
-	def старый_сайт(self) -> Схема:
-		return Схема(
-			{
-				"Agent Artifact Block": {"name", "rows", "columns", *патч.КОЛОНКИ["Agent Artifact Block"]},
-				"Agent Course Artifact": {"name", *патч.КОЛОНКИ["Agent Course Artifact"]},
-				"Agent Artifact Content": {"name", "content"},
-			}
-		)
+	def старый_сайт(self, заметки: bool = True) -> Схема:
+		"""Схема до патча; без `заметки` — таблицы заметок уже нет, как на сайте,
+		поставленном после её снятия. Запросы к таблице заметок в тестах всегда
+		идут в подмену (`ЗАМЕТКИ`), а не в базу: на локальном сайте она может
+		быть, на свежем — нет."""
+		таблицы = {
+			"Agent Artifact Block": {"name", "rows", "columns", *патч.КОЛОНКИ["Agent Artifact Block"]},
+			"Agent Course Artifact": {"name", *патч.КОЛОНКИ["Agent Course Artifact"]},
+		}
+		if заметки:
+			таблицы[патч.ЗАМЕТКИ] = {"name", "parent", "block_key", *патч.ПОЛЯ_ЗАМЕТКИ}
+		return Схема(таблицы, свои=[патч.ЗАМЕТКИ])
+
+	@contextmanager
+	def подменить(self, схема: Схема, строки: dict):
+		"""`схема.подменить`, а запрос к таблице заметок мимо подмены — падение
+		теста. `Why:` на локальном сайте таблица заметок есть, на свежем — нет:
+		такой запрос проходил локально и падал в CI."""
+		исходный = frappe.db.sql
+
+		def sql(запрос, *args, **kwargs):
+			if f"`tab{патч.ЗАМЕТКИ}`" in str(запрос):
+				raise AssertionError(f"запрос к таблице заметок мимо подмены: {запрос}")
+			return исходный(запрос, *args, **kwargs)
+
+		with patch.object(frappe.db, "sql", side_effect=sql), схема.подменить(строки):
+			yield схема
 
 	def старые_блоки(self, журнал: dict) -> list:
 		общее = {
@@ -241,7 +273,7 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 		}
 		было_бэкапов = set(self.бэкапы())
 		схема = self.старый_сайт()
-		with схема.подменить({СТАРЫЕ_БЛОКИ: self.старые_блоки(журнал), ЗАМЕТКИ: self.заметки()}):
+		with self.подменить(схема, {СТАРЫЕ_БЛОКИ: self.старые_блоки(журнал), ЗАМЕТКИ: self.заметки()}):
 			первый = выполнить(патч)
 			ddl = list(схема.ddl)
 			второй = выполнить(патч)
@@ -339,7 +371,7 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 		блоки = self.старые_блоки(журнал)
 		блоки[1].canvas = '{"grid": ["rules"]}'
 		схема = self.старый_сайт()
-		with схема.подменить({СТАРЫЕ_БЛОКИ: блоки, ЗАМЕТКИ: self.заметки()}):
+		with self.подменить(схема, {СТАРЫЕ_БЛОКИ: блоки, ЗАМЕТКИ: self.заметки()}):
 			with self.assertRaises(frappe.ValidationError) as отказ:
 				выполнить(патч)
 
@@ -354,7 +386,7 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 		self.assertEqual(frappe.db.count("File", {"name": ("in", self.файлы)}), 2)
 		self.assertIsNone(frappe.db.get_value("Agent Artifact Block", self.блоки["rules"], "rows"))
 
-		with схема.подменить({СТАРЫЕ_БЛОКИ: блоки}):
+		with self.подменить(схема, {СТАРЫЕ_БЛОКИ: блоки, ЗАМЕТКИ: []}):
 			with self.assertRaises(frappe.ValidationError) as до_синхронизации:
 				выполнить(проверка)
 		self.assertIn("схема доктайпов и данные не тронуты", str(до_синхронизации.exception))
@@ -363,18 +395,21 @@ class IntegrationTestDocumentSingleModel(IntegrationTestCase):
 	def test_прежняя_версия_не_валит_патч(self):
 		"""Непереводимый блок и холст недействующей версии — в бэкап, у блока нет
 		`rows` и `columns`; переводимый блок той же версии переводится. Проверка
-		до синхронизации их не считает бедой."""
+		до синхронизации их не считает бедой. Таблицы заметок на этом сайте уже
+		нет: патч её не читает и не удаляет."""
 		было_бэкапов = set(self.бэкапы())
 		блоки = self.старые_блоки({"table": "register", "columns": [{"key": "topic", "type": "number"}]})
 		for блок in блоки:
 			блок.is_active = 0
 		блоки[0].canvas = '{"grid": ["log"]}'
-		схема = self.старый_сайт()
-		with схема.подменить({СТАРЫЕ_БЛОКИ: блоки}):
+		схема = self.старый_сайт(заметки=False)
+		with self.подменить(схема, {СТАРЫЕ_БЛОКИ: блоки, ЗАМЕТКИ: []}):
 			выполнить(проверка)
 			вывод = выполнить(патч)
 
+		self.assertIn("заметок блоков 0,", вывод)
 		self.assertIn("блоков переведено 1, непереводимых в прежних версиях 2", вывод)
+		self.assertNotIn("DROP TABLE IF EXISTS `tabAgent Artifact Content`", схема.ddl, "таблицы заметок нет")
 		self.assertEqual(
 			frappe.db.get_value("Agent Artifact Block", self.блоки["log"], ["rows", "columns"]), (None, None)
 		)

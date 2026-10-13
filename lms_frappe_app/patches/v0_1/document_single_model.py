@@ -210,13 +210,17 @@ def _переводы(курсы: set[str]) -> dict:
 	Колонки `spec` уже нет — переводить нечего.
 	"""
 	итог: dict = {"переводы": {}, "беды": [], "прежние": []}
-	if "spec" not in колонки_таблицы(БЛОК):
+	есть_у_блока = колонки_таблицы(БЛОК)
+	if "spec" not in есть_у_блока:
 		return итог
 	есть_у_схемы = колонки_таблицы(СХЕМА)
-	холст = ", ".join(f"a.`{поле}`" for поле in ("layout", "canvas") if поле in есть_у_схемы) or "NULL"
+	холст = ", ".join(
+		f"a.`{поле}`" if поле in есть_у_схемы else f"NULL AS `{поле}`" for поле in ("layout", "canvas")
+	)
+	вид = "b.`kind`" if "kind" in есть_у_блока else "NULL AS `kind`"
 	строки = frappe.db.sql(
 		f"""
-		SELECT b.name, b.block_key, b.kind, b.spec, a.name AS schema_name, a.course, a.slug,
+		SELECT b.name, b.block_key, {вид}, b.spec, a.name AS schema_name, a.course, a.slug,
 			a.version, a.is_active, {холст}
 		FROM `tabAgent Artifact Block` b
 		JOIN `tabAgent Course Artifact` a ON a.name = b.parent
@@ -270,26 +274,38 @@ def _сироты(доктайп: str, курсы: set[str], поля: list[str]
 	]
 
 
+#: Поля строки заметок блока, которые уходят в бэкап.
+ПОЛЯ_ЗАМЕТКИ = ("content", "url", "file", "preview")
+
+
 def _заметки() -> list[dict]:
-	"""Непустые заметки, ссылки, файлы и срезы блоков документов учеников."""
+	"""Непустые заметки, ссылки, файлы и срезы блоков документов учеников.
+
+	Таблицы заметок может не быть — на сайте, поставленном после её снятия, —
+	и в ней может не быть поздних колонок: читается только то, что есть.
+	"""
 	if not frappe.db.table_exists(ЗАМЕТКИ, cached=False):
 		return []
-	return [
-		dict(строка)
-		for строка in frappe.db.sql(
-			"""
-			SELECT d.name AS document, d.student, d.archived_student, d.course, d.artifact,
-				d.organization, c.block_key AS block, c.content, c.url, c.file, f.file_name, c.preview
-			FROM `tabAgent Artifact Content` c
-			JOIN `tabAgent Student Artifact` d ON d.name = c.parent
-			LEFT JOIN `tabFile` f ON f.name = c.file
-			WHERE c.parenttype = 'Agent Student Artifact'
-				AND (COALESCE(c.content, '') != '' OR COALESCE(c.url, '') != '' OR COALESCE(c.file, '') != '')
-			ORDER BY d.name, c.idx
-			""",
-			as_dict=True,
-		)
-	]
+	return [dict(строка) for строка in frappe.db.sql(выборка_заметок(колонки_таблицы(ЗАМЕТКИ)), as_dict=True)]
+
+
+def выборка_заметок(есть: set[str]) -> str:
+	"""Запрос заметок блоков по колонкам таблицы заметок `есть`: колонки, которой
+	нет, — `NULL`; без `file` нет и имени файла."""
+	поля = {поле: f"c.`{поле}`" if поле in есть else "NULL" for поле in ПОЛЯ_ЗАМЕТКИ}
+	непустые = " OR ".join(f"COALESCE({поля[п]}, '') != ''" for п in ("content", "url", "file") if п in есть)
+	файл = "LEFT JOIN `tabFile` f ON f.name = c.`file`" if "file" in есть else ""
+	return f"""
+		SELECT d.name AS document, d.student, d.archived_student, d.course, d.artifact,
+			d.organization, c.block_key AS block, {поля["content"]} AS content, {поля["url"]} AS url,
+			{поля["file"]} AS file, {"f.file_name" if файл else "NULL"} AS file_name,
+			{поля["preview"]} AS preview
+		FROM `tabAgent Artifact Content` c
+		JOIN `tabAgent Student Artifact` d ON d.name = c.parent
+		{файл}
+		WHERE c.parenttype = 'Agent Student Artifact' AND ({непустые or "FALSE"})
+		ORDER BY d.name, c.idx
+		"""
 
 
 def _сохранить_бэкап(содержимое: dict) -> str:
