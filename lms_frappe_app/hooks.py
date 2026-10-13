@@ -37,7 +37,9 @@ add_to_apps_screen = [
 # app_include_js = "/assets/lms_frappe_app/js/lms_frappe_app.js"
 
 # include js, css files in header of web template
-# web_include_css = "/assets/lms_frappe_app/css/lms_frappe_app.css"
+# Вход, регистрация и смена пароля — в стиле публичного сайта; правила файла
+# заперты на адресах этих страниц, остальные веб-страницы он не трогает.
+web_include_css = "/assets/lms_frappe_app/css/high-time-web.css"
 # web_include_js = "/assets/lms_frappe_app/js/lms_frappe_app.js"
 
 # include custom scss in every website theme (without file extension ".scss")
