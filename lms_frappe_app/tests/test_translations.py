@@ -100,3 +100,56 @@ class IntegrationTestTranslations(IntegrationTestCase):
 		self.assertEqual([с for с in строки if not словарь.get(с)], [])
 		# Перевод Frappe «Уважаемый» угадывает пол адресата.
 		self.assertEqual(словарь["Dear"], "Здравствуйте,")
+
+	def test_страница_входа_переведена_целиком(self):
+		"""Вход, регистрация, «забыли пароль» и вход по ссылке — шаблон Frappe
+		`frappe/www/login.html` и его скрипт `templates/includes/login/login.js`.
+
+		`Why:` у Frappe часть его строк в `ru.po` пустая, и русскоязычный
+		посетитель видел вход вперемешку: «Sign In», «Forgot password?»,
+		«Create Account» рядом с «Почта» и «Продолжить». А «Sign up» Learning
+		переводит «Войти» — ссылка на регистрацию звала войти
+		(learning-services#563). Строки — в нашем файле, по той же причине,
+		что и письма: переводы Frappe в CI и на стенде разные.
+		"""
+		словарь = get_all_translations("ru")
+		строки = (
+			"Sign In",
+			"Welcome! Please sign in to continue.",
+			"Email",
+			"jane@example.com",
+			"Password",
+			"Continue",
+			"Forgot Password?",
+			"Send login link",
+			"Login with {0}",
+			"Signup Disabled",
+			"Signups have been disabled for this website.",
+			"Password is required.",
+			"Invalid Email.",
+			"Sent",
+			"Forgot password?",
+			"Don't have an account?",
+			"Sign up",
+			"Sign Up",
+			"Let's setup your account.",
+			"Create Account",
+			"Please enter your email, we'll send you password reset link",
+			"Send Link",
+			"Back to sign in",
+			"Please check your email.",
+			"Didn't receive the link?",
+			"Resend",
+			"Login with password",
+			"Login with Email Link",
+			"Email is required.",
+			"Please enter a valid email.",
+			"Full name is required.",
+			"Invalid credentials, try again.",
+		)
+
+		# Действует именно наш перевод: «где-то переведено» прошло бы и с чужим.
+		свои = {оригинал: перевод for оригинал, перевод, *_ in _строки()}
+		self.assertEqual([с for с in строки if с not in свои], [])
+		self.assertEqual({с: словарь.get(с) for с in строки}, {с: свои[с] for с in строки})
+		self.assertEqual(словарь["Sign up"], "Зарегистрироваться")
