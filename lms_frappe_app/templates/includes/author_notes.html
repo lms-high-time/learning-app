@@ -49,7 +49,7 @@
 
 	.note-selection {
 		position: fixed; z-index: 30; font: 500 14px/1.2 "IBM Plex Sans", sans-serif; cursor: pointer;
-		color: #fff; background: #0f7c8a; border: 0; border-radius: 999px; padding: 8px 14px;
+		color: #fff; background: #0e6f7b; border: 0; border-radius: 999px; padding: 8px 14px;
 		box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
 	}
 	.note-toast {
@@ -70,22 +70,22 @@
 	.note-dialog [data-context]:empty { display: none; }
 	.note-dialog label { display: grid; gap: 4px; font-size: 13px; color: #5c6773; }
 	.note-dialog textarea { font: inherit; font-size: 15px; color: inherit; border: 1px solid #d5dbe1; border-radius: 8px; padding: 8px 10px; resize: vertical; }
-	.note-dialog textarea:focus { outline: 2px solid #0f7c8a; outline-offset: 0; border-color: #0f7c8a; }
+	.note-dialog textarea:focus { outline: 2px solid #0e6f7b; outline-offset: 0; border-color: #0e6f7b; }
 	.note-dialog [data-error] { margin: 0; color: #c2432c; font-size: 13px; min-height: 1em; }
 	.note-dialog .note-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 	.note-dialog .note-dialog-actions button { font: inherit; font-size: 14px; border-radius: 6px; padding: 7px 14px; cursor: pointer; border: 1px solid #d5dbe1; background: #fff; color: #1d2530; }
-	.note-dialog .note-dialog-actions button[value="send"] { background: #0f7c8a; border-color: #0f7c8a; color: #fff; }
+	.note-dialog .note-dialog-actions button[value="send"] { background: #0e6f7b; border-color: #0e6f7b; color: #fff; }
 	.note-dialog[data-mode="reply"] [data-quote-field], .note-dialog[data-mode="return"] [data-quote-field] { display: none; }
 	@media (prefers-color-scheme: dark) {
-		:root:not([data-theme="light"]) .note-dialog { background: #1e242c; color: #e6eaee; border-color: #313a44; }
-		:root:not([data-theme="light"]) .note-dialog textarea { background: #151a20; border-color: #313a44; }
-		:root:not([data-theme="light"]) .note-dialog .note-dialog-actions button { background: #1e242c; color: #e6eaee; border-color: #313a44; }
-		:root:not([data-theme="light"]) .note-dialog .note-dialog-actions button[value="send"] { background: #4fb6c3; border-color: #4fb6c3; color: #151a20; }
+		:root:not([data-theme="light"]) .note-dialog { background: #1c2026; color: #e7e9ec; border-color: #2f353d; }
+		:root:not([data-theme="light"]) .note-dialog textarea { background: #14171b; border-color: #2f353d; }
+		:root:not([data-theme="light"]) .note-dialog .note-dialog-actions button { background: #1c2026; color: #e7e9ec; border-color: #2f353d; }
+		:root:not([data-theme="light"]) .note-dialog .note-dialog-actions button[value="send"] { background: #5cc0cb; border-color: #5cc0cb; color: #14171b; }
 	}
-	:root[data-theme="dark"] .note-dialog { background: #1e242c; color: #e6eaee; border-color: #313a44; }
-	:root[data-theme="dark"] .note-dialog textarea { background: #151a20; border-color: #313a44; }
-	:root[data-theme="dark"] .note-dialog .note-dialog-actions button { background: #1e242c; color: #e6eaee; border-color: #313a44; }
-	:root[data-theme="dark"] .note-dialog .note-dialog-actions button[value="send"] { background: #4fb6c3; border-color: #4fb6c3; color: #151a20; }
+	:root[data-theme="dark"] .note-dialog { background: #1c2026; color: #e7e9ec; border-color: #2f353d; }
+	:root[data-theme="dark"] .note-dialog textarea { background: #14171b; border-color: #2f353d; }
+	:root[data-theme="dark"] .note-dialog .note-dialog-actions button { background: #1c2026; color: #e7e9ec; border-color: #2f353d; }
+	:root[data-theme="dark"] .note-dialog .note-dialog-actions button[value="send"] { background: #5cc0cb; border-color: #5cc0cb; color: #14171b; }
 	@media (max-width: 720px) {
 		/* На телефоне форма — снизу экрана, во всю ширину: так до неё дотягивается палец. */
 		.note-dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 14px 14px 0 0; }

@@ -261,30 +261,30 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 	.author-page {
-		--bg: #f2f4f6; --paper: #ffffff; --ink: #1d2530; --muted: #5c6773;
-		--line: #d5dbe1; --accent: #0f7c8a; --accent-soft: #d8eef1;
+		--bg: #f6f6f3; --paper: #ffffff; --ink: #1b1e24; --muted: #5f656e;
+		--line: #dcdfe3; --accent: #0e6f7b; --accent-soft: #e2f0f1;
 		--gap: #c2432c; --gap-soft: #f8e1dc; --warn: #8a6a1f; --warn-soft: #f6ead0;
-		--ch1: #5b6b7d; --ch1s: #e4e9ee; --ch2: #0f7c8a; --ch2s: #d8eef1;
+		--ch1: #5b6b7d; --ch1s: #e4e9ee; --ch2: #0e6f7b; --ch2s: #e2f0f1;
 		--ch3: #b7791f; --ch3s: #f6ead0; --ch4: #6f5bb5; --ch4s: #e6e0f5;
 		--ch5: #b8456c; --ch5s: #f5dde6;
 	}
 	@media (prefers-color-scheme: dark) {
 		:root:not([data-theme="light"]) .author-page {
 			color-scheme: dark;
-			--bg: #151a20; --paper: #1e242c; --ink: #e6eaee; --muted: #98a3ae;
-			--line: #313a44; --accent: #4fb6c3; --accent-soft: #143a40;
+			--bg: #14171b; --paper: #1c2026; --ink: #e7e9ec; --muted: #a0a7b0;
+			--line: #2f353d; --accent: #5cc0cb; --accent-soft: #163a3f;
 			--gap: #ef7a63; --gap-soft: #4a2119; --warn: #d9a24a; --warn-soft: #3f3116;
-			--ch1: #9aa8b7; --ch1s: #2a323b; --ch2: #4fb6c3; --ch2s: #143a40;
+			--ch1: #9aa8b7; --ch1s: #2a323b; --ch2: #5cc0cb; --ch2s: #163a3f;
 			--ch3: #d9a24a; --ch3s: #3f3116; --ch4: #a18ee0; --ch4s: #2d2745;
 			--ch5: #e07a9c; --ch5s: #44202f;
 		}
 	}
 	:root[data-theme="dark"] .author-page {
 		color-scheme: dark;
-		--bg: #151a20; --paper: #1e242c; --ink: #e6eaee; --muted: #98a3ae;
-		--line: #313a44; --accent: #4fb6c3; --accent-soft: #143a40;
+		--bg: #14171b; --paper: #1c2026; --ink: #e7e9ec; --muted: #a0a7b0;
+		--line: #2f353d; --accent: #5cc0cb; --accent-soft: #163a3f;
 		--gap: #ef7a63; --gap-soft: #4a2119; --warn: #d9a24a; --warn-soft: #3f3116;
-		--ch1: #9aa8b7; --ch1s: #2a323b; --ch2: #4fb6c3; --ch2s: #143a40;
+		--ch1: #9aa8b7; --ch1s: #2a323b; --ch2: #5cc0cb; --ch2s: #163a3f;
 		--ch3: #d9a24a; --ch3s: #3f3116; --ch4: #a18ee0; --ch4s: #2d2745;
 		--ch5: #e07a9c; --ch5s: #44202f;
 	}
@@ -292,26 +292,26 @@
 	/* Шапка, фон и подвал сайта — в тон кабинету: в тёмной теме тёмный блок
 	   стоял между белой шапкой и белыми полями. Стили подключены только на
 	   страницах кабинета; в светлой теме меняется лишь фон страницы. */
-	body { background: #f2f4f6; }
+	body { background: #f6f6f3; }
 	/* Значок меню на телефоне: у `.icon` в теме сайта нет обводки, и кнопка
 	   выходила пустой рамкой — на всех страницах Frappe, не только здесь. */
 	.navbar .navbar-toggler .icon { stroke: currentColor; fill: none; stroke-width: 1.5; }
 	@media (prefers-color-scheme: dark) {
-		:root:not([data-theme="light"]) body { background: #151a20; }
-		:root:not([data-theme="light"]) :is(.navbar, .web-footer) { background: #151a20; color: #98a3ae; border-color: #313a44; }
-		:root:not([data-theme="light"]) :is(.navbar-brand, .nav-link, .dropdown-item) { color: #e6eaee; }
-		:root:not([data-theme="light"]) .web-footer a { color: #98a3ae; }
-		:root:not([data-theme="light"]) .navbar .dropdown-menu { background: #1e242c; border-color: #313a44; }
+		:root:not([data-theme="light"]) body { background: #14171b; }
+		:root:not([data-theme="light"]) :is(.navbar, .web-footer) { background: #14171b; color: #a0a7b0; border-color: #2f353d; }
+		:root:not([data-theme="light"]) :is(.navbar-brand, .nav-link, .dropdown-item) { color: #e7e9ec; }
+		:root:not([data-theme="light"]) .web-footer a { color: #a0a7b0; }
+		:root:not([data-theme="light"]) .navbar .dropdown-menu { background: #1c2026; border-color: #2f353d; }
 		:root:not([data-theme="light"]) .navbar .dropdown-item:is(:hover, :focus) { background: #2a323b; }
-		:root:not([data-theme="light"]) .navbar .navbar-toggler { color: #e6eaee; border-color: #313a44; }
+		:root:not([data-theme="light"]) .navbar .navbar-toggler { color: #e7e9ec; border-color: #2f353d; }
 	}
-	:root[data-theme="dark"] body { background: #151a20; }
-	:root[data-theme="dark"] :is(.navbar, .web-footer) { background: #151a20; color: #98a3ae; border-color: #313a44; }
-	:root[data-theme="dark"] :is(.navbar-brand, .nav-link, .dropdown-item) { color: #e6eaee; }
-	:root[data-theme="dark"] .web-footer a { color: #98a3ae; }
-	:root[data-theme="dark"] .navbar .dropdown-menu { background: #1e242c; border-color: #313a44; }
+	:root[data-theme="dark"] body { background: #14171b; }
+	:root[data-theme="dark"] :is(.navbar, .web-footer) { background: #14171b; color: #a0a7b0; border-color: #2f353d; }
+	:root[data-theme="dark"] :is(.navbar-brand, .nav-link, .dropdown-item) { color: #e7e9ec; }
+	:root[data-theme="dark"] .web-footer a { color: #a0a7b0; }
+	:root[data-theme="dark"] .navbar .dropdown-menu { background: #1c2026; border-color: #2f353d; }
 	:root[data-theme="dark"] .navbar .dropdown-item:is(:hover, :focus) { background: #2a323b; }
-	:root[data-theme="dark"] .navbar .navbar-toggler { color: #e6eaee; border-color: #313a44; }
+	:root[data-theme="dark"] .navbar .navbar-toggler { color: #e7e9ec; border-color: #2f353d; }
 
 	.author-page {
 		background: var(--bg); color: var(--ink);
