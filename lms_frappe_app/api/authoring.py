@@ -26,6 +26,7 @@ from lms_frappe_app.agent_learning import (
 	testers,
 )
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
+from lms_frappe_app.agent_learning.releases import findings as находки_публикации
 from lms_frappe_app.agent_learning.releases import index as releases_index
 from lms_frappe_app.agent_learning.releases import places
 from lms_frappe_app.agent_learning.releases import projection as releases_projection
@@ -483,7 +484,9 @@ def ревизия_замечаний(course: str) -> str | None:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def publish_release(release, course: str | None = None, instructors=None, commit=None) -> dict:
+def publish_release(
+	release, course: str | None = None, instructors=None, commit=None, findings=None, changes=None
+) -> dict:
 	"""Публикует релиз курса целиком — новой версией.
 
 	`release` — релиз от компилятора курса (объект или строка JSON), формат —
@@ -505,6 +508,12 @@ def publish_release(release, course: str | None = None, instructors=None, commit
 	коммит её первой публикации. Необязателен: у публикатора git может не
 	быть.
 
+	`findings` и `changes` — находки проверки карты и изменения против
+	действующей версии от конвейера курса (`releases.findings`): форма
+	проверяется до первой записи, отказ — `release_findings_invalid`;
+	пишутся в новую версию как есть, `unchanged` их не пишет — запись релиза
+	неизменяема. Необязательны.
+
 	Открытые попытки квиза курса публикация переносит на новый релиз или
 	аннулирует. Попытку, которую в этот момент меняет ответ ученика, MariaDB
 	стенда (`innodb_snapshot_isolation`) отдаёт взаимоблокировкой, а занятую
@@ -514,8 +523,12 @@ def publish_release(release, course: str | None = None, instructors=None, commit
 	автор = _автор()
 	коммит = None if commit is None else _коммит(commit)
 	инструкторы = None if instructors is None else _инструкторы(instructors)
+	находки = находки_публикации.находки(findings)
+	изменения = находки_публикации.изменения(changes)
 	try:
-		return releases.опубликовать(release, course or None, автор, инструкторы, коммит)
+		return releases.опубликовать(
+			release, course or None, автор, инструкторы, коммит, находки=находки, изменения=изменения
+		)
 	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
 		frappe.db.rollback()
 		raise Отказ(ЗАНЯТО, "Курс сейчас меняет другой запрос: публикация откатилась — повторите") from None

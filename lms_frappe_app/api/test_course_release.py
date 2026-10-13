@@ -54,12 +54,50 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 	def код(self, ответ: dict) -> str | None:
 		return None if ответ["ok"] else ответ["error"]["code"]
 
+	# --- находки и изменения публикации (learning-services#560) ---
+
+	def test_находки_и_изменения_публикации_у_версии(self):
+		"""Находки и изменения пишутся в новую версию как переданы (и строкой
+		JSON из формы POST); `unchanged` их не переписывает; не по форме — отказ
+		до первой записи."""
+		self.свой_курс()
+		находки = [{"code": "quiz_echo", "severity": "attention", "target": "l-1", "message": "Повтор"}]
+		изменения = {"against": 1, "paths": [{"op": "~", "path": "agent.lessons.l-1.directive"}]}
+		релиз = пример_релиза(self.ключ)
+		релиз["course"]["summary"] = "Вторая версия"
+
+		неверно = authoring.publish_release(release=релиз, findings=[{"code": "x"}])
+		self.assertEqual(
+			(self.код(неверно), неверно["error"]["where"]), ("release_findings_invalid", "findings[0].severity")
+		)
+		self.assertEqual(len(authoring.course_releases(course=self.курс)["data"]["releases"]), 1)
+
+		ответ = authoring.publish_release(
+			release=релиз, findings=frappe.as_json(находки), changes=frappe.as_json(изменения)
+		)
+		self.assertTrue(ответ["ok"], ответ)
+		повтор = authoring.publish_release(release=релиз, findings=[], changes={"against": None})
+		self.assertTrue(повтор["data"]["unchanged"], повтор)
+
+		данные = self.просмотр()
+		self.assertEqual(данные["findings"], находки)
+		self.assertEqual(данные["changes"], {**изменения, "truncated": False})
+		self.assertNotIn("findings", данные["course"])
+		self.assertNotIn("findings", self.просмотр(lesson="l-1")["course"])
+		история = authoring.course_releases(course=self.курс)["data"]["releases"]
+		self.assertEqual(
+			[(р["version"], р["findings_count"], р["changes"]) for р in история],
+			[(2, 1, {"against": 1, "count": 1, "truncated": False}), (1, None, None)],
+		)
+
 	# --- релиз целиком ---
 
 	def test_автор_видит_релиз_с_ответами(self):
 		данные = self.просмотр()
 
-		self.assertEqual(set(данные), {"course", "chapters", "lessons", "document"})
+		self.assertEqual(set(данные), {"course", "chapters", "lessons", "document", "findings", "changes"})
+		# Публикатор образца находок и изменений не передал.
+		self.assertEqual((данные["findings"], данные["changes"]), (None, None))
 		курс = данные["course"]
 		self.assertEqual(
 			(курс["id"], курс["key"], курс["title"], курс["release"], курс["version"], курс["published_by"]),

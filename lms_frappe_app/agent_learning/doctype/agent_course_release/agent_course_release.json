@@ -13,6 +13,8 @@
   "digest",
   "source_commit",
   "document_key",
+  "findings",
+  "changes",
   "published_by",
   "published_at",
   "sb_index",
@@ -84,6 +86,26 @@
    "label": "Ключ документа",
    "description": "Пусто — у релиза нет документа",
    "read_only": 1
+  },
+  {
+   "fieldname": "findings",
+   "fieldtype": "JSON",
+   "label": "Находки проверки карты",
+   "description": "Замечания проверки карты курса от публикатора, как переданы: [{code, severity, target, message}]; пусто — не переданы",
+   "hidden": 1,
+   "read_only": 1,
+   "report_hide": 1,
+   "print_hide": 1
+  },
+  {
+   "fieldname": "changes",
+   "fieldtype": "JSON",
+   "label": "Изменения против действующей версии",
+   "description": "Отличия релиза от версии against от публикатора, как переданы: {against, paths: [{op, path}], truncated}; пусто — не переданы",
+   "hidden": 1,
+   "read_only": 1,
+   "report_hide": 1,
+   "print_hide": 1
   },
   {
    "fieldname": "published_by",
@@ -177,7 +199,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-09 23:30:00.000000",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Release",
