@@ -353,7 +353,12 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 		пакет = релиз["agent"]["lessons"]["l-1"]
 		пакет[ВРЕД] = "Часть пакета с таким ключом"
 		пакет["extra"] = {ВРЕД: "Запись с таким ключом"}
-		ответ = authoring.publish_release(release=релиз)
+		находки = [
+			{"code": f"c{ВРЕД}", "severity": ВРЕД, "target": f"S1 {ВРЕД}", "message": f"Находка {ВРЕД}"},
+			{"code": "x", "severity": "attention", "target": ВРЕД, "message": f"Вне уроков {ВРЕД}"},
+		]
+		изменения = {"against": 1, "paths": [{"op": "~", "path": f"agent.lessons.l-1.{ВРЕД}"}]}
+		ответ = authoring.publish_release(release=релиз, findings=находки, changes=изменения)
 		self.assertTrue(ответ["ok"], ответ)
 		курс = ответ["data"]["course"]
 		строка = {
@@ -370,10 +375,13 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 		for параметры, дошло in (
 			({}, сущности),
 			({"course": курс}, "Урок второй x&#34; data-x=&#34;1"),
+			({"course": курс}, "Вне уроков x&#34;&gt;&lt;img"),
 			({"course": курс, "view": "notes"}, "Заметка x&#34;"),
 			({"course": курс, "lesson": "l-1"}, "Пункт пакета с таким ключом"),
 			({"course": курс, "lesson": "l-1"}, "onerror=alert(1)&gt;"),
 			({"course": курс, "lesson": "l-1"}, "Цитата источника x&#34;&gt;&lt;img"),
+			({"course": курс, "lesson": "l-1"}, "Находка x&#34;&gt;&lt;img"),
+			({"course": курс, "lesson": "l-1"}, "agent.lessons.l-1.x&#34;&gt;&lt;img"),
 		):
 			with self.subTest(**параметры):
 				html = страница(self.куратор, **параметры)
@@ -663,6 +671,61 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		# У урока, которого нет в карте, — пометка, а не ошибка.
 		self.assertIsNone(сведения_для(self.куратор, course=self.курс, lesson="l-2")["lesson"]["map"])
 		self.assertIn("Урока нет в карте релиза", страница(self.куратор, course=self.курс, lesson="l-2"))
+
+	def test_находки_и_изменения_публикации_в_кабинете(self):
+		"""Находки проверки карты и изменения версии — у урока и его узлов, в
+		строке урока на вкладке «Релиз» и числом в «Истории»; находки вне уроков
+		— отдельно на вкладке «Релиз» (learning-services#560)."""
+		релиз = пример_релиза(self.ключ)
+		релиз["map"] = пример_карты()
+		находки = [
+			{"code": "quiz_echo", "severity": "attention", "target": "S2", "message": "Зачёт повторяет практику"},
+			{"code": "lesson_check", "severity": "attention", "target": "l-1", "message": "Замечание к уроку"},
+			{"code": "unused", "severity": "attention", "target": "D9", "message": "Решение вне уроков"},
+			{"code": "course_check", "severity": "attention", "target": None, "message": "Без цели"},
+		]
+		изменения = {
+			"against": 1,
+			"paths": [
+				{"op": "~", "path": "agent.lessons.l-1.directive"},
+				{"op": "+", "path": "map.situations.S2"},
+				{"op": "-", "path": "lessons[l-2].hook"},
+				{"op": "~", "path": "course.summary"},
+			],
+		}
+		ответ = authoring.publish_release(release=релиз, findings=находки, changes=изменения)
+		self.assertTrue(ответ["ok"], ответ)
+
+		урок = сведения_для(self.куратор, course=self.курс, lesson="l-1")["lesson"]
+
+		self.assertEqual(
+			[(н["code"], н["anchor"]) for н in урок["findings"]],
+			[("quiz_echo", author.якорь("map.S2")), ("lesson_check", author.якорь("lesson.l-1"))],
+		)
+		self.assertEqual(set(урок["findings_by_node"]), {"S2"})
+		self.assertEqual(
+			[п["path"] for п in урок["changed_paths"]], ["agent.lessons.l-1.directive", "map.situations.S2"]
+		)
+		html = страница(self.куратор, course=self.курс, lesson="l-1")
+		for текст in ('href="#section-review"', "Замечания проверки карты", "Изменено в версии 2", "map.situations.S2"):
+			self.assertIn(текст, html)
+		# Находка узла — и в списке урока, и у самого узла в карте.
+		self.assertEqual(html.count("Зачёт повторяет практику"), 2)
+		self.assertNotIn("Решение вне уроков", html)
+
+		с = сведения_для(self.куратор, course=self.курс)
+		self.assertEqual(
+			[(len(у["findings"]), len(у["changed_paths"])) for у in с["release"]["lessons"]],
+			[(2, 2), (0, 1), (0, 0)],
+		)
+		self.assertEqual([н["code"] for н in с["release"]["findings_elsewhere"]], ["unused", "course_check"])
+		html = страница(self.куратор, course=self.курс)
+		for текст in ("находок 2", "изменён в v2", "Замечания проверки карты вне уроков · 2", "Решение вне уроков"):
+			self.assertIn(текст, html)
+
+		html = страница(self.куратор, course=self.курс, view="history")
+		self.assertIn('<span class="num">4</span> против v1', html)
+		self.assertIn('<span class="num">4</span></td>', html)
 
 	def test_тестеры(self):
 		тестер = self.тестер()

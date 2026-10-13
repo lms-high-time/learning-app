@@ -137,6 +137,7 @@ def сведения(
 
 	релиз = основа["release"] = _релиз(course, authoring.course_release(course=course)["data"])
 	карта = _Карта(релиз)
+	_проверка_публикации(релиз, карта)
 	заметки = _заметки(course, карта)
 	_заметки_релиза(релиз, заметки)
 	курс["notes_attention"] = sum(з["waiting_on"] == "author" for з in заметки)
@@ -291,6 +292,9 @@ def _релиз(course: str, данные: dict) -> dict:
 		"lessons": данные["lessons"],
 		"document": документ,
 		"notes": {},
+		"findings": данные["findings"],
+		"changes": данные["changes"],
+		"findings_elsewhere": [],
 	}
 
 
@@ -321,6 +325,8 @@ def _урок(course: str, урок: dict, номер: int, глава: dict, р
 			урок["homework"]["answer_mode"], урок["homework"]["answer_mode"]
 		)
 	урок["open_notes"] = 0
+	урок["findings"] = []
+	урок["changed_paths"] = []
 
 
 def _место(часть: dict, target: str, подпись: str) -> None:
@@ -342,14 +348,23 @@ def _урок_целиком(course: str, ключ: str, релиз: dict, за�
 	пункты = {п["key"]: п["title"] for ц in урок["objectives"] for п in ц["goals"]}
 	разделы = {р["key"]: р["title"] for р in (релиз["document"] or {}).get("sections", [])}
 	рамка = {часть: значение for часть, значение in агент.items() if часть != "lesson"}
+	карта_урока = _карта_урока(карта.срезы.get(ключ))
+	места = _места_карты(карта_урока)
+	находки = [{**н, "anchor": _якорь_находки(н["target"], урок, места)} for н in урок["findings"]]
+	у_узлов: dict[str, list[dict]] = {}
+	for н in находки:
+		if н["target"] != ключ:
+			у_узлов.setdefault(н["target"], []).append(н)
 	return {
 		**урок,
+		"findings": находки,
+		"findings_by_node": у_узлов,
 		"agent": _части(агент["lesson"], урок, пункты, разделы),
 		"agent_target": f"agent.lesson.{ключ}",
 		"agent_label": f"{урок['label']} · пакет агента",
 		"agent_anchor": якорь(f"agent.lesson.{ключ}"),
 		"frame": _части(рамка, None, {}, {}),
-		"map": _карта_урока(карта.срезы.get(ключ)),
+		"map": карта_урока,
 		"notes_index": _указатель(заметки, ключ),
 		"prev": _сосед(уроки, место - 1),
 		"next": _сосед(уроки, место + 1),
@@ -423,6 +438,28 @@ def _json(значение) -> str:
 # --- карта урока ---
 
 
+def _проверка_публикации(релиз: dict, карта: "_Карта") -> None:
+	"""Находки проверки карты и изменённые пути публикации — по урокам.
+
+	Находка урока — с целью-уроком или узлом его среза карты; находки без
+	цели или с целью вне уроков — `findings_elsewhere` релиза. Путь урока —
+	`lesson_map.путь_урока`. Срезы карты читаются, только если есть что
+	раскладывать.
+	"""
+	находки = релиз["findings"] or []
+	пути = (релиз["changes"] or {}).get("paths") or []
+	if not находки and not пути:
+		return
+	разложенные = set()
+	for урок in релиз["lessons"]:
+		ключ, узлы = урок["key"], карта.узлы[урок["key"]]
+		урок["findings"] = [н for н in находки if н["target"] == ключ or н["target"] in узлы]
+		разложенные |= {id(н) for н in урок["findings"]}
+		срез = карта.срезы.get(ключ)
+		урок["changed_paths"] = [п for п in пути if lesson_map.путь_урока(п["path"], ключ, срез)]
+	релиз["findings_elsewhere"] = [н for н in находки if id(н) not in разложенные]
+
+
 class _Карта:
 	"""Срезы карты релиза по урокам (`lesson_map`) — читаются, только когда
 	понадобились: на странице урока, для заметок на узлах карты."""
@@ -484,6 +521,28 @@ def _карта_урока(срез: dict | None) -> dict | None:
 			for к, з in срез["misconceptions"].items()
 		],
 	}
+
+
+def _якорь_находки(цель: str, урок: dict, места: set[str]) -> str | None:
+	"""Куда ведёт находка на странице урока: к уроку или к месту узла карты;
+	узла без места на странице нет — никуда."""
+	if цель == урок["key"]:
+		return урок["anchor"]
+	return якорь(f"map.{цель}") if f"map.{цель}" in места else None
+
+
+def _места_карты(карта: dict | None) -> set[str]:
+	"""Места заметок узлов карты урока, которые есть на странице."""
+	if not карта:
+		return set()
+	узлы = [*карта["situations"], *карта["quiz"], *карта["theses"], *карта["misconceptions"]]
+	for решение in карта["decisions"]:
+		узлы.append(решение)
+		for вариант in решение["variants"]:
+			узлы += [вариант, *вариант["errors"]]
+		if решение["result"]:
+			узлы += [решение["result"], *решение["result"]["requirements"]]
+	return {у["target"] for у in узлы if у["target"]}
 
 
 def _ключи(значение, срез: dict) -> list[str]:
