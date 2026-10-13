@@ -365,6 +365,8 @@ def _урок_целиком(course: str, ключ: str, релиз: dict, за�
 		"agent_anchor": якорь(f"agent.lesson.{ключ}"),
 		"frame": _части(рамка, None, {}, {}),
 		"map": карта_урока,
+		# Версию сменила новая публикация, пока страница собиралась.
+		"map_unavailable": not карта.доступна,
 		"notes_index": _указатель(заметки, ключ),
 		"prev": _сосед(уроки, место - 1),
 		"next": _сосед(уроки, место + 1),
@@ -456,7 +458,7 @@ def _проверка_публикации(релиз: dict, карта: "_Ка�
 		урок["findings"] = [н for н in находки if н["target"] == ключ or н["target"] in узлы]
 		разложенные |= {id(н) for н in урок["findings"]}
 		срез = карта.срезы.get(ключ)
-		урок["changed_paths"] = [п for п in пути if lesson_map.путь_урока(п["path"], ключ, срез)]
+		урок["changed_paths"] = [п for п in пути if lesson_map.путь_урока(п["path"], ключ, срез, карта.ключи)]
 	релиз["findings_elsewhere"] = [н for н in находки if id(н) not in разложенные]
 
 
@@ -468,8 +470,21 @@ class _Карта:
 		self.релиз = релиз
 
 	@cached_property
-	def срезы(self) -> dict[str, dict]:
+	def данные(self) -> dict | None:
+		"""`lesson_map.срезы` релиза; `None` — содержимое версии освобождено."""
 		return lesson_map.срезы(self.релиз["release"], self.релиз["digest"])
+
+	@property
+	def доступна(self) -> bool:
+		return self.данные is not None
+
+	@property
+	def срезы(self) -> dict[str, dict]:
+		return (self.данные or {}).get("lessons", {})
+
+	@property
+	def ключи(self) -> dict[str, list[str]]:
+		return (self.данные or {}).get("keys", {})
 
 	@cached_property
 	def узлы(self) -> dict[str, set[str]]:
@@ -572,7 +587,7 @@ def _решение(ключ: str, решение: dict, срез: dict, тек�
 		"goal": _ссылка(решение.get("serves"), тексты),
 		"note": _строка(решение.get("note")),
 		"relies_on": _ссылки(решение.get("relies_on"), тексты),
-		"uses": [_строка(у) for у in решение.get("uses") or []] if isinstance(решение.get("uses"), list) else [],
+		"uses": [т for т in map(_строка, решение["uses"]) if т] if isinstance(решение.get("uses"), list) else [],
 		"variants": [_вариант(к, в, тексты) for к, в in _словари(решение.get("variants")).items()],
 		"result": _результат(результат, срез["results"][результат], тексты)
 		if isinstance(результат, str) and результат in срез["results"]

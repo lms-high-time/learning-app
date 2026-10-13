@@ -58,11 +58,12 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 
 	def test_находки_и_изменения_публикации_у_версии(self):
 		"""Находки и изменения пишутся в новую версию как переданы (и строкой
-		JSON из формы POST); `unchanged` их не переписывает; не по форме — отказ
-		до первой записи."""
+		JSON из формы POST). `unchanged` дописывает находки версии без них, но не
+		переписывает переданные и не пишет изменения; не по форме — отказ до
+		первой записи."""
 		self.свой_курс()
 		находки = [{"code": "quiz_echo", "severity": "attention", "target": "l-1", "message": "Повтор"}]
-		изменения = {"against": 1, "paths": [{"op": "~", "path": "agent.lessons.l-1.directive"}]}
+		изменения = {"against": 1, "paths": [{"op": "~", "path": "agent.lessons.l-1.directive"}], "truncated": True}
 		релиз = пример_релиза(self.ключ)
 		релиз["course"]["summary"] = "Вторая версия"
 
@@ -71,23 +72,28 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 			(self.код(неверно), неверно["error"]["where"]), ("release_findings_invalid", "findings[0].severity")
 		)
 		self.assertEqual(len(authoring.course_releases(course=self.курс)["data"]["releases"]), 1)
+		# Первая версия опубликована без находок: тот же релиз ещё раз их дописывает.
+		прежние = [{"code": "trap_unused", "severity": "attention", "target": None, "message": "Раньше"}]
+		тот_же = authoring.publish_release(release=пример_релиза(self.ключ), findings=прежние, changes=изменения)
+		self.assertTrue(тот_же["data"]["unchanged"], тот_же)
+		self.assertEqual(self.просмотр()["findings"], прежние)
 
 		ответ = authoring.publish_release(
 			release=релиз, findings=frappe.as_json(находки), changes=frappe.as_json(изменения)
 		)
 		self.assertTrue(ответ["ok"], ответ)
-		повтор = authoring.publish_release(release=релиз, findings=[], changes={"against": None})
+		повтор = authoring.publish_release(release=релиз, findings=[], changes={"against": 1, "paths": []})
 		self.assertTrue(повтор["data"]["unchanged"], повтор)
 
 		данные = self.просмотр()
 		self.assertEqual(данные["findings"], находки)
-		self.assertEqual(данные["changes"], {**изменения, "truncated": False})
+		self.assertEqual(данные["changes"], изменения)
 		self.assertNotIn("findings", данные["course"])
 		self.assertNotIn("findings", self.просмотр(lesson="l-1")["course"])
 		история = authoring.course_releases(course=self.курс)["data"]["releases"]
 		self.assertEqual(
 			[(р["version"], р["findings_count"], р["changes"]) for р in история],
-			[(2, 1, {"against": 1, "count": 1, "truncated": False}), (1, None, None)],
+			[(2, 1, {"against": 1, "count": 1, "truncated": True}), (1, 1, None)],
 		)
 
 	# --- релиз целиком ---

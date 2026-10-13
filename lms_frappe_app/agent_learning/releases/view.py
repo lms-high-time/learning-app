@@ -17,12 +17,12 @@ import frappe
 from lms_frappe_app.agent_learning.releases import document, index
 
 
-def карточка(курс: str, название: str, релиз: str) -> dict:
+def карточка(курс: str, название: str, релиз: str, *, с_проверкой: bool = False) -> dict:
 	"""Курс и его действующий релиз: ключ, название, версия, кто и когда опубликовал,
-	дайджест; находки и изменения публикации (`findings`, `changes`) — для
-	`релиз_целиком`, наружу в карточке их нет."""
-	запись = index.сведения(релиз)
-	return {
+	дайджест; `с_проверкой` — и находки и изменения публикации (`findings`,
+	`changes`) для `релиз_целиком`: наружу в карточке их нет."""
+	запись = index.сведения(релиз, с_проверкой=с_проверкой)
+	карточка_курса = {
 		"id": курс,
 		"key": запись.course_key,
 		"title": название,
@@ -32,16 +32,17 @@ def карточка(курс: str, название: str, релиз: str) -> d
 		"published_by": запись.published_by,
 		"digest": запись.digest,
 		"document_key": запись.document_key,
-		"findings": _из_json(запись.findings),
-		"changes": _из_json(запись.changes),
 	}
+	if с_проверкой:
+		карточка_курса.update(findings=_из_json(запись.findings), changes=_из_json(запись.changes))
+	return карточка_курса
 
 
 def релиз_целиком(курс: dict, релиз: str) -> dict:
 	"""Действующий релиз курса: главы, уроки с целями, пунктами и квизом, документ,
 	находки и изменения его публикации.
 
-	`курс` — `карточка` этого релиза.
+	`курс` — `карточка` этого релиза `с_проверкой`.
 	"""
 	уроки = index.уроки(релиз)
 	цели = index.цели_с_пунктами(релиз)
@@ -93,21 +94,23 @@ def история(курс: str, действующий: str | None) -> list[di
 			"commit": р.source_commit or None,
 			"document_key": р.document_key,
 			"active": р.name == действующий,
-			"findings_count": None if (находки := _из_json(р.findings)) is None else len(находки),
-			"changes": _сводка_изменений(_из_json(р.changes)),
+			"findings_count": р.findings_count,
+			"changes": _сводка_изменений(р),
 		}
-		for р in index.история(курс)
+		for р in index.история_со_сводкой(курс)
 	]
 
 
-def _сводка_изменений(изменения: dict | None) -> dict | None:
-	"""Изменения публикации числом путей: с какой версией сравнивали, сколько путей, обрезан ли список."""
-	if изменения is None:
+def _сводка_изменений(р) -> dict | None:
+	"""Изменения публикации числом путей: с какой версией сравнивали, сколько путей,
+	обрезан ли список; не переданы — `None`. JSON-значения `against` и
+	`truncated` приходят из базы строкой (`index.история_со_сводкой`)."""
+	if not р.has_changes:
 		return None
 	return {
-		"against": изменения["against"],
-		"count": len(изменения["paths"]),
-		"truncated": изменения["truncated"],
+		"against": json.loads(р.changes_against) if р.changes_against else None,
+		"count": р.changes_count or 0,
+		"truncated": bool(р.changes_truncated and json.loads(р.changes_truncated)),
 	}
 
 

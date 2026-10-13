@@ -494,20 +494,50 @@ def _ключ(значение) -> bool:
 	"digest",
 	"source_commit",
 	"document_key",
-	"findings",
-	"changes",
 ]
+#: Находки и изменения публикации — JSON строкой; у большой публикации это
+#: сотни килобайт, поэтому их читает только тот, кому они нужны.
+ПОЛЯ_ПРОВЕРКИ = ["findings", "changes"]
 
 
-def сведения(релиз: str):
+def сведения(релиз: str, *, с_проверкой: bool = False):
 	"""Запись релиза без индекса и снимка: версия, кто и когда опубликовал, дайджест,
-	коммит источника, документ, находки и изменения публикации (JSON строкой)."""
-	return frappe.db.get_value(РЕЛИЗ, релиз, ПОЛЯ_РЕЛИЗА, as_dict=True)
+	коммит источника, документ; `с_проверкой` — и находки и изменения публикации
+	(`ПОЛЯ_ПРОВЕРКИ`) той же выборкой."""
+	поля = ПОЛЯ_РЕЛИЗА + ПОЛЯ_ПРОВЕРКИ if с_проверкой else ПОЛЯ_РЕЛИЗА
+	return frappe.db.get_value(РЕЛИЗ, релиз, поля, as_dict=True)
 
 
 def история(курс: str) -> list:
 	"""Релизы курса — те же поля, что у `сведения`, — свежие вперёд, одной выборкой."""
 	return frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=ПОЛЯ_РЕЛИЗА, order_by="version desc")
+
+
+def история_со_сводкой(курс: str) -> list:
+	"""`история` и сводка проверки публикации у каждой версии — той же выборкой:
+	`findings_count` (`None` — находки не переданы), `has_changes`,
+	`changes_against`, `changes_count`, `changes_truncated` (JSON-значения
+	`against` и `truncated` строкой).
+
+	`Why:` счётчики считает база (`json_length`, `json_extract`): находки и
+	пути всех версий курса, прочитанные ради чисел, — мегабайты на вызов.
+	"""
+	поля = ", ".join(f"`{поле}`" for поле in ПОЛЯ_РЕЛИЗА)
+	return frappe.db.sql(
+		f"""
+		select {поля},
+			json_length(`findings`) as findings_count,
+			`changes` is not null as has_changes,
+			json_extract(`changes`, '$.against') as changes_against,
+			json_length(`changes`, '$.paths') as changes_count,
+			json_extract(`changes`, '$.truncated') as changes_truncated
+		from `tab{РЕЛИЗ}`
+		where `course` = %s
+		order by `version` desc
+		""",
+		курс,
+		as_dict=True,
+	)
 
 
 def снимок(релиз: str) -> dict:

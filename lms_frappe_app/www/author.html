@@ -610,7 +610,7 @@
 
 	<section class="panel" id="section-map">
 		<h2>Карта урока</h2>
-		{% if lesson.map %}{{ карта_урока(lesson.map, заметки, lesson.findings_by_node) }}{% else %}<p class="muted">Урока нет в карте релиза.</p>{% endif %}
+		{% if lesson.map %}{{ карта_урока(lesson.map, заметки, lesson.findings_by_node) }}{% elif lesson.map_unavailable %}<p class="muted">Карта недоступна: вышла новая версия курса. Обновите страницу.</p>{% else %}<p class="muted">Урока нет в карте релиза.</p>{% endif %}
 	</section>
 
 	<section class="panel" id="section-notes" data-live="notes-index">
