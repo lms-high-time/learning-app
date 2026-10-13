@@ -18,7 +18,8 @@ from lms_frappe_app.agent_learning.releases import document, index
 
 
 def карточка(курс: str, название: str, релиз: str) -> dict:
-	"""Курс и его действующий релиз: ключ, название, версия, кто и когда опубликовал."""
+	"""Курс и его действующий релиз: ключ, название, версия, кто и когда опубликовал,
+	дайджест."""
 	запись = index.сведения(релиз)
 	return {
 		"id": курс,
@@ -28,6 +29,7 @@ def карточка(курс: str, название: str, релиз: str) -> d
 		"version": запись.version,
 		"published_at": _дата(запись.published_at),
 		"published_by": запись.published_by,
+		"digest": запись.digest,
 		"document_key": запись.document_key,
 	}
 

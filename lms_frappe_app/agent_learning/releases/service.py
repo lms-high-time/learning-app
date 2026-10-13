@@ -500,7 +500,7 @@ def удалить_курс(курс: str) -> None:
 			frappe.delete_doc("Agent Author Note", имя, ignore_permissions=True)
 		for релиз in frappe.get_all(РЕЛИЗ, filters={"course": курс}, fields=["name", "digest"]):
 			frappe.delete_doc(РЕЛИЗ, релиз.name, ignore_permissions=True)
-			frappe.cache.delete_value(places.ключ_кэша(релиз.name, релиз.digest))
+			places.сбросить_кэш(релиз.name, релиз.digest)
 		for имя in frappe.get_all("Agent Course Artifact", filters={"course": курс}, pluck="name"):
 			frappe.delete_doc("Agent Course Artifact", имя, ignore_permissions=True)
 		homework.удалить_шаблоны(курс)

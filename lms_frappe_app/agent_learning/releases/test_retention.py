@@ -17,7 +17,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ПОПЫТКА_ИДЁТ,
 )
 from lms_frappe_app.agent_learning.errors import Отказ
-from lms_frappe_app.agent_learning.releases import index, places, retention, service
+from lms_frappe_app.agent_learning.releases import index, lesson_map, places, retention, service
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import authoring, manager, student
@@ -96,6 +96,9 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 		кэш = places.ключ_кэша(первый["release"], запись_до.digest)
 		frappe.cache.set_value(кэш, {"узел": "текст"})
 		self.addCleanup(frappe.cache.delete_value, кэш)
+		срезы = lesson_map.ключ_кэша(первый["release"], запись_до.digest)
+		frappe.cache.set_value(срезы, {"l-1": {}})
+		self.addCleanup(frappe.cache.delete_value, срезы)
 		релиз = пример_релиза(self.ключ)
 		релиз["lessons"][0]["title"] = "Урок первый, исправленный"
 
@@ -105,6 +108,7 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 		self.цел(второй["release"])
 		self.assertEqual(frappe.db.get_value(index.РЕЛИЗ, первый["release"], поля, as_dict=True), запись_до)
 		self.assertIsNone(frappe.cache.get_value(кэш))
+		self.assertIsNone(frappe.cache.get_value(срезы))
 		self.assertEqual([р.version for р in index.история(первый["course"])], [2, 1])
 		with self.assertRaises(ValueError):
 			index.снимок(первый["release"])
