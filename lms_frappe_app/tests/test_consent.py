@@ -11,12 +11,16 @@
 from pathlib import Path
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning.consent import ВНЕШНИЙ_ВХОД, РЕГИСТРАЦИЯ
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
 )
+
+
+def почта() -> str:
+	return f"consent-{frappe.generate_hash(length=8)}@example.com"
 
 
 def зарегистрировать(почта: str, *, провайдер: str | None = None) -> str:
@@ -47,16 +51,18 @@ class IntegrationTestConsent(IntegrationTestCase):
 	def test_регистрация_формой_записывает_согласие_с_редакцией(self):
 		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-10-14")
 
-		[запись] = согласия(зарегистрировать("consent-form@example.com"))
+		[запись] = согласия(зарегистрировать(почта()))
 
 		self.assertEqual(запись.documents_version, "2026-10-14")
+		# Служебную строку входа `frappe` Frappe добавляет каждому пользователю:
+		# она не делает регистрацию формой входом через провайдера.
 		self.assertEqual(запись.method, РЕГИСТРАЦИЯ)
 		self.assertFalse(запись.provider)
 		self.assertTrue(запись.accepted_at)
 
 	def test_первый_вход_через_google_записывает_провайдера(self):
 		"""Кнопка «Войти через Google» у нового человека и есть регистрация."""
-		[запись] = согласия(зарегистрировать("consent-google@example.com", провайдер="google"))
+		[запись] = согласия(зарегистрировать(почта(), провайдер="google"))
 
 		self.assertEqual(запись.method, ВНЕШНИЙ_ВХОД)
 		self.assertEqual(запись.provider, "google")
@@ -65,30 +71,41 @@ class IntegrationTestConsent(IntegrationTestCase):
 		"""Человек страниц входа не видел — согласие собирает тот, кто его заводит."""
 		frappe.set_user("Administrator")
 
-		self.assertEqual(согласия(зарегистрировать("consent-admin@example.com")), [])
+		self.assertEqual(согласия(зарегистрировать(почта())), [])
+
+	def test_удаление_пользователя_не_мешает_и_запись_остаётся(self):
+		"""Ссылка из записи согласия не запрещает удалить пользователя, а сама
+		запись — доказательство — остаётся."""
+		адрес = зарегистрировать(почта())
+		frappe.set_user("Administrator")
+
+		frappe.delete_doc("User", адрес, ignore_permissions=True)
+
+		self.assertFalse(frappe.db.exists("User", адрес))
+		self.assertEqual(len(согласия(адрес)), 1)
 
 	def test_пустая_редакция_в_настройках_не_роняет_регистрацию(self):
 		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "")
 		умолчание = frappe.get_meta(НАСТРОЙКИ).get_field("legal_version").default
 
-		[запись] = согласия(зарегистрировать("consent-empty@example.com"))
+		[запись] = согласия(зарегистрировать(почта()))
 
 		self.assertTrue(умолчание)
 		self.assertEqual(запись.documents_version, умолчание)
 
 	def test_вход_существующего_ничего_не_записывает(self):
 		"""Привязка Google к уже существующему аккаунту — сохранение, а не вставка."""
-		почта = зарегистрировать("consent-existing@example.com")
+		адрес = зарегистрировать(почта())
 		frappe.set_user("Guest")
-		пользователь = frappe.get_doc("User", почта)
+		пользователь = frappe.get_doc("User", адрес)
 		пользователь.append("social_logins", {"provider": "google", "userid": "id-existing"})
 		пользователь.flags.ignore_permissions = True
 		пользователь.save()
 
-		self.assertEqual(len(согласия(почта)), 1)
+		self.assertEqual(len(согласия(адрес)), 1)
 
 
-class IntegrationTestConsentNotice(IntegrationTestCase):
+class UnitTestConsentNotice(UnitTestCase):
 	def test_подпись_подключена_к_веб_страницам(self):
 		"""Без подписи запись согласия ничего не доказывает: человек не видел,
 		с чем соглашается."""

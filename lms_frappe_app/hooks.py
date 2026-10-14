@@ -40,7 +40,7 @@ add_to_apps_screen = [
 # Вход, регистрация и смена пароля — в стиле публичного сайта; правила файла
 # заперты на адресах этих страниц, остальные веб-страницы он не трогает.
 web_include_css = "/assets/lms_frappe_app/css/high-time-web.css"
-# Подпись о согласии с Условиями и Политикой под кнопками входа и регистрации
+# Подпись о согласии с Условиями и Политикой в карточках входа и регистрации
 # (learning-services#577); на других страницах скрипт ничего не делает.
 web_include_js = "/assets/lms_frappe_app/js/consent-notice.js"
 
@@ -160,7 +160,9 @@ has_permission = {
 fixtures = [
 	{
 		"dt": "Role",
-		"filters": [["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]],
+		"filters": [
+			["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]
+		],
 	},
 	# Зачин урока и обещание курса адресованы ученику, а директивы — агенту,
 	# поэтому поля живут на самих DocType Learning, а не в директивах (#238,
@@ -455,7 +457,12 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# ignore_links_on_delete = ["Communication", "ToDo"]
+# Запись согласия — доказательство на случай спора и переживает удаление
+# пользователя; без этой строки ссылка из неё запрещала бы удалить любого, кто
+# зарегистрировался сам (learning-services#577). Удаление по запросу на
+# стирание данных Frappe делает переименованием, и ссылка переезжает на
+# анонимное имя.
+ignore_links_on_delete = ["Agent Consent"]
 
 # Request Events
 # ----------------
@@ -509,3 +516,4 @@ override_whitelisted_methods = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
+
