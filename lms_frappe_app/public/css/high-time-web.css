@@ -99,6 +99,8 @@ body:is([data-path="login"], [data-path="update-password"]) {
 	--ink-gray-5: var(--ht-muted);
 	--gray-900: var(--ht-btn);
 	--gray-100: var(--ht-bg);
+	/* Рамка окон Frappe и линия под их заголовком (правила окна — ниже). */
+	--border-color: var(--ht-line);
 	background: var(--ht-bg);
 	color: var(--ht-ink);
 	font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -192,6 +194,37 @@ body:is([data-path="login"], [data-path="update-password"])
 	.page-card
 	.btn-login-option:hover {
 	border-color: var(--ht-muted);
+}
+/* Окна Frappe (`frappe.msgprint`: «Сброс пароля», ошибки входа). website.bundle
+   собирает Bootstrap с белым `.modal-content` и светлой линией над подвалом —
+   значения прямо в коде, мимо переменных, — а текст окно наследует наш: в
+   тёмной теме выходило светлое на белом. Заголовку тема задаёт свой тёмный
+   цвет, его перебиваем отдельно. Крестик — `button.close` с иконкой,
+   обводку иконка берёт из `--icon-stroke`, а не из `color`. Ссылки и основная
+   кнопка в теме Frappe тёмные, на тёмном окне их не видно. */
+body:is([data-path="login"], [data-path="update-password"]) .modal-content {
+	background: var(--ht-paper);
+	color: var(--ht-ink);
+	border-radius: 6px;
+}
+body:is([data-path="login"], [data-path="update-password"]) .modal-content .modal-footer {
+	border-top-color: var(--ht-line);
+}
+body:is([data-path="login"], [data-path="update-password"])
+	.modal-content
+	:is(.modal-title, .close) {
+	color: var(--ht-ink);
+}
+body:is([data-path="login"], [data-path="update-password"]) .modal-content .close {
+	--icon-stroke: currentColor;
+}
+body:is([data-path="login"], [data-path="update-password"]) .modal-content a:not(.btn) {
+	color: var(--ht-accent);
+}
+body:is([data-path="login"], [data-path="update-password"]) .modal-content .btn-primary {
+	background: var(--ht-btn);
+	border-color: var(--ht-btn);
+	color: var(--ht-btn-ink);
 }
 body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card a:not(.btn) {
 	color: var(--ht-accent);
