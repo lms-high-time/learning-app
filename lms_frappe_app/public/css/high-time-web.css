@@ -226,6 +226,18 @@ body:is([data-path="login"], [data-path="update-password"]) .modal-content .btn-
 	border-color: var(--ht-btn);
 	color: var(--ht-btn-ink);
 }
+/* Подпись о согласии с Условиями и Политикой (consent-notice.js) — мелко и
+   приглушённо под кнопками: она сообщает, а не зовёт к действию. */
+body:is([data-path="login"], [data-path="update-password"])
+	section[class]
+	.page-card
+	.consent-notice {
+	margin: 12px 0 0;
+	font-size: 0.8rem;
+	line-height: 1.45;
+	text-align: center;
+	color: var(--ht-muted);
+}
 body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card a:not(.btn) {
 	color: var(--ht-accent);
 	text-underline-offset: 3px;

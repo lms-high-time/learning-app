@@ -40,7 +40,9 @@ add_to_apps_screen = [
 # Вход, регистрация и смена пароля — в стиле публичного сайта; правила файла
 # заперты на адресах этих страниц, остальные веб-страницы он не трогает.
 web_include_css = "/assets/lms_frappe_app/css/high-time-web.css"
-# web_include_js = "/assets/lms_frappe_app/js/lms_frappe_app.js"
+# Подпись о согласии с Условиями и Политикой под кнопками входа и регистрации
+# (learning-services#577); на других страницах скрипт ничего не делает.
+web_include_js = "/assets/lms_frappe_app/js/consent-notice.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "lms_frappe_app/public/scss/website"
@@ -158,9 +160,7 @@ has_permission = {
 fixtures = [
 	{
 		"dt": "Role",
-		"filters": [
-			["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]
-		],
+		"filters": [["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]],
 	},
 	# Зачин урока и обещание курса адресованы ученику, а директивы — агенту,
 	# поэтому поля живут на самих DocType Learning, а не в директивах (#238,
@@ -299,6 +299,11 @@ doc_events = {
 	# после validate Frappe и добавляет роли платформы (#26).
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
+	},
+	# Самостоятельная регистрация — формой или первым входом через Google —
+	# записывает согласие с документами (learning-services#577).
+	"User": {
+		"after_insert": "lms_frappe_app.agent_learning.consent.записать_согласие",
 	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
@@ -504,4 +509,3 @@ override_whitelisted_methods = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
