@@ -99,6 +99,11 @@ body:is([data-path="login"], [data-path="update-password"]) {
 	--ink-gray-5: var(--ht-muted);
 	--gray-900: var(--ht-btn);
 	--gray-100: var(--ht-bg);
+	/* Окна Frappe (`frappe.msgprint`: «Сброс пароля», ошибки входа) берут фон
+	   из `--modal-bg`, а у неё в теме Frappe `white`: без этой строки в тёмной
+	   теме окно белое, а текст в нём — наш светлый. */
+	--modal-bg: var(--ht-paper);
+	--border-color: var(--ht-line);
 	background: var(--ht-bg);
 	color: var(--ht-ink);
 	font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -192,6 +197,15 @@ body:is([data-path="login"], [data-path="update-password"])
 	.page-card
 	.btn-login-option:hover {
 	border-color: var(--ht-muted);
+}
+body:is([data-path="login"], [data-path="update-password"]) .modal-content {
+	background: var(--modal-bg);
+	color: var(--ht-ink);
+	border-radius: 6px;
+}
+body:is([data-path="login"], [data-path="update-password"]) .modal-content :is(.modal-title, .btn-modal-close) {
+	color: var(--ht-ink);
+	font-family: inherit;
 }
 body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card a:not(.btn) {
 	color: var(--ht-accent);
