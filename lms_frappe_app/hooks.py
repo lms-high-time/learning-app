@@ -40,7 +40,9 @@ add_to_apps_screen = [
 # Вход, регистрация и смена пароля — в стиле публичного сайта; правила файла
 # заперты на адресах этих страниц, остальные веб-страницы он не трогает.
 web_include_css = "/assets/lms_frappe_app/css/high-time-web.css"
-# web_include_js = "/assets/lms_frappe_app/js/lms_frappe_app.js"
+# Подпись о согласии с Условиями и Политикой в карточках входа и регистрации
+# (learning-services#577); на других страницах скрипт ничего не делает.
+web_include_js = "/assets/lms_frappe_app/js/consent-notice.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "lms_frappe_app/public/scss/website"
@@ -300,6 +302,11 @@ doc_events = {
 	"OAuth Client": {
 		"validate": "lms_frappe_app.agent_learning.oauth_client.разрешить_роли_платформы",
 	},
+	# Самостоятельная регистрация — формой или первым входом через Google —
+	# записывает согласие с документами (learning-services#577).
+	"User": {
+		"after_insert": "lms_frappe_app.agent_learning.consent.записать_согласие",
+	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
 	"LMS Course": {
@@ -450,7 +457,12 @@ override_whitelisted_methods = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# ignore_links_on_delete = ["Communication", "ToDo"]
+# Запись согласия — доказательство на случай спора и переживает удаление
+# пользователя; без этой строки ссылка из неё запрещала бы удалить любого, кто
+# зарегистрировался сам (learning-services#577). Удаление по запросу на
+# стирание данных Frappe делает переименованием, и ссылка переезжает на
+# анонимное имя.
+ignore_links_on_delete = ["Agent Consent"]
 
 # Request Events
 # ----------------
