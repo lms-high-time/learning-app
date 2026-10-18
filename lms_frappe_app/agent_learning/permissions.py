@@ -110,13 +110,57 @@ def условие_назначения(user: str | None = None) -> str:
 	return f"`tabCourse Allocation`.`organization` in ({_список(организации)})"
 
 
+def _действующий_в_пространстве(таблица: str, автор: str) -> str:
+	"""SQL: автор записи — действующий участник организации её пространства.
+
+	`Why:` команда видит документы, домашки и занятия только действующих
+	участников (learning-services#585). Правило по членству, а не по отметке на
+	записях: при уходе ничего не переписывается, вернувшийся видит всё снова,
+	удалённое членство и ушедшие до правила закрыты тем же условием. У
+	архивной записи (сброс прогресса) автор пуст — её условие не пропускает.
+	"""
+	return (
+		"exists (select 1 from `tabOrganization Membership` m "
+		f"where m.organization = {таблица}.`organization` and m.user = {таблица}.`{автор}` "
+		f"and m.status = {frappe.db.escape(ЧЛЕНСТВО_ДЕЙСТВУЕТ)})"
+	)
+
+
+def сдачи_ушедших(организации: list[str]) -> list[str]:
+	"""Сдачи пространств этих организаций, чей автор в организации больше не состоит.
+
+	Для явных отборов через `frappe.get_all` (очередь куратора): хуки прав там
+	не применяются, а пару «автор — организация сдачи» фильтром не выразить.
+	Список — только сдачи ушедших, а не все; отбор идёт по индексу
+	`organization`. Вырастет — собрать очередь одним запросом с NOT EXISTS.
+	"""
+	if not организации:
+		return []
+	таблица = "`tabAgent Homework Submission`"
+	return frappe.db.sql_list(
+		f"select name from {таблица} where {таблица}.`organization` in ({_список(организации)})"
+		f" and ifnull({таблица}.`member`, '') != ''"
+		f" and not {_действующий_в_пространстве(таблица, 'member')}"
+	)
+
+
+def действует_в(user: str, organization: str) -> bool:
+	"""Действующий ли участник организации — то же правило для одной записи."""
+	return bool(
+		frappe.db.exists(
+			"Organization Membership",
+			{"user": user, "organization": organization, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
+		)
+	)
+
+
 def условие_занятия(user: str | None = None) -> str:
 	"""`Agent Learning Session`: свои занятия, руководителю — занятия пространства его организаций.
 
 	`Why:` по пространству, а не по людям: человек учится лично и в
 	нескольких компаниях, и руководитель X не должен видеть его работу вне X
-	(learning-services#344). Ушедший остаётся в пространстве X — его занятия
-	в нём организации видны, как и его документы.
+	(learning-services#344). Ушедшего из X руководитель X больше не видит
+	(learning-services#585).
 	"""
 	user = user or frappe.session.user
 	if видит_всё(user):
@@ -125,7 +169,11 @@ def условие_занятия(user: str | None = None) -> str:
 	организации = организации_менеджера(user)
 	if not организации:
 		return свои
-	return f"({свои} or `tabAgent Learning Session`.`organization` in ({_список(организации)}))"
+	таблица = "`tabAgent Learning Session`"
+	return (
+		f"({свои} or ({таблица}.`organization` in ({_список(организации)})"
+		f" and {_действующий_в_пространстве(таблица, 'student')}))"
+	)
 
 
 def доступно_занятие(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -139,7 +187,9 @@ def доступно_занятие(doc, ptype: str = "read", user: str | None =
 		return False
 	if видит_всё(user) or doc.student == user:
 		return True
-	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+	if not doc.organization or doc.organization not in организации_менеджера(user):
+		return False
+	return bool(doc.student) and действует_в(doc.student, doc.organization)
 
 
 def доступно_членство(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -195,9 +245,11 @@ def условие_попытки(user: str | None = None) -> str:
 	организации = организации_менеджера(user)
 	if not организации:
 		return свои
+	таблица = "`tabAgent Learning Session`"
 	подзапрос = (
-		"select name from `tabAgent Learning Session` "
+		f"select name from {таблица} "
 		f"where organization in ({_список(организации)})"
+		f" and {_действующий_в_пространстве(таблица, 'student')}"
 	)
 	return f"({свои} or `tabAgent Quiz Attempt`.`session` in ({подзапрос}))"
 
@@ -216,7 +268,15 @@ def доступна_попытка(doc, ptype: str = "read", user: str | None =
 	организации = организации_менеджера(user)
 	if not организации or not doc.session:
 		return False
-	return frappe.db.get_value("Agent Learning Session", doc.session, "organization") in организации
+	занятие = frappe.db.get_value(
+		"Agent Learning Session", doc.session, ["organization", "student"], as_dict=True
+	)
+	return bool(
+		занятие
+		and занятие.organization in организации
+		and занятие.student
+		and действует_в(занятие.student, занятие.organization)
+	)
 
 
 def условие_ответа(user: str | None = None) -> str:
@@ -248,24 +308,21 @@ def доступен_ответ(doc, ptype: str = "read", user: str | None = Non
 	return frappe.db.get_value("Agent Quiz Attempt", doc.attempt, "student") == user
 
 
-def свои_организации_пересекаются(менеджер: str, ученик: str) -> bool:
-	"""Состоит ли ученик в организации, которой управляет вызывающий.
+def общие_организации(менеджер: str, ученик: str) -> list[str]:
+	"""Организации вызывающего, где ученик сейчас состоит; сотруднику платформы — его без отбора.
 
 	Нужна явной проверкой в методах отчётности: `frappe.get_all` — это
 	`get_list(ignore_permissions=True)`, и `permission_query_conditions` к нему
 	не применяются **никогда**. Изоляция, построенная только на хуках, в этих
 	методах не работала — проверено эксплуатацией.
 	"""
-	if видит_всё(менеджер):
-		return True
 	организации = организации_менеджера(менеджер)
-	if not организации:
-		return False
-	return bool(
-		frappe.db.exists(
-			"Organization Membership",
-			{"user": ученик, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
-		)
+	if видит_всё(менеджер) or not организации:
+		return организации
+	return frappe.get_all(
+		"Organization Membership",
+		filters={"user": ученик, "organization": ("in", организации), "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
+		pluck="organization",
 	)
 
 
@@ -334,7 +391,11 @@ def условие_артефакта(user: str | None = None) -> str:
 	организации = организации_с_документами(user)
 	if not организации:
 		return свои
-	return f"({свои} or `tabAgent Student Artifact`.`organization` in ({_список(организации)}))"
+	таблица = "`tabAgent Student Artifact`"
+	return (
+		f"({свои} or ({таблица}.`organization` in ({_список(организации)})"
+		f" and {_действующий_в_пространстве(таблица, 'student')}))"
+	)
 
 
 def доступен_артефакт(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -344,7 +405,9 @@ def доступен_артефакт(doc, ptype: str = "read", user: str | None
 		return False
 	if видит_всё(user) or doc.student == user:
 		return True
-	return bool(doc.organization) and doc.organization in организации_с_документами(user)
+	if not doc.organization or doc.organization not in организации_с_документами(user):
+		return False
+	return bool(doc.student) and действует_в(doc.student, doc.organization)
 
 
 #: Методисты видят все сдачи домашек, включая личные (learning-services#439):
@@ -367,7 +430,10 @@ def условие_сдачи(user: str | None = None) -> str:
 	организации = организации_менеджера(user)
 	if not организации:
 		return свои
-	return f"({свои} or {таблица}.`organization` in ({_список(организации)}))"
+	return (
+		f"({свои} or ({таблица}.`organization` in ({_список(организации)})"
+		f" and {_действующий_в_пространстве(таблица, 'member')}))"
+	)
 
 
 def доступна_сдача(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -383,7 +449,9 @@ def доступна_сдача(doc, ptype: str = "read", user: str | None = Non
 		return False
 	if методист(user) or doc.member == user:
 		return True
-	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+	if not doc.organization or doc.organization not in организации_менеджера(user):
+		return False
+	return bool(doc.member) and действует_в(doc.member, doc.organization)
 
 
 def может_проверять(doc, user: str) -> bool:
@@ -397,7 +465,9 @@ def может_проверять(doc, user: str) -> bool:
 		return False
 	if видит_всё(user) or методист(user):
 		return True
-	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+	if not doc.organization or doc.organization not in организации_менеджера(user):
+		return False
+	return действует_в(doc.member, doc.organization)
 
 
 def доступен_desk(user: str | None = None) -> bool:

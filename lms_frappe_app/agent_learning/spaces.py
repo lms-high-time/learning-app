@@ -190,7 +190,16 @@ def пространство_курса(user: str, course: str, space: str | Non
 		order_by="last_activity_at desc",
 		limit=1,
 	)
-	if открытое:
+	# Открытое занятие в пространстве, которого у человека больше нет (ушёл из
+	# организации), пространство не задаёт: иначе агент, начавший урок до
+	# ухода, писал бы туда дальше (learning-services#585).
+	if открытое and (
+		not открытое[0].organization
+		or frappe.db.exists(
+			"Organization Membership",
+			{"user": user, "organization": открытое[0].organization, "status": ЧЛЕНСТВО_ДЕЙСТВУЕТ},
+		)
+	):
 		return открытое[0].organization or None
 
 	выбранное = текущее(user)

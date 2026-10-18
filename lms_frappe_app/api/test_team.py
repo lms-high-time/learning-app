@@ -7,14 +7,19 @@
 же: руководителю — всегда, участнику — если открыто всем, прочим — ничего.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.api import manager, student, team
+from lms_frappe_app.agent_learning import permissions
+from lms_frappe_app.api import manager, review, student, team
 from lms_frappe_app.tests.sample_data import (
 	раздел,
 	схема_документа,
 	добавить_в_организацию,
+	создать_домашку,
+	создать_занятие,
 	зачислить,
 	создать_менеджера,
 	создать_организацию,
@@ -37,7 +42,8 @@ class IntegrationTestTeam(IntegrationTestCase):
 		добавить_в_организацию(self.сотрудник, self.другая)
 		self.руководитель = создать_менеджера(f"team-m-{суффикс}@example.com", self.компания)
 
-		self.курс = зачислить(self.сотрудник, создать_урок(f"Урок {суффикс}"))
+		self.урок = создать_урок(f"Урок {суффикс}")
+		self.курс = зачислить(self.сотрудник, self.урок)
 		схема_документа(
 			self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель"), раздел("sponsor", "Спонсор")]
 		)
@@ -72,10 +78,13 @@ class IntegrationTestTeam(IntegrationTestCase):
 	def видимость(self, значение: str) -> None:
 		frappe.db.set_value("Learning Organization", self.компания, "artifact_visibility", значение)
 
-	def уйти(self, кто: str) -> None:
+	def уйти(self, кто: str):
+		"""Уход из компании; возвращает подменённую отправку писем."""
 		членство = frappe.get_doc("Organization Membership", {"user": кто, "organization": self.компания})
 		членство.status = "Left"
-		членство.save(ignore_permissions=True)
+		with patch("frappe.sendmail") as письма:
+			членство.save(ignore_permissions=True)
+		return письма
 
 	def test_руководитель_видит_команду_документы_и_отчёт(self):
 		"""Руководителю — участники, курсы, сравнение документов пространства
@@ -125,8 +134,8 @@ class IntegrationTestTeam(IntegrationTestCase):
 
 	def test_участник_посторонний_и_ушедший(self):
 		"""Участник видит команду, только если открыто всем; посторонний и
-		ушедший — нет, и при открытой видимости. Документ ушедшего остаётся у
-		руководителя с пометкой — на видимости по умолчанию, как без открытия."""
+		ушедший — нет, и при открытой видимости. Документ ушедшего руководителю
+		больше не виден, сам ушедший остаётся в списке с пометкой (#585)."""
 		with self.subTest("участник: закрыто"):
 			отказ = self.от_имени(self.коллега, team.team, organization=self.компания)
 			self.assertEqual(отказ["error"]["code"], "team_not_available")
@@ -146,8 +155,115 @@ class IntegrationTestTeam(IntegrationTestCase):
 		finally:
 			self.видимость(прежняя)
 
-		with self.subTest("документ ушедшего остаётся с пометкой"):
-			авторы = {а["user"]: а for а in self.документы(self.руководитель)["data"]["authors"]}
+		with self.subTest("документ ушедшего команде не виден, сам он — с пометкой"):
+			авторы = {а["user"] for а in self.документы(self.руководитель)["data"]["authors"]}
+			команда = self.от_имени(self.руководитель, team.team, organization=self.компания)["data"]
+			участники = {у["user"]: у for у in команда["members"]}
 
-			self.assertTrue(авторы[self.коллега]["left"])
-			self.assertFalse(авторы[self.сотрудник]["left"])
+			self.assertEqual(авторы, {self.сотрудник})
+			self.assertTrue(участники[self.коллега]["left"])
+
+	def test_работа_ушедшего_команде_не_видна_до_возвращения(self):
+		"""Команда видит документы, сдачи и занятия только действующих
+		участников: у ушедшего они остаются в базе, но команде не видны, а
+		вернулся — видны снова. Его личная работа не трогается (#585)."""
+		создать_домашку(self.урок)
+		frappe.set_user(self.коллега)
+		сдача = student.submit_homework(lesson=self.урок, answer="сделал", space=self.компания)
+		frappe.set_user("Administrator")
+		self.assertTrue(сдача["ok"], сдача)
+		сдача = сдача["data"]["submission"]["id"]
+		self.написать(self.коллега, "Своё у коллеги", "personal")
+		занятие = frappe.get_doc("Agent Learning Session", создать_занятие(self.коллега, self.урок))
+		frappe.db.set_value("Agent Learning Session", занятие.name, "organization", self.компания)
+		занятие.reload()
+		документ = frappe.get_doc(
+			"Agent Student Artifact", {"student": self.коллега, "organization": self.компания}
+		)
+
+		def видно() -> dict[str, bool]:
+			очередь = self.от_имени(self.руководитель, review.queue)["data"]["items"]
+			авторы = {а["user"] for а in self.документы(self.руководитель)["data"]["authors"]}
+			занятия = frappe.db.sql(
+				"select name from `tabAgent Learning Session` where name = %s and "
+				+ permissions.условие_занятия(self.руководитель),
+				занятие.name,
+			)
+			return {
+				"документ в сравнении": self.коллега in авторы,
+				"документ напрямую": permissions.доступен_артефакт(документ, "read", self.руководитель),
+				"сдача в очереди": сдача in {п["id"] for п in очередь},
+				"занятие напрямую": permissions.доступно_занятие(занятие, "read", self.руководитель),
+				"занятие списком": bool(занятия),
+				"сдача в счётчике": self.от_имени(self.руководитель, review.pending_count)["data"]["count"]
+				> 0,
+			}
+
+		self.assertEqual(set(видно().values()), {True}, "предусловие: работа участника команде видна")
+
+		self.уйти(self.коллега)
+
+		with self.subTest("ушедший — не видно"):
+			self.assertEqual(видно(), dict.fromkeys(видно(), False))
+		with self.subTest("в базе всё на месте, личное не тронуто"):
+			self.assertEqual(
+				frappe.db.get_value("Agent Student Artifact", документ.name, "student"), self.коллега
+			)
+			self.assertEqual(frappe.db.get_value("Agent Homework Submission", сдача, "member"), self.коллега)
+			self.assertTrue(
+				frappe.db.exists(
+					"Agent Student Artifact", {"student": self.коллега, "organization": ("is", "not set")}
+				)
+			)
+
+		членство = frappe.get_doc(
+			"Organization Membership", {"user": self.коллега, "organization": self.компания}
+		)
+		членство.status = "Active"
+		членство.save(ignore_permissions=True)
+		with self.subTest("вернулся — видно снова"):
+			self.assertEqual(set(видно().values()), {True})
+
+	def test_подробности_только_по_организациям_где_ученик_состоит(self):
+		"""Руководитель двух организаций; ученик ушёл из одной — по ней в
+		подробностях ни курсов, ни занятий; ушёл из обеих — отказ (#585)."""
+		суффикс = frappe.generate_hash(length=6)
+		двух = создать_менеджера(f"team-m2-{суффикс}@example.com", self.компания)
+		добавить_в_организацию(двух, self.другая, role="Manager")
+		frappe.db.set_value(
+			"Agent Learning Session",
+			создать_занятие(self.сотрудник, self.урок),
+			"organization",
+			self.компания,
+		)
+
+		self.уйти(self.сотрудник)
+
+		подробности = self.от_имени(двух, manager.student_detail, user=self.сотрудник)["data"]
+		self.assertTrue(подробности["courses"])
+		self.assertEqual(подробности["sessions"], [])
+
+		членство = frappe.get_doc(
+			"Organization Membership", {"user": self.сотрудник, "organization": self.другая}
+		)
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+		отказ = self.от_имени(двух, manager.student_detail, user=self.сотрудник)
+		self.assertEqual(отказ["error"]["code"], "not_your_student")
+
+	def test_удалённое_членство_как_уход(self):
+		"""Членство удалили в Desk — работа бывшего участника команде не видна."""
+		frappe.delete_doc(
+			"Organization Membership",
+			frappe.db.get_value(
+				"Organization Membership", {"user": self.коллега, "organization": self.компания}
+			),
+			ignore_permissions=True,
+		)
+
+		авторы = {а["user"] for а in self.документы(self.руководитель)["data"]["authors"]}
+		self.assertNotIn(self.коллега, авторы)
+		документ = frappe.get_doc(
+			"Agent Student Artifact", {"student": self.коллега, "organization": self.компания}
+		)
+		self.assertFalse(permissions.доступен_артефакт(документ, "read", self.руководитель))

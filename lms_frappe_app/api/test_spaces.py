@@ -12,6 +12,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning import spaces
 from lms_frappe_app.agent_learning.constants import СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА
 from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning_session import курс_урока
 from lms_frappe_app.api import manager, student
@@ -27,6 +28,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_организацию,
 	создать_урок,
 	создать_ученика,
+	создать_занятие,
 	урок_релиза,
 )
 
@@ -136,12 +138,12 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 		self.руководитель_игрек = создать_менеджера(f"acc-my-{суффикс}@example.com", self.игрек)
 
 		# Три курса — три пространства одного и того же человека.
-		self.курсы = {}
+		self.курсы, self.уроки = {}, {}
 		for пространство in ("икс", "игрек", "личное"):
 			урок = создать_урок(f"Урок {пространство} {суффикс}")
 			курс = зачислить(self.сотрудник, урок)
 			завести_схему(курс)
-			self.курсы[пространство] = курс
+			self.курсы[пространство], self.уроки[пространство] = курс, урок
 		назначить(self.икс, self.курсы["икс"])
 		назначить(self.игрек, self.курсы["игрек"])
 
@@ -211,13 +213,29 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 			self.assertFalse(self.читает(self.коллега, "икс"))
 
 	def test_документ_ушедшего_автора(self):
-		"""Ушедший автор свой документ читает, а документ остаётся у организации."""
+		"""Ушедший автор свой документ читает, организация — больше нет
+		(learning-services#585)."""
 		выйти(self.сотрудник, self.икс)
 
 		with self.subTest("автор читает свой"):
 			self.assertTrue(self.читает(self.сотрудник, "икс"))
-		with self.subTest("руководитель читает документ ушедшего"):
-			self.assertTrue(self.читает(self.руководитель_икс, "икс"))
+		with self.subTest("руководитель документ ушедшего не читает"):
+			self.assertFalse(self.читает(self.руководитель_икс, "икс"))
+
+	def test_открытое_занятие_ушедшего_не_держит_пространство(self):
+		"""Агент начал урок в организации, человек ушёл: без `space` работа идёт
+		уже не туда — иначе новый документ попал бы в пространство организации."""
+		frappe.db.set_value(
+			"Agent Learning Session",
+			создать_занятие(self.сотрудник, self.уроки["икс"]),
+			"organization",
+			self.икс,
+		)
+		self.assertEqual(spaces.пространство_курса(self.сотрудник, self.курсы["икс"]), self.икс)
+
+		выйти(self.сотрудник, self.икс)
+
+		self.assertIsNone(spaces.пространство_курса(self.сотрудник, self.курсы["икс"]))
 
 	def test_ушедший_руководитель_теряет_доступ_сразу(self):
 		выйти(self.руководитель_икс, self.икс)

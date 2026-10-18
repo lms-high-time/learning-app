@@ -127,7 +127,8 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 	"""Документ курса у каждого участника в пространстве организации — по блокам.
 
 	Сравнение идёт блок за блоком: что написал каждый в «Спонсоре проекта»,
-	а не пять документов целиком. У ушедшего документ остаётся — с пометкой.
+	а не пять документов целиком. Документов ушедших здесь нет — до их
+	возвращения (learning-services#585).
 	Блок участника приходит markdown-текстом: у `many` — таблица, у `one` —
 	поля строками; страница показывает его, не зная устройства разделов.
 	"""
@@ -135,7 +136,8 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 	if course not in _курсы_организации(organization):
 		raise Отказ(КУРС_НЕ_ОРГАНИЗАЦИИ, "Этот курс организация не назначала", course=course)
 	схема = _действующая_схема(course, artifact)
-	участники = {у["user"]: у for у in _участники(organization)}
+	# Только действующие: документы ушедших команде не видны (learning-services#585).
+	участники = {у["user"]: у for у in _участники(organization) if not у["left"]}
 	экземпляры = frappe.get_all(
 		"Agent Student Artifact",
 		filters={
@@ -161,7 +163,6 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 				{
 					"user": участник["user"],
 					"full_name": участник["full_name"],
-					"left": участник["left"],
 					"filled": заполнен_ли,
 					"markdown": export.markdown(раздел, данные),
 				}
@@ -170,7 +171,6 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 			{
 				"user": участник["user"],
 				"full_name": участник["full_name"],
-				"left": участник["left"],
 				"blocks_filled": заполнено,
 				"blocks_total": len(разделы),
 				"modified": экземпляр.modified.isoformat(),
@@ -391,7 +391,11 @@ def set_member_role(organization: str, user: str, role: str) -> dict:
 @frappe.whitelist(methods=["POST"])
 @контракт
 def remove_member(organization: str, user: str) -> dict:
-	"""Отмечает уход: членство закрывается, документы остаются у организации.
+	"""Отмечает уход: членство закрывается, документы уходят с человеком.
+
+	Работа ушедшего в пространстве организации остаётся в базе, но ей не видна
+	(права по действующему членству), копия документов уходит ему письмом
+	(`leave.уйти`, learning-services#585).
 
 	Руководитель отмечает уход участников; руководителей и администраторов —
 	только администратор: иначе руководитель снимал бы коллег с их прав.
