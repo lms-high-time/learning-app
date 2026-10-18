@@ -7,14 +7,19 @@
 же: руководителю — всегда, участнику — если открыто всем, прочим — ничего.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.api import manager, student, team
+from lms_frappe_app.agent_learning import permissions
+from lms_frappe_app.api import manager, review, student, team
 from lms_frappe_app.tests.sample_data import (
 	раздел,
 	схема_документа,
 	добавить_в_организацию,
+	создать_домашку,
+	создать_занятие,
 	зачислить,
 	создать_менеджера,
 	создать_организацию,
@@ -37,7 +42,8 @@ class IntegrationTestTeam(IntegrationTestCase):
 		добавить_в_организацию(self.сотрудник, self.другая)
 		self.руководитель = создать_менеджера(f"team-m-{суффикс}@example.com", self.компания)
 
-		self.курс = зачислить(self.сотрудник, создать_урок(f"Урок {суффикс}"))
+		self.урок = создать_урок(f"Урок {суффикс}")
+		self.курс = зачислить(self.сотрудник, self.урок)
 		схема_документа(
 			self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель"), раздел("sponsor", "Спонсор")]
 		)
@@ -72,10 +78,13 @@ class IntegrationTestTeam(IntegrationTestCase):
 	def видимость(self, значение: str) -> None:
 		frappe.db.set_value("Learning Organization", self.компания, "artifact_visibility", значение)
 
-	def уйти(self, кто: str) -> None:
+	def уйти(self, кто: str):
+		"""Уход из компании; возвращает подменённую отправку писем."""
 		членство = frappe.get_doc("Organization Membership", {"user": кто, "organization": self.компания})
 		членство.status = "Left"
-		членство.save(ignore_permissions=True)
+		with patch("frappe.sendmail") as письма:
+			членство.save(ignore_permissions=True)
+		return письма
 
 	def test_руководитель_видит_команду_документы_и_отчёт(self):
 		"""Руководителю — участники, курсы, сравнение документов пространства
@@ -125,8 +134,8 @@ class IntegrationTestTeam(IntegrationTestCase):
 
 	def test_участник_посторонний_и_ушедший(self):
 		"""Участник видит команду, только если открыто всем; посторонний и
-		ушедший — нет, и при открытой видимости. Документ ушедшего остаётся у
-		руководителя с пометкой — на видимости по умолчанию, как без открытия."""
+		ушедший — нет, и при открытой видимости. Документ ушедшего руководителю
+		больше не виден, сам ушедший остаётся в списке с пометкой (#585)."""
 		with self.subTest("участник: закрыто"):
 			отказ = self.от_имени(self.коллега, team.team, organization=self.компания)
 			self.assertEqual(отказ["error"]["code"], "team_not_available")
@@ -146,8 +155,87 @@ class IntegrationTestTeam(IntegrationTestCase):
 		finally:
 			self.видимость(прежняя)
 
-		with self.subTest("документ ушедшего остаётся с пометкой"):
-			авторы = {а["user"]: а for а in self.документы(self.руководитель)["data"]["authors"]}
+		with self.subTest("документ ушедшего команде не виден, сам он — с пометкой"):
+			авторы = {а["user"] for а in self.документы(self.руководитель)["data"]["authors"]}
+			команда = self.от_имени(self.руководитель, team.team, organization=self.компания)["data"]
+			участники = {у["user"]: у for у in команда["members"]}
 
-			self.assertTrue(авторы[self.коллега]["left"])
-			self.assertFalse(авторы[self.сотрудник]["left"])
+			self.assertEqual(авторы, {self.сотрудник})
+			self.assertTrue(участники[self.коллега]["left"])
+
+	def test_ушедший_забирает_документы_команда_его_работу_не_видит(self):
+		"""При уходе копия документов пространства компании уходит письмом, а
+		документы, сдачи домашек и занятия ушедшего команде больше не видны.
+		Его работа вне компании и работа остальных — не трогаются (#585)."""
+		создать_домашку(self.урок)
+		frappe.set_user(self.коллега)
+		сдача = student.submit_homework(lesson=self.урок, answer="сделал", space=self.компания)
+		frappe.set_user("Administrator")
+		self.assertTrue(сдача["ok"], сдача)
+		сдача = сдача["data"]["submission"]["id"]
+		self.assertIn(
+			сдача,
+			{п["id"] for п in self.от_имени(self.руководитель, review.queue)["data"]["items"]},
+			"предусловие: сдача действующего участника — в очереди руководителя",
+		)
+		занятие = создать_занятие(self.коллега, self.урок)
+		frappe.db.set_value("Agent Learning Session", занятие, "organization", self.компания)
+		self.assertTrue(
+			permissions.доступно_занятие(
+				frappe.get_doc("Agent Learning Session", занятие), "read", self.руководитель
+			),
+			"предусловие: занятие действующего участника руководителю видно",
+		)
+
+		письма = self.уйти(self.коллега)
+
+		with self.subTest("копия документов — письмом"):
+			письма.assert_called_once()
+			аргументы = письма.call_args.kwargs
+			self.assertEqual(аргументы["recipients"], [self.коллега])
+			(файл,) = аргументы["attachments"]
+			self.assertTrue(файл["fname"].endswith("summary.md"), файл["fname"])
+			self.assertIn("Склад", файл["fcontent"])
+
+		with self.subTest("документ — в архиве, команде не виден"):
+			документ = frappe.db.get_value(
+				"Agent Student Artifact",
+				{"archived_student": self.коллега, "organization": self.компания},
+				["name", "student"],
+				as_dict=True,
+			)
+			self.assertIsNone(документ.student)
+			self.assertFalse(
+				permissions.доступен_артефакт(
+					frappe.get_doc("Agent Student Artifact", документ.name), "read", self.руководитель
+				)
+			)
+
+		with self.subTest("сдача домашки — в архиве, в очереди её нет"):
+			очередь = self.от_имени(self.руководитель, review.queue)["data"]["items"]
+			self.assertNotIn(сдача, {п["id"] for п in очередь})
+			self.assertEqual(
+				frappe.db.get_value("Agent Homework Submission", сдача, "archived_student"), self.коллега
+			)
+
+		with self.subTest("занятие ушедшего руководителю не видно"):
+			self.assertFalse(
+				permissions.доступно_занятие(
+					frappe.get_doc("Agent Learning Session", занятие), "read", self.руководитель
+				)
+			)
+			видимые = frappe.db.sql(
+				"select name from `tabAgent Learning Session` where name = %s and "
+				+ permissions.условие_занятия(self.руководитель),
+				занятие,
+			)
+			self.assertEqual(видимые, ())
+
+		with self.subTest("работа остальных и вне компании не тронута"):
+			авторы = {а["user"] for а in self.документы(self.руководитель)["data"]["authors"]}
+			self.assertEqual(авторы, {self.сотрудник})
+			self.assertTrue(
+				frappe.db.exists(
+					"Agent Student Artifact", {"student": self.сотрудник, "organization": self.другая}
+				)
+			)
