@@ -111,6 +111,9 @@ class UnitTestConsentNotice(UnitTestCase):
 		с чем соглашается."""
 		адрес = "/assets/lms_frappe_app/js/consent-notice.js"
 		self.assertIn(адрес, frappe.get_hooks("web_include_js"))
+		# Аналитика — общий скрипт сайта cenda.app, а не своя копия
+		# (learning-services#582).
+		self.assertIn("/site/analytics.js", frappe.get_hooks("web_include_js"))
 		файл = Path(frappe.get_app_path("lms_frappe_app", "public", "js", "consent-notice.js"))
 		текст = файл.read_text(encoding="utf-8")
 		for нужное in ('"/terms"', '"/privacy"', ".for-login", ".for-signup"):

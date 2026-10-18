@@ -42,7 +42,12 @@ add_to_apps_screen = [
 web_include_css = "/assets/lms_frappe_app/css/high-time-web.css"
 # Подпись о согласии с Условиями и Политикой в карточках входа и регистрации
 # (learning-services#577); на других страницах скрипт ничего не делает.
-web_include_js = "/assets/lms_frappe_app/js/consent-notice.js"
+# Согласие на аналитику — общий скрипт публичного сайта на том же домене
+# (learning-services#582): баннер и выбор одни на весь cenda.app.
+web_include_js = [
+	"/assets/lms_frappe_app/js/consent-notice.js",
+	"/site/analytics.js",
+]
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "lms_frappe_app/public/scss/website"
