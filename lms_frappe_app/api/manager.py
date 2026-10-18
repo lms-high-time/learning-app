@@ -25,6 +25,7 @@ from lms_frappe_app.agent_learning.structure import уроки_курса
 from lms_frappe_app.agent_learning.permissions import (
 	видит_всё,
 	общие_организации,
+	организации_менеджера,
 )
 from lms_frappe_app.api import контракт, текущий_пользователь
 
