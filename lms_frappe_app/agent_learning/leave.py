@@ -1,109 +1,100 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Уход из команды: её больше не касаются работы ушедшего (learning-services#585).
+"""Уход из команды: копия документов — ушедшему (learning-services#585).
 
 Решение владельца: команда видит документы, прогресс и домашние задания
-только действующих участников. При уходе документы и сдачи домашек человека
-в пространстве команды архивируются — так же, как при сбросе прогресса
-(`reset.py`): автор переносится в `archived_student`, поле автора очищается,
-и все экраны команды, ищущие по автору, архива не видят сами. Копию своих
-документов человек получает письмом, файлами `.md`.
+только действующих участников; при уходе документы никуда не переносятся —
+остаются в базе, команда их не видит, вернулся в команду — снова видны.
+Видимость решают права по действующему членству (`permissions`), а здесь
+ушедший получает письмом копию своих документов пространства команды,
+файлами `.md`: из интерфейса пространство ушедшей команды ему не открыть.
 
 `Why:` перенос документа в личное пространство столкнулся бы с личным
 документом по тому же курсу, а отдельный раздел «из прошлых команд» стоил бы
-нового интерфейса. Вернувшийся в команду начинает её документ заново:
-архив ухода не отличить от архива сброса, и восстановление подняло бы то,
-что человек сбросил сам.
-
-Занятия и попытки квиза не архивируются: прохождение урока у человека одно
-на все пространства, а отчёт руководителю строится по действующим
-участникам.
+нового интерфейса.
 """
 
+import re
+
 import frappe
-from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning.artifacts.document import выгрузка
-from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.notices import почта_есть
 
 ДОКУМЕНТ = "Agent Student Artifact"
-СДАЧА = "Agent Homework Submission"
 
 
-def уйти(user: str, organization: str) -> dict:
-	"""Отправляет человеку копию его документов команды и архивирует их и сдачи."""
+def уйти(user: str, organization: str) -> int:
+	"""Отправляет ушедшему копию его документов команды; возвращает число файлов.
+
+	Нет почты — письма нет, уход не останавливается: документы остаются в
+	базе, а вернувшийся в команду увидит их снова.
+	"""
 	документы = frappe.get_all(
 		ДОКУМЕНТ,
 		filters={"student": user, "organization": organization},
-		fields=["name", "course", "artifact"],
+		fields=["course", "artifact"],
 	)
-	# Файлы — до архивации: выгрузка ищет документ по автору.
-	файлы = _файлы(user, organization, документы)
-	if файлы:
-		try:
-			_письмо(user, organization, файлы)
-		except frappe.OutgoingEmailError:
-			# Уход не ждёт почты: без отправки команда всё равно не должна
-			# видеть работу ушедшего. Документы остаются в архиве — копию
-			# пришлём по запросу.
-			frappe.log_error(
-				"Копия документов ушедшему не отправлена",
-				reference_doctype="Learning Organization",
-				reference_name=organization,
-			)
-			файлы = []
-
-	момент = now_datetime()
-	for документ in документы:
-		frappe.db.set_value(
-			ДОКУМЕНТ,
-			документ.name,
-			{"student": None, "archived_student": user, "archived_at": момент},
-			update_modified=False,
-		)
-	сдачи = frappe.get_all(СДАЧА, filters={"member": user, "organization": organization}, pluck="name")
-	for имя in сдачи:
-		frappe.db.set_value(
-			СДАЧА,
-			имя,
-			{"member": None, "archived_student": user, "archived_at": момент},
-			update_modified=False,
-		)
-	return {"documents": len(документы), "submissions": len(сдачи), "sent": len(файлы)}
+	if not документы or not почта_есть():
+		return 0
+	файлы, пропущено = _файлы(user, organization, документы)
+	_письмо(user, organization, файлы, пропущено)
+	return len(файлы)
 
 
-def _файлы(user: str, organization: str, документы: list) -> list[dict]:
-	"""Документы файлами `.md`; документ, чья схема снята с курса, пропускается."""
+def _файлы(user: str, organization: str, документы: list) -> tuple[list[dict], int]:
+	"""Документы файлами `.md` и сколько выгрузить не удалось.
+
+	Схему документа могли снять с курса, данные — испортить: такой документ
+	пропускается, а не роняет уход. В письме сказано, что его нет.
+	"""
 	названия = dict(
 		frappe.get_all(
 			"LMS Course",
-			filters={"name": ("in", list({д.course for д in документы}) or [""])},
+			filters={"name": ("in", list({д.course for д in документы}))},
 			fields=["name", "title"],
 			as_list=True,
 		)
 	)
-	файлы = []
+	файлы, пропущено = [], 0
 	for документ in документы:
 		try:
 			имя, текст = выгрузка(user, документ.course, organization, документ.artifact, "md")
-		except Отказ:
+		except Exception:
+			frappe.log_error(
+				"Копия документа ушедшему не собрана",
+				reference_doctype="LMS Course",
+				reference_name=документ.course,
+			)
+			пропущено += 1
 			continue
-		курс = frappe.scrub(названия.get(документ.course) or документ.course)
+		курс = re.sub(r"[^\w.-]+", "_", названия.get(документ.course) or документ.course).strip("_")
 		файлы.append({"fname": f"{курс}-{имя}", "fcontent": текст})
-	return файлы
+	return файлы, пропущено
 
 
-def _письмо(user: str, organization: str, файлы: list[dict]) -> None:
-	команда = frappe.db.get_value("Learning Organization", organization, "organization_name") or organization
+def _письмо(user: str, organization: str, файлы: list[dict], пропущено: int) -> None:
+	название = frappe.db.get_value("Learning Organization", organization, "organization_name") or organization
+	команда = frappe.utils.escape_html(название)
+	недостаёт = (
+		"<p>Некоторые документы собрать не удалось — напишите нам, пришлём их отдельно.</p>"
+		if пропущено
+		else ""
+	)
 	frappe.sendmail(
 		recipients=[user],
-		subject=f"Ваши документы из команды «{команда}»",
+		subject=f"Ваши документы из команды «{название}»",
 		message=(
-			f"<p>Вы больше не в команде «{frappe.utils.escape_html(команда)}». "
-			"Команда больше не видит ваши документы, прогресс и домашние задания.</p>"
-			"<p>Копия документов, которые вы собирали в её пространстве, — во вложении. "
-			"Если вернётесь в команду, документ команды начнётся заново.</p>"
+			f"<p>Вы больше не в команде «{команда}». Команда больше не видит ваши документы, "
+			"прогресс и домашние задания.</p>"
+			+ (
+				"<p>Копия документов, которые вы собирали в её пространстве, — во вложении.</p>"
+				if файлы
+				else ""
+			)
+			+ f"{недостаёт}"
+			+ "<p>Если вернётесь в команду, документы снова будут на месте.</p>"
 		),
 		attachments=файлы,
 		reference_doctype="Learning Organization",

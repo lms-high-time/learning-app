@@ -113,15 +113,33 @@ def условие_назначения(user: str | None = None) -> str:
 def _действующий_в_пространстве(таблица: str, автор: str) -> str:
 	"""SQL: автор записи — действующий участник организации её пространства.
 
-	`Why:` команда видит работу только действующих участников
-	(learning-services#585). Занятия не архивируются при уходе — прохождение
-	урока у человека одно на все пространства, — поэтому ушедшего отсекает
-	условие, а не очищенный автор.
+	`Why:` команда видит документы, домашки и занятия только действующих
+	участников (learning-services#585). Правило по членству, а не по отметке на
+	записях: при уходе ничего не переписывается, вернувшийся видит всё снова,
+	удалённое членство и ушедшие до правила закрыты тем же условием. У
+	архивной записи (сброс прогресса) автор пуст — её условие не пропускает.
 	"""
 	return (
 		"exists (select 1 from `tabOrganization Membership` m "
 		f"where m.organization = {таблица}.`organization` and m.user = {таблица}.`{автор}` "
 		f"and m.status = {frappe.db.escape(ЧЛЕНСТВО_ДЕЙСТВУЕТ)})"
+	)
+
+
+def сдачи_ушедших(организации: list[str]) -> list[str]:
+	"""Сдачи пространств этих организаций, чей автор в организации больше не состоит.
+
+	Для явных отборов через `frappe.get_all` (очередь куратора): хуки прав там
+	не применяются, а пару «автор — организация сдачи» фильтром не выразить.
+	Список короткий — только ушедшие, а не все сдачи.
+	"""
+	if not организации:
+		return []
+	таблица = "`tabAgent Homework Submission`"
+	return frappe.db.sql_list(
+		f"select name from {таблица} where {таблица}.`organization` in ({_список(организации)})"
+		f" and ifnull({таблица}.`member`, '') != ''"
+		f" and not {_действующий_в_пространстве(таблица, 'member')}"
 	)
 
 
@@ -288,7 +306,7 @@ def доступен_ответ(doc, ptype: str = "read", user: str | None = Non
 
 
 def общие_организации(менеджер: str, ученик: str) -> list[str]:
-	"""Организации вызывающего, где ученик сейчас состоит; сотруднику платформы — все его.
+	"""Организации вызывающего, где ученик сейчас состоит; сотруднику платформы — его без отбора.
 
 	Нужна явной проверкой в методах отчётности: `frappe.get_all` — это
 	`get_list(ignore_permissions=True)`, и `permission_query_conditions` к нему
@@ -370,13 +388,11 @@ def условие_артефакта(user: str | None = None) -> str:
 	организации = организации_с_документами(user)
 	if not организации:
 		return свои
-	# Архивный документ (автор ушёл из организации или сбросил курс) команде
-	# не виден: его автор очищен (learning-services#585).
-	пространства = (
-		f"(`tabAgent Student Artifact`.`organization` in ({_список(организации)})"
-		" and ifnull(`tabAgent Student Artifact`.`student`, '') != '')"
+	таблица = "`tabAgent Student Artifact`"
+	return (
+		f"({свои} or ({таблица}.`organization` in ({_список(организации)})"
+		f" and {_действующий_в_пространстве(таблица, 'student')}))"
 	)
-	return f"({свои} or {пространства})"
 
 
 def доступен_артефакт(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -386,9 +402,9 @@ def доступен_артефакт(doc, ptype: str = "read", user: str | None
 		return False
 	if видит_всё(user) or doc.student == user:
 		return True
-	if not doc.student:
+	if not doc.organization or doc.organization not in организации_с_документами(user):
 		return False
-	return bool(doc.organization) and doc.organization in организации_с_документами(user)
+	return bool(doc.student) and действует_в(doc.student, doc.organization)
 
 
 #: Методисты видят все сдачи домашек, включая личные (learning-services#439):
@@ -411,9 +427,10 @@ def условие_сдачи(user: str | None = None) -> str:
 	организации = организации_менеджера(user)
 	if not организации:
 		return свои
-	# Архивная сдача (ученик ушёл из организации или сбросил курс) руководителю
-	# не видна: её автор очищен (learning-services#585).
-	return f"({свои} or ({таблица}.`organization` in ({_список(организации)}) and ifnull({таблица}.`member`, '') != ''))"
+	return (
+		f"({свои} or ({таблица}.`organization` in ({_список(организации)})"
+		f" and {_действующий_в_пространстве(таблица, 'member')}))"
+	)
 
 
 def доступна_сдача(doc, ptype: str = "read", user: str | None = None) -> bool:
@@ -429,9 +446,9 @@ def доступна_сдача(doc, ptype: str = "read", user: str | None = Non
 		return False
 	if методист(user) or doc.member == user:
 		return True
-	if not doc.member:
+	if not doc.organization or doc.organization not in организации_менеджера(user):
 		return False
-	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+	return bool(doc.member) and действует_в(doc.member, doc.organization)
 
 
 def может_проверять(doc, user: str) -> bool:
@@ -445,7 +462,9 @@ def может_проверять(doc, user: str) -> bool:
 		return False
 	if видит_всё(user) or методист(user):
 		return True
-	return bool(doc.organization) and doc.organization in организации_менеджера(user)
+	if not doc.organization or doc.organization not in организации_менеджера(user):
+		return False
+	return действует_в(doc.member, doc.organization)
 
 
 def доступен_desk(user: str | None = None) -> bool:

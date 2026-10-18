@@ -24,6 +24,7 @@ from lms_frappe_app.agent_learning.permissions import (
 	методист,
 	может_проверять,
 	организации_менеджера,
+	сдачи_ушедших,
 )
 from lms_frappe_app.api import контракт, текущий_пользователь
 
@@ -54,7 +55,11 @@ def _отбор(куратор: str) -> list | None:
 	организации = организации_менеджера(куратор)
 	if not организации:
 		return None
-	return [*фильтры, ["organization", "in", организации]]
+	фильтры.append(["organization", "in", организации])
+	# Сдачи ушедших руководитель не проверяет и не видит (learning-services#585).
+	if ушедших := сдачи_ушедших(организации):
+		фильтры.append(["name", "not in", ушедших])
+	return фильтры
 
 
 def _названия_организаций(организации) -> dict[str | None, str]:

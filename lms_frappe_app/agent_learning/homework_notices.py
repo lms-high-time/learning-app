@@ -360,6 +360,20 @@ def _дайджесты(сейчас, _получатели=None) -> list[dict]:
 	):
 		ведёт.setdefault(строка.instructor, set()).add(строка.parent)
 
+	# Сдачи ушедших из организации её руководителю не считаются
+	# (learning-services#585).
+	действующие = {
+		(строка.user, строка.organization)
+		for строка in frappe.get_all(
+			"Organization Membership",
+			filters={
+				"user": ("in", list({с.member for с in ждут if с.organization}) or [""]),
+				"status": ЧЛЕНСТВО_ДЕЙСТВУЕТ,
+			},
+			fields=["user", "organization"],
+		)
+	}
+
 	def построить(куратор: str) -> dict | None:
 		свои_роли = роли[куратор]
 		видит = [
@@ -368,7 +382,10 @@ def _дайджесты(сейчас, _получатели=None) -> list[dict]:
 			if с.member != куратор
 			and (
 				"Moderator" in свои_роли
-				or (с.organization and с.organization in руководит.get(куратор, set()))
+				or (
+					с.organization in руководит.get(куратор, set())
+					and (с.member, с.organization) in действующие
+				)
 				or курсы.get(с.lesson) in ведёт.get(куратор, set())
 			)
 		]

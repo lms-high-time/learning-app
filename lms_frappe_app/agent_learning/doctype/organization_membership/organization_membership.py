@@ -30,12 +30,20 @@ class OrganizationMembership(Document):
 		# Вернувшийся догоняет курсы, назначенные без него, как новичок.
 		if not self.flags.in_insert and self.has_value_changed("status"):
 			self.догнать_назначения()
-			# Ушедший забирает документы с собой, команда их больше не видит (learning-services#585).
+			# Ушедшему — копия документов: команда их больше не видит, а из
+			# интерфейса ему пространство не открыть (learning-services#585).
 			if self.status == ЧЛЕНСТВО_ЗАКРЫТО:
 				from lms_frappe_app.agent_learning.leave import уйти
 
 				уйти(self.user, self.organization)
 		обновить_роль_руководителя(self.user)
+
+	def on_trash(self):
+		# Удалённое членство — тот же уход: видимость решает действующее членство.
+		if self.status == ЧЛЕНСТВО_ДЕЙСТВУЕТ:
+			from lms_frappe_app.agent_learning.leave import уйти
+
+			уйти(self.user, self.organization)
 
 	def after_delete(self):
 		обновить_роль_руководителя(self.user)
