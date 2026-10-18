@@ -14,6 +14,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 import frappe
+from frappe.model.delete_doc import delete_dynamic_links
 from frappe.query_builder import Order
 from frappe.utils import getdate, now_datetime, nowdate
 
@@ -783,6 +784,13 @@ def forget(key: str, course: str | None = None) -> dict:
 	"""Удаляет заметку об ученике по ключу.
 
 	Ученик вправе стереть о себе всё: заметки ведутся о нём и доступны ему.
+	Удаление — без копии в корзине (Deleted Document) и вместе с историей правок
+	(Version). `Why:` обычное удаление оставляло полный текст заметки в корзине,
+	где его видит администратор, а политика конфиденциальности обещает удаление
+	(learning-services#578). Историю `frappe.delete_doc` убирает задачей в
+	очереди после коммита (`delete_dynamic_links`), без повтора: упади воркер —
+	прежние тексты остались бы навсегда. Поэтому метод зовёт её сам, сразу, а
+	задача из очереди потом ничего не находит.
 	"""
 	имя = frappe.db.exists(
 		"Agent Student Note",
@@ -794,7 +802,8 @@ def forget(key: str, course: str | None = None) -> dict:
 	)
 	if not имя:
 		raise Отказ(ЗАМЕТКА_НЕ_НАЙДЕНА, "Такой заметки нет", key=key)
-	frappe.delete_doc("Agent Student Note", имя, ignore_permissions=True)
+	frappe.delete_doc("Agent Student Note", имя, ignore_permissions=True, delete_permanently=True)
+	delete_dynamic_links("Agent Student Note", имя)
 	return {"key": key}
 
 
