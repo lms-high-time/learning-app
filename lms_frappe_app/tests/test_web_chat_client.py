@@ -13,6 +13,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.install import (
+	ИМЯ_КЛИЕНТА_ЧАТА,
 	КЛЮЧ_ЧАТА_ID,
 	КЛЮЧ_ЧАТА_ВОЗВРАТ,
 	КЛЮЧ_ЧАТА_СЕКРЕТ,
@@ -63,6 +64,7 @@ class IntegrationTestWebChatClient(IntegrationTestCase):
 		клиент = frappe.get_doc("OAuth Client", ID)
 		# id совпадает с тем, что знает MCP-сервис: Frappe пишет client_id из имени.
 		self.assertEqual(клиент.client_id, ID)
+		self.assertEqual(клиент.app_name, ИМЯ_КЛИЕНТА_ЧАТА)
 		self.assertEqual(клиент.client_secret, СЕКРЕТ)
 		self.assertEqual(клиент.redirect_uris, ВОЗВРАТ)
 		self.assertEqual(клиент.default_redirect_uri, ВОЗВРАТ)
@@ -82,6 +84,19 @@ class IntegrationTestWebChatClient(IntegrationTestCase):
 		обеспечить_клиента_веб_чата()
 
 		self.assertEqual(frappe.db.get_value("OAuth Client", ID, "modified"), было)
+
+	def test_прежнее_имя_клиента_меняется_миграцией(self):
+		"""Имя платформы сменилось (learning-services#575): клиент на стенде
+		переименовывается сам, id и секрет — прежние."""
+		self._задать()
+		обеспечить_клиента_веб_чата()
+		frappe.db.set_value("OAuth Client", ID, "app_name", "Прежнее имя")
+
+		обеспечить_клиента_веб_чата()
+
+		клиент = frappe.get_doc("OAuth Client", ID)
+		self.assertEqual(клиент.app_name, ИМЯ_КЛИЕНТА_ЧАТА)
+		self.assertEqual((клиент.client_id, клиент.client_secret), (ID, СЕКРЕТ))
 
 	def test_смена_секрета_и_адреса_подхватывается(self):
 		self._задать()
