@@ -783,6 +783,10 @@ def forget(key: str, course: str | None = None) -> dict:
 	"""Удаляет заметку об ученике по ключу.
 
 	Ученик вправе стереть о себе всё: заметки ведутся о нём и доступны ему.
+	Удаление — без копии в корзине (Deleted Document); историю правок (Version)
+	Frappe удаляет вместе с записью. `Why:` обычное удаление оставляло полный
+	текст заметки в корзине, где его видит администратор, а политика
+	конфиденциальности обещает удаление (learning-services#578).
 	"""
 	имя = frappe.db.exists(
 		"Agent Student Note",
@@ -794,7 +798,7 @@ def forget(key: str, course: str | None = None) -> dict:
 	)
 	if not имя:
 		raise Отказ(ЗАМЕТКА_НЕ_НАЙДЕНА, "Такой заметки нет", key=key)
-	frappe.delete_doc("Agent Student Note", имя, ignore_permissions=True)
+	frappe.delete_doc("Agent Student Note", имя, ignore_permissions=True, delete_permanently=True)
 	return {"key": key}
 
 
