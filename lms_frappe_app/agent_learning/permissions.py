@@ -131,7 +131,8 @@ def сдачи_ушедших(организации: list[str]) -> list[str]:
 
 	Для явных отборов через `frappe.get_all` (очередь куратора): хуки прав там
 	не применяются, а пару «автор — организация сдачи» фильтром не выразить.
-	Список короткий — только ушедшие, а не все сдачи.
+	Список — только сдачи ушедших, а не все; отбор идёт по индексу
+	`organization`. Вырастет — собрать очередь одним запросом с NOT EXISTS.
 	"""
 	if not организации:
 		return []
@@ -267,7 +268,9 @@ def доступна_попытка(doc, ptype: str = "read", user: str | None =
 	организации = организации_менеджера(user)
 	if not организации or not doc.session:
 		return False
-	занятие = frappe.db.get_value("Agent Learning Session", doc.session, ["organization", "student"], as_dict=True)
+	занятие = frappe.db.get_value(
+		"Agent Learning Session", doc.session, ["organization", "student"], as_dict=True
+	)
 	return bool(
 		занятие
 		and занятие.organization in организации

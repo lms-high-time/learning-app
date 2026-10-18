@@ -20,7 +20,13 @@ import re
 import frappe
 
 from lms_frappe_app.agent_learning.artifacts.document import выгрузка
+from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.notices import почта_есть
+
+#: Ошибки сборки одного документа, после которых уход продолжается. Ошибки
+#: базы сюда не входят: после взаимоблокировки транзакция уже испорчена.
+ОШИБКИ_ВЫГРУЗКИ = (Отказ, frappe.ValidationError, ValueError, KeyError, TypeError)
+ТОЧКА_ПИСЬМА = "leave_copy"
 
 ДОКУМЕНТ = "Agent Student Artifact"
 
@@ -61,7 +67,7 @@ def _файлы(user: str, organization: str, документы: list) -> tuple
 	for документ in документы:
 		try:
 			имя, текст = выгрузка(user, документ.course, organization, документ.artifact, "md")
-		except Exception:
+		except ОШИБКИ_ВЫГРУЗКИ:
 			frappe.log_error(
 				"Копия документа ушедшему не собрана",
 				reference_doctype="LMS Course",
@@ -82,6 +88,24 @@ def _письмо(user: str, organization: str, файлы: list[dict], проп
 		if пропущено
 		else ""
 	)
+	# Письмо не держит уход: сбой постановки в очередь (адрес, ящик) — запись
+	# в журнал ошибок, а не откат ухода.
+	frappe.db.savepoint(ТОЧКА_ПИСЬМА)
+	try:
+		_поставить(user, organization, название, команда, файлы, недостаёт)
+	except (frappe.OutgoingEmailError, frappe.ValidationError):
+		frappe.db.rollback(save_point=ТОЧКА_ПИСЬМА)
+		frappe.clear_last_message()
+		frappe.log_error(
+			"Копия документов ушедшему не отправлена",
+			reference_doctype="Learning Organization",
+			reference_name=organization,
+		)
+
+
+def _поставить(
+	user: str, organization: str, название: str, команда: str, файлы: list[dict], недостаёт: str
+) -> None:
 	frappe.sendmail(
 		recipients=[user],
 		subject=f"Ваши документы из команды «{название}»",

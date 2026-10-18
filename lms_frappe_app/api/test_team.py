@@ -195,6 +195,8 @@ class IntegrationTestTeam(IntegrationTestCase):
 				"сдача в очереди": сдача in {п["id"] for п in очередь},
 				"занятие напрямую": permissions.доступно_занятие(занятие, "read", self.руководитель),
 				"занятие списком": bool(занятия),
+				"сдача в счётчике": self.от_имени(self.руководитель, review.pending_count)["data"]["count"]
+				> 0,
 			}
 
 		self.assertEqual(set(видно().values()), {True}, "предусловие: работа участника команде видна")
@@ -221,6 +223,33 @@ class IntegrationTestTeam(IntegrationTestCase):
 		членство.save(ignore_permissions=True)
 		with self.subTest("вернулся — видно снова"):
 			self.assertEqual(set(видно().values()), {True})
+
+	def test_подробности_только_по_организациям_где_ученик_состоит(self):
+		"""Руководитель двух организаций; ученик ушёл из одной — по ней в
+		подробностях ни курсов, ни занятий; ушёл из обеих — отказ (#585)."""
+		суффикс = frappe.generate_hash(length=6)
+		двух = создать_менеджера(f"team-m2-{суффикс}@example.com", self.компания)
+		добавить_в_организацию(двух, self.другая, role="Manager")
+		frappe.db.set_value(
+			"Agent Learning Session",
+			создать_занятие(self.сотрудник, self.урок),
+			"organization",
+			self.компания,
+		)
+
+		self.уйти(self.сотрудник)
+
+		подробности = self.от_имени(двух, manager.student_detail, user=self.сотрудник)["data"]
+		self.assertTrue(подробности["courses"])
+		self.assertEqual(подробности["sessions"], [])
+
+		членство = frappe.get_doc(
+			"Organization Membership", {"user": self.сотрудник, "organization": self.другая}
+		)
+		членство.status = "Left"
+		членство.save(ignore_permissions=True)
+		отказ = self.от_имени(двух, manager.student_detail, user=self.сотрудник)
+		self.assertEqual(отказ["error"]["code"], "not_your_student")
 
 	def test_удалённое_членство_как_уход(self):
 		"""Членство удалили в Desk — работа бывшего участника команде не видна."""

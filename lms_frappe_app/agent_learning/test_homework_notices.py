@@ -262,15 +262,29 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.assertEqual(len(self.дайджест(модератор)), 1)
 
 	def test_дайджест_руководителю_не_уходит(self):
-		"""Пустая очередь — без письма; отключённому руководителю — без дайджеста.
+		"""Пустая очередь — без письма; отключённому руководителю — без дайджеста;
+		сдача ушедшего из организации — не в счёт (learning-services#585).
 		У каждого случая свои ученик, урок, организация и руководитель."""
 
 		def отключённый():
 			self.сдать(self.организация)
 			frappe.db.set_value("User", self.менеджер, "enabled", 0)
 
+		def ушёл():
+			self.сдать(self.организация)
+			frappe.db.set_value(
+				"Organization Membership",
+				{"user": self.ученик, "organization": self.организация},
+				"status",
+				"Left",
+			)
+
 		for номер, (что, подготовить) in enumerate(
-			{"пустая очередь": lambda: None, "отключённый руководитель": отключённый}.items()
+			{
+				"пустая очередь": lambda: None,
+				"отключённый руководитель": отключённый,
+				"сдача ушедшего": ушёл,
+			}.items()
 		):
 			with self.subTest(что):
 				if номер:
