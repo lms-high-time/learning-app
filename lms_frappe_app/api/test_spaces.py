@@ -211,13 +211,23 @@ class IntegrationTestDocumentAccess(IntegrationTestCase):
 			self.assertFalse(self.читает(self.коллега, "икс"))
 
 	def test_документ_ушедшего_автора(self):
-		"""Ушедший автор свой документ читает, а документ остаётся у организации."""
+		"""Документ ушедшего уходит в архив: его не читает ни организация, ни
+		сам автор — копию он получает письмом (learning-services#585)."""
 		выйти(self.сотрудник, self.икс)
 
-		with self.subTest("автор читает свой"):
-			self.assertTrue(self.читает(self.сотрудник, "икс"))
-		with self.subTest("руководитель читает документ ушедшего"):
-			self.assertTrue(self.читает(self.руководитель_икс, "икс"))
+		with self.subTest("руководитель документ ушедшего не читает"):
+			self.assertFalse(self.читает(self.руководитель_икс, "икс"))
+		with self.subTest("в архиве с автором"):
+			self.assertTrue(
+				frappe.db.exists(
+					"Agent Student Artifact",
+					{
+						"archived_student": self.сотрудник,
+						"organization": self.икс,
+						"student": ("is", "not set"),
+					},
+				)
+			)
 
 	def test_ушедший_руководитель_теряет_доступ_сразу(self):
 		выйти(self.руководитель_икс, self.икс)

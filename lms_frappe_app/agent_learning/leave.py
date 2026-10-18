@@ -41,7 +41,18 @@ def уйти(user: str, organization: str) -> dict:
 	# Файлы — до архивации: выгрузка ищет документ по автору.
 	файлы = _файлы(user, organization, документы)
 	if файлы:
-		_письмо(user, organization, файлы)
+		try:
+			_письмо(user, organization, файлы)
+		except frappe.OutgoingEmailError:
+			# Уход не ждёт почты: без отправки команда всё равно не должна
+			# видеть работу ушедшего. Документы остаются в архиве — копию
+			# пришлём по запросу.
+			frappe.log_error(
+				"Копия документов ушедшему не отправлена",
+				reference_doctype="Learning Organization",
+				reference_name=organization,
+			)
+			файлы = []
 
 	момент = now_datetime()
 	for документ in документы:
