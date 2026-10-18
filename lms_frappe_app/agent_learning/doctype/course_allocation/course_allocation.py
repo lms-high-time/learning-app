@@ -71,11 +71,11 @@ class CourseAllocation(Document):
 		)
 		if организация.status != "Active":
 			frappe.throw(
-				frappe._("Организация {0} приостановлена").format(self.organization)
+				frappe._("Команда {0} приостановлена").format(self.organization)
 			)
 		if not организация.разрешает_курс(self.course):
 			frappe.throw(
-				frappe._("Курс {0} не открыт организации {1}").format(
+				frappe._("Курс {0} не открыт команде {1}").format(
 					self.course, self.organization
 				)
 			)

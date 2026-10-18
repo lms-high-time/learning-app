@@ -81,7 +81,7 @@ class OrganizationMembership(Document):
 		)
 		if уже_есть:
 			frappe.throw(
-				frappe._("{0} уже состоит в организации {1}").format(self.user, self.organization),
+				frappe._("{0} уже состоит в команде {1}").format(self.user, self.organization),
 				frappe.DuplicateEntryError,
 			)
 

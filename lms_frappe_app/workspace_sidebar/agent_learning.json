@@ -250,7 +250,7 @@
    "icon": "building",
    "indent": 1,
    "keep_closed": 0,
-   "label": "Организации",
+   "label": "Команды",
    "link_type": "DocType",
    "show_arrow": 0,
    "type": "Section Break"
@@ -261,7 +261,7 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
-   "label": "Организации",
+   "label": "Команды",
    "link_to": "Learning Organization",
    "link_type": "DocType",
    "show_arrow": 0,
@@ -339,7 +339,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-09 18:00:00.000000",
+ "modified": "2026-10-19 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",

@@ -23,11 +23,11 @@
    "fieldname": "organization",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Организация",
+   "label": "Команда",
    "options": "Learning Organization",
    "reqd": 1,
    "search_index": 1,
-   "description": "Назначение — путь для сотрудников компании: даёт дедлайн, политику квиза организации и строку в отчёте руководителя. Частного ученика записывают кнопкой «Записать» на странице курса."
+   "description": "Назначение — путь для участников команды: даёт дедлайн, политику квиза команды и строку в отчёте ведущего. Ученика вне команды записывают кнопкой «Записать» на странице курса."
   },
   {
    "fieldname": "course",
@@ -79,17 +79,17 @@
   },
   {
    "default": "0",
-   "description": "Сотрудник сам взял курс из каталога организации — не поручение руководителя.",
+   "description": "Участник сам взял курс из каталога команды — не поручение ведущего.",
    "fieldname": "chosen_by_member",
    "fieldtype": "Check",
-   "label": "Выбран сотрудником",
+   "label": "Выбран участником",
    "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-30 20:00:00.000000",
+ "modified": "2026-10-19 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Course Allocation",
