@@ -360,7 +360,7 @@ def _расходится(ключ, client_id: str, client_secret: str) -> bool:
 КЛЮЧ_ЧАТА_ID = "web_chat_oauth_client_id"
 КЛЮЧ_ЧАТА_СЕКРЕТ = "web_chat_oauth_client_secret"
 КЛЮЧ_ЧАТА_ВОЗВРАТ = "web_chat_redirect_uri"
-ИМЯ_КЛИЕНТА_ЧАТА = "MCP-LMS Web Chat"
+ИМЯ_КЛИЕНТА_ЧАТА = "Cenda Web Chat"
 
 
 def обеспечить_клиента_веб_чата() -> None:
