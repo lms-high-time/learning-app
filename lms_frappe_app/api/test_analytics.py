@@ -4,6 +4,7 @@
 """Идентификатор для аналитики — без email и имени (learning-services#582)."""
 
 import hashlib
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -34,9 +35,14 @@ class IntegrationTestAnalyticsId(IntegrationTestCase):
 		self.assertEqual(первый, self.от_имени(self.первый), "стабилен между вызовами")
 		self.assertNotEqual(первый, self.от_имени(self.второй), "у разных людей разный")
 		self.assertRegex(первый, r"^[0-9a-f]{32}$")
-		self.assertNotIn(self.первый.split("@")[0], первый)
 		# Без секрета сайта не подобрать: голый хеш адреса — не он.
 		self.assertFalse(hashlib.sha256(self.первый.encode()).hexdigest().startswith(первый))
+
+	def test_регистр_не_важен_а_ключ_важен(self):
+		self.assertEqual(analytics.идентификатор("A@Example.com"), analytics.идентификатор("a@example.com"))
+		прежний = analytics.идентификатор("a@example.com")
+		with patch.object(analytics, "get_encryption_key", return_value="другой-секрет"):
+			self.assertNotEqual(analytics.идентификатор("a@example.com"), прежний)
 
 	def test_гостю_нет(self):
 		frappe.set_user("Guest")
