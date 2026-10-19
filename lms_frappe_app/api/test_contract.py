@@ -31,7 +31,7 @@ from frappe.tests import IntegrationTestCase
 import lms_frappe_app.api
 from lms_frappe_app.agent_learning.releases import schema as схема_релиза
 from lms_frappe_app.agent_learning.releases import service as релизы
-from lms_frappe_app.api import authoring, manager, public, review, student
+from lms_frappe_app.api import analytics, authoring, manager, public, review, student
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
@@ -447,6 +447,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 
 		self.сверить("student.whoami", student.whoami())
+		self.сверить("analytics.analytics_id", analytics.analytics_id())
 		self.сверить("student.list_catalog", student.list_catalog())
 		self.сверить("student.enroll", student.enroll(course=курс))
 
