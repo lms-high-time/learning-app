@@ -67,9 +67,9 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 			self.assertIn(фильтр["status"][1], статусы)
 
 	def test_сайдбар_модуля(self):
-		"""Сайдбар начинается с обзора и ведёт на каждый доктайп модуля. Пин на
-		состав: новый доктайп без строки в сайдбаре снова станет невидимым, и
-		заметят это по прямой ссылке, как в прошлый раз."""
+		"""Сайдбар начинается с обзора и ведёт на каждый доктайп и отчёт модуля.
+		Пин на состав: новый доктайп без строки в сайдбаре снова станет
+		невидимым, и заметят это по прямой ссылке, как в прошлый раз."""
 		сайдбар = frappe.get_doc("Workspace Sidebar", WORKSPACE)
 
 		with self.subTest("ведёт на каждый доктайп модуля"):
@@ -78,6 +78,15 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 
 			self.assertTrue(сайдбар.standard)
 			self.assertEqual(доктайпы - ссылки, set(), "доктайпы модуля без пункта в сайдбаре")
+
+		with self.subTest("ведёт на каждый отчёт модуля"):
+			ссылки = {п.link_to for п in сайдбар.items if п.type == "Link" and п.link_type == "Report"}
+			отчёты = set(
+				frappe.get_all("Report", filters={"module": МОДУЛЬ, "is_standard": "Yes"}, pluck="name")
+			)
+
+			self.assertEqual(отчёты - ссылки, set(), "отчёты модуля без пункта в сайдбаре")
+			self.assertIn("Agent Connections", отчёты)
 
 		with self.subTest("начинается с обзора"):
 			первый = сайдбар.items[0]

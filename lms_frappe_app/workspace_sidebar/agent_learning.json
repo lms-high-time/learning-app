@@ -106,6 +106,18 @@
    "icon": "",
    "indent": 0,
    "keep_closed": 0,
+   "label": "Подключения агентов",
+   "link_to": "Agent Connections",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "",
+   "indent": 0,
+   "keep_closed": 0,
    "label": "Занятия",
    "link_to": "Agent Learning Session",
    "link_type": "DocType",
@@ -351,7 +363,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-19 12:00:00.000000",
+ "modified": "2026-10-19 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Learning",
