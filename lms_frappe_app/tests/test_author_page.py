@@ -12,6 +12,7 @@ import frappe
 import jinja2
 import jinja2.nodes
 from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.agent_learning.releases import lesson_map
@@ -570,13 +571,19 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		без_третьего["lessons"] = без_третьего["lessons"][:2]
 		del без_третьего["agent"]["lessons"]["l-3"]
 		authoring.publish_release(release=без_третьего)
+		# Метки создания — явные и обратные порядку вызовов: группа идёт по ним,
+		# а часы контейнера тестов отступают назад (learning-services#509).
+		for часов, ид in enumerate((ждёт_агента, снятый), start=1):
+			frappe.db.set_value(
+				"Agent Author Note", ид, "creation", add_to_date(now_datetime(), hours=-часов)
+			)
 
 		с = сведения_для(self.куратор, course=self.курс, view="notes")
 
 		очередь = {группа: [з["id"] for з in записи] for группа, записи in с["notes_queue"].items()}
 		self.assertEqual(
 			очередь,
-			{"check": [сделано], "question": [вопрос_агента], "agent": [ждёт_агента, снятый], "accepted": []},
+			{"check": [сделано], "question": [вопрос_агента], "agent": [снятый, ждёт_агента], "accepted": []},
 		)
 		self.assertEqual(с["course"]["notes_attention"], 2)
 		снятая = next(з for з in с["notes_queue"]["agent"] if з["id"] == снятый)

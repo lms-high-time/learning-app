@@ -11,8 +11,10 @@ from functools import cached_property
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import add_days, now_datetime
 
 from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.releases.index import РЕЛИЗ
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -135,6 +137,25 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 	def ревизия(self) -> str:
 		return self.отметки()["revision"]
 
+	def состарить(self, курс: str | None = None) -> str:
+		"""Отметки курса (по умолчанию — своего), его релиза и заметок — на день
+		назад; возвращает ревизию курса.
+
+		`Why:` ревизия — это метки `modified`, а часы одноразового контейнера
+		тестов отступают назад и совпадают до микросекунды: «следующая запись
+		позже» держится только против метки, заведомо оставшейся в прошлом
+		(learning-services#509).
+		"""
+		курс = курс or self.курс
+		назад = add_days(now_datetime(), -1)
+		frappe.db.set_value("LMS Course", курс, "modified", назад, update_modified=False)
+		релиз = frappe.db.get_value("LMS Course", курс, "active_release")
+		if релиз:
+			frappe.db.set_value(РЕЛИЗ, релиз, "modified", назад, update_modified=False)
+		for заметка in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
+			frappe.db.set_value("Agent Author Note", заметка, "modified", назад, update_modified=False)
+		return authoring.course_revision(course=курс)["data"]["revision"]
+
 	def test_новый_релиз_двигает_ревизию_а_тот_же_и_чтение_нет(self):
 		до = self.ревизия()
 		authoring.course_release(course=self.курс)
@@ -145,6 +166,7 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 		self.опубликовать()
 		self.assertEqual(self.ревизия(), до)
 
+		до = self.состарить()
 		релиз = пример_релиза(self.ключ)
 		релиз["lessons"][0]["title"] = "Урок первый, переписанный"
 		self.опубликовать(релиз)
@@ -157,30 +179,34 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 
 		ид = authoring.add_note(course=self.курс, target="course", text="Проверь карточку")["data"]["id"]
 		после_записи = self.отметки()
+		self.assertEqual(после_записи["revision"], до["revision"])
+		self.assertIsNotNone(после_записи["notes_revision"])
+
+		self.состарить()
+		перед_ответом = self.отметки()
 		authoring.reply_note(note=ид, text="Уточню: обещание")
 		после_ответа = self.отметки()
 
-		self.assertEqual(после_записи["revision"], до["revision"])
-		self.assertIsNotNone(после_записи["notes_revision"])
-		self.assertGreater(после_ответа["notes_revision"], после_записи["notes_revision"])
+		self.assertEqual(после_ответа["revision"], перед_ответом["revision"])
+		self.assertGreater(после_ответа["notes_revision"], перед_ответом["notes_revision"])
 
 	def test_снятие_с_публикации_и_анонс_двигают_ревизию(self):
-		было = self.ревизия()
+		было = self.состарить()
 		authoring.publish_course(course=self.курс)
-		до = self.ревизия()
-		self.assertGreater(до, было)
+		self.assertGreater(self.ревизия(), было)
+		до = self.состарить()
 		authoring.unpublish_course(course=self.курс)
-		после_снятия = self.ревизия()
-		self.assertGreater(после_снятия, до)
+		self.assertGreater(self.ревизия(), до)
 
+		до = self.состарить()
 		ответ = authoring.announce_course(course=self.курс)
 
 		self.assertTrue(ответ["ok"], ответ)
-		self.assertGreater(self.ревизия(), после_снятия)
+		self.assertGreater(self.ревизия(), до)
 
 	def test_анонс_без_релиза_отмечается_карточкой(self):
 		анонс = authoring.create_course(title="Анонс", summary="было")["data"]["id"]
-		до = authoring.course_revision(course=анонс)["data"]["revision"]
+		до = self.состарить(анонс)
 		authoring.update_course(course=анонс, summary="стало")
 
 		self.assertGreater(authoring.course_revision(course=анонс)["data"]["revision"], до)

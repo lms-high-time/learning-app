@@ -65,7 +65,16 @@ class IntegrationTestLessonSession(IntegrationTestCase):
 			self.assertEqual(данные["session"], None)
 
 		первое = создать_занятие(self.ученик, self.урок)
-		frappe.db.set_value("Agent Learning Session", первое, "status", "Abandoned")
+		# Последнее занятие выбирается по метке создания, а часы контейнера тестов
+		# отступают назад (learning-services#509).
+		frappe.db.set_value(
+			"Agent Learning Session",
+			первое,
+			{
+				"status": "Abandoned",
+				"creation": frappe.utils.add_to_date(frappe.utils.now_datetime(), days=-1),
+			},
+		)
 		последнее = создать_занятие(self.ученик, self.урок)
 		with self.subTest("последнее занятие урока"):
 			данные = student.lesson_session(self.урок)["data"]
