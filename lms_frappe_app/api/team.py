@@ -37,7 +37,7 @@ def _требовать_доступ(organization: str) -> tuple[str, str]:
 	зритель = текущий_пользователь()
 	доступ = доступ_к_команде(зритель, organization)
 	if not доступ:
-		raise Отказ(КОМАНДА_НЕДОСТУПНА, "Команда этой организации вам не открыта", organization=organization)
+		raise Отказ(КОМАНДА_НЕДОСТУПНА, "Эта команда вам не открыта", organization=organization)
 	return зритель, доступ
 
 
@@ -134,7 +134,7 @@ def team_documents(organization: str, course: str, artifact: str) -> dict:
 	"""
 	_требовать_доступ(organization)
 	if course not in _курсы_организации(organization):
-		raise Отказ(КУРС_НЕ_ОРГАНИЗАЦИИ, "Этот курс организация не назначала", course=course)
+		raise Отказ(КУРС_НЕ_ОРГАНИЗАЦИИ, "Этот курс команда не назначала", course=course)
 	схема = _действующая_схема(course, artifact)
 	# Только действующие: документы ушедших команде не видны (learning-services#585).
 	участники = {у["user"]: у for у in _участники(organization) if not у["left"]}
@@ -199,7 +199,7 @@ def _руководитель(organization: str) -> str:
 	"""Руководитель организации или сотрудник платформы; иначе — отказ."""
 	зритель, доступ = _требовать_доступ(organization)
 	if доступ != "manager":
-		raise Отказ(НЕТ_ПРАВА, "Управлять командой может руководитель", organization=organization)
+		raise Отказ(НЕТ_ПРАВА, "Управлять командой может ведущий", organization=organization)
 	return зритель
 
 
@@ -212,7 +212,7 @@ def _администратор(organization: str) -> str:
 	зритель = _руководитель(organization)
 	if _админ_ли(зритель, organization):
 		return зритель
-	raise Отказ(НЕТ_ПРАВА, "Менять роли может администратор организации", organization=organization)
+	raise Отказ(НЕТ_ПРАВА, "Менять роли может администратор команды", organization=organization)
 
 
 def _админ_ли(user: str, organization: str) -> bool:
@@ -240,7 +240,7 @@ def _приглашение(token: str):
 def _членство(organization: str, user: str):
 	имя = frappe.db.get_value("Organization Membership", {"user": user, "organization": organization})
 	if not имя:
-		raise Отказ(НЕ_УЧАСТНИК, "Этот человек не состоит в организации", user=user)
+		raise Отказ(НЕ_УЧАСТНИК, "Этот человек не состоит в команде", user=user)
 	return frappe.get_doc("Organization Membership", имя)
 
 
@@ -350,11 +350,11 @@ def accept_invite(token: str) -> dict:
 	приглашение = _приглашение(token)
 	организация = приглашение.organization
 	if frappe.db.get_value("Learning Organization", организация, "status") != "Active":
-		raise Отказ(ПРИГЛАШЕНИЕ_НЕ_НАЙДЕНО, "Организация сейчас приостановлена")
+		raise Отказ(ПРИГЛАШЕНИЕ_НЕ_НАЙДЕНО, "Команда сейчас приостановлена")
 	имя = frappe.db.get_value("Organization Membership", {"user": ученик, "organization": организация})
 	уже_в_ней = имя and frappe.db.get_value("Organization Membership", имя, "status") == ЧЛЕНСТВО_ДЕЙСТВУЕТ
 	if not уже_в_ней and места_кончились(организация):
-		raise Отказ(ОРГАНИЗАЦИЯ_ЗАПОЛНЕНА, "В организации не осталось мест, пока её не подтвердили")
+		raise Отказ(ОРГАНИЗАЦИЯ_ЗАПОЛНЕНА, "В команде не осталось мест")
 	if имя:
 		членство = frappe.get_doc("Organization Membership", имя)
 		if членство.status != ЧЛЕНСТВО_ДЕЙСТВУЕТ:
@@ -382,7 +382,7 @@ def set_member_role(organization: str, user: str, role: str) -> dict:
 		raise Отказ(НЕТ_ПРАВА, "Такой роли нет", role=role)
 	членство = _членство(organization, user)
 	if членство.role == АДМИН and role != АДМИН and not _останется_админ(organization, user):
-		raise Отказ(ПОСЛЕДНИЙ_АДМИН, "У организации должен остаться администратор", user=user)
+		raise Отказ(ПОСЛЕДНИЙ_АДМИН, "У команды должен остаться администратор", user=user)
 	членство.role = role
 	членство.save(ignore_permissions=True)
 	return {"user": user, "role": role}
@@ -405,7 +405,7 @@ def remove_member(organization: str, user: str) -> dict:
 	if членство.role != "Member" and user != зритель:
 		_администратор(organization)
 	if членство.role == АДМИН and not _останется_админ(organization, user):
-		raise Отказ(ПОСЛЕДНИЙ_АДМИН, "У организации должен остаться администратор", user=user)
+		raise Отказ(ПОСЛЕДНИЙ_АДМИН, "У команды должен остаться администратор", user=user)
 	if членство.status != "Left":
 		членство.status = "Left"
 		членство.save(ignore_permissions=True)
@@ -515,7 +515,7 @@ def assign_course(
 	"""
 	_руководитель(organization)
 	if not frappe.get_doc("Learning Organization", organization).разрешает_курс(course):
-		raise Отказ(КУРС_НЕ_ОТКРЫТ, "Этот курс организации не открыт", course=course)
+		raise Отказ(КУРС_НЕ_ОТКРЫТ, "Этот курс команде не открыт", course=course)
 	if анонсирован(course):
 		raise Отказ(КУРС_ГОТОВИТСЯ, "Курс ещё готовится, назначить его нельзя", course=course)
 	люди = _список(members)
@@ -735,9 +735,9 @@ def create_organization(title: str) -> dict:
 	if лимит and frappe.db.count(
 		"Learning Organization", {"created_by": создатель, "verified": 0}
 	) >= лимит:
-		raise Отказ(ЛИМИТ_ОРГАНИЗАЦИЙ, "Больше неподтверждённых организаций создать нельзя", limit=лимит)
+		raise Отказ(ЛИМИТ_ОРГАНИЗАЦИЙ, "Больше команд создать нельзя", limit=лимит)
 	if frappe.db.exists("Learning Organization", {"organization_name": название}):
-		raise Отказ(НАЗВАНИЕ_ЗАНЯТО, "Организация с таким названием уже есть", title=название)
+		raise Отказ(НАЗВАНИЕ_ЗАНЯТО, "Команда с таким названием уже есть", title=название)
 
 	организация = frappe.get_doc(
 		{

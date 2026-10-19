@@ -28,7 +28,7 @@
    "fieldname": "organization",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Организация",
+   "label": "Команда",
    "options": "Learning Organization",
    "reqd": 1,
    "search_index": 1
@@ -63,7 +63,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-28 12:00:00.000000",
+ "modified": "2026-10-19 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Organization Membership",

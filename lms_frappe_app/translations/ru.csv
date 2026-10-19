@@ -16,6 +16,7 @@ Add a question to get started.,"Добавьте вопрос, чтобы нач
 Add new question,Добавить новый вопрос
 Add students to the batch to make an announcement,"Добавьте студентов в поток, чтобы сделать объявление"
 Add tag,Добавить тег
+All Members,Все участники
 Allow Job Posting,Разрешить публикацию вакансий
 Allow this badge to be awarded to learners.,Разрешить выдавать этот бейдж студентам.
 Allow this coupon to be used for discounts.,Разрешить использовать этот купон для скидок.
@@ -214,6 +215,7 @@ Kajabi,Kajabi
 LMS Google Meet Settings,Настройки Google Meet для LMS
 Launch a paid course,Запустить платный курс
 Learning,Обучение
+Learning Organization,Команда
 Learning goal,Цель обучения,Learner profile
 Learning style,Подача,Learner profile
 Lesson Completion,Прохождение уроков
@@ -234,6 +236,8 @@ Make Announcement,Сделать объявление
 Make this certificate visible to the participant.,Показывать этот сертификат участнику.
 "Manage batches, review and grade submissions","Ведение потоков, проверка и оценка работ"
 Manage templates,Управление шаблонами
+Manager,Ведущий
+Managers,Ведущие
 Manual Assignment,Назначение вручную
 Mark for review,"Отметить, чтобы вернуться"
 Mark this option as a correct answer.,Отметить этот вариант как правильный ответ.
@@ -274,6 +278,12 @@ Only show courses that offer a certificate,Показывать только к�
 Only {0} file is allowed.,Можно загружать только файлы {0}.
 Open to Work,Ищу работу
 Or copy and paste this link:,Или скопируйте ссылку в адресную строку:
+Org Admin,Администратор
+Organization Admin,Администратор команды
+Organization Course,Курс команды
+Organization Invite,Приглашение в команду
+Organization Manager,Ведущий команды
+Organization Membership,Участие в команде
 "Oversee all users, content, and system settings","Контроль всех пользователей, контента и настроек системы"
 Paid certificate,Платный сертификат
 Paid course,Платный курс
@@ -337,6 +347,7 @@ Select from questions you have already created,Выберите из уже со
 Select instructors,Выберите инструкторов
 Select related courses,Выберите связанные курсы
 Select timezone,Выберите часовой пояс
+Selected Members,Выбранные участники
 Self enrollment,Самостоятельная запись
 Sell an evaluator-graded certificate alongside this free course.,Продавать сертификат с проверкой оценщиком вместе с этим бесплатным курсом.
 "Selling a paid course or certificate needs the Payments app. Install it from the Frappe Marketplace, then turn on pricing here.","Для продажи платного курса или сертификата нужно приложение Payments. Установите его из Frappe Marketplace, а затем включите цены здесь."
@@ -428,6 +439,7 @@ What's the first milestone you'd like to achieve?,Какой первой цел
 "When on, anyone can preview this lesson without enrolling. Otherwise it is visible only to enrolled students.","Когда включено, любой может открыть этот урок без записи на курс. Иначе он доступен только записанным студентам."
 "When you feel ready, you can schedule an evaluation to get certified.","Когда почувствуете, что готовы, запишитесь на оценку, чтобы получить сертификат."
 Where will you be using Frappe Learning?,Где вы будете использовать Frappe Learning?
+Whole Organization,Вся команда
 Work,Работа
 Work context,Контекст работы,Learner profile
 You are not authorized to view the assessments of this batch.,У вас нет прав на просмотр оценок этого потока.

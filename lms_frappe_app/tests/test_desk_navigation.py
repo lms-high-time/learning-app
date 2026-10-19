@@ -40,7 +40,7 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 			карточки = [с.label for с in workspace.links if с.type == "Card Break"]
 			ссылки = {с.link_to for с in workspace.links if с.type == "Link"}
 
-			self.assertEqual(карточки, ["Курс", "Ученики", "Организации"])
+			self.assertEqual(карточки, ["Курс", "Ученики", "Команды"])
 			self.assertIn("Agent Student Artifact", ссылки)
 			self.assertIn("Agent Course Report", ссылки)
 
