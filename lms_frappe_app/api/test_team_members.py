@@ -3,6 +3,8 @@
 
 """Сотрудники в «Команде»: приглашение ссылкой, роли, уход (#363)."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -76,6 +78,19 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 			self.assertEqual(self.членство(self.новичок), {"role": "Member", "status": "Active"})
 			self.assertEqual(spaces.текущее(self.новичок), self.компания)
 
+	def test_участник_выходит_сам(self):
+		"""Выйти может любой участник, без права руководителя: согласие на то, что
+		видит команда, отзывается уходом (learning-services#585)."""
+		with patch("frappe.sendmail"):
+			ответ = self.от_имени(
+				self.сотрудник, team.remove_member, organization=self.компания, user=self.сотрудник
+			)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(self.членство(self.сотрудник).status, "Left")
+		повтор = self.от_имени(self.сотрудник, team.remove_member, organization=self.компания, user=self.сотрудник)
+		self.assertEqual(повтор["error"]["code"], "not_a_member")
+
 	def test_управление_командой_по_ролям(self):
 		"""Признаки управления для интерфейса. Посторонний и участник командой не
 		управляют; руководитель не меняет роли и не снимает коллегу-руководителя;
@@ -109,6 +124,18 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 				team.set_member_role,
 				{**орг, "user": self.админ, "role": "Member"},
 				("last_org_admin",),
+			),
+			"участник: отметить уход другого": (
+				self.сотрудник,
+				team.remove_member,
+				{**орг, "user": коллега},
+				("team_not_available", "not_allowed"),
+			),
+			"посторонний: уйти из чужой команды": (
+				self.посторонний,
+				team.remove_member,
+				{**орг, "user": self.посторонний},
+				("not_a_member",),
 			),
 			"последний администратор: уйти": (
 				self.админ,
