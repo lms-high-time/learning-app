@@ -121,10 +121,10 @@
    "read_only": 1
   },
   {
+   "collapsible": 1,
    "fieldname": "sb_archive",
    "fieldtype": "Section Break",
-   "label": "Архив",
-   "collapsible": 1
+   "label": "Архив"
   },
   {
    "description": "Событие заархивировано сбросом прогресса: ученик перенесён сюда, поле «Ученик» пусто.",
@@ -132,8 +132,7 @@
    "fieldtype": "Link",
    "label": "Ученик до сброса",
    "options": "User",
-   "read_only": 1,
-   "search_index": 1
+   "read_only": 1
   },
   {
    "fieldname": "archived_at",

@@ -28,3 +28,4 @@ lms_frappe_app.patches.v0_1.prune_projection
 lms_frappe_app.patches.v0_1.release_course_progress
 lms_frappe_app.patches.v0_1.document_single_model
 lms_frappe_app.patches.v0_1.forgotten_notes
+lms_frappe_app.patches.v0_1.archive_reset_quiz_events

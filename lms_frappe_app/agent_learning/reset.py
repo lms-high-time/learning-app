@@ -5,7 +5,7 @@
 
 Решения владельца (learning-services#313):
 
-- **Архив, а не удаление.** Занятия, попытки квиза и их журнал вопросов,
+- **Архив, а не удаление.** Занятия, попытки квиза и их журнал проверки,
   документ курса, заметки по курсу, сдачи домашки и прохождения уроков
   остаются в базе. Ученик
   переносится в `archived_student`, а поле «Ученик» очищается. Все запросы
@@ -66,12 +66,22 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 			изменения.update(status=ПОПЫТКА_БРОШЕНА, finished_at=момент)
 		frappe.db.set_value("Agent Quiz Attempt", попытка.name, изменения, update_modified=False)
 
-	# Журнал вопросов квиза — как попытки: в нём слова ученика
-	# (`student_words`), а сброс обещает «как будто не записывался»
-	# (learning-services#510).
+	# Журнал проверки — как попытки: в нём слова ученика (`student_words`), а
+	# сброс обещает «как будто не записывался» (learning-services#510).
+	# Архивация — UPDATE по отбору, а не по найденным именам: событие, которое
+	# ответ ученика вставил, пока шёл сброс, обычный SELECT по снимку не
+	# увидит, а UPDATE — увидит.
 	события = _события_квиза(ученик, курс, [п.name for п in попытки])
-	for имя in события:
-		frappe.db.set_value("Agent Quiz Event", имя, архив, update_modified=False)
+	frappe.db.set_value(
+		"Agent Quiz Event", {"student": ученик, "course": курс}, архив, update_modified=False
+	)
+	if попытки:
+		frappe.db.set_value(
+			"Agent Quiz Event",
+			{"student": ученик, "attempt": ("in", [п.name for п in попытки])},
+			архив,
+			update_modified=False,
+		)
 
 	документы = frappe.get_all(
 		"Agent Student Artifact", filters={"student": ученик, "course": курс}, pluck="name"
