@@ -123,28 +123,25 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 			)
 			self.assertTrue(событие.occurred_at)
 
-	# --- слова ученика обязательны ---
+	# --- слова ученика необязательны ---
 
 	def test_отказ_в_ответе_ничего_не_пишет(self):
-		"""Без слов ученика ответ не принят, ответ на чужой вопрос отклонён. Ни
-		ответа, ни записи о нём: отказ ничего не меняет, и тот же вопрос остаётся
-		открытым для ответа со словами."""
-		отказы = {
-			"слова: None": (self.первый, None, quiz.НУЖНЫ_СЛОВА),
-			"слова: пустая строка": (self.первый, "", quiz.НУЖНЫ_СЛОВА),
-			"слова: пробелы": (self.первый, "   \n\t", quiz.НУЖНЫ_СЛОВА),
-			"чужой вопрос": ("S9/l-1-D1", "да", quiz.ЧУЖОЙ_ВОПРОС),
-		}
-		for что, (вопрос, слова, код) in отказы.items():
-			with self.subTest(что):
-				ответ = self.ответить(вопрос, "V1", слова)
+		"""Ответ на чужой вопрос отклонён: ни ответа, ни записи о нём, и тот же
+		вопрос остаётся открытым."""
+		ответ = self.ответить("S9/l-1-D1", "V1", "да")
 
-				self.assertFalse(ответ["ok"])
-				self.assertEqual(ответ["error"]["code"], код)
-				self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": self.попытка}))
-				self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
+		self.assertFalse(ответ["ok"])
+		self.assertEqual(ответ["error"]["code"], quiz.ЧУЖОЙ_ВОПРОС)
+		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": self.попытка}))
+		self.assertEqual([с.kind for с in self.события()], [ВЫДАН])
 
-		self.assertTrue(self.ответить(self.первый, "V1", "Первый")["ok"])
+	def test_ответ_без_слов_ученика_принимается(self):
+		"""Слова ученика необязательны: каталоги коннекторов не принимают сбор
+		слов разговора, которые инструменту не нужны (learning-services#602).
+		Нет их — в журнале пусто, вердикт тот же."""
+		self.assertTrue(self.ответить(self.первый, "V1", "   \n\t")["ok"])
+		принят = next(с for с in self.события() if с.kind == ПРИНЯТ)
+		self.assertFalse(принят.student_words)
 
 	def test_длинные_слова_обрезаются_а_не_отклоняются(self):
 		ответ = self.ответить(self.первый, "V1", "я" * (quiz.ДЛИНА_СЛОВ + 500))
