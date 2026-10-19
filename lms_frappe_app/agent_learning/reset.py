@@ -5,8 +5,9 @@
 
 Решения владельца (learning-services#313):
 
-- **Архив, а не удаление.** Занятия, попытки квиза, документ курса, заметки по
-  курсу, сдачи домашки и прохождения уроков остаются в базе. Ученик
+- **Архив, а не удаление.** Занятия, попытки квиза и их журнал вопросов,
+  документ курса, заметки по курсу, сдачи домашки и прохождения уроков
+  остаются в базе. Ученик
   переносится в `archived_student`, а поле «Ученик» очищается. Все запросы
   учебного потока ищут по ученику и архив не видят сами: первое занятие,
   перенос незакрытых целей, повтор урока, лимит попыток, прогресс, отчёт
@@ -64,6 +65,13 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 		if попытка.status == ПОПЫТКА_ИДЁТ:
 			изменения.update(status=ПОПЫТКА_БРОШЕНА, finished_at=момент)
 		frappe.db.set_value("Agent Quiz Attempt", попытка.name, изменения, update_modified=False)
+
+	# Журнал вопросов квиза — как попытки: в нём слова ученика
+	# (`student_words`), а сброс обещает «как будто не записывался»
+	# (learning-services#510).
+	события = _события_квиза(ученик, курс, [п.name for п in попытки])
+	for имя in события:
+		frappe.db.set_value("Agent Quiz Event", имя, архив, update_modified=False)
 
 	документы = frappe.get_all(
 		"Agent Student Artifact", filters={"student": ученик, "course": курс}, pluck="name"
@@ -125,6 +133,7 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 		"course": курс,
 		"sessions_archived": len(занятия),
 		"attempts_archived": len(попытки),
+		"quiz_events_archived": len(события),
 		"artifacts_archived": len(документы),
 		"notes_archived": len(заметки),
 		"homework_archived": len(сдачи),
@@ -167,6 +176,21 @@ def _занятия(ученик: str, курс: str, уроки: list[str]) -> 
 		):
 			найдено[з.name] = з.status
 	return list(найдено.items())
+
+
+def _события_квиза(ученик: str, курс: str, попытки: list[str]) -> list[str]:
+	"""События квиза ученика по курсу и по его попыткам: у событий старых
+	попыток курс мог быть не записан."""
+	найдено = set(
+		frappe.get_all("Agent Quiz Event", filters={"student": ученик, "course": курс}, pluck="name")
+	)
+	if попытки:
+		найдено.update(
+			frappe.get_all(
+				"Agent Quiz Event", filters={"student": ученик, "attempt": ("in", попытки)}, pluck="name"
+			)
+		)
+	return sorted(найдено)
 
 
 def _попытки(ученик: str, курс: str, уроки: list[str], занятия: list[str]) -> list:

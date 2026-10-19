@@ -17,7 +17,10 @@
   "sb_answer",
   "answer",
   "student_words",
-  "is_correct"
+  "is_correct",
+  "sb_archive",
+  "archived_student",
+  "archived_at"
  ],
  "fields": [
   {
@@ -116,11 +119,32 @@
    "fieldtype": "Check",
    "label": "Верно",
    "read_only": 1
+  },
+  {
+   "fieldname": "sb_archive",
+   "fieldtype": "Section Break",
+   "label": "Архив",
+   "collapsible": 1
+  },
+  {
+   "description": "Событие заархивировано сбросом прогресса: ученик перенесён сюда, поле «Ученик» пусто.",
+   "fieldname": "archived_student",
+   "fieldtype": "Link",
+   "label": "Ученик до сброса",
+   "options": "User",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "archived_at",
+   "fieldtype": "Datetime",
+   "label": "Сброшено",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-09 18:00:00.000000",
+ "modified": "2026-10-19 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Quiz Event",

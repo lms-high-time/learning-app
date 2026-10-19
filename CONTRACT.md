@@ -2555,13 +2555,14 @@ Settings`, по умолчанию 3; `0` — не напоминать) тем,
 ```json
 { "ok": true, "data": {
   "student": "ivanov@example.com", "course": "course-basics",
-  "sessions_archived": 2, "attempts_archived": 1, "artifacts_archived": 1,
-  "notes_archived": 1, "homework_archived": 1, "runs_archived": 1,
+  "sessions_archived": 2, "attempts_archived": 1, "quiz_events_archived": 3,
+  "artifacts_archived": 1, "notes_archived": 1, "homework_archived": 1, "runs_archived": 1,
   "progress_deleted": 1, "enrolled_again": false } }
 ```
 
-Занятия, попытки квиза, документы курса, заметки агента, сдачи домашки и
-прохождения уроков по курсу уходят в архив: ученик переносится в
+Занятия, попытки квиза и их журнал вопросов (`Agent Quiz Event` — в нём слова
+ученика), документы курса, заметки агента, сдачи домашки и прохождения уроков
+по курсу уходят в архив: ученик переносится в
 `archived_student` с датой `archived_at`, поле «Ученик» очищается. Методы
 учебного потока ищут по ученику и архив не видят — следующее занятие по курсу
 открывается как первое (`first_in_course`), лимит попыток квиза полный,
