@@ -1665,8 +1665,8 @@ Frappe.
 **Отказы:** `unknown_note_kind` (с `kind`) — вид не `fact`, `observation` или
 `project`; `note_key_required` (с `key`) — ключ пустой; `not_your_session` —
 наблюдение или проект без `session` или по чужому занятию; `note_limit_reached` (с `limit`) — набор
-заполнен; `note_exists` (с `key` и прежним `text`) — с `new_only` ключ уже
-есть.
+заполнен; `note_exists` (с `key`, прежними `text` и `kind`) — с `new_only`
+ключ уже есть.
 
 ## `lms_frappe_app.api.student.forget`
 

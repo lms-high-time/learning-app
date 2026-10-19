@@ -311,10 +311,17 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		ответ = student.remember(kind="fact", key="role", text="Менеджер", new_only=True)
 
-		self.assertEqual(ответ["error"]["code"], student.ЗАМЕТКА_ЕСТЬ)
-		self.assertEqual(ответ["error"]["text"], "Директор")
-		self.assertTrue(student.remember(kind="fact", key="role", text="Менеджер")["ok"])
-		self.assertEqual(student.my_notes()["data"]["facts"][0]["text"], "Менеджер")
+		self.assertEqual(
+			(ответ["error"]["code"], ответ["error"]["text"], ответ["error"]["kind"]),
+			(student.ЗАМЕТКА_ЕСТЬ, "Директор", "fact"),
+		)
+		self.assertEqual(student.my_notes()["data"]["facts"][0]["text"], "Директор")
+
+		with self.subTest("на полном наборе — note_exists, а не предел; флаг строкой из формы"):
+			self._предел_заметок(1)
+			student.remember(kind="fact", key="city", text="Казань")
+			ответ = student.remember(kind="fact", key="city", text="Ташкент", new_only="true")
+			self.assertEqual(ответ["error"]["code"], student.ЗАМЕТКА_ЕСТЬ)
 
 	def test_заметка_приходит_с_датами_и_забывается(self):
 		student.remember(kind="fact", key="role", text="Директор")

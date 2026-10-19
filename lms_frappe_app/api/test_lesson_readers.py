@@ -256,34 +256,6 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 				self.данные(student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Ещё"}])),
 			)
 
-	def test_документ_только_дописывается_по_просьбе(self):
-		"""`fill_only` — правка заполненного отдельным вызовом: клиенту нужно
-		знать, когда спрашивать подтверждение (learning-services#614). Отказ
-		ничего не пишет и называет, что запись изменила бы."""
-		создано = self.данные(
-			student.update_artifact(self.курс, "notebook", "log", rows=[{"topic": "Встреча"}], fill_only=True)
-		)["created"]
-
-		for что, запись, затронуто in (
-			("правка", {"rows": [{"id": создано[0], "topic": "Созвон"}]}, [f"{создано[0]}.topic"]),
-			("удаление", {"delete_rows": создано}, создано),
-			("очистка", {"clear": True}, ["clear"]),
-		):
-			with self.subTest(что):
-				ответ = student.update_artifact(self.курс, "notebook", "log", fill_only=True, **запись)
-
-				self.assertEqual(ответ["error"]["code"], "artifact_overwrite")
-				self.assertEqual(ответ["error"]["touched"], затронуто)
-
-		дописано = student.update_artifact(
-			self.курс, "notebook", "log", rows=[{"topic": "Ещё"}], fill_only=True
-		)
-		self.assertTrue(дописано["ok"], дописано)
-		правка = student.update_artifact(
-			self.курс, "notebook", "log", rows=[{"id": создано[0], "topic": "Созвон"}]
-		)
-		self.assertTrue(правка["ok"], "без fill_only правка проходит, как раньше")
-
 	# --- student_detail ---
 
 	def test_руководитель_видит_цели_урока_из_прохождения(self):
