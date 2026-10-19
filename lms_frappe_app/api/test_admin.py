@@ -112,6 +112,71 @@ class IntegrationTestResetProgress(IntegrationTestCase):
 		self.assertNotIn(self.курс, [к["id"] for к in student.list_my_courses()["data"]["courses"]])
 		self.assertIn(self.репорт, [р["id"] for р in student.my_reports()["data"]["reports"]])
 
+	def test_журнал_вопросов_квиза_уходит_в_архив(self):
+		"""В событиях квиза — слова ученика: сброс уносит их в архив вместе с
+		попыткой, в том числе события без записанного курса (learning-services#510)."""
+		def событие(**поля) -> str:
+			return frappe.get_doc(
+				{
+					"doctype": "Agent Quiz Event",
+					"kind": "Answer Submitted",
+					"attempt": self.попытка,
+					"student": self.ученик,
+					"student_words": "мой ответ своими словами",
+					**поля,
+				}
+			).insert(ignore_permissions=True).name
+
+		по_курсу = событие(course=self.курс)
+		без_курса = событие()
+		сосед = создать_ученика(f"reset-n-{frappe.generate_hash(length=6)}@example.com")
+		чужое = событие(course=self.курс, student=сосед)
+
+		итог = self.сбросить()["data"]
+
+		self.assertEqual(итог["quiz_events_archived"], 2)
+		self.assertEqual(
+			frappe.db.get_value("Agent Quiz Event", чужое, "student"), сосед, "чужое событие не тронуто"
+		)
+		for имя in (по_курсу, без_курса):
+			запись = frappe.db.get_value(
+				"Agent Quiz Event", имя, ["student", "archived_student", "archived_at"], as_dict=True
+			)
+			self.assertIsNone(запись.student, имя)
+			self.assertEqual(запись.archived_student, self.ученик)
+			self.assertIsNotNone(запись.archived_at)
+
+	def test_патч_уносит_в_архив_события_прежних_сбросов(self):
+		"""Сброшенные до правки: попытка в архиве, событие — с учеником."""
+		from lms_frappe_app.patches.v0_1 import archive_reset_quiz_events
+
+		событие = frappe.get_doc(
+			{
+				"doctype": "Agent Quiz Event",
+				"kind": "Answer Submitted",
+				"attempt": self.попытка,
+				"student": self.ученик,
+				"student_words": "мой ответ",
+			}
+		).insert(ignore_permissions=True).name
+		момент = frappe.utils.now_datetime()
+		frappe.db.set_value(
+			"Agent Quiz Attempt",
+			self.попытка,
+			{"student": None, "archived_student": self.ученик, "archived_at": момент},
+			update_modified=False,
+		)
+
+		archive_reset_quiz_events.execute()
+		archive_reset_quiz_events.execute()
+
+		запись = frappe.db.get_value(
+			"Agent Quiz Event", событие, ["student", "archived_student", "archived_at"], as_dict=True
+		)
+		self.assertIsNone(запись.student)
+		self.assertEqual(запись.archived_student, self.ученик)
+		self.assertIsNotNone(запись.archived_at)
+
 	def test_сдачи_домашки_уходят_в_архив(self):
 		"""Повторное прохождение начинается с чистого листа (learning-services#439)."""
 		создать_домашку(self.урок)
