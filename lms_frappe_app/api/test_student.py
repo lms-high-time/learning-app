@@ -304,6 +304,18 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		self.assertTrue(student.remember(kind="fact", key="k0", text="нет")["ok"])
 
+	def test_только_новая_заметка_не_заменяет_прежнюю(self):
+		"""`new_only` — замена записанного отдельным вызовом: клиенту нужно знать,
+		когда спрашивать подтверждение (learning-services#614)."""
+		self.assertTrue(student.remember(kind="fact", key="role", text="Директор", new_only=True)["ok"])
+
+		ответ = student.remember(kind="fact", key="role", text="Менеджер", new_only=True)
+
+		self.assertEqual(ответ["error"]["code"], student.ЗАМЕТКА_ЕСТЬ)
+		self.assertEqual(ответ["error"]["text"], "Директор")
+		self.assertTrue(student.remember(kind="fact", key="role", text="Менеджер")["ok"])
+		self.assertEqual(student.my_notes()["data"]["facts"][0]["text"], "Менеджер")
+
 	def test_заметка_приходит_с_датами_и_забывается(self):
 		student.remember(kind="fact", key="role", text="Директор")
 

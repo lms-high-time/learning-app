@@ -17,6 +17,7 @@
 НЕ_ТОТ_РАЗДЕЛ = "artifact_wrong_section"
 НЕЧЕГО_ПИСАТЬ = "artifact_nothing_to_write"
 ОЧИСТКА_С_ЗАПИСЬЮ = "artifact_clear_with_content"
+ПРАВКА_ЗАПОЛНЕННОГО = "artifact_overwrite"
 
 АРТЕФАКТ_НЕ_НАЙДЕН = "artifact_not_found"
 БЛОК_НЕ_НАЙДЕН = "artifact_block_not_found"

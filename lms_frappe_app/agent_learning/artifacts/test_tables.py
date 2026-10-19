@@ -248,6 +248,36 @@ class TestЗапись(UnitTestCase):
 		self.assertEqual(data.очистить(ПРАВИЛА, д)["fields"], {"other_field": "чужое"})
 
 
+class TestЗатронутое(UnitTestCase):
+	"""Дописывание и правка заполненного различаются (learning-services#614)."""
+
+	def test_раздел_many(self):
+		было = data.записать(ЖУРНАЛ, None, rows=[{"topic": "Ретро"}, {"topic": "Созвоны"}])
+		for что, (запись, ожидается) in {
+			"новая строка": ({"rows": [{"topic": "Третья"}]}, []),
+			"пустая клетка": ({"rows": [{"id": "A1", "decision": "Раз в неделю"}]}, []),
+			"то же значение": ({"rows": [{"id": "A1", "topic": "Ретро"}]}, []),
+			"правка клетки": ({"rows": [{"id": "A1", "topic": "Демо"}]}, ["A1.topic"]),
+			"стёртая клетка": ({"rows": [{"id": "A2", "topic": ""}]}, ["A2.topic"]),
+			"удалённая строка": ({"delete_rows": ["A2"]}, ["A2"]),
+		}.items():
+			with self.subTest(что):
+				стало = data.записать(ЖУРНАЛ, было, **запись)
+				self.assertEqual(data.затронутое(ЖУРНАЛ, было, стало), ожидается)
+		self.assertEqual(data.затронутое(ЖУРНАЛ, было, data.очистить(ЖУРНАЛ, было)), ["A1", "A2"])
+
+	def test_раздел_one(self):
+		было = data.записать(ПРАВИЛА, None, fields={"method": "Согласие"})
+		for что, (поля, ожидается) in {
+			"пустое поле": ({"exception": "Бюджет"}, []),
+			"правка поля": ({"method": "Голосование"}, ["method"]),
+			"стёртое поле": ({"method": ""}, ["method"]),
+		}.items():
+			with self.subTest(что):
+				стало = data.записать(ПРАВИЛА, было, fields=поля)
+				self.assertEqual(data.затронутое(ПРАВИЛА, было, стало), ожидается)
+
+
 class TestЗаполненность(UnitTestCase):
 	def test_раздел_many(self):
 		for имя, строки, заполнен, пустые in (
