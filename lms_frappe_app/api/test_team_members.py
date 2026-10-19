@@ -3,6 +3,8 @@
 
 """Сотрудники в «Команде»: приглашение ссылкой, роли, уход (#363)."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -76,6 +78,34 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 			self.assertEqual(self.членство(self.новичок), {"role": "Member", "status": "Active"})
 			self.assertEqual(spaces.текущее(self.новичок), self.компания)
 
+	def test_участник_выходит_сам(self):
+		"""Выйти может любой участник, без права руководителя: согласие на то, что
+		видит команда, отзывается уходом (learning-services#585)."""
+		with patch("lms_frappe_app.agent_learning.leave.уйти") as копия:
+			ответ = self.от_имени(
+				self.сотрудник, team.remove_member, organization=self.компания, user=self.сотрудник
+			)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(self.членство(self.сотрудник).status, "Left")
+		# Копия документов — и при своём выходе: хук членства тот же.
+		копия.assert_called_once_with(self.сотрудник, self.компания)
+		повтор = self.от_имени(
+			self.сотрудник, team.remove_member, organization=self.компания, user=self.сотрудник
+		)
+		self.assertEqual(повтор["error"]["code"], "not_a_member")
+
+	def test_руководитель_выходит_сам_и_теряет_роль(self):
+		"""Свой выход руководителя не требует администратора; роль Frappe снимает хук."""
+		with patch("lms_frappe_app.agent_learning.leave.уйти"):
+			ответ = self.от_имени(
+				self.руководитель, team.remove_member, organization=self.компания, user=self.руководитель
+			)
+
+		self.assertTrue(ответ["ok"], ответ)
+		self.assertEqual(self.членство(self.руководитель).status, "Left")
+		self.assertNotIn("Organization Manager", frappe.get_roles(self.руководитель))
+
 	def test_управление_командой_по_ролям(self):
 		"""Признаки управления для интерфейса. Посторонний и участник командой не
 		управляют; руководитель не меняет роли и не снимает коллегу-руководителя;
@@ -88,6 +118,8 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 			self.assertEqual((админу["can_manage"], админу["can_change_roles"]), (True, True))
 
 		коллега = создать_менеджера(f"inv-m2-{frappe.generate_hash(length=6)}@example.com", self.компания)
+		участник = создать_ученика(f"inv-e2-{frappe.generate_hash(length=6)}@example.com")
+		добавить_в_организацию(участник, self.компания)
 		орг = {"organization": self.компания}
 		отказы = {
 			"посторонний: ссылка": (self.посторонний, team.create_invite, орг, ("team_not_available", "not_allowed")),
@@ -109,6 +141,18 @@ class IntegrationTestTeamMembers(IntegrationTestCase):
 				team.set_member_role,
 				{**орг, "user": self.админ, "role": "Member"},
 				("last_org_admin",),
+			),
+			"участник: отметить уход другого участника": (
+				self.сотрудник,
+				team.remove_member,
+				{**орг, "user": участник},
+				("team_not_available",),
+			),
+			"посторонний: уйти из чужой команды": (
+				self.посторонний,
+				team.remove_member,
+				{**орг, "user": self.посторонний},
+				("not_a_member",),
 			),
 			"последний администратор: уйти": (
 				self.админ,
