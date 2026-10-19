@@ -574,9 +574,14 @@ class IntegrationTestAuthorPage(IntegrationTestCase):
 		с = сведения_для(self.куратор, course=self.курс, view="notes")
 
 		очередь = {группа: [з["id"] for з in записи] for группа, записи in с["notes_queue"].items()}
+		# В группе — по времени создания из базы, а не по порядку вызовов:
+		# часы контейнера тестов отступают назад (learning-services#509).
+		по_созданию = sorted(
+			(ждёт_агента, снятый), key=lambda ид: frappe.db.get_value("Agent Author Note", ид, "creation")
+		)
 		self.assertEqual(
 			очередь,
-			{"check": [сделано], "question": [вопрос_агента], "agent": [ждёт_агента, снятый], "accepted": []},
+			{"check": [сделано], "question": [вопрос_агента], "agent": по_созданию, "accepted": []},
 		)
 		self.assertEqual(с["course"]["notes_attention"], 2)
 		снятая = next(з for з in с["notes_queue"]["agent"] if з["id"] == снятый)
