@@ -276,6 +276,6 @@ class IntegrationTestПросмотрРелиза(IntegrationTestCase):
 			[(второй["release"], 2, True, None), (self.первый["release"], 1, False, "notebook")],
 		)
 		self.assertEqual({р["published_by"] for р in история}, {self.куратор})
-		self.assertGreaterEqual(история[0]["published_at"], история[1]["published_at"])
+		self.assertTrue(all(р["published_at"] for р in история))
 		self.assertEqual(len({р["digest"] for р in история}), 2)
 		self.assertTrue(all(len(р["digest"]) == 64 for р in история))

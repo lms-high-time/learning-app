@@ -980,6 +980,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		"""Сообщается только последняя попытка урока: после аннулированной ученик
 		уже начал новую в другом занятии, а квиз просит в третьем."""
 		занятие, попытка = self.аннулированная_публикацией()
+		# Последняя попытка выбирается по метке создания, а часы контейнера тестов
+		# отступают назад (learning-services#509).
+		frappe.db.set_value(ПОПЫТКА, попытка, "creation", add_to_date(now_datetime(), days=-1))
 		урок = frappe.db.get_value("Agent Learning Session", занятие, "lesson")
 		второе, третье = (создать_занятие(self.ученик, урок) for _ in range(2))
 		self.assertTrue(student.request_quiz(второе)["ok"])
@@ -1074,7 +1077,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		проваленная = self.сдать(run, занятие, ["V2", "V2"])["attempt"]
 		self.assertEqual(self.попытка(проваленная).status, ПОПЫТКА_НЕ_ЗАЧТЕНА)
 		давно = add_to_date(now_datetime(), days=-1)
-		frappe.db.set_value(ПОПЫТКА, проваленная, "finished_at", давно)
+		# Метка создания — тоже в прошлом: последняя попытка урока выбирается по
+		# ней, а часы контейнера тестов отступают назад (learning-services#509).
+		frappe.db.set_value(ПОПЫТКА, проваленная, {"finished_at": давно, "creation": давно})
 		_, _, отставшая = self.гонка_с_публикацией(run, занятие)
 		frappe.db.set_value(ПОПЫТКА, проваленная, "finished_at", now_datetime())
 		run = прохождения.прохождение(self.ученик, run.course, "l-1")

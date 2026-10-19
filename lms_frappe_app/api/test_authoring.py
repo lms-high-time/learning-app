@@ -14,6 +14,7 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_days, now_datetime
 
 from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.releases.index import РЕЛИЗ
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
@@ -136,22 +137,24 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 	def ревизия(self) -> str:
 		return self.отметки()["revision"]
 
-	def состарить(self) -> str:
-		"""Отметки курса, релиза и заметок — на день назад; возвращает ревизию.
+	def состарить(self, курс: str | None = None) -> str:
+		"""Отметки курса (по умолчанию — своего), его релиза и заметок — на день
+		назад; возвращает ревизию курса.
 
 		`Why:` ревизия — это метки `modified`, а часы одноразового контейнера
 		тестов отступают назад и совпадают до микросекунды: «следующая запись
 		позже» держится только против метки, заведомо оставшейся в прошлом
 		(learning-services#509).
 		"""
+		курс = курс or self.курс
 		назад = add_days(now_datetime(), -1)
-		frappe.db.set_value("LMS Course", self.курс, "modified", назад, update_modified=False)
-		релиз = frappe.db.get_value("LMS Course", self.курс, "active_release")
+		frappe.db.set_value("LMS Course", курс, "modified", назад, update_modified=False)
+		релиз = frappe.db.get_value("LMS Course", курс, "active_release")
 		if релиз:
-			frappe.db.set_value("Agent Course Release", релиз, "modified", назад, update_modified=False)
-		for заметка in frappe.get_all("Agent Author Note", filters={"course": self.курс}, pluck="name"):
+			frappe.db.set_value(РЕЛИЗ, релиз, "modified", назад, update_modified=False)
+		for заметка in frappe.get_all("Agent Author Note", filters={"course": курс}, pluck="name"):
 			frappe.db.set_value("Agent Author Note", заметка, "modified", назад, update_modified=False)
-		return self.ревизия()
+		return authoring.course_revision(course=курс)["data"]["revision"]
 
 	def test_новый_релиз_двигает_ревизию_а_тот_же_и_чтение_нет(self):
 		до = self.ревизия()
@@ -195,16 +198,15 @@ class IntegrationTestCourseRevision(IntegrationTestCase):
 		authoring.unpublish_course(course=self.курс)
 		self.assertGreater(self.ревизия(), до)
 
-		после_снятия = self.состарить()
+		до = self.состарить()
 		ответ = authoring.announce_course(course=self.курс)
 
 		self.assertTrue(ответ["ok"], ответ)
-		self.assertGreater(self.ревизия(), после_снятия)
+		self.assertGreater(self.ревизия(), до)
 
 	def test_анонс_без_релиза_отмечается_карточкой(self):
 		анонс = authoring.create_course(title="Анонс", summary="было")["data"]["id"]
-		frappe.db.set_value("LMS Course", анонс, "modified", add_days(now_datetime(), -1), update_modified=False)
-		до = authoring.course_revision(course=анонс)["data"]["revision"]
+		до = self.состарить(анонс)
 		authoring.update_course(course=анонс, summary="стало")
 
 		self.assertGreater(authoring.course_revision(course=анонс)["data"]["revision"], до)

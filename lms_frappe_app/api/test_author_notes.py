@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_to_date, now_datetime
 
 from lms_frappe_app.agent_learning.releases import index, places
 from lms_frappe_app.api import authoring
@@ -270,9 +271,15 @@ class IntegrationTestAuthorNotes(IntegrationTestCase):
 		self.записать("lesson.l-2")
 		курс = self.записать("course")
 		authoring.set_note_status(note=урок, status="accepted")
+		# Метки создания — явные и обратные порядку вызовов: очередь идёт по ним,
+		# а часы контейнера тестов отступают назад (learning-services#509).
+		for часов, ид in enumerate((урок, пункт, вопрос), start=1):
+			frappe.db.set_value(
+				"Agent Author Note", ид, "creation", add_to_date(now_datetime(), hours=-часов)
+			)
 
-		self.assertEqual([з["id"] for з in self.очередь(lesson="l-1")], [урок, пункт, вопрос])
-		self.assertEqual([з["id"] for з in self.очередь(lesson="l-1", status="open")], [пункт, вопрос])
+		self.assertEqual([з["id"] for з in self.очередь(lesson="l-1")], [вопрос, пункт, урок])
+		self.assertEqual([з["id"] for з in self.очередь(lesson="l-1", status="open")], [вопрос, пункт])
 		self.assertEqual(self.очередь(lesson="l-9"), [])
 		self.assertIn(курс, [з["id"] for з in self.очередь(status="open")])
 		ответ = authoring.list_notes(course=self.курс, status="closed")
