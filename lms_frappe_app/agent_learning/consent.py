@@ -31,7 +31,7 @@ import datetime
 from urllib.parse import quote, urlsplit
 
 import frappe
-from frappe.utils import add_days, now_datetime
+from frappe.utils import add_days, get_datetime, now_datetime
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import redirect
 
@@ -146,12 +146,30 @@ def есть_явное(пользователь: str) -> bool:
 	)
 
 
-def регистрация_не_завершена(пользователь: str) -> bool:
-	"""Аккаунт заведён с действующей редакцией, но без отметок — как вход
-	через Google. Иначе на экран ведёт смена редакции: согласие было с прежней
-	или его записи нет вовсе (аккаунт старше записей согласия)."""
-	редакции = frappe.get_all("Agent Consent", filters={"user": пользователь}, pluck="documents_version")
-	return bool(редакции) and set(редакции) == {редакция_документов()}
+def принимал_прежде(пользователь: str) -> bool:
+	"""Принимал ли пользователь документы раньше — тогда экран для него о
+	новой редакции, иначе это завершение регистрации.
+
+	Принятие — явная запись, регистрация формой или вход через провайдера до
+	`ЧИСТКА_С`: тогда согласием считалась подпись под кнопкой. Записи
+	прежнего аккаунта с той же почтой не в счёт — они переживают удаление.
+	Аккаунт без записей до `ЧИСТКА_С` старше самих записей; позже без записей
+	бывают только заведённые вручную, а такой человек документов не видел.
+	"""
+	заведён = frappe.db.get_value("User", пользователь, "creation")
+	записи = frappe.get_all(
+		"Agent Consent",
+		filters={"user": пользователь, "accepted_at": [">=", заведён]},
+		fields=["method", "explicit", "accepted_at"],
+	)
+	if not записи:
+		return заведён < get_datetime(ЧИСТКА_С)
+	return any(
+		з.explicit
+		or з.method == РЕГИСТРАЦИЯ
+		or (з.method == ВНЕШНИЙ_ВХОД and з.accepted_at < get_datetime(ЧИСТКА_С))
+		for з in записи
+	)
 
 
 МЕСЯЦЫ = (

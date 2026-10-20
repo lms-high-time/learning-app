@@ -35,10 +35,7 @@ def get_context(context):
 	if consent.есть_явное(frappe.session.user):
 		_уйти(назад)
 	context.no_breadcrumbs = True
-	if consent.регистрация_не_завершена(frappe.session.user):
-		context.title = "Завершите регистрацию"
-		context.subtitle = "Осталось подтвердить возраст и принять условия."
-	else:
+	if consent.принимал_прежде(frappe.session.user):
 		context.title = "Мы обновили условия"
 		дата = consent.дата_редакции()
 		context.subtitle = (
@@ -46,6 +43,9 @@ def get_context(context):
 			if дата
 			else "Действуют новые Условия использования и Политика конфиденциальности."
 		)
+	else:
+		context.title = "Завершите регистрацию"
+		context.subtitle = "Осталось подтвердить возраст и принять условия."
 	context.logo = get_app_logo()
 	context.redirect_to = назад
 	context.csrf_token = frappe.sessions.get_csrf_token()

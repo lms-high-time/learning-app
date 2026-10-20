@@ -1,6 +1,6 @@
 {% extends "templates/web.html" %}
 
-{% block title %}{{ title }}{% endblock %}
+{% block title %}{{ title | e }}{% endblock %}
 
 {% block navbar %}{% endblock %}
 {% block footer %}{% endblock %}
@@ -15,8 +15,8 @@
 		<div class="page-card-head">
 			<img class="app-logo" src="{{ logo | e }}" alt="">
 			<div class="page-card-head-text">
-				<h4>{{ title }}</h4>
-				<p class="page-card-subtitle">{{ subtitle }}</p>
+				<h4>{{ title | e }}</h4>
+				<p class="page-card-subtitle">{{ subtitle | e }}</p>
 			</div>
 		</div>
 		<form id="consent-form" novalidate>
