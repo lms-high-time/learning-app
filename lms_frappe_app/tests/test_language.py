@@ -14,6 +14,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.translate import get_all_languages
 
 from lms_frappe_app.install import ЯЗЫК, обеспечить_русский_язык, согласовать_умолчание_языка
+from lms_frappe_app.patches.v0_1 import students_language
 
 
 class IntegrationTestLanguage(IntegrationTestCase):
@@ -52,9 +53,35 @@ class IntegrationTestLanguage(IntegrationTestCase):
 		self.assertEqual(новый_пользователь(), ЯЗЫК)
 		self.assertEqual(новый_пользователь(язык="en"), "en", "выбранный язык не перетирается")
 
+	def test_патч_переводит_учеников_с_en_кроме_выбравших(self):
+		"""Решение владельца по уже созданным — вариант А в #633."""
+		прежний = frappe.db.get_single_value("System Settings", "language")
+		умолчание = frappe.db.get_default("language")
+		self.addCleanup(frappe.set_user, "Administrator")
+		self.addCleanup(frappe.db.set_default, "language", умолчание)
+		self.addCleanup(frappe.db.set_single_value, "System Settings", "language", прежний or "")
+		frappe.db.set_single_value("System Settings", "language", ЯЗЫК)
+		по_ошибке = новый_пользователь(язык="en", имя=True)
+		выбрал = новый_пользователь(язык=ЯЗЫК, имя=True)
+		сотрудник = новый_пользователь(язык="en", имя=True)
+		frappe.set_user("Administrator")
+		профиль = frappe.get_doc("User", выбрал)
+		профиль.language = "en"
+		профиль.save(ignore_permissions=True)
+		frappe.db.set_value("User", сотрудник, "user_type", "System User")
 
-def новый_пользователь(язык: str | None = None) -> str:
-	"""Язык пользователя, созданного как при регистрации: гостем, с обходом прав."""
+		students_language.execute()
+		students_language.execute()
+
+		self.assertEqual(frappe.db.get_value("User", по_ошибке, "language"), ЯЗЫК)
+		self.assertEqual(frappe.db.get_value("User", выбрал, "language"), "en", "выбор из журнала версий")
+		self.assertEqual(frappe.db.get_value("User", сотрудник, "language"), "en", "сотрудников не трогает")
+		self.assertEqual(frappe.db.get_default("language"), ЯЗЫК)
+
+
+def новый_пользователь(язык: str | None = None, *, имя: bool = False) -> str:
+	"""Язык пользователя, созданного как при регистрации: гостем, с обходом
+	прав. С `имя` — его адрес."""
 	frappe.set_user("Guest")
 	пользователь = frappe.new_doc("User")
 	пользователь.update(
@@ -67,4 +94,4 @@ def новый_пользователь(язык: str | None = None) -> str:
 	)
 	пользователь.flags.ignore_permissions = True
 	пользователь.insert()
-	return пользователь.language
+	return пользователь.name if имя else пользователь.language
