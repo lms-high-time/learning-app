@@ -37,6 +37,7 @@
 			</div>
 		</form>
 		<div class="consent-underage" id="underage" hidden>
+			<h5 id="underage-title" tabindex="-1">Удаление учётной записи</h5>
 			<p>Cenda доступна только лицам, достигшим 18 лет. Мы удалим вашу учётную запись и данные, связанные с ней.</p>
 			<p class="field-error text-danger" id="underage-error" role="alert"></p>
 			<div class="page-card-actions">
@@ -103,8 +104,14 @@
 		форма.hidden = открыто;
 		ссылки.hidden = открыто;
 	};
-	document.getElementById("underage-open").addEventListener("click", () => показать(true));
-	document.getElementById("underage-cancel").addEventListener("click", () => показать(false));
+	document.getElementById("underage-open").addEventListener("click", () => {
+		показать(true);
+		document.getElementById("underage-title").focus();
+	});
+	document.getElementById("underage-cancel").addEventListener("click", () => {
+		показать(false);
+		document.getElementById("underage-open").focus();
+	});
 	document.getElementById("underage-confirm").addEventListener("click", async (событие) => {
 		const удалить = событие.currentTarget;
 		const ошибкаУдаления = document.getElementById("underage-error");
@@ -122,7 +129,7 @@
 				document.getElementById("underage-done-text").textContent =
 					итог === "deleted"
 						? "Учётная запись и связанные с ней данные удалены."
-						: "Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней.";
+						: "Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней. Если вы нажали по ошибке, напишите на privacy@cenda.app.";
 				document.getElementById("underage-done").hidden = false;
 				return;
 			}
