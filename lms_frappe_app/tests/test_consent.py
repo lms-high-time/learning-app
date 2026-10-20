@@ -23,7 +23,7 @@ from werkzeug.wrappers import Request
 from lms_frappe_app.agent_learning import consent
 from lms_frappe_app.agent_learning.consent import ВНЕШНИЙ_ВХОД, РЕГИСТРАЦИЯ
 from lms_frappe_app.api import consent as consent_api
-from lms_frappe_app.www.consent import ДОМОЙ, куда_вернуть
+from lms_frappe_app.www.consent import ДОМОЙ
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
 )
@@ -54,15 +54,20 @@ def согласия(почта: str) -> list[frappe._dict]:
 
 
 @contextmanager
-def запрос(путь: str = "/lms", метод: str = "GET", cookie: str | None = None):
-	"""Запрос браузера на время проверки: путь, метод и cookie."""
+def запрос(путь: str = "/lms", метод: str = "GET", cookie: str | None = None, **заголовки):
+	"""Запрос браузера на время проверки: путь, метод, cookie и заголовки."""
+	был = hasattr(frappe.local, "request")
 	прежний = getattr(frappe.local, "request", None)
-	заголовки = {"Cookie": cookie} if cookie else {}
+	if cookie:
+		заголовки["Cookie"] = cookie
 	frappe.local.request = Request(EnvironBuilder(path=путь, method=метод, headers=заголовки).get_environ())
 	try:
 		yield
 	finally:
-		frappe.local.request = прежний
+		if был:
+			frappe.local.request = прежний
+		else:
+			del frappe.local.request
 
 
 class IntegrationTestConsent(IntegrationTestCase):
@@ -135,7 +140,9 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 
 	def test_отметки_формы_делают_регистрацию_явной(self):
-		with запрос(cookie=f"{consent.ЯВНОЕ_СОГЛАСИЕ}=1"):
+		# Рядом — cookie выбора по аналитике `cenda_consent` (analytics.js): имя
+		# отметок своё, и браузер присылает обе.
+		with запрос(cookie=f"cenda_consent=granted; {consent.ЯВНОЕ_СОГЛАСИЕ}=1"):
 			[с_отметками] = согласия(зарегистрировать(почта()))
 			[через_google] = согласия(зарегистрировать(почта(), провайдер="google"))
 		with запрос():
@@ -154,10 +161,14 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		self.assertEqual(ответ.status_code, 302)
 		self.assertEqual(ответ.headers["Location"], "/consent?redirect-to=%2Flms%2Fcourses%3Fx%3D1")
 
-		with self.subTest("API не трогается"), запрос("/api/method/lms_frappe_app.api.student.whoami"):
-			consent.потребовать_согласие()
+		with self.subTest("вход «от имени» не ведёт на экран"), запрос("/lms"):
+			frappe.session.data.impersonated_by = "Administrator"
+			try:
+				consent.потребовать_согласие()
+			finally:
+				frappe.session.data.pop("impersonated_by", None)
 
-		with self.subTest("после согласия — пропускает"):
+		with self.subTest("после согласия — пропускает"), запрос("/consent", "POST"):
 			ответ = consent_api.accept(age_confirmed=1, documents_accepted="true")
 			self.assertTrue(ответ["ok"], ответ)
 			with запрос("/lms"):
@@ -167,20 +178,38 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 				(явное.method, явное.explicit, явное.age_confirmed), (consent.ЭКРАН_СОГЛАСИЯ, 1, 1)
 			)
 
-	def test_согласие_без_обеих_отметок_не_записывается(self):
+	def test_согласие_даёт_только_сам_пользователь_и_обеими_отметками(self):
 		адрес = зарегистрировать(почта(), провайдер="google")
 		frappe.set_user(адрес)
-
-		ответ = consent_api.accept(age_confirmed=1, documents_accepted=0)
-
-		self.assertEqual(ответ["error"]["code"], consent_api.НУЖНЫ_ОТМЕТКИ)
+		for что, (заголовки, отметки, код) in {
+			"одна отметка": ({}, {"age_confirmed": 1, "documents_accepted": 0}, consent_api.НУЖНЫ_ОТМЕТКИ),
+			"токен агента": (
+				{"Authorization": "Bearer x"},
+				{"age_confirmed": 1, "documents_accepted": 1},
+				consent_api.ТОЛЬКО_САМ,
+			),
+		}.items():
+			with self.subTest(что), запрос("/api/method/x", "POST", **заголовки):
+				self.assertEqual(consent_api.accept(**отметки)["error"]["code"], код)
 		self.assertFalse(consent.есть_явное(адрес))
+
+		with запрос("/consent", "POST"):
+			consent_api.accept(age_confirmed=1, documents_accepted=1)
+			consent_api.accept(age_confirmed=1, documents_accepted=1)
+		self.assertEqual(sum(с.explicit for с in согласия(адрес)), 1, "повтор ничего не пишет")
+
+	def test_гость_и_administrator_на_экран_не_идут(self):
+		with запрос("/lms"):
+			consent.потребовать_согласие()
+			frappe.set_user("Administrator")
+			consent.потребовать_согласие()
 
 	def test_новая_редакция_снова_просит_согласия(self):
 		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-10-20")
 		адрес = зарегистрировать(почта(), провайдер="google")
 		frappe.set_user(адрес)
-		consent_api.accept(age_confirmed=1, documents_accepted=1)
+		with запрос("/consent", "POST"):
+			consent_api.accept(age_confirmed=1, documents_accepted=1)
 		self.assertTrue(consent.есть_явное(адрес))
 
 		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-11-01")
@@ -202,6 +231,8 @@ class UnitTestПутиСогласия(UnitTestCase):
 			("/logout", "GET", False),
 			("/assets/app.js", "GET", False),
 			("/update-password", "GET", False),
+			("/message?id=x", "GET", False),
+			("/api/v2/method/frappe.integrations.oauth2.authorize", "GET", True),
 		):
 			with self.subTest(путь=путь, метод=метод):
 				self.assertEqual(consent.путь_под_согласием(путь, метод), ведёт)
@@ -216,12 +247,16 @@ class UnitTestПутиСогласия(UnitTestCase):
 			("https://evil.example", ДОМОЙ),
 			("//evil.example", ДОМОЙ),
 			("/\\evil.example", ДОМОЙ),
+			# Браузер выбрасывает табуляцию и переводы строк: стало бы //evil.
+			("/\t/evil.example", ДОМОЙ),
+			("/\n/evil.example", ДОМОЙ),
+			("/%09/evil.example", "/%09/evil.example"),
 			("/consent?redirect-to=/lms", ДОМОЙ),
 			("", ДОМОЙ),
 			(None, ДОМОЙ),
 		):
 			with self.subTest(адрес=адрес):
-				self.assertEqual(куда_вернуть(адрес), ожидается)
+				self.assertEqual(consent.куда_вернуть(адрес, ДОМОЙ), ожидается)
 
 	def test_гейт_подключён(self):
 		self.assertIn(
@@ -240,5 +275,5 @@ class UnitTestConsentNotice(UnitTestCase):
 		self.assertIn("/site/analytics.js", frappe.get_hooks("web_include_js"))
 		файл = Path(frappe.get_app_path("lms_frappe_app", "public", "js", "consent-notice.js"))
 		текст = файл.read_text(encoding="utf-8")
-		for нужное in ('"/terms"', '"/privacy"', ".for-login", ".for-signup", "cenda_consent"):
+		for нужное in ('"/terms"', '"/privacy"', ".for-login", ".for-signup", consent.ЯВНОЕ_СОГЛАСИЕ):
 			self.assertIn(нужное, текст)

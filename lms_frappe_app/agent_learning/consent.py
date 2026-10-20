@@ -13,12 +13,21 @@ cookie `ЯВНОЕ_СОГЛАСИЕ` — по нему запись регист
 явного согласия с действующей редакцией нет: прежние пользователи и все после
 смены редакции. Обычный вход ничего не записывает: аккаунт уже есть.
 
-Аккаунт, который завели вручную (Desk, импорт), записи не получает: человек
-этих страниц не видел. Такие аккаунты заводим только мы и только по просьбе
-самого человека (политика конфиденциальности, раздел 3).
+Аккаунт, который завели вручную (Desk, импорт), при создании записи не
+получает: человек этих страниц не видел. Такие аккаунты заводим только мы и
+только по просьбе самого человека (политика конфиденциальности, раздел 3); их
+согласие — с экрана, при первом входе, как у всех.
+
+Гейт касается всех вошедших, сотрудников в desk тоже. `Why:` документы
+принимает каждый, кто пользуется платформой; исключён только Administrator —
+технический аккаунт, за которым нет человека. Не касается и сессии «Войти
+как» (`impersonated_by`): отметки за ученика ставил бы не он.
+
+Отметки формы регистрации приходят cookie с клиента. Подделать её может
+только сам регистрирующийся — по силе это то же поле формы.
 """
 
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import frappe
 from frappe.utils import now_datetime
@@ -33,7 +42,9 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 ВНЕШНИЙ_ВХОД = "Social Login"
 ЭКРАН_СОГЛАСИЯ = "Consent Screen"
 #: Cookie формы регистрации: обе отметки поставлены (`consent-notice.js`).
-ЯВНОЕ_СОГЛАСИЕ = "cenda_consent"
+#: Своё имя: `cenda_consent` — выбор по аналитике (`site/static/analytics.js`),
+#: и с одним именем браузер прислал бы обе (learning-services#624).
+ЯВНОЕ_СОГЛАСИЕ = "cenda_signup_marks"
 #: Экран согласия.
 СТРАНИЦА = "/consent"
 #: Пути, которые работают и без явного согласия: сам экран, вход и выход,
@@ -44,6 +55,8 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	"/login",
 	"/logout",
 	"/update-password",
+	# Сообщение Frappe живёт в кэше минуту: увести с него на экран — потерять его.
+	"/message",
 	"/api/",
 	"/assets/",
 	"/files/",
@@ -57,7 +70,10 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 )
 #: Исключение из `/api/`: экран согласия OAuth открывается в браузере, когда
 #: ученик подключает агента, — до согласия его ведём сначала на `/consent`.
-АВТОРИЗАЦИЯ_АГЕНТА = "/api/method/frappe.integrations.oauth2.authorize"
+АВТОРИЗАЦИЯ_АГЕНТА = (
+	"/api/method/frappe.integrations.oauth2.authorize",
+	"/api/v2/method/frappe.integrations.oauth2.authorize",
+)
 #: Служебная строка входа, которую Frappe в `User.validate` добавляет каждому
 #: пользователю, — не внешний провайдер. `Why:` без исключения любая
 #: регистрация формой записывалась как вход через провайдера `frappe`.
@@ -88,6 +104,37 @@ def путь_под_согласием(путь: str, метод: str) -> bool:
 	return not путь.startswith(СВОБОДНЫЕ)
 
 
+def готово() -> bool:
+	"""Схема согласия уже с явными отметками. `Why:` в окно выкладки код новый,
+	а `bench migrate` ещё не добавил колонку: запрос по ней дал бы 500 на каждой
+	странице и уронил бы регистрацию."""
+	return frappe.db.table_exists("Agent Consent") and frappe.db.has_column("Agent Consent", "explicit")
+
+
+def куда_вернуть(адрес: str | None, домой: str) -> str:
+	"""Свой относительный адрес или `домой`.
+
+	`Why:` чужой адрес превратил бы экран в переадресацию на любой сайт. Браузер
+	выбрасывает из адреса табуляцию и переводы строк, и `/\t/evil` стал бы
+	`//evil` — поэтому управляющие символы отвергаются целиком, а адрес
+	разбирается так же, как его разберёт браузер.
+	"""
+	адрес = (адрес or "").strip()
+	if any(ord(знак) < 0x20 or знак == "\x7f" for знак in адрес) or "\\" in адрес:
+		return домой
+	части = urlsplit(адрес)
+	if части.scheme or части.netloc or not адрес.startswith("/") or адрес.startswith("//"):
+		return домой
+	if адрес.startswith(СТРАНИЦА):
+		return домой
+	return адрес
+
+
+def от_имени() -> bool:
+	"""Сессия «Войти как» — за пользователя действует другой человек."""
+	return bool((getattr(frappe.local, "session", None) or {}).get("data", {}).get("impersonated_by"))
+
+
 def есть_явное(пользователь: str) -> bool:
 	"""Явное согласие с действующей редакцией документов уже дано."""
 	return bool(
@@ -111,7 +158,7 @@ def потребовать_согласие():
 		return
 	if not путь_под_согласием(frappe.request.path, frappe.request.method):
 		return
-	if not frappe.db.table_exists("Agent Consent") or есть_явное(пользователь):
+	if от_имени() or not готово() or есть_явное(пользователь):
 		return
 	куда = frappe.request.full_path.rstrip("?")
 	raise HTTPException(response=redirect(f"{СТРАНИЦА}?redirect-to={quote(куда, safe='')}", 302))
@@ -147,6 +194,7 @@ def записать_согласие(user, method=None):
 	# Регистрация в это окно проходит без записи, а не падает.
 	if not frappe.db.table_exists("Agent Consent"):
 		return
+	явное = готово() and _отметки_формы()
 	провайдеры = [
 		строка.provider
 		for строка in user.get("social_logins") or []
@@ -162,9 +210,12 @@ def записать_согласие(user, method=None):
 			"provider": провайдеры[0] if провайдеры else "",
 			# Отметки есть только в форме регистрации: у входа через провайдера
 			# их не спросить, и он придёт на экран согласия.
-			**({"explicit": 1, "age_confirmed": 1} if not провайдеры and _отметки_формы() else {}),
+			**({"explicit": 1, "age_confirmed": 1} if not провайдеры and явное else {}),
 		}
 	).insert(ignore_permissions=True)
+	if явное:
+		# Отметки нужны одному запросу регистрации — дальше cookie не живёт.
+		frappe.local.cookie_manager.delete_cookie(ЯВНОЕ_СОГЛАСИЕ)
 
 
 def _отметки_формы() -> bool:

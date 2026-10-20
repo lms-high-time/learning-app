@@ -3,10 +3,11 @@
 """Экран согласия с документами (learning-services#624).
 
 Сюда `consent.потребовать_согласие` ведёт вошедшего без явного согласия с
-действующей редакцией. После согласия — назад, на `redirect-to`; адрес
-принимается только свой, относительный: чужой превратил бы экран в
-переадресацию на любой сайт.
+действующей редакцией. После согласия — назад, на `redirect-to`: только свой
+адрес (`consent.куда_вернуть`).
 """
+
+from urllib.parse import quote
 
 import frappe
 from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
@@ -19,29 +20,22 @@ no_cache = 1
 ДОМОЙ = "/lms"
 
 
-def куда_вернуть(адрес: str | None) -> str:
-	"""Свой относительный адрес или `ДОМОЙ`."""
-	адрес = (адрес or "").strip()
-	if (
-		not адрес.startswith("/")
-		or адрес.startswith("//")
-		or "\\" in адрес
-		or адрес.startswith(consent.СТРАНИЦА)
-	):
-		return ДОМОЙ
-	return адрес
+def _уйти(адрес: str):
+	# 302, а не 301 Frappe по умолчанию: закэшированный 301 после смены
+	# редакции увёл бы мимо экрана. Адрес — в кодировке заголовка: кириллица
+	# в пути уронила бы ответ на latin-1.
+	frappe.local.flags.redirect_location = quote(адрес, safe="/?&=%#:+,;@")
+	raise frappe.Redirect(302)
 
 
 def get_context(context):
 	if frappe.session.user == "Guest":
-		frappe.local.flags.redirect_location = "/login"
-		raise frappe.Redirect
-	назад = куда_вернуть(frappe.form_dict.get("redirect-to"))
+		_уйти("/login")
+	назад = consent.куда_вернуть(frappe.form_dict.get("redirect-to"), ДОМОЙ)
 	if consent.есть_явное(frappe.session.user):
-		frappe.local.flags.redirect_location = назад
-		raise frappe.Redirect
+		_уйти(назад)
 	context.no_breadcrumbs = True
-	context.title = "Условия использования"
+	context.title = "Согласие с документами"
 	context.logo = get_app_logo()
 	context.redirect_to = назад
 	context.csrf_token = frappe.sessions.get_csrf_token()
