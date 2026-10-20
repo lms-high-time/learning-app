@@ -225,10 +225,13 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		через_google = зарегистрировать(почта(), провайдер="google")
 		формой = зарегистрировать(почта())
 		прежний = зарегистрировать(почта())
+		недавно_формой = зарегистрировать(почта())
 		frappe.set_user("Administrator")
 		вручную = зарегистрировать(почта())
 		давний = зарегистрировать(почта())
 		frappe.db.set_value("User", давний, "creation", add_days(now_datetime(), -2))
+		frappe.db.set_value("User", формой, "creation", add_days(now_datetime(), -2))
+		frappe.db.set_value("Agent Consent", {"user": формой}, "accepted_at", add_days(now_datetime(), -2))
 		frappe.delete_doc("User", прежний, ignore_permissions=True)
 		frappe.set_user("Guest")
 		зарегистрировать(прежний, провайдер="google")
@@ -247,7 +250,8 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		)
 		for кто, пользователь, ожидается in (
 			("вход через Google без отметок", через_google, завершить),
-			("регистрация формой — подпись под кнопкой", формой, обновили),
+			("регистрация формой до отметок — подпись под кнопкой", формой, обновили),
+			("регистрация формой без отметок после", недавно_формой, завершить),
 			("заведён вручную", вручную, завершить),
 			("старше записей согласия", давний, обновили),
 			("записи прежнего аккаунта с той же почтой", прежний, завершить),
@@ -258,7 +262,7 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-11-01")
 		self.assertEqual(экран(через_google), завершить, "редакция сменилась, а принятия не было")
 		with запрос("/consent", "POST"):
-			consent_api.accept(age_confirmed=1, documents_accepted=1)
+			self.assertTrue(consent_api.accept(age_confirmed=1, documents_accepted=1)["ok"])
 		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-12-01")
 		self.assertEqual(
 			экран(через_google),
