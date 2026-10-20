@@ -17,7 +17,7 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 ШАБЛОН = "templates/includes/oauth_confirmation.html"
 
 КОНТЕКСТ = {
-	"client_id": "Агент ученика",
+	"client_id": "Claude",
 	"success_url": "/api/method/frappe.integrations.oauth2.approve",
 	"failure_url": "https://example.com/callback?error=access_denied",
 	"details": ["all"],
@@ -27,21 +27,54 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 
 class IntegrationTestOAuthConfirmation(IntegrationTestCase):
 	def test_экран_подтверждения(self):
-		"""Экран называет учётную запись и остаётся рабочим: кнопки и защита от
-		CSRF — из исходного шаблона, их легко потерять."""
+		"""Экран называет агента и учётную запись и остаётся рабочим: кнопки и
+		защита от CSRF — из исходного шаблона, их легко потерять."""
 		self.addCleanup(frappe.set_user, "Administrator")
 		ученик = создать_ученика(f"oauth-{frappe.generate_hash(length=6)}@example.com")
 		frappe.set_user(ученик)
 
-		страница = frappe.render_template(ШАБЛОН, КОНТЕКСТ)
+		def экран(**поправки):
+			return frappe.render_template(ШАБЛОН, {**КОНТЕКСТ, **поправки})
 
-		with self.subTest("называет учётную запись"):
+		страница = экран()
+
+		with self.subTest("называет агента и учётную запись"):
+			self.assertIn("Подключить Claude к&nbsp;Cenda?", страница)
 			self.assertIn("Вы вошли как", страница)
 			self.assertIn(ученик, страница)
 
 		with self.subTest("остаётся рабочим"):
-			self.assertIn(КОНТЕКСТ["success_url"], страница)
-			self.assertIn(КОНТЕКСТ["failure_url"], страница)
-			self.assertIn('name="csrf_token"', страница)
-			# Перечень запрашиваемых прав — то, ради чего экран существует.
-			self.assertIn("All", страница)
+			self.assertIn(f'action="{КОНТЕКСТ["success_url"]}"', страница)
+			self.assertIn(f'href="{КОНТЕКСТ["failure_url"]}"', страница)
+			self.assertEqual(страница.count('name="csrf_token" value="csrf"'), 2)
+
+		with self.subTest("сменить аккаунт — выход формой"):
+			self.assertIn('action="/api/method/web_logout"', страница)
+
+		# Обычный запрос прав — `all`, он сказан фразой; перечень — когда агент
+		# просит что-то сверх него, и тогда без `all`.
+		with self.subTest("права «all» не перечисляются"):
+			self.assertNotIn("Запрошено:", страница)
+		with self.subTest("права сверх «all» перечисляются"):
+			перечень = экран(details=["all", "Email"])
+			self.assertIn("Запрошено:", перечень)
+			self.assertNotIn("all", перечень.split("Запрошено:", 1)[1].split("</p>", 1)[0])
+
+		# Имя агента и права задаёт сторонний клиент, а шаблоны Frappe сами не
+		# экранируют: разметка в имени перекрыла бы учётную запись на экране.
+		with self.subTest("имя и права агента экранируются"):
+			чужой = экран(client_id="<b>X</b>", details=["<i>Y</i>"])
+			self.assertIn("&lt;b&gt;X", чужой)
+			self.assertNotIn("<b>X", чужой)
+			self.assertNotIn("<i>Y", чужой)
+
+		with self.subTest("агент без имени"):
+			self.assertIn("Подключить агента к&nbsp;Cenda?", экран(client_id=None))
+
+		# Frappe 16 эту ветку не зовёт (ошибки уходят JSON); держим её рабочей
+		# на случай, если начнёт.
+		with self.subTest("ошибка подключения"):
+			ошибка = экран(error="invalid_request")
+			self.assertIn("Не удалось подключить Claude", ошибка)
+			self.assertIn("invalid_request", ошибка)
+			self.assertNotIn(КОНТЕКСТ["success_url"], ошибка)

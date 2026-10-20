@@ -121,11 +121,13 @@ website_redirects = [
 # Jinja
 # ----------
 
-# add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "lms_frappe_app.utils.jinja_methods",
-# 	"filters": "lms_frappe_app.utils.jinja_filters"
-# }
+# Логотип сайта — в шаблоны, а не путь к файлу: экран подтверждения OAuth
+# (templates/includes/oauth_confirmation.html) берёт тот же логотип, что вход,
+# и на сайте без загруженного логотипа не показывает битую картинку
+# (learning-services#622).
+jinja = {
+	"methods": ["frappe.core.doctype.navbar_settings.navbar_settings.get_app_logo"],
+}
 
 # Права
 # ------------------
