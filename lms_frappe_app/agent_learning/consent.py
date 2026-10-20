@@ -285,7 +285,11 @@ def убрать_аккаунт(пользователь: str, причина: s
 		}
 	).insert(ignore_permissions=True)
 	# Сессии на других устройствах: `Session.resume` не смотрит на `enabled`.
-	frappe.sessions.clear_sessions(пользователь, keep_current=True, force=True)
+	# Импорт явный: `frappe.sessions` подгружает только веб-запрос, и в задаче
+	# планировщика обращение через атрибут падало бы на каждом аккаунте.
+	from frappe.sessions import clear_sessions
+
+	clear_sessions(пользователь, keep_current=True, force=True)
 	if данные:
 		документ = frappe.get_doc("User", пользователь)
 		документ.enabled = 0
