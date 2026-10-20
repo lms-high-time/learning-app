@@ -22,6 +22,7 @@ def before_tests() -> None:
 	Локальный прогон уравнивается с CI в процессе, а не на диске: файл
 	индекса и поиск на стенде не трогаются (lms-platform#126).
 	"""
+	# nosemgrep: frappe-monkey-patching-not-allowed — только в before_tests: хука на выключение индекса у Learning нет, стенд не затрагивается
 	from lms.sqlite import LearningSearch
 
 	LearningSearch.is_search_enabled = lambda self: False
