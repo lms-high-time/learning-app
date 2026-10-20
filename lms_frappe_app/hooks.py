@@ -225,6 +225,8 @@ scheduler_events = {
 		f"{_назначение}.сверить_зачисления",
 		# Письмо непрошедшим, когда срок назначения близко (#365).
 		"lms_frappe_app.agent_learning.notices.напомнить_о_сроках",
+		# Новые аккаунты без согласия за 30 дней — удаляются (learning-services#624).
+		"lms_frappe_app.agent_learning.consent.удалить_без_согласия",
 	],
 }
 
@@ -473,7 +475,10 @@ ignore_links_on_delete = ["Agent Consent"]
 
 # Request Events
 # ----------------
-# before_request = ["lms_frappe_app.utils.before_request"]
+# Без явного согласия с документами страницы платформы ведут на экран
+# согласия (learning-services#624): вошедшие через Google и прежние
+# пользователи отмечают «мне есть 18» и «принимаю документы» один раз.
+before_request = ["lms_frappe_app.agent_learning.consent.потребовать_согласие"]
 # after_request = ["lms_frappe_app.utils.after_request"]
 
 # Job Events

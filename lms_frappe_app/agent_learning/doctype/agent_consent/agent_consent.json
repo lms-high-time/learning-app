@@ -10,7 +10,9 @@
   "documents_version",
   "accepted_at",
   "method",
-  "provider"
+  "provider",
+  "explicit",
+  "age_confirmed"
  ],
  "fields": [
   {
@@ -43,10 +45,11 @@
    "fieldname": "method",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Как зарегистрировался",
-   "options": "Sign Up\nSocial Login",
+   "label": "Как дано",
+   "options": "Sign Up\nSocial Login\nConsent Screen\nUnderage\nNot Given",
    "read_only": 1,
-   "reqd": 1
+   "reqd": 1,
+   "description": "Underage — сообщил на экране согласия, что ему нет 18 лет; Not Given — вошёл через Google и не дал согласия за 30 дней. Обе записи переживают удаление аккаунта."
   },
   {
    "description": "Провайдер входа — у регистрации через Google и других",
@@ -54,11 +57,27 @@
    "fieldtype": "Data",
    "label": "Провайдер",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Отметил галочки сам — в форме регистрации или на экране согласия, а не только видел подпись «Продолжая, вы принимаете…»",
+   "fieldname": "explicit",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Явное",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "age_confirmed",
+   "fieldtype": "Check",
+   "label": "Подтвердил, что ему есть 18 лет",
+   "read_only": 1
   }
  ],
  "in_create": 1,
  "links": [],
- "modified": "2026-10-14 12:00:00.000000",
+ "modified": "2026-10-20 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Consent",

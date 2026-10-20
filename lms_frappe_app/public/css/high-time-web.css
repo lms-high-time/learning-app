@@ -85,7 +85,7 @@
    data-theme, поэтому тема — только по настройке системы. Переменные Frappe
    переопределены здесь же: правила login.bundle, которых ниже нет (ссылка
    «Resend», ошибки, иконки полей), берут нашу палитру и в тёмной теме. */
-body:is([data-path="login"], [data-path="update-password"], :has(.cenda-oauth)) {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"], :has(.cenda-oauth)) {
 	--ht-bg: #f6f6f3;
 	--ht-paper: #ffffff;
 	--ht-ink: #1b1e24;
@@ -109,7 +109,7 @@ body:is([data-path="login"], [data-path="update-password"], :has(.cenda-oauth)) 
 	font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-	body:is([data-path="login"], [data-path="update-password"], :has(.cenda-oauth)) {
+	body:is([data-path="login"], [data-path="update-password"], [data-path="consent"], :has(.cenda-oauth)) {
 		--ht-bg: #14171b;
 		--ht-paper: #1c2026;
 		--ht-ink: #e7e9ec;
@@ -127,27 +127,27 @@ body:is([data-path="login"], [data-path="update-password"], :has(.cenda-oauth)) 
    .page-card-body input`): body, атрибут и section[class] — класс есть у
    каждой секции входа — поднимают наши правила над правилами Frappe без
    !important, сразу для всех секций. */
-body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) section[class] .page-card {
 	background: var(--ht-paper);
 	border: 1px solid var(--ht-line);
 	border-radius: 3px;
 	padding: 36px 40px 32px;
 	box-shadow: 0 30px 60px -40px rgba(20, 30, 40, 0.35);
 }
-body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card-head h4 {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) section[class] .page-card-head h4 {
 	font-family: "Literata", Georgia, serif;
 	font-weight: 500;
 	font-size: 1.6rem;
 	letter-spacing: -0.01em;
 	color: var(--ht-ink);
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
 	:is(.page-card-subtitle, .form-label, .sign-up-message, .forgot-password-message > *) {
 	color: var(--ht-muted);
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
 	.page-card-body
@@ -158,7 +158,7 @@ body:is([data-path="login"], [data-path="update-password"])
 	background: var(--ht-paper);
 	color: var(--ht-ink);
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
 	.page-card-body
@@ -166,7 +166,7 @@ body:is([data-path="login"], [data-path="update-password"])
 	border-color: var(--ht-accent);
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--ht-accent) 25%, transparent);
 }
-body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card .btn {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) section[class] .page-card .btn {
 	min-height: 42px;
 	border-radius: 6px;
 	font-weight: 500;
@@ -176,7 +176,7 @@ body:is([data-path="login"], [data-path="update-password"]) section[class] .page
 	justify-content: center;
 	gap: 8px;
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
 	.page-card-actions
@@ -185,7 +185,7 @@ body:is([data-path="login"], [data-path="update-password"])
 	border: 1.5px solid var(--ht-btn);
 	color: var(--ht-btn-ink);
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
 	.btn-login-option {
@@ -193,7 +193,7 @@ body:is([data-path="login"], [data-path="update-password"])
 	border: 1px solid var(--ht-line);
 	color: var(--ht-ink);
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
 	.btn-login-option:hover {
@@ -206,26 +206,26 @@ body:is([data-path="login"], [data-path="update-password"])
    цвет, его перебиваем отдельно. Крестик — `button.close` с иконкой,
    обводку иконка берёт из `--icon-stroke`, а не из `color`. Ссылки и основная
    кнопка в теме Frappe тёмные, на тёмном окне их не видно. */
-body:is([data-path="login"], [data-path="update-password"]) .modal-content {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) .modal-content {
 	background: var(--ht-paper);
 	color: var(--ht-ink);
 	border-radius: 6px;
 }
-body:is([data-path="login"], [data-path="update-password"]) .modal-content .modal-footer {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) .modal-content .modal-footer {
 	border-top-color: var(--ht-line);
 }
-body:is([data-path="login"], [data-path="update-password"])
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	.modal-content
 	:is(.modal-title, .close) {
 	color: var(--ht-ink);
 }
-body:is([data-path="login"], [data-path="update-password"]) .modal-content .close {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) .modal-content .close {
 	--icon-stroke: currentColor;
 }
-body:is([data-path="login"], [data-path="update-password"]) .modal-content a:not(.btn) {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) .modal-content a:not(.btn) {
 	color: var(--ht-accent);
 }
-body:is([data-path="login"], [data-path="update-password"]) .modal-content .btn-primary {
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) .modal-content .btn-primary {
 	background: var(--ht-btn);
 	border-color: var(--ht-btn);
 	color: var(--ht-btn-ink);
@@ -239,7 +239,45 @@ body[data-path="login"] section[class] .page-card .consent-notice {
 	text-align: center;
 	color: var(--ht-muted);
 }
-body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card a:not(.btn) {
+/* Галочки согласия — в форме регистрации (consent-notice.js) и на экране
+   согласия (www/consent.html), learning-services#624. */
+body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-check {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+	margin: 0 0 10px;
+	font-size: 0.9rem;
+	line-height: 1.45;
+	color: var(--ht-ink);
+	cursor: pointer;
+}
+body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-hint {
+	margin: -6px 0 12px 26px;
+	font-size: 0.8rem;
+	color: var(--ht-muted);
+}
+body[data-path="consent"] section[class] .page-card :is(.consent-underage, .consent-done) p {
+	font-size: 0.9rem;
+	line-height: 1.5;
+	color: var(--ht-ink);
+}
+body[data-path="consent"] section[class] .page-card .btn-link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--ht-accent);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-check input {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	margin: 2px 0 0;
+	accent-color: var(--ht-accent);
+}
+body:is([data-path="login"], [data-path="update-password"], [data-path="consent"]) section[class] .page-card a:not(.btn) {
 	color: var(--ht-accent);
 	text-underline-offset: 3px;
 }
