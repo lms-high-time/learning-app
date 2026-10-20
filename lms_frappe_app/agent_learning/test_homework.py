@@ -590,6 +590,25 @@ class IntegrationTestHomeworkRequired(IntegrationTestCase):
 				True,
 				{"срок": "2020-01-01 23:59:59"},
 			),
+			"назначение организации рядом с самозаписью — обязательная": (
+				lambda: (
+					self.назначить(
+						audience="Selected Members", members=[{"user": self.ученик}], chosen_by_member=1
+					),
+					self.назначить(),
+				),
+				True,
+				{"обязательна": True, "дней": timedelta(days=5), "источник": "author"},
+			),
+			"поимённое назначение с учеником в адресатах — обязательная": (
+				lambda: self.назначить(
+					{"due_mode": "relative", "due_days": 3},
+					audience="Selected Members",
+					members=[{"user": self.ученик}],
+				),
+				True,
+				{"обязательна": True, "дней": timedelta(days=3), "источник": "allocation"},
+			),
 			"личное пространство — практика, хоть курс и назначен": (
 				lambda: self.назначить({"due_mode": "relative", "due_days": 1}),
 				False,

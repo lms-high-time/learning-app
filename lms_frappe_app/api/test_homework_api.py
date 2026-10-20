@@ -11,6 +11,7 @@ from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
+	добавить_в_организацию,
 	зачислить,
 	зачислить_на_курс,
 	курс_из_релиза,
@@ -299,6 +300,31 @@ class IntegrationTestHomeworkStart(IntegrationTestCase):
 			(False, {"mode": "none", "days": None, "date": None}),
 		)
 		self.assertIsNone(данные["previous_homework"])
+
+	def test_в_команде_назначившей_курс_задание_обязательное_со_сроком_назначения(self):
+		"""Проводка признака и действующего срока в `start_lesson`: курс назначила
+		организация ученика, срок назначения перекрывает автора (learning-services#627)."""
+		frappe.set_user("Administrator")
+		организация = создать_организацию(f"hwst-org-{frappe.generate_hash(length=6)}")
+		добавить_в_организацию(self.ученик, организация)
+		задание = frappe.db.get_value("Agent Lesson Homework", {"lesson": self.первый}, "name")
+		frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": организация,
+				"course": self.курс,
+				"homework_due": [{"homework": задание, "due_mode": "relative", "due_days": 2}],
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		ответ = student.start_lesson(lesson=self.первый, space=организация)
+		self.assertTrue(ответ["ok"], ответ)
+		данные = ответ["data"]
+		self.assertEqual(данные["space"], организация)
+		self.assertEqual(
+			(данные["homework"]["required"], данные["homework"]["due"]),
+			(True, {"mode": "relative", "days": 2, "date": None}),
+		)
 
 	def test_следующий_урок_отдаёт_статус_сдачи_прошлого_без_ответа(self):
 		"""Ответ ученика и журнал — `my_homework(lesson=…)`: на старте только статус и комментарий."""
