@@ -213,9 +213,10 @@ def записать_согласие(user, method=None):
 			**({"explicit": 1, "age_confirmed": 1} if not провайдеры and явное else {}),
 		}
 	).insert(ignore_permissions=True)
-	if явное:
-		# Отметки нужны одному запросу регистрации — дальше cookie не живёт.
-		frappe.local.cookie_manager.delete_cookie(ЯВНОЕ_СОГЛАСИЕ)
+	# Отметки нужны одному запросу регистрации — дальше cookie не живёт.
+	# Менеджер cookie есть только у HTTP-запроса, не у вызова из кода.
+	if явное and (cookie := getattr(frappe.local, "cookie_manager", None)):
+		cookie.delete_cookie(ЯВНОЕ_СОГЛАСИЕ)
 
 
 def _отметки_формы() -> bool:
