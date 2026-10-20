@@ -200,6 +200,23 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 			consent_api.accept(age_confirmed=1, documents_accepted=1)
 		self.assertEqual(sum(с.explicit for с in согласия(адрес)), 1, "повтор ничего не пишет")
 
+	def test_согласие_прежнего_аккаунта_с_той_же_почтой_не_в_счёт(self):
+		"""Записи согласия переживают удаление (learning-services#628): новый
+		аккаунт на ту же почту идёт на экран согласия сам."""
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(адрес)
+		with запрос("/consent", "POST"):
+			self.assertTrue(consent_api.accept(age_confirmed=1, documents_accepted=1)["ok"])
+		frappe.set_user("Administrator")
+		frappe.delete_doc("User", адрес, ignore_permissions=True)
+		frappe.set_user("Guest")
+		зарегистрировать(адрес, провайдер="google")
+		frappe.set_user(адрес)
+
+		self.assertFalse(consent.есть_явное(адрес))
+		with запрос("/lms"), self.assertRaises(HTTPException):
+			consent.потребовать_согласие()
+
 	def test_гость_и_administrator_на_экран_не_идут(self):
 		with запрос("/lms"):
 			consent.потребовать_согласие()
