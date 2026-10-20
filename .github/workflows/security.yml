@@ -137,7 +137,9 @@ jobs:
           if [ -n "$base" ]; then
             echo "mode=$EVENT, ${base:0:7}..$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
             git diff --name-only "$base" HEAD > "$RUNNER_TEMP/changed.txt"
-            git diff -U0 "$base" HEAD > "$RUNNER_TEMP/diff.patch"
+            # Без самого воркфлоу: слово `nosemgrep` в его тексте — не пометка,
+            # а правка воркфлоу и так видна строкой «изменены сами ворота».
+            git diff -U0 "$base" HEAD -- . ':(exclude).github/workflows/security.yml' > "$RUNNER_TEMP/diff.patch"
           else
             echo "mode=$EVENT, полный скан" >> "$GITHUB_OUTPUT"
             : > "$RUNNER_TEMP/changed.txt"
@@ -218,8 +220,10 @@ jobs:
 
           gates=$(grep -E '^(\.github/workflows/security\.yml|\.gitleaks\.toml|\.gitleaksignore|\.semgrepignore)$' "$t/changed.txt" | paste -sd, - || true)
           [ -z "$gates" ] || echo "::warning::здесь изменены сами ворота: $gates — проверь на ревью"
-          nosem=$(grep -cE '^\+.*nosemgrep' "$t/diff.patch" || true)
-          [ "$nosem" = 0 ] || echo "::warning::новых nosemgrep в диффе: $nosem — проверь на ревью, голый nosemgrep без id глушит все правила"
+          # Та же регулярка, что у semgrep: ` nosem(grep)?` без учёта регистра,
+          # в любом комментарии (`#`, `//`, `/* */`, `<!-- -->`) и даже в строке.
+          nosem=$(grep -vE '^\+\+\+ (b/|/dev/null)' "$t/diff.patch" | grep -ciE '^\+.* nosem(grep)?' || true)
+          [ "$nosem" = 0 ] || echo "::warning::новых пометок nosemgrep в диффе: $nosem — проверь на ревью; пометка действует в любом комментарии и в строке, голая — глушит все правила"
 
           {
             echo "## Безопасность"
