@@ -23,6 +23,7 @@ class IntegrationTestLanguage(IntegrationTestCase):
 		выключен, а в кэше — список языков без него."""
 		прежний = frappe.db.get_single_value("System Settings", "language")
 		self.addCleanup(frappe.clear_cache)
+		self.addCleanup(frappe.db.set_default, "language", frappe.db.get_default("language"))
 		self.addCleanup(frappe.db.set_single_value, "System Settings", "language", прежний or "")
 		frappe.db.set_single_value("System Settings", "language", "")
 		frappe.db.set_value("Language", ЯЗЫК, "enabled", 0)
@@ -67,7 +68,8 @@ class IntegrationTestLanguage(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		профиль = frappe.get_doc("User", выбрал)
 		профиль.language = "en"
-		профиль.save(ignore_permissions=True)
+		# В тестах Frappe версию по умолчанию не пишет: `save` берёт `ignore_version` из `in_test`.
+		профиль.save(ignore_permissions=True, ignore_version=False)
 		frappe.db.set_value("User", сотрудник, "user_type", "System User")
 
 		students_language.execute()
