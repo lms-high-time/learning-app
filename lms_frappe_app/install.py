@@ -426,10 +426,25 @@ def обеспечить_русский_язык() -> None:
 	frappe.db.set_value("Language", ЯЗЫК, "enabled", 1)
 	frappe.db.set_single_value("System Settings", "language", ЯЗЫК)
 	frappe.clear_document_cache("System Settings", "System Settings")
+	согласовать_умолчание_языка()
 	# Списки языков и словарь кэшируются: без сброса остались бы прежними.
 	frappe.client_cache.delete_value("languages")
 	frappe.cache.delete_value("languages_with_name")
 	frappe.cache.delete_key("merged_translations")
+
+
+def согласовать_умолчание_языка() -> None:
+	"""Умолчание `language` — язык из системных настроек.
+
+	Им Frappe заполняет язык каждого нового пользователя
+	(`Document._set_defaults`), а пишет его только сохранение системных
+	настроек (`System Settings.set_defaults`). `Why:` язык, поставленный в
+	обход сохранения, оставлял умолчание прежним: в настройках `ru`, а новые
+	ученики получали `en` от мастера настройки (#633).
+	"""
+	язык = frappe.db.get_single_value("System Settings", "language")
+	if язык and frappe.db.get_default("language") != язык:
+		frappe.db.set_default("language", язык)
 
 
 def обеспечить_значения_настроек() -> None:
