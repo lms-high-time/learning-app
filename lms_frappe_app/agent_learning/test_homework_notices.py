@@ -158,6 +158,16 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 				"Left",
 			)
 
+		def практика():
+			"""Срок автора практике не достаётся — и напоминать не о чем
+			(learning-services#627)."""
+			задание = домашка.задание_урока(self.урок).name
+			frappe.db.set_value(домашка.ЗАДАНИЕ, задание, {"due_mode": "relative", "due_days": 1})
+			домашка.выдать(frappe.get_doc("Agent Learning Session", создать_занятие(self.ученик, self.урок)))
+			сдача = домашка.найти_сдачу(задание, self.ученик, None)
+			frappe.db.set_value(домашка.СДАЧА, сдача, "assigned_at", УТРО - timedelta(days=5))
+			self.assertIsNone(frappe.db.get_value(домашка.СДАЧА, сдача, "due_at"))
+
 		случаи = {
 			"далёкий срок": далёкий_срок,
 			"ноль дней — не напоминать": ноль_дней,
@@ -165,6 +175,7 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 			"отключённому": отключённый,
 			"без доступа к курсу": без_доступа,
 			"ушедшему из организации": ушёл,
+			"практика без срока": практика,
 		}
 		for номер, (что, подготовить) in enumerate(случаи.items()):
 			with self.subTest(что):
@@ -219,8 +230,13 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 
 	# --- дайджест ---
 
-	def сдать(self, организация=None, ученик=None):
-		return домашка.сохранить(ученик or self.ученик, self.урок, организация, answer="сделал").name
+	def сдать(self, организация=None, ученик=None, *, обязательна=True):
+		"""Сдача на проверке. Признак обязательной ставится прямо: откуда он
+		берётся — `test_homework`, здесь — кому дайджест."""
+		имя = домашка.сохранить(ученик or self.ученик, self.урок, организация, answer="сделал").name
+		if обязательна:
+			frappe.db.set_value(домашка.СДАЧА, имя, "required", 1)
+		return имя
 
 	def дайджест(self, кому: str) -> list[str]:
 		return self.журнал(recipient=кому, kind="digest")
@@ -263,8 +279,9 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 
 	def test_дайджест_руководителю_не_уходит(self):
 		"""Пустая очередь — без письма; отключённому руководителю — без дайджеста;
-		сдача ушедшего из организации — не в счёт (learning-services#585).
-		У каждого случая свои ученик, урок, организация и руководитель."""
+		сдача ушедшего из организации — не в счёт (learning-services#585);
+		практика — тоже (learning-services#627). У каждого случая свои ученик,
+		урок, организация и руководитель."""
 
 		def отключённый():
 			self.сдать(self.организация)
@@ -284,6 +301,7 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 				"пустая очередь": lambda: None,
 				"отключённый руководитель": отключённый,
 				"сдача ушедшего": ушёл,
+				"только практика": lambda: self.сдать(self.организация, обязательна=False),
 			}.items()
 		):
 			with self.subTest(что):

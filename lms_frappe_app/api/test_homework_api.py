@@ -11,6 +11,7 @@ from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
+	добавить_в_организацию,
 	зачислить,
 	зачислить_на_курс,
 	курс_из_релиза,
@@ -102,12 +103,13 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 	def test_задание_и_сдача_урока(self):
 		ответ = student.homework(lesson=self.урок)["data"]
 		self.assertEqual(ответ["homework"]["title"], "Встреча со спонсором")
+		self.assertEqual(ответ["homework"]["required"], False)
 		self.assertEqual(ответ["homework"]["due"], {"mode": "none", "days": None, "date": None})
 		self.assertIsNone(ответ["submission"])
 		self.assertTrue(ответ["lesson_url"].startswith(f"/lms/courses/{self.курс}/learn/1-1"))
 		student.submit_homework(lesson=self.урок, answer="сделал")
 		сдача = student.homework(lesson=self.урок)["data"]["submission"]
-		self.assertEqual(сдача["status"], "Submitted")
+		self.assertEqual((сдача["status"], сдача["required"]), ("Submitted", False))
 		self.assertEqual([с["event"] for с in сдача["history"]], ["submitted"])
 		self.assertEqual(len(сдача["versions"]), 1)
 
@@ -172,7 +174,7 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 			self.assertEqual(строка["lesson"], self.урок)
 			self.assertEqual(строка["course"], self.курс)
 			self.assertTrue(строка["lesson_url"].startswith("/lms/courses/"))
-			self.assertEqual(строка["status"], "Submitted")
+			self.assertEqual((строка["status"], строка["required"]), ("Submitted", False))
 			self.assertIsNone(строка["last_comment"])
 			self.assertNotIn("submission", строка)
 			[строка] = student.my_homework(course=self.курс)["data"]["items"]
@@ -182,6 +184,7 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 			[строка] = student.my_homework(lesson=self.урок)["data"]["items"]
 			self.assertEqual(строка["submission"]["answer"], "сделал")
 			self.assertEqual(строка["homework"]["answer_mode"], "text_and_files")
+			self.assertEqual(строка["homework"]["required"], False)
 			self.assertNotIn("versions", строка["submission"])
 
 		frappe.set_user("Administrator")
@@ -287,10 +290,41 @@ class IntegrationTestHomeworkStart(IntegrationTestCase):
 		return ответ["data"]
 
 	def test_первый_урок_отдаёт_своё_задание(self):
+		"""Срок — действующий для ученика, а не правило автора: в личном
+		пространстве задание — практика без срока (правило — `test_homework`,
+		`test_описание_задания_даёт_действующее_правило`)."""
 		данные = self.старт(self.первый)
 		self.assertEqual(данные["homework"]["title"], "Встреча со спонсором")
-		self.assertEqual(данные["homework"]["due"]["days"], 3)
+		self.assertEqual(
+			(данные["homework"]["required"], данные["homework"]["due"]),
+			(False, {"mode": "none", "days": None, "date": None}),
+		)
 		self.assertIsNone(данные["previous_homework"])
+
+	def test_в_команде_назначившей_курс_задание_обязательное_со_сроком_назначения(self):
+		"""Проводка признака и действующего срока в `start_lesson`: курс назначила
+		организация ученика, срок назначения перекрывает автора (learning-services#627)."""
+		frappe.set_user("Administrator")
+		организация = создать_организацию(f"hwst-org-{frappe.generate_hash(length=6)}")
+		добавить_в_организацию(self.ученик, организация)
+		задание = frappe.db.get_value("Agent Lesson Homework", {"lesson": self.первый}, "name")
+		frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": организация,
+				"course": self.курс,
+				"homework_due": [{"homework": задание, "due_mode": "relative", "due_days": 2}],
+			}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.ученик)
+		ответ = student.start_lesson(lesson=self.первый, space=организация)
+		self.assertTrue(ответ["ok"], ответ)
+		данные = ответ["data"]
+		self.assertEqual(данные["space"], организация)
+		self.assertEqual(
+			(данные["homework"]["required"], данные["homework"]["due"]),
+			(True, {"mode": "relative", "days": 2, "date": None}),
+		)
 
 	def test_следующий_урок_отдаёт_статус_сдачи_прошлого_без_ответа(self):
 		"""Ответ ученика и журнал — `my_homework(lesson=…)`: на старте только статус и комментарий."""
@@ -299,7 +333,7 @@ class IntegrationTestHomeworkStart(IntegrationTestCase):
 		self.assertIsNone(данные["homework"])
 		прошлое = данные["previous_homework"]
 		self.assertEqual((прошлое["lesson"], прошлое["title"]), (self.первый, "Встреча со спонсором"))
-		self.assertEqual(прошлое["submission"]["status"], "Submitted")
+		self.assertEqual((прошлое["submission"]["status"], прошлое["submission"]["required"]), ("Submitted", False))
 		self.assertNotIn("answer", прошлое["submission"])
 		self.assertNotIn("history", прошлое["submission"])
 		self.assertNotIn("homework", прошлое)

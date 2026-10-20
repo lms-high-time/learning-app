@@ -66,36 +66,6 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		домашка.выдать(занятие(self.ученик, self.урок))
 		self.assertEqual(self.сдачи(), [])
 
-	def test_выдача_ставит_срок(self):
-		"""Относительный — от закрытия; абсолютный — конец дня. У каждого случая
-		свои ученик и урок."""
-		случаи = {
-			"относительный срок от закрытия": (
-				{"due_mode": "relative", "due_days": 5},
-				timedelta(days=5),
-				None,
-			),
-			"абсолютный срок — конец дня": (
-				{"due_mode": "absolute", "due_date": "2030-01-15"},
-				None,
-				"2030-01-15 23:59:59",
-			),
-		}
-		for номер, (что, (правило, от_выдачи, срок)) in enumerate(случаи.items()):
-			with self.subTest(что):
-				if номер:
-					self.заново()
-				создать_домашку(self.урок, **правило)
-
-				домашка.выдать(занятие(self.ученик, self.урок))
-
-				[сдача] = self.сдачи()
-				if от_выдачи is not None:
-					self.assertEqual(сдача.status, "Assigned")
-					self.assertEqual(get_datetime(сдача.due_at) - get_datetime(сдача.assigned_at), от_выдачи)
-				if срок is not None:
-					self.assertEqual(str(сдача.due_at), срок)
-
 	def test_повторное_закрытие_ничего_не_меняет(self):
 		создать_домашку(self.урок, due_mode="relative", due_days=5)
 		запись = занятие(self.ученик, self.урок)
@@ -105,19 +75,6 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		[стало] = self.сдачи()
 		self.assertEqual(было, стало)
 		self.assertEqual(len(frappe.get_doc("Agent Homework Submission", стало.name).history), 1)
-
-	def test_правка_правила_не_пересчитывает_выставленный_срок(self):
-		"""Ученик не получает просрочку задним числом за правку правила."""
-		правило = создать_домашку(self.урок, due_mode="relative", due_days=5)
-		запись = занятие(self.ученик, self.урок)
-		домашка.выдать(запись)
-		[было] = self.сдачи()
-		правило.update({"due_mode": "absolute", "due_date": "2020-01-01"})
-		правило.save(ignore_permissions=True)
-		домашка.выдать(запись)
-		домашка.сохранить(self.ученик, self.урок, None, answer="сделал")
-		[стало] = self.сдачи()
-		self.assertEqual(стало.due_at, было.due_at)
 
 	def test_закрытие_в_другом_пространстве_даёт_свою_сдачу(self):
 		создать_домашку(self.урок)
@@ -138,7 +95,6 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		[сдача] = self.сдачи()
 		self.assertEqual(сдача.status, "Submitted")
 		self.assertIsNotNone(сдача.assigned_at)
-		self.assertIsNotNone(сдача.due_at)
 
 	def test_complete_lesson_выдаёт_домашку(self):
 		from lms_frappe_app.api import student
@@ -160,9 +116,15 @@ class IntegrationTestHomeworkIssue(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		ответ = student.complete_lesson(занятие)
 		self.assertTrue(ответ["ok"], ответ)
+		# Задание урока — в ответе о закрытии (learning-services#627): личное
+		# пространство — практика без срока, хоть автор и задал три дня.
+		задание = ответ["data"]["homework"]
+		self.assertEqual((задание["title"], задание["required"]), ("Задание", False))
+		self.assertEqual(задание["due"], {"mode": "none", "days": None, "date": None})
 		frappe.set_user("Administrator")
 		[сдача] = self.сдачи()
 		self.assertEqual(сдача.status, "Assigned")
+		self.assertIsNone(сдача.due_at)
 
 	def test_закрытие_урока_и_очередь_выдачи(self):
 		"""Выдача — не в транзакции закрытия: её сбой не срывает зачёт; задача
@@ -516,15 +478,11 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.bin", большой), ("b.bin", большой)])
 		self.assertEqual(отказ.exception.код, "answer_too_large")
 
-	def test_абсолютный_срок_ставится_при_создании(self):
-		создать_домашку(self.урок, due_mode="absolute", due_date="2030-01-15")
-		документ = домашка.сохранить(self.ученик, self.урок, None, answer="рано")
-		self.assertEqual(str(документ.due_at), "2030-01-15 23:59:59")
-		self.assertIsNone(документ.assigned_at)
 
-
-class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
-	"""Срок домашки из назначения курса перекрывает срок автора (learning-services#452)."""
+class IntegrationTestHomeworkRequired(IntegrationTestCase):
+	"""Обязательная домашка и практика: срок — только у сдачи в пространстве
+	организации, которая сама назначила курс; правило назначения перекрывает
+	автора (learning-services#452, #627)."""
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -551,6 +509,10 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 
+	def правило_автора(self, **правило) -> None:
+		self.задание.update(правило)
+		self.задание.save(ignore_permissions=True)
+
 	def выдать(self, организация):
 		имя = создать_занятие(self.ученик, self.урок)
 		frappe.db.set_value("Agent Learning Session", имя, "organization", организация)
@@ -561,10 +523,10 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 	def дней_до_срока(self, сдача) -> timedelta:
 		return get_datetime(сдача.due_at) - get_datetime(сдача.assigned_at)
 
-	def test_срок_выдачи_из_назначения(self):
-		"""Правило назначения перекрывает автора; из двух назначений — ближайший
-		срок; назначение другой организации, личная сдача и назначение не адресату
-		оставляют срок автора; выбранный самим курс тоже действует. У каждого
+	def test_срок_и_признак_при_выдаче(self):
+		"""Обязательная — в пространстве организации, назначившей курс: срок
+		автора, перекрытый правилом назначения, из двух назначений — ближайший.
+		Остальное — практика без срока и без источника в журнале. У каждого
 		случая свои ученик, урок и организация."""
 
 		def другая_организация():
@@ -581,11 +543,40 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 				members=[{"user": коллега}],
 			)
 
+		def из_каталога_команды():
+			"""Самозапись создаёт назначение с обязательностью курса по умолчанию —
+			на домашку она не влияет."""
+			from lms_frappe_app.agent_learning import spaces
+
+			spaces.записать(self.ученик, self.курс, self.организация)
+			self.assertEqual(
+				frappe.db.get_value(
+					"Course Allocation",
+					{"organization": self.организация, "course": self.курс},
+					["chosen_by_member", "mandatory"],
+				),
+				(1, 1),
+			)
+
+		ПРАКТИКА = {"обязательна": False, "срок": "None", "источник": None, "срок в журнале": None}
 		случаи = {
+			"назначение без правил — относительный срок автора от выдачи": (
+				self.назначить,
+				True,
+				{"обязательна": True, "дней": timedelta(days=5), "источник": "author"},
+			),
+			"абсолютный срок автора — конец дня": (
+				lambda: (
+					self.правило_автора(due_mode="absolute", due_date="2030-01-15", due_days=0),
+					self.назначить(),
+				),
+				True,
+				{"обязательна": True, "срок": "2030-01-15 23:59:59"},
+			),
 			"правило назначения перекрывает автора": (
 				lambda: self.назначить({"due_mode": "relative", "due_days": 2}),
 				True,
-				{"дней": timedelta(days=2), "источник": "allocation"},
+				{"обязательна": True, "дней": timedelta(days=2), "источник": "allocation"},
 			),
 			"два назначения — ближайший срок": (
 				lambda: (
@@ -599,62 +590,111 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 				True,
 				{"срок": "2020-01-01 23:59:59"},
 			),
-			"назначение другой организации не действует": (
-				другая_организация,
+			"назначение организации рядом с самозаписью — обязательная": (
+				lambda: (
+					self.назначить(
+						audience="Selected Members", members=[{"user": self.ученик}], chosen_by_member=1
+					),
+					self.назначить(),
+				),
 				True,
-				{"дней": timedelta(days=5), "источник": "author"},
+				{"обязательна": True, "дней": timedelta(days=5), "источник": "author"},
 			),
-			"личная сдача — только автор": (
-				lambda: self.назначить({"due_mode": "relative", "due_days": 1}),
-				False,
-				{"дней": timedelta(days=5)},
-			),
-			"выбранный самим курс тоже действует": (
+			"поимённое назначение с учеником в адресатах — обязательная": (
 				lambda: self.назначить(
 					{"due_mode": "relative", "due_days": 3},
 					audience="Selected Members",
 					members=[{"user": self.ученик}],
-					chosen_by_member=1,
 				),
 				True,
-				{"дней": timedelta(days=3)},
+				{"обязательна": True, "дней": timedelta(days=3), "источник": "allocation"},
 			),
-			"назначение не адресату не действует": (не_адресату, True, {"дней": timedelta(days=5)}),
+			"личное пространство — практика, хоть курс и назначен": (
+				lambda: self.назначить({"due_mode": "relative", "due_days": 1}),
+				False,
+				ПРАКТИКА,
+			),
+			"курс из каталога команды — практика": (из_каталога_команды, True, ПРАКТИКА),
+			"назначение другой организации — практика": (другая_организация, True, ПРАКТИКА),
+			"назначение не адресату — практика": (не_адресату, True, ПРАКТИКА),
+		}
+		for номер, (что, (подготовить, в_организации, ожидаемо)) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				подготовить()
+
+				сдача = self.выдать(self.организация if в_организации else None)
+
+				выдача = сдача.history[-1]
+				итог = {
+					"обязательна": bool(сдача.required),
+					"дней": self.дней_до_срока(сдача) if сдача.due_at else None,
+					"срок": str(сдача.due_at),
+					"источник": выдача.due_source or None,
+					"срок в журнале": выдача.due_at,
+				}
+				self.assertEqual(выдача.event, "assigned")
+				self.assertEqual({к: итог[к] for к in ожидаемо}, ожидаемо)
+
+	def test_правка_правила_не_меняет_выставленный_срок(self):
+		"""Ученик не получает просрочку задним числом — ни за правку автора, ни
+		за правку назначения."""
+		случаи = {
+			"правка правила автора": lambda назначение: self.правило_автора(
+				due_mode="absolute", due_date="2020-01-01", due_days=0
+			),
+			"правка правила назначения": lambda назначение: (
+				назначение.set(
+					"homework_due",
+					[{"homework": self.задание.name, "due_mode": "absolute", "due_date": "2020-01-01"}],
+				),
+				назначение.save(ignore_permissions=True),
+			),
+		}
+		for номер, (что, править) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				назначение = self.назначить()
+				было = self.выдать(self.организация).due_at
+				self.assertIsNotNone(было)
+				править(назначение)
+				self.выдать(self.организация)
+				домашка.сохранить(self.ученик, self.урок, self.организация, answer="сделал")
+				стало = frappe.db.get_value(домашка.СДАЧА, {"member": self.ученик}, "due_at")
+				self.assertEqual(стало, было)
+
+	def test_сохранение_до_выдачи_ставит_абсолютный_срок(self):
+		"""Абсолютный срок обязательной известен сразу — из назначения или автора;
+		у практики срока нет и тогда. У каждого случая свои ученик и урок."""
+		случаи = {
+			"правило назначения": (
+				lambda: self.назначить({"due_mode": "absolute", "due_date": "2030-03-01"}),
+				True,
+				(True, "2030-03-01 23:59:59"),
+			),
+			"правило автора": (lambda: self.назначить(), True, (True, "2030-01-15 23:59:59")),
+			"практика — без срока": (lambda: None, False, (False, "None")),
 		}
 		for номер, (что, (назначить, в_организации, ожидаемо)) in enumerate(случаи.items()):
 			with self.subTest(что):
 				if номер:
 					self.заново()
+				self.правило_автора(due_mode="absolute", due_date="2030-01-15", due_days=0)
 				назначить()
 
-				сдача = self.выдать(self.организация if в_организации else None)
+				документ = домашка.сохранить(
+					self.ученик, self.урок, self.организация if в_организации else None, answer="рано"
+				)
 
-				итог = {
-					"дней": self.дней_до_срока(сдача),
-					"срок": str(сдача.due_at),
-					"источник": сдача.history[-1].due_source,
-				}
-				self.assertEqual({к: итог[к] for к in ожидаемо}, ожидаемо)
-
-	def test_правка_назначения_не_меняет_выставленный_срок(self):
-		назначение = self.назначить({"due_mode": "relative", "due_days": 2})
-		было = self.выдать(self.организация).due_at
-		назначение.set("homework_due", [{"homework": self.задание.name, "due_mode": "absolute", "due_date": "2020-01-01"}])
-		назначение.save(ignore_permissions=True)
-		домашка.сохранить(self.ученик, self.урок, self.организация, answer="сделал")
-		стало = frappe.db.get_value(домашка.СДАЧА, {"member": self.ученик}, "due_at")
-		self.assertEqual(стало, было)
-
-	def test_сохранение_до_выдачи_ставит_абсолютный_срок_назначения(self):
-		self.назначить({"due_mode": "absolute", "due_date": "2030-03-01"})
-		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
-		self.assertEqual(str(документ.due_at), "2030-03-01 23:59:59")
+				self.assertEqual((bool(документ.required), str(документ.due_at)), ожидаемо)
+				self.assertIsNone(документ.assigned_at)
 
 	def test_сохранение_до_выдачи_при_относительном_правиле_без_срока(self):
 		"""Правило назначения относительное — срок выставит выдача, хотя автор
 		и задал бы абсолютный: действуют правила назначения, а не автора."""
-		self.задание.update({"due_mode": "absolute", "due_date": "2030-01-15"})
-		self.задание.save(ignore_permissions=True)
+		self.правило_автора(due_mode="absolute", due_date="2030-01-15", due_days=0)
 		self.назначить({"due_mode": "relative", "due_days": 2})
 		документ = домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
 		self.assertIsNone(документ.due_at)
@@ -662,6 +702,45 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 		сдача = self.выдать(self.организация)
 		self.assertEqual(сдача.status, "Submitted")
 		self.assertEqual(self.дней_до_срока(сдача), timedelta(days=2))
+
+	def test_признак_сохранения_до_выдачи_не_пересчитывается(self):
+		"""Признак ставит первое сохранение, выдача его не меняет: практика не
+		становится обязательной, а обязательная без назначения берёт срок автора."""
+
+		def снять_назначение(назначение):
+			frappe.db.set_value("Course Allocation", назначение.name, "chosen_by_member", 1)
+
+		случаи = {
+			"обязательная, назначение сняли — срок автора": (
+				True,
+				снять_назначение,
+				{"обязательна": True, "дней": timedelta(days=5), "источник": "author"},
+			),
+			"практика, курс назначили потом — остаётся практикой": (
+				False,
+				None,
+				{"обязательна": False, "дней": None, "источник": None},
+			),
+		}
+		for номер, (что, (назначено_сначала, потом, ожидаемо)) in enumerate(случаи.items()):
+			with self.subTest(что):
+				if номер:
+					self.заново()
+				назначение = self.назначить() if назначено_сначала else None
+				домашка.сохранить(self.ученик, self.урок, self.организация, answer="рано")
+				if потом:
+					потом(назначение)
+				else:
+					self.назначить()
+
+				сдача = self.выдать(self.организация)
+
+				итог = {
+					"обязательна": bool(сдача.required),
+					"дней": self.дней_до_срока(сдача) if сдача.due_at else None,
+					"источник": сдача.history[-1].due_source or None,
+				}
+				self.assertEqual(итог, ожидаемо)
 
 	def test_источник_срока_из_журнала_если_правило_сняли(self):
 		"""Срок выставлен сохранением по правилу назначения, правило потом сняли:
@@ -677,3 +756,71 @@ class IntegrationTestHomeworkAllocationDue(IntegrationTestCase):
 		сдача = self.выдать(self.организация)
 		self.assertEqual(str(сдача.due_at), "2030-03-01 23:59:59")
 		self.assertEqual((сдача.history[-1].event, сдача.history[-1].due_source), ("assigned", "allocation"))
+
+	def test_описание_задания_даёт_действующее_правило(self):
+		"""`required` и `due` — для этого ученика в этом пространстве, а не правило
+		автора; признак заведённой сдачи сильнее назначения."""
+		случаи = {
+			"личное пространство — практика без срока": (
+				lambda: self.назначить({"due_mode": "relative", "due_days": 2}),
+				None,
+				None,
+				(False, {"mode": "none", "days": None, "date": None}),
+			),
+			"назначено без правил — правило автора": (
+				self.назначить,
+				self.организация,
+				None,
+				(True, {"mode": "relative", "days": 5, "date": None}),
+			),
+			"два назначения — правило ближайшего срока": (
+				lambda: (
+					self.назначить({"due_mode": "relative", "due_days": 4}),
+					self.назначить({"due_mode": "absolute", "due_date": "2020-01-01"}),
+				),
+				self.организация,
+				None,
+				(True, {"mode": "absolute", "days": None, "date": "2020-01-01"}),
+			),
+			"сдача — практика, хоть курс и назначен": (
+				self.назначить,
+				self.организация,
+				False,
+				(False, {"mode": "none", "days": None, "date": None}),
+			),
+		}
+		for что, (подготовить, организация, обязательна, ожидаемо) in случаи.items():
+			with self.subTest(что):
+				frappe.db.delete("Course Allocation", {"course": self.курс})
+				подготовить()
+
+				описание = домашка.описание_задания(
+					домашка.задание_урока(self.урок), self.ученик, организация, обязательна=обязательна
+				)
+
+				self.assertEqual((описание["required"], описание["due"]), ожидаемо)
+
+	def test_задание_к_закрытию(self):
+		"""Задание закрытого урока для ответа о зачёте: с признаком и действующим
+		сроком; признак — у сдачи, если она уже заведена; урока без задания и
+		снятого задания — нет."""
+		self.назначить({"due_mode": "relative", "due_days": 2})
+
+		задание = домашка.к_закрытию(self.ученик, self.урок, self.курс, self.организация)
+		self.assertEqual(
+			{к: задание[к] for к in ("lesson", "title", "required", "due")},
+			{
+				"lesson": self.урок,
+				"title": "Встреча со спонсором",
+				"required": True,
+				"due": {"mode": "relative", "days": 2, "date": None},
+			},
+		)
+
+		frappe.db.set_value(домашка.СДАЧА, self.выдать(self.организация).name, "required", 0)
+		self.assertFalse(домашка.к_закрытию(self.ученик, self.урок, self.курс, self.организация)["required"])
+
+		frappe.db.set_value(домашка.ЗАДАНИЕ, self.задание.name, "retired", 1)
+		self.assertIsNone(домашка.к_закрытию(self.ученик, self.урок, self.курс, self.организация))
+		без_задания = создать_урок(f"Без задания {frappe.generate_hash(length=4)}")
+		self.assertIsNone(домашка.к_закрытию(self.ученик, без_задания, self.курс, self.организация))

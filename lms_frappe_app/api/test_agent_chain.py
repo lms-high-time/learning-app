@@ -346,8 +346,8 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		попытка = self.данные(student.request_quiz(старт["session"]))["attempt"]
 		провал = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "V2", "Второй"))["result"]
 		self.assertFalse(провал["passed"])
-		self.assertNotIn("next_lesson", провал)
-		self.assertNotIn("empty_blocks", провал)
+		for ключ in ("next_lesson", "empty_blocks", "homework"):
+			self.assertNotIn(ключ, провал)
 
 		frappe.db.set_value("Agent Quiz Attempt", попытка, "finished_at", "2000-01-01 00:00:00")
 		старт = self.старт()
@@ -355,6 +355,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		итог = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "V1", "Первый"))["result"]
 
 		self.assertTrue(итог["passed"])
+		self.assertIsNone(итог["homework"], "у урока нет задания")
 		self.assertEqual(итог["next_lesson"], {"id": урок_релиза(self.курс, "l-2"), "title": "Урок второй"})
 		self.assertEqual([(б["artifact"], б["key"]) for б in итог["empty_blocks"]], [("notebook", "log")])
 
@@ -381,7 +382,8 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.отметить_обязательные(занятие, старт["lesson_map"])
 		закрыто = self.данные(student.complete_lesson(занятие))
 
-		self.assertEqual(set(закрыто), {"lesson", "session_status", "next_lesson", "empty_blocks"})
+		self.assertEqual(set(закрыто), {"lesson", "session_status", "next_lesson", "empty_blocks", "homework"})
+		self.assertIsNone(закрыто["homework"], "у урока нет задания")
 		self.assertEqual((закрыто["lesson"], закрыто["session_status"]), (урок, "Completed"))
 		self.assertEqual(self.прохождение(курс).status, прохождения.ПРОЙДЕН)
 		self.assertTrue(

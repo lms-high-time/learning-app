@@ -310,10 +310,13 @@ def сверить_зачисления() -> int:
 
 
 def назначения_пользователя(user: str, course: str | None = None) -> list[dict]:
-	"""Действующие назначения пользователя — с дедлайнами и обязательностью.
+	"""Действующие назначения пользователя — с дедлайнами, обязательностью и
+	признаком «взял сам» (`chosen_by_member`).
 
 	Нужна и инструменту `list_my_courses`, и отчёту менеджера: дедлайн живёт
 	в назначении, а не в зачислении, и без этой связки просрочку не показать.
+	Признак «взял сам» решает, обязательна ли домашка
+	(`homework.назначения_организации`).
 	"""
 	from lms_frappe_app.agent_learning.doctype.learning_organization.learning_organization import (
 		организации_пользователя,
@@ -330,7 +333,16 @@ def назначения_пользователя(user: str, course: str | None 
 	назначения = frappe.get_all(
 		"Course Allocation",
 		filters=фильтры,
-		fields=["name", "organization", "course", "audience", "deadline", "mandatory", "creation"],
+		fields=[
+			"name",
+			"organization",
+			"course",
+			"audience",
+			"deadline",
+			"mandatory",
+			"chosen_by_member",
+			"creation",
+		],
 	)
 	свои = []
 	for назначение in назначения:

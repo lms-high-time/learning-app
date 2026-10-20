@@ -45,6 +45,9 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 		# секунда вставки.
 		for номер, сдача in enumerate((self.личная, self.рабочая, self.чужая)):
 			frappe.db.set_value(домашка.СДАЧА, сдача.name, "submitted_at", f"2026-10-0{номер + 1} 10:00:00")
+		# Рабочая — обязательная, как в пространстве команды, назначившей курс;
+		# откуда берётся признак — `test_homework`. Остальные — практика.
+		frappe.db.set_value(домашка.СДАЧА, self.рабочая.name, "required", 1)
 
 	def очередь(self, user, **параметры) -> dict:
 		frappe.set_user(user)
@@ -78,13 +81,15 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 				(self.курс, self.урок, self.организация, self.организация),
 			)
 			self.assertEqual((строка["version"], строка["reviewed_version"], строка["overdue"]), (1, None, False))
+			self.assertTrue(строка["required"])
 			self.assertEqual(данные["organizations"], [{"id": self.организация, "title": self.организация}])
 			self.assertEqual([к["id"] for к in данные["courses"]], [self.курс])
 
-		with self.subTest("методист: личное подписано"):
+		with self.subTest("методист: личное подписано, практика — в очереди с признаком"):
 			данные = self.очередь(self.методист, course=self.курс)
 			личная = данные["items"][0]
 			self.assertEqual((личная["organization"], личная["organization_title"]), ("personal", "Личное"))
+			self.assertFalse(личная["required"])
 			self.assertIn({"id": "personal", "title": "Личное"}, данные["organizations"])
 
 		отборы = {
@@ -191,6 +196,7 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 		self.assertEqual(карточка["submission"]["id"], self.рабочая.name)
 		self.assertIn("versions", карточка["submission"])
 		self.assertEqual(карточка["homework"]["title"], "Встреча со спонсором")
+		self.assertEqual((карточка["submission"]["required"], карточка["homework"]["required"]), (True, True))
 		self.assertEqual(
 			(карточка["student"], карточка["reviewed_version"]), ({"name": "Анна Петрова"}, None)
 		)
