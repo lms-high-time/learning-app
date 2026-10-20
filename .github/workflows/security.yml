@@ -6,12 +6,29 @@
 # (`dependencies = []`), а Frappe и Learning, которые реально стоят, проверяет
 # trivy по образу стенда. Поэтому и без общего `security/gate.py` — он живёт в
 # приватном learning-services, и публичный CI его без секрета не достанет;
-# порог здесь проще: блокирует ERROR, незнакомая severity, ошибка в отчёте,
-# ненулевой код сканера и любой секрет, WARNING — в сводке.
+# порог здесь проще: блокирует ERROR и любой незнакомый уровень, ошибка в
+# отчёте, ненулевой код сканера и любой секрет, WARNING — в сводке. Вместо
+# комментария в PR — сводка прогона: у PR из форка токен только на чтение.
 #
 # Ручной запуск с `base`/`sha` — проверка ровно выкатываемого диффа:
 # `python deploy/release.py deploy` в learning-services двигает указатель
 # `deploy`, только если этот прогон зелёный.
+#
+# Чего ворота НЕ делают:
+# - на PR только советуют: в ruleset обязателен `bench run-tests`, а выкатку
+#   держит `release.py`;
+# - правку самих ворот из ветки PR (этот файл, `.gitleaksignore`,
+#   `.semgrepignore`, новые `nosemgrep`) не блокируют, а выносят первой
+#   строкой сводки — её смотрит ревью; `.gitleaks.toml` из дерева не
+#   действует вовсе — конфиг gitleaks задаётся здесь;
+# - не закрепляют `p/python` из реестра: удалённое правило — тихое
+#   ослабление, новое может покрасить неделю;
+# - не сканируют `tests/` (действует встроенный `.semgrepignore` semgrep) и
+#   файлы, которые semgrep не разобрал (`warn` в отчёте — только в сводке);
+# - секрет в публичном репозитории ловят, но не предотвращают — это push
+#   protection в настройках;
+# - красная неделя — только письмо GitHub автору последней правки cron, а
+#   после 60 дней без активности GitHub выключает `schedule` сам.
 name: Безопасность
 # Метка и диапазон выкатки в названии: по метке release.py находит прогон.
 run-name: ${{ inputs.label && format('Безопасность · выкатка {0} · {1}..{2}', inputs.label, inputs.base, inputs.sha) || '' }}
@@ -79,7 +96,8 @@ jobs:
 
       # PR: база — первый родитель merge-коммита (текущий master). Пуш:
       # пришедшие коммиты, недоступный `before` — полный скан. Выкатка — ровно
-      # base..sha. Неделя и ручной запуск без диапазона — всё.
+      # base..sha. Неделя и ручной запуск без диапазона — всё. Список файлов
+      # диапазона — для строки о правке самих ворот.
       - name: Диапазон
         id: range
         env:
@@ -116,13 +134,29 @@ jobs:
               echo "log=--all" >> "$GITHUB_OUTPUT" ;;
           esac
           echo "base=$base" >> "$GITHUB_OUTPUT"
+          if [ -n "$base" ]; then
+            echo "mode=$EVENT, ${base:0:7}..$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+            git diff --name-only "$base" HEAD > "$RUNNER_TEMP/changed.txt"
+            git diff -U0 "$base" HEAD > "$RUNNER_TEMP/diff.patch"
+          else
+            echo "mode=$EVENT, полный скан" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/changed.txt"
+            : > "$RUNNER_TEMP/diff.patch"
+          fi
 
+      # Правила — fetch ровно закреплённого sha, без всей истории upstream.
+      # Конфиг gitleaks — свой: явный `--config` главнее `.gitleaks.toml` в
+      # дереве, и PR не может выключить проверку allowlist'ом из своей ветки;
+      # `.gitleaksignore` при этом действует (проверено на подложенном секрете).
       - name: Правила
         run: |
-          git clone -q https://github.com/frappe/semgrep-rules.git "$RUNNER_TEMP/frappe-rules"
-          git -C "$RUNNER_TEMP/frappe-rules" checkout -q "$FRAPPE_RULES_SHA"
+          r="$RUNNER_TEMP/frappe-rules"
+          git init -q "$r"
+          git -C "$r" fetch -q --depth 1 https://github.com/frappe/semgrep-rules.git "$FRAPPE_RULES_SHA"
+          git -C "$r" checkout -q FETCH_HEAD
           curl -fsSL -o "$RUNNER_TEMP/lms-security.yml" \
             "https://raw.githubusercontent.com/lms-high-time/learning-fork/$FORK_RULES_SHA/.github/semgrep/security.yml"
+          printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
 
       # Сканеры не валят свой шаг: код выхода пишется в файл и разбирается в
       # «Решении» вместе с отчётом — пустой отчёт упавшего сканера не «чисто».
@@ -146,11 +180,13 @@ jobs:
         run: |
           rc=0
           docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo:ro" -v "$RUNNER_TEMP:/out" "$GITLEAKS_IMAGE" \
-            git /repo --redact --no-banner --log-opts="$LOG_OPTS" \
+            git /repo --redact --no-banner --config /out/gitleaks.toml --log-opts="$LOG_OPTS" \
             --exit-code 0 -f json -r /out/gitleaks.json || rc=$?
           echo "$rc" > "$RUNNER_TEMP/gitleaks.rc"
 
       - name: Решение
+        env:
+          MODE: ${{ steps.range.outputs.mode }}
         run: |
           fail=0
           t=$RUNNER_TEMP
@@ -161,26 +197,46 @@ jobs:
           done
           [ "$fail" = 0 ] || exit 1
 
-          leaks=$(jq 'length' "$t/gitleaks.json")
-          jq -r '.[] | "::error file=\(.File),line=\(.StartLine)::секрет \(.RuleID) в \(.Commit[0:7]) — отзови и убери из истории; ложное — в .gitleaksignore с комментарием"' "$t/gitleaks.json"
-
-          jq -r '.errors[] | select(.level == "error") | "::error::semgrep: \(.message)"' "$t/semgrep.json"
-          scan_errors=$(jq '[.errors[] | select(.level == "error")] | length' "$t/semgrep.json")
+          # Значения из отчётов идут в команды workflow — экранируются, иначе
+          # имя файла с переводом строки внедрило бы свою команду.
+          esc='def msg: gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A");
+               def prop: msg | gsub(":";"%3A") | gsub(",";"%2C");'
           # Блокирует всё, кроме известных неблокирующих уровней: после
           # обновления semgrep уровень может назваться иначе.
           quiet='["WARNING","INFO","INVENTORY","EXPERIMENT"]'
+
+          leaks=$(jq 'length' "$t/gitleaks.json")
+          jq -r "$esc"' .[] | "::error file=\(.File | prop),line=\(.StartLine)::секрет \(.RuleID | msg) в \(.Commit[0:7]) — отзови и убери из истории; ложное — в .gitleaksignore с комментарием"' "$t/gitleaks.json"
+
+          jq -r "$esc"' .errors[] | select(.level == "error") | "::error::semgrep: \(.message | tostring | msg)"' "$t/semgrep.json"
+          scan_errors=$(jq '[.errors[] | select(.level == "error")] | length' "$t/semgrep.json")
+          scan_warns=$(jq '[.errors[] | select(.level != "error")] | length' "$t/semgrep.json")
           blocking=$(jq --argjson q "$quiet" '[.results[] | select(.extra.severity as $s | $q | index($s) | not)] | length' "$t/semgrep.json")
-          jq -r --argjson q "$quiet" '.results[] | select(.extra.severity as $s | $q | index($s) | not)
-            | "::error file=\(.path),line=\(.start.line)::\(.check_id | split(".") | last): \(.extra.message | split("\n")[0]) — исправь или `# nosemgrep: \(.check_id | split(".") | last) — <причина>`"' "$t/semgrep.json"
+          jq -r --argjson q "$quiet" "$esc"' .results[] | select(.extra.severity as $s | $q | index($s) | not)
+            | (.check_id | split(".") | last) as $r
+            | "::error file=\(.path | prop),line=\(.start.line)::\($r | msg): \(.extra.message | split("\n")[0] | msg) — исправь или `# nosemgrep: \($r | msg) — <причина>`"' "$t/semgrep.json"
+
+          gates=$(grep -E '^(\.github/workflows/security\.yml|\.gitleaks\.toml|\.gitleaksignore|\.semgrepignore)$' "$t/changed.txt" | paste -sd, - || true)
+          [ -z "$gates" ] || echo "::warning::здесь изменены сами ворота: $gates — проверь на ревью"
+          nosem=$(grep -cE '^\+.*nosemgrep' "$t/diff.patch" || true)
+          [ "$nosem" = 0 ] || echo "::warning::новых nosemgrep в диффе: $nosem — проверь на ревью, голый nosemgrep без id глушит все правила"
 
           {
             echo "## Безопасность"
             echo
+            echo "_${MODE}_"
+            echo
+            [ -z "$gates" ] || { echo "⚠️ **Здесь изменены сами ворота:** $gates — проверь на ревью."; echo; }
+            [ "$nosem" = 0 ] || { echo "⚠️ **Новых \`nosemgrep\` в диффе: $nosem** — проверь на ревью."; echo; }
             echo "**Блокирует:** секретов $leaks, находок semgrep $blocking, ошибок сканера $scan_errors"
             echo
             echo "<details><summary>Видно, не блокирует</summary>"
             echo
-            jq -r --argjson q "$quiet" '.results[] | select(.extra.severity as $s | $q | index($s)) | "- \(.path):\(.start.line): \(.check_id | split(".") | last)"' "$t/semgrep.json" | head -100
+            echo "Предупреждений сканера (файл не разобран и т. п.): $scan_warns"
+            echo
+            jq -r --argjson q "$quiet" '[.results[] | select(.extra.severity as $s | $q | index($s))]
+              | group_by(.check_id) | sort_by(-length) | .[]
+              | "- \(.[0].check_id | split(".") | last): \(length)"' "$t/semgrep.json"
             echo
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
