@@ -291,6 +291,17 @@ body[data-path="consent"] section.for-consent .page-card-head {
 body[data-path="consent"] section.for-consent #consent-links {
 	margin-top: 16px;
 }
+/* Экран согласия — короткая служебная форма: шрифт на ступень мельче, чем у входа. */
+body[data-path="consent"] section.for-consent .page-card-head h4 {
+	font-size: 1.3rem;
+}
+body[data-path="consent"] section.for-consent :is(.page-card-subtitle, #consent-links, .consent-check) {
+	font-size: 0.85rem;
+}
+body[data-path="consent"] section.for-consent .page-card .btn {
+	min-height: 38px;
+	font-size: 0.9rem;
+}
 body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-check input {
 	flex: none;
 	width: 16px;
