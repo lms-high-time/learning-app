@@ -1,7 +1,9 @@
-/* Вход, регистрация и смена пароля — в стиле публичного сайта (палитра и
-   шрифты lms-platform site/static/style.css). Файл подключён ко всем веб-
-   страницам Frappe (web_include_css), поэтому каждое правило заперто на
-   адресах этих страниц: кабинет автора и прочие страницы www/ держат свои
+/* Вход, регистрация, смена пароля и экран подтверждения доступа OAuth — в
+   стиле публичного сайта (палитра и шрифты lms-platform site/static/style.css).
+   Файл подключён ко всем веб-страницам Frappe (web_include_css), поэтому
+   каждое правило заперто на этих страницах: вход — по адресу, экран
+   подтверждения — по своему блоку `.cenda-oauth` (адрес у него общий со всеми
+   сообщениями Frappe). Кабинет автора и прочие страницы www/ держат свои
    стили. Разметку и путь входа не трогаем — только вид. */
 
 /* Диапазоны весов, а не по весу на файл: тема ставит тексту 420, и с
@@ -83,13 +85,14 @@
    data-theme, поэтому тема — только по настройке системы. Переменные Frappe
    переопределены здесь же: правила login.bundle, которых ниже нет (ссылка
    «Resend», ошибки, иконки полей), берут нашу палитру и в тёмной теме. */
-body:is([data-path="login"], [data-path="update-password"]) {
+body:is([data-path="login"], [data-path="update-password"], :has(.cenda-oauth)) {
 	--ht-bg: #f6f6f3;
 	--ht-paper: #ffffff;
 	--ht-ink: #1b1e24;
 	--ht-muted: #5f656e;
 	--ht-line: #dcdfe3;
 	--ht-accent: #0e6f7b;
+	--ht-accent-soft: #e2f0f1;
 	--ht-btn: #1b1e24;
 	--ht-btn-ink: #ffffff;
 	--text-color: var(--ht-ink);
@@ -106,13 +109,14 @@ body:is([data-path="login"], [data-path="update-password"]) {
 	font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-	body:is([data-path="login"], [data-path="update-password"]) {
+	body:is([data-path="login"], [data-path="update-password"], :has(.cenda-oauth)) {
 		--ht-bg: #14171b;
 		--ht-paper: #1c2026;
 		--ht-ink: #e7e9ec;
 		--ht-muted: #a0a7b0;
 		--ht-line: #2f353d;
 		--ht-accent: #5cc0cb;
+		--ht-accent-soft: #163a3f;
 		--ht-btn: #e7e9ec;
 		--ht-btn-ink: #14171b;
 		color-scheme: dark;
@@ -238,4 +242,192 @@ body[data-path="login"] section[class] .page-card .consent-notice {
 body:is([data-path="login"], [data-path="update-password"]) section[class] .page-card a:not(.btn) {
 	color: var(--ht-accent);
 	text-underline-offset: 3px;
+}
+
+/* Экран подтверждения доступа OAuth (templates/includes/oauth_confirmation.html,
+   learning-services#622) — лист как у входа. Frappe отдаёт его
+   страницей-сообщением: её заголовок «Подтвердите доступ», карточка и
+   отступы контейнера здесь не нужны — заголовок и лист у экрана свои.
+   Токены приходят через `body:has(.cenda-oauth)`; у каждого есть светлое
+   запасное значение — в браузере без `:has` экран остаётся листом с видимыми
+   кнопками и рамкой фокуса, а не текстом без оформления. */
+body:has(.cenda-oauth) main.container {
+	max-width: none;
+	padding: 0;
+}
+body:has(.cenda-oauth) :is(.page-header-wrapper, .page-footer, .error-page .page-card-head) {
+	display: none;
+}
+body:has(.cenda-oauth) .error-page {
+	display: grid;
+	place-items: start center;
+	min-height: 100vh;
+	min-height: 100svh;
+	padding: 56px 16px;
+}
+body:has(.cenda-oauth) .error-page > div {
+	width: 100%;
+	max-width: 440px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	box-shadow: none;
+}
+body:has(.cenda-oauth) .error-page :is(.details, .details > p) {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+.cenda-oauth {
+	padding: 36px 40px 28px;
+	border: 1px solid var(--ht-line, #dcdfe3);
+	border-radius: 3px;
+	background: var(--ht-paper, #ffffff);
+	box-shadow: 0 30px 60px -40px rgba(20, 30, 40, 0.35);
+	color: var(--ht-ink, #1b1e24);
+	text-align: left;
+}
+.cenda-oauth__logo {
+	display: block;
+	width: 32px;
+	height: 32px;
+	margin-bottom: 20px;
+}
+.cenda-oauth__title {
+	margin: 0 0 10px;
+	font: 500 1.6rem/1.2 "Literata", Georgia, serif;
+	letter-spacing: -0.01em;
+	color: var(--ht-ink, #1b1e24);
+}
+.cenda-oauth__lead {
+	margin: 0 0 24px;
+	font-size: 1rem;
+	line-height: 1.55;
+	color: var(--ht-muted, #5f656e);
+}
+.cenda-oauth :is(.cenda-oauth__scopes, .cenda-oauth__fine) {
+	font-size: 0.85rem;
+	line-height: 1.5;
+	color: var(--ht-muted, #5f656e);
+}
+.cenda-oauth__scopes {
+	margin: -12px 0 24px;
+}
+.cenda-oauth__fine {
+	margin: 18px 0 0;
+}
+.cenda-oauth__account {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 0 0 24px;
+	padding: 12px 14px;
+	border: 1px solid var(--ht-line, #dcdfe3);
+	border-radius: 6px;
+}
+.cenda-oauth__avatar {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	background: var(--ht-accent-soft, #e2f0f1);
+	color: var(--ht-accent, #0e6f7b);
+	font-size: 0.85rem;
+	font-weight: 600;
+}
+.cenda-oauth__who {
+	flex: 1;
+	min-width: 0;
+	line-height: 1.35;
+}
+.cenda-oauth__who b {
+	display: block;
+	font-weight: 500;
+}
+.cenda-oauth__who :is(b, span:not(.sr-only)) {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.cenda-oauth__who span:not(.sr-only) {
+	display: block;
+	font-size: 0.9rem;
+	color: var(--ht-muted, #5f656e);
+}
+.cenda-oauth form {
+	margin: 0;
+}
+/* «Сменить» — форма выхода, а выглядит ссылкой: действие второстепенное. */
+.cenda-oauth__switch {
+	flex: none;
+	padding: 4px 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	font-size: 0.9rem;
+	color: var(--ht-accent, #0e6f7b);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+.cenda-oauth__btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-height: 44px;
+	border-radius: 6px;
+	font: 500 1rem "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+	text-decoration: none;
+	cursor: pointer;
+}
+.cenda-oauth__btn--allow {
+	border: 1.5px solid var(--ht-btn, #1b1e24);
+	background: var(--ht-btn, #1b1e24);
+	color: var(--ht-btn-ink, #ffffff);
+}
+.cenda-oauth__btn--deny {
+	margin-top: 10px;
+	border: 1px solid var(--ht-line, #dcdfe3);
+	background: transparent;
+	color: var(--ht-ink, #1b1e24);
+}
+.cenda-oauth__btn--deny:hover {
+	border-color: var(--ht-muted, #5f656e);
+	color: var(--ht-ink, #1b1e24);
+	text-decoration: none;
+}
+.cenda-oauth :is(.cenda-oauth__btn, .cenda-oauth__switch, a):focus-visible {
+	outline: 2px solid var(--ht-accent, #0e6f7b);
+	outline-offset: 3px;
+}
+.cenda-oauth a:not(.cenda-oauth__btn) {
+	color: var(--ht-accent, #0e6f7b);
+	text-underline-offset: 3px;
+}
+.cenda-oauth__error {
+	margin: 0 0 20px;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: var(--ht-bg, #f6f6f3);
+	font: 0.85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+	color: var(--ht-ink, #1b1e24);
+	overflow-wrap: anywhere;
+}
+/* Телефон: лист во весь экран, без рамки и тени. */
+@media (max-width: 480px) {
+	body:has(.cenda-oauth) .error-page {
+		padding: 0;
+	}
+	.cenda-oauth {
+		min-height: 100vh;
+		min-height: 100svh;
+		padding: 32px 20px;
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
+	}
 }
