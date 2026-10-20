@@ -225,6 +225,8 @@ scheduler_events = {
 		f"{_назначение}.сверить_зачисления",
 		# Письмо непрошедшим, когда срок назначения близко (#365).
 		"lms_frappe_app.agent_learning.notices.напомнить_о_сроках",
+		# Новые аккаунты без согласия за 30 дней — удаляются (learning-services#624).
+		"lms_frappe_app.agent_learning.consent.удалить_без_согласия",
 	],
 }
 

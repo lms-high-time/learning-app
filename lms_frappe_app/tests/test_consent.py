@@ -13,9 +13,11 @@
 
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import add_days, now_datetime
 from werkzeug.exceptions import HTTPException
 from werkzeug.test import EnvironBuilder
 from werkzeug.wrappers import Request
@@ -215,6 +217,95 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-11-01")
 
 		self.assertFalse(consent.есть_явное(адрес))
+
+
+class IntegrationTestUnderage(IntegrationTestCase):
+	"""Путь для тех, кому нет 18 лет (learning-services#624)."""
+
+	def setUp(self):
+		frappe.set_user("Guest")
+		self.addCleanup(frappe.set_user, "Administrator")
+
+	def заметка(self, адрес: str) -> None:
+		frappe.get_doc(
+			{
+				"doctype": "Agent Student Note",
+				"student": адрес,
+				"kind": "Fact",
+				"note_key": "role",
+				"text": "x",
+			}
+		).insert(ignore_permissions=True)
+
+	def test_мне_нет_18_удаляет_аккаунт_и_контакт(self):
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(адрес)
+
+		with запрос("/consent", "POST"):
+			ответ = consent_api.decline_underage()
+
+		frappe.set_user("Administrator")
+		self.assertEqual(ответ["data"]["result"], "deleted")
+		self.assertFalse(frappe.db.exists("User", адрес))
+		self.assertFalse(frappe.db.exists("Contact", {"email_id": адрес}))
+		self.assertEqual(len(согласия(адрес)), 1, "запись о согласии остаётся доказательством")
+
+	def test_с_учебными_данными_аккаунт_закрывается(self):
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user("Administrator")
+		self.заметка(адрес)
+		frappe.set_user(адрес)
+
+		with запрос("/consent", "POST"):
+			ответ = consent_api.decline_underage()
+
+		self.assertEqual(ответ["data"]["result"], "closed")
+		self.assertEqual(frappe.db.get_value("User", адрес, "enabled"), 0)
+
+	def test_сообщить_о_возрасте_может_только_сам(self):
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(адрес)
+
+		with запрос("/api/method/x", "POST", Authorization="Bearer x"):
+			ответ = consent_api.decline_underage()
+
+		self.assertEqual(ответ["error"]["code"], consent_api.ТОЛЬКО_САМ)
+		self.assertTrue(frappe.db.exists("User", адрес))
+
+	def test_новые_аккаунты_без_согласия_удаляются_через_30_дней(self):
+		давно = add_days(now_datetime(), -consent.ДНЕЙ_БЕЗ_СОГЛАСИЯ - 5)
+		без_согласия = зарегистрировать(почта(), провайдер="google")
+		с_согласием = зарегистрировать(почта(), провайдер="google")
+		с_данными = зарегистрировать(почта(), провайдер="google")
+		свежий = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(с_согласием)
+		with запрос("/consent", "POST"):
+			consent_api.accept(age_confirmed=1, documents_accepted=1)
+		frappe.set_user("Administrator")
+		self.заметка(с_данными)
+		for адрес in (без_согласия, с_согласием, с_данными):
+			frappe.db.set_value("User", адрес, "creation", давно, update_modified=False)
+
+		# Отсечка — раньше «давно»: в тесте все четверо созданы после неё.
+		with patch.object(consent, "ЧИСТКА_С", add_days(давно, -1)):
+			consent.удалить_без_согласия()
+
+		self.assertFalse(frappe.db.exists("User", без_согласия))
+		for адрес in (с_согласием, с_данными, свежий):
+			self.assertTrue(frappe.db.exists("User", адрес), адрес)
+
+	def test_прежние_аккаунты_чистка_не_трогает(self):
+		"""Явного согласия у прежних пользователей нет ни у кого: без отсечки
+		чистка удалила бы всех, кто не зашёл на сайт за месяц."""
+		давно = add_days(now_datetime(), -consent.ДНЕЙ_БЕЗ_СОГЛАСИЯ - 5)
+		прежний = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user("Administrator")
+		frappe.db.set_value("User", прежний, "creation", давно, update_modified=False)
+
+		with patch.object(consent, "ЧИСТКА_С", add_days(давно, 1)):
+			consent.удалить_без_согласия()
+
+		self.assertTrue(frappe.db.exists("User", прежний))
 
 
 class UnitTestПутиСогласия(UnitTestCase):

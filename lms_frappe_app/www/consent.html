@@ -25,6 +25,7 @@
 					<input type="checkbox" name="age_confirmed" required>
 					<span>Подтверждаю, что мне исполнилось 18 лет</span>
 				</label>
+				<p class="consent-hint">Cenda доступна лицам, достигшим 18 лет.</p>
 				<label class="consent-check">
 					<input type="checkbox" name="documents_accepted" required>
 					<span>Принимаю <a href="/terms" target="_blank" rel="noopener">Условия использования</a> и <a href="/privacy" target="_blank" rel="noopener">Политику конфиденциальности</a></span>
@@ -35,7 +36,21 @@
 				<button type="submit" class="btn btn-sm btn-primary btn-block">Продолжить</button>
 			</div>
 		</form>
-		<div class="text-center sign-up-message">
+		<div class="consent-underage" id="underage" hidden>
+			<p>Cenda доступна только лицам, достигшим 18 лет. Мы удалим вашу учётную запись и данные, связанные с ней.</p>
+			<p class="field-error text-danger" id="underage-error" role="alert"></p>
+			<div class="page-card-actions">
+				<button type="button" class="btn btn-sm btn-danger btn-block" id="underage-confirm">Удалить учётную запись</button>
+				<button type="button" class="btn btn-sm btn-default btn-block" id="underage-cancel">Отмена</button>
+			</div>
+		</div>
+		<div class="consent-done" id="underage-done" hidden>
+			<p id="underage-done-text"></p>
+			<a href="/">На главную</a>
+		</div>
+		<div class="text-center sign-up-message" id="consent-links">
+			<button type="button" class="btn-link" id="underage-open">Мне нет 18 лет</button>
+			<span aria-hidden="true">·</span>
 			<a href="/logout">Выйти</a>
 		</div>
 	</div>
@@ -78,6 +93,42 @@
 		} catch {}
 		ошибка.textContent = "Не удалось сохранить согласие. Попробуйте ещё раз.";
 		кнопка.disabled = false;
+	});
+
+	// «Мне нет 18 лет»: аккаунт удаляется или закрывается (learning-services#624).
+	const окно = document.getElementById("underage");
+	const ссылки = document.getElementById("consent-links");
+	const показать = (открыто) => {
+		окно.hidden = !открыто;
+		форма.hidden = открыто;
+		ссылки.hidden = открыто;
+	};
+	document.getElementById("underage-open").addEventListener("click", () => показать(true));
+	document.getElementById("underage-cancel").addEventListener("click", () => показать(false));
+	document.getElementById("underage-confirm").addEventListener("click", async (событие) => {
+		const удалить = событие.currentTarget;
+		const ошибкаУдаления = document.getElementById("underage-error");
+		удалить.disabled = true;
+		try {
+			const ответ = await fetch("/api/method/lms_frappe_app.api.consent.decline_underage", {
+				method: "POST",
+				credentials: "same-origin",
+				headers: { Accept: "application/json", "X-Frappe-CSRF-Token": страница.csrf },
+			});
+			const тело = await ответ.json().catch(() => ({}));
+			const итог = ответ.ok && тело.message && тело.message.ok && тело.message.data.result;
+			if (итог) {
+				окно.hidden = true;
+				document.getElementById("underage-done-text").textContent =
+					итог === "deleted"
+						? "Учётная запись и связанные с ней данные удалены."
+						: "Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней.";
+				document.getElementById("underage-done").hidden = false;
+				return;
+			}
+		} catch {}
+		ошибкаУдаления.textContent = "Не удалось выполнить запрос. Попробуйте ещё раз или напишите на privacy@cenda.app.";
+		удалить.disabled = false;
 	});
 })();
 </script>

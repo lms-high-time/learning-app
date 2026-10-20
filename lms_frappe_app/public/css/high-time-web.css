@@ -251,6 +251,25 @@ body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .c
 	color: var(--ht-ink);
 	cursor: pointer;
 }
+body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-hint {
+	margin: -6px 0 12px 26px;
+	font-size: 0.8rem;
+	color: var(--ht-muted);
+}
+body[data-path="consent"] section[class] .page-card :is(.consent-underage, .consent-done) p {
+	font-size: 0.9rem;
+	line-height: 1.5;
+	color: var(--ht-ink);
+}
+body[data-path="consent"] section[class] .page-card .btn-link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--ht-accent);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
 body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-check input {
 	flex: none;
 	width: 16px;

@@ -30,7 +30,7 @@ cookie `ЯВНОЕ_СОГЛАСИЕ` — по нему запись регист
 from urllib.parse import quote, urlsplit
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import add_days, now_datetime
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import redirect
 
@@ -222,3 +222,101 @@ def записать_согласие(user, method=None):
 def _отметки_формы() -> bool:
 	"""Форма регистрации прислала обе отметки: cookie ставит её скрипт."""
 	return bool(frappe.request and frappe.request.cookies.get(ЯВНОЕ_СОГЛАСИЕ) == "1")
+
+
+# --- младше 18 лет ---
+
+#: Учебные данные ученика: есть они — аккаунт не удаляется сразу, а
+#: закрывается, и данные удаляет администратор (политика, раздел 13).
+УЧЕБНЫЕ_ДАННЫЕ = (
+	("LMS Enrollment", "member"),
+	("Agent Learning Session", "student"),
+	("Agent Student Artifact", "student"),
+	("Agent Student Note", "student"),
+	("Agent Homework Submission", "member"),
+)
+#: Сколько дней ждём согласия у нового аккаунта, прежде чем удалить его.
+ДНЕЙ_БЕЗ_СОГЛАСИЯ = 30
+#: Чистка касается аккаунтов, созданных с этого дня, — когда появилось явное
+#: согласие. `Why:` у прежних пользователей явного согласия нет ни у кого, и
+#: чистка удалила бы всех, кто не зашёл на сайт за месяц.
+ЧИСТКА_С = "2026-10-20"
+#: Куда писать о закрытом аккаунте с данными.
+ПОЧТА_ДАННЫХ = "privacy@cenda.app"
+
+
+def есть_учебные_данные(пользователь: str) -> bool:
+	return any(frappe.db.exists(тип, {поле: пользователь}) for тип, поле in УЧЕБНЫЕ_ДАННЫЕ)
+
+
+def убрать_несовершеннолетнего(пользователь: str) -> str:
+	"""Пользователь сообщил, что ему нет 18 лет: аккаунт удаляется или закрывается.
+
+	Без учебных данных — удаляется сразу вместе с контактом: Frappe при удалении
+	пользователя контакт только отвязывает, и в нём остались бы почта и имя.
+	С данными — закрывается, а данные удаляет администратор по письму на
+	`ПОЧТА_ДАННЫХ` в срок политики конфиденциальности. `Why:` данные ребёнка без
+	согласия родителей держать нельзя (ЗРУ-547, ст. 21), а удалять учебные
+	данные молча, мимо проверки человеком, — риск стереть чужое. Запись о
+	согласии остаётся: она доказывает, что согласия не было.
+	"""
+	if есть_учебные_данные(пользователь):
+		frappe.db.set_value("User", пользователь, "enabled", 0)
+		if getattr(frappe.local, "login_manager", None):
+			frappe.local.login_manager.logout(user=пользователь)
+		_сообщить_о_закрытом(пользователь)
+		return "closed"
+	_удалить(пользователь)
+	return "deleted"
+
+
+def _удалить(пользователь: str) -> None:
+	for контакт in frappe.get_all("Contact", filters={"user": пользователь}, pluck="name"):
+		frappe.delete_doc("Contact", контакт, ignore_permissions=True, delete_permanently=True)
+	frappe.delete_doc("User", пользователь, ignore_permissions=True, delete_permanently=True)
+
+
+def _сообщить_о_закрытом(пользователь: str) -> None:
+	from lms_frappe_app.agent_learning.notices import почта_есть
+
+	if not почта_есть():
+		return
+	frappe.sendmail(
+		recipients=[ПОЧТА_ДАННЫХ],
+		subject="Закрыт аккаунт: пользователю нет 18 лет",
+		message=(
+			f"Пользователь {пользователь} сообщил на экране согласия, что ему нет 18 лет. "
+			"Аккаунт закрыт. Удалите его учебные данные и аккаунт в срок политики конфиденциальности."
+		),
+		now=True,
+	)
+
+
+def удалить_без_согласия() -> int:
+	"""Ежедневно: новые аккаунты, не давшие согласия за `ДНЕЙ_БЕЗ_СОГЛАСИЯ`, удаляются.
+
+	Это человек, который вошёл через Google и закрыл экран согласия: он мог быть
+	младше 18, а его почта и имя у нас уже есть. Только аккаунты сайта
+	(`Website User`), созданные не раньше `ЧИСТКА_С` и без учебных данных.
+	"""
+	if not готово():
+		return 0
+	срок = add_days(now_datetime(), -ДНЕЙ_БЕЗ_СОГЛАСИЯ)
+	кандидаты = frappe.get_all(
+		"User",
+		filters={
+			"user_type": "Website User",
+			"creation": ["between", [ЧИСТКА_С, срок]],
+			"name": ["not in", ("Guest", "Administrator")],
+		},
+		pluck="name",
+	)
+	удалено = 0
+	for пользователь in кандидаты:
+		if frappe.db.exists("Agent Consent", {"user": пользователь, "explicit": 1}):
+			continue
+		if есть_учебные_данные(пользователь):
+			continue
+		_удалить(пользователь)
+		удалено += 1
+	return удалено
