@@ -265,7 +265,10 @@ body:has(.cenda-oauth) .error-page {
 	min-height: 100svh;
 	padding: 56px 16px;
 }
+/* `min-width: 0` — у элемента сетки и листа: иначе длинная почта, которая не
+   переносится, растягивала лист шире экрана телефона, и он уезжал за края. */
 body:has(.cenda-oauth) .error-page > div {
+	min-width: 0;
 	width: 100%;
 	max-width: 440px;
 	margin: 0;
@@ -279,7 +282,11 @@ body:has(.cenda-oauth) .error-page :is(.details, .details > p) {
 	padding: 0;
 	border: 0;
 }
+/* Имя агента задаёт клиент: длинное слово без пробелов переносится, а не
+   вылезает за лист. Почту с `nowrap` это не трогает — там многоточие. */
 .cenda-oauth {
+	min-width: 0;
+	overflow-wrap: anywhere;
 	padding: 36px 40px 28px;
 	border: 1px solid var(--ht-line, #dcdfe3);
 	border-radius: 3px;
