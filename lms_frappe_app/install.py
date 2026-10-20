@@ -144,9 +144,7 @@ def обеспечить_индекс_артефактов() -> None:
 		AS (ifnull(`organization`, '')) PERSISTENT
 		"""
 	)
-	frappe.db.sql_ddl(
-		"DROP INDEX IF EXISTS `agent_student_artifact_key` ON `tabAgent Student Artifact`"
-	)
+	frappe.db.sql_ddl("DROP INDEX IF EXISTS `agent_student_artifact_key` ON `tabAgent Student Artifact`")
 	frappe.db.sql_ddl(
 		"""
 		CREATE UNIQUE INDEX IF NOT EXISTS `agent_student_artifact_space_key`
@@ -307,11 +305,7 @@ def обеспечить_вход_через_google() -> None:
 		return
 
 	существует = frappe.db.exists("Social Login Key", "google")
-	ключ = (
-		frappe.get_doc("Social Login Key", "google")
-		if существует
-		else frappe.new_doc("Social Login Key")
-	)
+	ключ = frappe.get_doc("Social Login Key", "google") if существует else frappe.new_doc("Social Login Key")
 	if not существует:
 		# Адреса, скоупы и иконку задаёт сам Frappe: свои копии разъехались бы
 		# с ним при первом же обновлении. Метод объявлен пригодным именно для
@@ -349,9 +343,7 @@ def _расходится(ключ, client_id: str, client_secret: str) -> bool:
 		return True
 	if ключ.sign_ups != "Allow":
 		return True
-	прежний = get_decrypted_password(
-		"Social Login Key", "google", "client_secret", raise_exception=False
-	)
+	прежний = get_decrypted_password("Social Login Key", "google", "client_secret", raise_exception=False)
 	return прежний != client_secret
 
 
@@ -402,9 +394,7 @@ def обеспечить_клиента_веб_чата() -> None:
 		клиент.save(ignore_permissions=True)
 		return
 	# Имя записи = id из конфигурации: `client_id` Frappe выводит из имени.
-	frappe.get_doc({"doctype": "OAuth Client", **нужные}).insert(
-		ignore_permissions=True, set_name=client_id
-	)
+	frappe.get_doc({"doctype": "OAuth Client", **нужные}).insert(ignore_permissions=True, set_name=client_id)
 
 
 ЯЗЫК = "ru"
@@ -426,10 +416,25 @@ def обеспечить_русский_язык() -> None:
 	frappe.db.set_value("Language", ЯЗЫК, "enabled", 1)
 	frappe.db.set_single_value("System Settings", "language", ЯЗЫК)
 	frappe.clear_document_cache("System Settings", "System Settings")
+	согласовать_умолчание_языка()
 	# Списки языков и словарь кэшируются: без сброса остались бы прежними.
 	frappe.client_cache.delete_value("languages")
 	frappe.cache.delete_value("languages_with_name")
 	frappe.cache.delete_key("merged_translations")
+
+
+def согласовать_умолчание_языка() -> None:
+	"""Умолчание `language` — язык из системных настроек.
+
+	Им Frappe заполняет язык каждого нового пользователя
+	(`Document._set_defaults`), а пишет его только сохранение системных
+	настроек (`System Settings.set_defaults`). `Why:` язык, поставленный в
+	обход сохранения, оставлял умолчание прежним: в настройках `ru`, а новые
+	ученики получали `en` от мастера настройки (#633).
+	"""
+	язык = frappe.db.get_single_value("System Settings", "language")
+	if язык and frappe.db.get_default("language") != язык:
+		frappe.db.set_default("language", язык)
 
 
 def обеспечить_значения_настроек() -> None:
@@ -446,19 +451,11 @@ def обеспечить_значения_настроек() -> None:
 	бы на ближайшем деплое. Строка в `tabSingles` есть — поле уже видели.
 	"""
 	заполненные = frappe.db.get_singles_dict(НАСТРОЙКИ)
-	умолчания = {
-		поле.fieldname: поле.default
-		for поле in frappe.get_meta(НАСТРОЙКИ).fields
-		if поле.default
-	}
+	умолчания = {поле.fieldname: поле.default for поле in frappe.get_meta(НАСТРОЙКИ).fields if поле.default}
 	# Адрес сервиса агента в схеме пустой: он зависит от сайта, а не от кода.
 	умолчания.setdefault("agent_service_url", get_url().rstrip("/"))
 
-	новые = {
-		поле: значение
-		for поле, значение in умолчания.items()
-		if поле not in заполненные
-	}
+	новые = {поле: значение for поле, значение in умолчания.items() if поле not in заполненные}
 	if not новые:
 		return
 	for поле, значение in новые.items():
