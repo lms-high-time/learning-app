@@ -456,7 +456,7 @@ def start_lesson(
 		"signals": _сигналы_старта(ученик, курс, lesson, занятие, сведения, run, блоки),
 		# Задание урока — целиком; по прошлому — статус и комментарий куратора,
 		# ответ ученика — `my_homework(lesson=…)` (learning-services#439).
-		**домашка.для_старта(ученик, lesson, курс, пространство),
+		**домашка.для_старта(ученик, lesson, курс, пространство, назначения),
 	}
 	if _флаг(frame):
 		ответ["course_frame"] = рамка
@@ -1045,14 +1045,24 @@ def homework(lesson: str, space: str | None = None) -> dict:
 	# сдачей, как на старте урока (`homework.для_старта`): новым его не выдают.
 	if задание and задание.retired and not имя:
 		задание = None
-	сдача = None
-	if имя:
-		сдача = домашка.описание_сдачи(frappe.get_doc(домашка.СДАЧА, имя), с_версиями=True, читатель=ученик)
+	документ = frappe.get_doc(домашка.СДАЧА, имя) if имя else None
 	return {
 		"space": пространства.наружу(пространство),
 		"lesson_url": домашка.адрес_урока(lesson, курс),
-		"homework": домашка.описание_задания(задание) if задание else None,
-		"submission": сдача,
+		"homework": (
+			домашка.описание_задания(
+				задание,
+				ученик,
+				пространство,
+				обязательна=bool(документ.required) if документ else None,
+				курс=курс,
+			)
+			if задание
+			else None
+		),
+		"submission": (
+			домашка.описание_сдачи(документ, с_версиями=True, читатель=ученик) if документ else None
+		),
 	}
 
 
@@ -1081,7 +1091,7 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 	сдачи = frappe.get_all(
 		домашка.СДАЧА,
 		filters=фильтры,
-		fields=["name", "homework", "lesson", "status", "due_at", "version"],
+		fields=["name", "homework", "lesson", "status", "required", "due_at", "version"],
 		order_by="modified desc",
 	)
 	уроки = домашка.уроки_с_курсом({с.lesson for с in сдачи})
@@ -1124,7 +1134,9 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 			"last_comment": комментарии.get(сдача.name),
 		}
 		if lesson:
-			строка["homework"] = домашка.описание_задания(задание)
+			строка["homework"] = домашка.описание_задания(
+				задание, ученик, пространство, обязательна=bool(сдача.required), курс=курс
+			)
 			строка["submission"] = домашка.описание_сдачи(
 				frappe.get_doc(домашка.СДАЧА, сдача.name), читатель=ученик
 			)
@@ -1357,10 +1369,12 @@ def complete_lesson(session: str) -> dict:
 
 
 def _после_закрытия(ученик: str, курс: str, lesson: str, пространство: str | None) -> dict:
-	"""Что дальше после закрытого урока: `next_lesson` и `empty_blocks` — пустые блоки документа урока."""
+	"""Что дальше после закрытого урока: `next_lesson`, `empty_blocks` — пустые блоки
+	документа урока — и `homework`, задание урока (`homework.к_закрытию`)."""
 	return {
 		"next_lesson": _следующий_урок(ученик, курс),
 		"empty_blocks": _пустые_блоки_урока(ученик, курс, lesson, пространство or None),
+		"homework": домашка.к_закрытию(ученик, lesson, курс, пространство or None),
 	}
 
 
@@ -1399,7 +1413,7 @@ def submit_answer(
 	(learning-services#602).
 
 	Итог сданной попытки закрывает урок и несёт то же, что `complete_lesson`:
-	`next_lesson` и `empty_blocks`.
+	`next_lesson`, `empty_blocks` и `homework`.
 	"""
 	попытка = frappe.db.get_value(
 		"Agent Quiz Attempt", attempt, ["student", "course", "lesson", "session"], as_dict=True

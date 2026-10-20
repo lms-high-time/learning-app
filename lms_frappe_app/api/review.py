@@ -82,6 +82,9 @@ def queue(
 ) -> dict:
 	"""Сдачи, которые куратор вправе проверять, — старые сверху.
 
+	Практика (`required: false`) — в той же очереди: ученик сдал её сам и ждёт
+	ответа так же, но срока у неё нет (learning-services#627).
+
 	`courses` и `organizations` — значения фильтров из всех видимых куратору
 	сдач, без учёта выбранных фильтров: выбор одного не прячет остальные.
 	"""
@@ -116,6 +119,7 @@ def queue(
 				"member",
 				"organization",
 				"status",
+				"required",
 				"submitted_at",
 				"version",
 				"due_at",
@@ -145,6 +149,7 @@ def queue(
 			{
 				"id": сдача.name,
 				"status": сдача.status,
+				"required": bool(сдача.required),
 				"student": {"name": имена.get(сдача.member, сдача.member)},
 				"course": урок.course,
 				"course_title": названия_курсов.get(урок.course),
@@ -185,7 +190,13 @@ def карточка(документ, читатель: str) -> dict:
 	организация = документ.organization or None
 	return {
 		"submission": домашка.описание_сдачи(документ, с_версиями=True, читатель=читатель),
-		"homework": домашка.описание_задания(задание) if задание else None,
+		"homework": (
+			домашка.описание_задания(
+				задание, ученик, организация, обязательна=bool(документ.required), курс=урок.course
+			)
+			if задание
+			else None
+		),
 		"student": {"name": _имена_учеников({ученик}).get(ученик, ученик) if ученик else None},
 		"course": урок.course,
 		"course_title": frappe.get_cached_value("LMS Course", урок.course, "title") if урок.course else None,

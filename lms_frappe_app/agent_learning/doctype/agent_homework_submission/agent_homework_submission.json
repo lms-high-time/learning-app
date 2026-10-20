@@ -14,6 +14,7 @@
   "status",
   "cb_dates",
   "assigned_at",
+  "required",
   "due_at",
   "submitted_at",
   "version",
@@ -85,6 +86,15 @@
    "fieldname": "assigned_at",
    "fieldtype": "Datetime",
    "label": "Выдано",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Обязательная: сдача в пространстве команды, которая сама назначила ученику курс. Ставится, когда сдача заводится, и не пересчитывается. Нет — практика: без срока и без дайджеста куратору.",
+   "fieldname": "required",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Обязательная",
    "read_only": 1
   },
   {
@@ -170,7 +180,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-19 12:00:00.000000",
+ "modified": "2026-10-20 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Homework Submission",
