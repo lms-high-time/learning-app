@@ -15,15 +15,15 @@
 		<div class="page-card-head">
 			<img class="app-logo" src="{{ logo | e }}" alt="">
 			<div class="page-card-head-text">
-				<h4>Прежде чем продолжить</h4>
-				<p class="page-card-subtitle">Подтвердите возраст и примите документы — один раз для этой редакции.</p>
+				<h4>Согласие с документами</h4>
+				<p class="page-card-subtitle">Чтобы продолжить работу с Cenda, подтвердите возраст и примите действующую редакцию Условий использования и Политики конфиденциальности.</p>
 			</div>
 		</div>
 		<form id="consent-form" novalidate>
 			<div class="page-card-body">
 				<label class="consent-check">
 					<input type="checkbox" name="age_confirmed" required>
-					<span>Мне есть 18 лет</span>
+					<span>Подтверждаю, что мне исполнилось 18 лет</span>
 				</label>
 				<label class="consent-check">
 					<input type="checkbox" name="documents_accepted" required>
@@ -55,7 +55,8 @@
 		const возраст = форма.elements.age_confirmed.checked;
 		const документы = форма.elements.documents_accepted.checked;
 		if (!возраст || !документы) {
-			ошибка.textContent = "Отметьте обе галочки, чтобы продолжить.";
+			ошибка.textContent =
+				"Для продолжения необходимо подтвердить возраст и принять Условия использования и Политику конфиденциальности.";
 			return;
 		}
 		ошибка.textContent = "";
@@ -75,7 +76,7 @@
 				return;
 			}
 		} catch {}
-		ошибка.textContent = "Не получилось сохранить, попробуйте ещё раз.";
+		ошибка.textContent = "Не удалось сохранить согласие. Попробуйте ещё раз.";
 		кнопка.disabled = false;
 	});
 })();

@@ -22,14 +22,15 @@
 	};
 	const ОТМЕТКИ = {
 		ru: {
-			возраст: "Мне есть 18 лет",
+			возраст: "Подтверждаю, что мне исполнилось 18 лет",
 			документы: ["Принимаю ", "Условия использования", " и ", "Политику конфиденциальности"],
-			ошибка: "Отметьте обе галочки, чтобы зарегистрироваться.",
+			ошибка:
+				"Для регистрации необходимо подтвердить возраст и принять Условия использования и Политику конфиденциальности.",
 		},
 		en: {
-			возраст: "I am 18 or older",
+			возраст: "I confirm that I am 18 years of age or older",
 			документы: ["I accept the ", "Terms of Use", " and the ", "Privacy Policy"],
-			ошибка: "Tick both boxes to sign up.",
+			ошибка: "To sign up, you must confirm your age and accept the Terms of Use and the Privacy Policy.",
 		},
 	};
 	const КАРТОЧКИ = [".for-login", ".for-email-login"];
