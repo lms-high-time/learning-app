@@ -1,6 +1,6 @@
 {% extends "templates/web.html" %}
 
-{% block title %}{{ title }}{% endblock %}
+{% block title %}{{ title | e }}{% endblock %}
 
 {% block navbar %}{% endblock %}
 {% block footer %}{% endblock %}
@@ -15,25 +15,24 @@
 		<div class="page-card-head">
 			<img class="app-logo" src="{{ logo | e }}" alt="">
 			<div class="page-card-head-text">
-				<h4>Согласие с документами</h4>
-				<p class="page-card-subtitle">Чтобы продолжить работу с Cenda, подтвердите возраст и примите действующую редакцию Условий использования и Политики конфиденциальности.</p>
+				<h4>{{ title | e }}</h4>
+				<p class="page-card-subtitle">{{ subtitle | e }}</p>
 			</div>
 		</div>
 		<form id="consent-form" novalidate>
 			<div class="page-card-body">
 				<label class="consent-check">
 					<input type="checkbox" name="age_confirmed" required>
-					<span>Подтверждаю, что мне исполнилось 18 лет</span>
+					<span>Мне исполнилось 18 лет</span>
 				</label>
-				<p class="consent-hint">Cenda доступна лицам, достигшим 18 лет.</p>
 				<label class="consent-check">
 					<input type="checkbox" name="documents_accepted" required>
-					<span>Принимаю <a href="/terms" target="_blank" rel="noopener">Условия использования</a> и <a href="/privacy" target="_blank" rel="noopener">Политику конфиденциальности</a></span>
+					<span>Я принимаю <a href="/terms" target="_blank" rel="noopener">Условия использования</a> и <a href="/privacy" target="_blank" rel="noopener">Политику конфиденциальности</a></span>
 				</label>
 				<p class="field-error text-danger" id="consent-error" role="alert"></p>
 			</div>
 			<div class="page-card-actions">
-				<button type="submit" class="btn btn-sm btn-primary btn-block">Продолжить</button>
+				<button type="submit" class="btn btn-sm btn-primary btn-block">Принять и продолжить</button>
 			</div>
 		</form>
 		<div class="consent-underage" id="underage" hidden>
@@ -71,8 +70,7 @@
 		const возраст = форма.elements.age_confirmed.checked;
 		const документы = форма.elements.documents_accepted.checked;
 		if (!возраст || !документы) {
-			ошибка.textContent =
-				"Для продолжения необходимо подтвердить возраст и принять Условия использования и Политику конфиденциальности.";
+			ошибка.textContent = "Чтобы продолжить, подтвердите возраст и примите условия.";
 			return;
 		}
 		ошибка.textContent = "";

@@ -22,17 +22,14 @@
 	};
 	const ОТМЕТКИ = {
 		ru: {
-			возраст: "Подтверждаю, что мне исполнилось 18 лет",
-			подсказка: "Cenda доступна лицам, достигшим 18 лет.",
-			документы: ["Принимаю ", "Условия использования", " и ", "Политику конфиденциальности"],
-			ошибка:
-				"Для регистрации необходимо подтвердить возраст и принять Условия использования и Политику конфиденциальности.",
+			возраст: "Мне исполнилось 18 лет",
+			документы: ["Я принимаю ", "Условия использования", " и ", "Политику конфиденциальности"],
+			ошибка: "Чтобы зарегистрироваться, подтвердите возраст и примите условия.",
 		},
 		en: {
-			возраст: "I confirm that I am 18 years of age or older",
-			подсказка: "Cenda is available only to persons aged 18 or older.",
+			возраст: "I am 18 or older",
 			документы: ["I accept the ", "Terms of Use", " and the ", "Privacy Policy"],
-			ошибка: "To sign up, you must confirm your age and accept the Terms of Use and the Privacy Policy.",
+			ошибка: "To sign up, confirm your age and accept the terms.",
 		},
 	};
 	const КАРТОЧКИ = [".for-login", ".for-email-login"];
@@ -73,12 +70,8 @@
 		const ошибка = document.createElement("p");
 		ошибка.className = "field-error text-danger consent-error";
 		ошибка.setAttribute("role", "alert");
-		const подсказка = document.createElement("p");
-		подсказка.className = "consent-hint";
-		подсказка.textContent = т.подсказка;
 		блок.append(
 			галочка("cenda_age", т.возраст),
-			подсказка,
 			галочка("cenda_documents", начало, ссылка("/terms", условия), союз, ссылка("/privacy", политика)),
 			ошибка,
 		);

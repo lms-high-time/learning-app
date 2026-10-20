@@ -27,10 +27,11 @@ cookie `ЯВНОЕ_СОГЛАСИЕ` — по нему запись регист
 только сам регистрирующийся — по силе это то же поле формы.
 """
 
+import datetime
 from urllib.parse import quote, urlsplit
 
 import frappe
-from frappe.utils import add_days, now_datetime
+from frappe.utils import add_days, get_datetime, now_datetime
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import redirect
 
@@ -143,6 +144,55 @@ def есть_явное(пользователь: str) -> bool:
 			{"user": пользователь, "documents_version": редакция_документов(), "explicit": 1},
 		)
 	)
+
+
+def принимал_прежде(пользователь: str) -> bool:
+	"""Принимал ли пользователь документы раньше — тогда экран для него о
+	новой редакции, иначе это завершение регистрации.
+
+	Принятие — явная запись или регистрация (формой, через провайдера) до
+	`ЧИСТКА_С`: тогда согласием считалась подпись под кнопкой. Записи
+	прежнего аккаунта с той же почтой не в счёт — они переживают удаление.
+	Аккаунт без записей до `ЧИСТКА_С` старше самих записей; позже без записей
+	бывают только заведённые вручную, а такой человек документов не видел.
+	"""
+	заведён = frappe.db.get_value("User", пользователь, "creation")
+	записи = frappe.get_all(
+		"Agent Consent",
+		filters={"user": пользователь, "accepted_at": [">=", заведён]},
+		fields=["method", "explicit", "accepted_at"],
+	)
+	if not записи:
+		return заведён < get_datetime(ЧИСТКА_С)
+	return any(
+		з.explicit or (з.method in (РЕГИСТРАЦИЯ, ВНЕШНИЙ_ВХОД) and з.accepted_at < get_datetime(ЧИСТКА_С))
+		for з in записи
+	)
+
+
+МЕСЯЦЫ = (
+	"января",
+	"февраля",
+	"марта",
+	"апреля",
+	"мая",
+	"июня",
+	"июля",
+	"августа",
+	"сентября",
+	"октября",
+	"ноября",
+	"декабря",
+)
+
+
+def дата_редакции() -> str | None:
+	"""«20 октября 2026 года» — для редакции-даты, иначе `None`."""
+	try:
+		день = datetime.date.fromisoformat(редакция_документов())
+	except ValueError:
+		return None
+	return f"{день.day} {МЕСЯЦЫ[день.month - 1]} {день.year} года"
 
 
 def потребовать_согласие():

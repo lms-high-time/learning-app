@@ -266,24 +266,41 @@ body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .c
 	color: var(--ht-ink);
 	cursor: pointer;
 }
-body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-hint {
-	margin: -6px 0 12px 26px;
-	font-size: 0.8rem;
-	color: var(--ht-muted);
-}
 body[data-path="consent"] section[class] .page-card :is(.consent-underage, .consent-done) p {
 	font-size: 0.9rem;
 	line-height: 1.5;
 	color: var(--ht-ink);
 }
+/* Кнопка «Мне нет 18 лет» — как ссылка «Выйти» рядом: без подчёркивания до наведения. */
 body[data-path="consent"] section[class] .page-card .btn-link {
 	padding: 0;
 	border: 0;
 	background: none;
+	font: inherit;
 	color: var(--ht-accent);
-	text-decoration: underline;
+	text-decoration: none;
 	text-underline-offset: 3px;
 	cursor: pointer;
+}
+body[data-path="consent"] section[class] .page-card .btn-link:hover {
+	text-decoration: underline;
+}
+body[data-path="consent"] section.for-consent .page-card-head {
+	margin-bottom: 20px;
+}
+body[data-path="consent"] section.for-consent #consent-links {
+	margin-top: 16px;
+}
+/* Экран согласия — короткая служебная форма: шрифт на ступень мельче, чем у входа. */
+body[data-path="consent"] section.for-consent .page-card-head h4 {
+	font-size: 1.3rem;
+}
+body[data-path="consent"] section.for-consent :is(.page-card-subtitle, #consent-links, .consent-check) {
+	font-size: 0.85rem;
+}
+body[data-path="consent"] section.for-consent .page-card .btn {
+	min-height: 38px;
+	font-size: 0.9rem;
 }
 body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-check input {
 	flex: none;

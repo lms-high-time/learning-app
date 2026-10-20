@@ -25,7 +25,7 @@ from werkzeug.wrappers import Request
 from lms_frappe_app.agent_learning import consent
 from lms_frappe_app.agent_learning.consent import ВНЕШНИЙ_ВХОД, РЕГИСТРАЦИЯ
 from lms_frappe_app.api import consent as consent_api
-from lms_frappe_app.www.consent import ДОМОЙ
+from lms_frappe_app.www.consent import ДОМОЙ, get_context
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
 )
@@ -217,6 +217,66 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-11-01")
 
 		self.assertFalse(consent.есть_явное(адрес))
+
+	def test_экран_отличает_незавершённую_регистрацию_от_новой_редакции(self):
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-10-20")
+		# Отсчёт — от часов базы: в контейнере тестов они отстают (learning-services#509).
+		self.enterContext(patch.object(consent, "ЧИСТКА_С", str(add_days(now_datetime(), -1))))
+		через_google = зарегистрировать(почта(), провайдер="google")
+		формой = зарегистрировать(почта())
+		прежний = зарегистрировать(почта())
+		недавно_формой = зарегистрировать(почта())
+		frappe.set_user("Administrator")
+		вручную = зарегистрировать(почта())
+		давний = зарегистрировать(почта())
+		frappe.db.set_value("User", давний, "creation", add_days(now_datetime(), -2))
+		frappe.db.set_value("User", формой, "creation", add_days(now_datetime(), -2))
+		frappe.db.set_value("Agent Consent", {"user": формой}, "accepted_at", add_days(now_datetime(), -2))
+		frappe.delete_doc("User", прежний, ignore_permissions=True)
+		frappe.set_user("Guest")
+		зарегистрировать(прежний, провайдер="google")
+
+		def экран(пользователь: str) -> tuple[str, str]:
+			frappe.set_user(пользователь)
+			контекст = frappe._dict()
+			with запрос("/consent"), patch("frappe.sessions.get_csrf_token", return_value="x"):
+				get_context(контекст)
+			return контекст.title, контекст.subtitle
+
+		завершить = ("Завершите регистрацию", "Осталось подтвердить возраст и принять условия.")
+		обновили = (
+			"Мы обновили условия",
+			"С 20 октября 2026 года действуют новые Условия использования и Политика конфиденциальности.",
+		)
+		for кто, пользователь, ожидается in (
+			("вход через Google без отметок", через_google, завершить),
+			("регистрация формой до отметок — подпись под кнопкой", формой, обновили),
+			("регистрация формой без отметок после", недавно_формой, завершить),
+			("заведён вручную", вручную, завершить),
+			("старше записей согласия", давний, обновили),
+			("записи прежнего аккаунта с той же почтой", прежний, завершить),
+		):
+			with self.subTest(кто):
+				self.assertEqual(экран(пользователь), ожидается)
+
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-11-01")
+		self.assertEqual(экран(через_google), завершить, "редакция сменилась, а принятия не было")
+		with запрос("/consent", "POST"):
+			self.assertTrue(consent_api.accept(age_confirmed=1, documents_accepted=1)["ok"])
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-12-01")
+		self.assertEqual(
+			экран(через_google),
+			(
+				"Мы обновили условия",
+				"С 1 декабря 2026 года действуют новые Условия использования и Политика конфиденциальности.",
+			),
+		)
+
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "v2")
+		self.assertIsNone(consent.дата_редакции())
+		self.assertEqual(
+			экран(через_google)[1], "Действуют новые Условия использования и Политика конфиденциальности."
+		)
 
 
 class IntegrationTestUnderage(IntegrationTestCase):
