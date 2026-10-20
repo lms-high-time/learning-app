@@ -271,14 +271,25 @@ body[data-path="consent"] section[class] .page-card :is(.consent-underage, .cons
 	line-height: 1.5;
 	color: var(--ht-ink);
 }
+/* Кнопка «Мне нет 18 лет» — как ссылка «Выйти» рядом: без подчёркивания до наведения. */
 body[data-path="consent"] section[class] .page-card .btn-link {
 	padding: 0;
 	border: 0;
 	background: none;
+	font: inherit;
 	color: var(--ht-accent);
-	text-decoration: underline;
+	text-decoration: none;
 	text-underline-offset: 3px;
 	cursor: pointer;
+}
+body[data-path="consent"] section[class] .page-card .btn-link:hover {
+	text-decoration: underline;
+}
+body[data-path="consent"] section.for-consent .page-card-head {
+	margin-bottom: 20px;
+}
+body[data-path="consent"] section.for-consent #consent-links {
+	margin-top: 16px;
 }
 body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-check input {
 	flex: none;
