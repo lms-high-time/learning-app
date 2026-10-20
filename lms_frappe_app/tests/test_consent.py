@@ -409,6 +409,7 @@ class IntegrationTestUnderage(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		for адрес in (первый, второй):
 			frappe.db.set_value("Agent Consent", {"user": адрес}, "accepted_at", давно, update_modified=False)
+			frappe.db.set_value("User", адрес, "creation", давно, update_modified=False)
 		настоящий = consent.убрать_аккаунт
 
 		def с_ошибкой(пользователь, причина):
@@ -434,11 +435,47 @@ class IntegrationTestUnderage(IntegrationTestCase):
 		прежний = зарегистрировать(почта(), провайдер="google")
 		frappe.set_user("Administrator")
 		frappe.db.set_value("Agent Consent", {"user": прежний}, "accepted_at", давно, update_modified=False)
+		frappe.db.set_value("User", прежний, "creation", давно, update_modified=False)
 
 		with patch.object(consent, "ЧИСТКА_С", add_days(давно, 1)), patch.object(frappe.db, "commit"):
 			consent.удалить_без_согласия()
 
 		self.assertTrue(frappe.db.exists("User", прежний))
+
+	def test_чистка_судит_аккаунт_по_его_записям_а_не_прежнего(self):
+		"""Записи согласия переживают удаление (learning-services#628). Новый
+		аккаунт на ту же почту не убирается раньше срока по входу прежнего и не
+		остаётся навсегда из-за его отметки «не дано»."""
+		очень_давно = add_days(now_datetime(), -consent.ДНЕЙ_БЕЗ_СОГЛАСИЯ - 20)
+		давно = add_days(now_datetime(), -consent.ДНЕЙ_БЕЗ_СОГЛАСИЯ - 5)
+		вернулся_сразу, вернулся_давно = (зарегистрировать(почта(), провайдер="google") for _ in range(2))
+		frappe.set_user("Administrator")
+		for адрес in (вернулся_сразу, вернулся_давно):
+			frappe.db.set_value(
+				"Agent Consent", {"user": адрес}, "accepted_at", очень_давно, update_modified=False
+			)
+			frappe.db.set_value("User", адрес, "creation", очень_давно, update_modified=False)
+
+		with patch.object(consent, "ЧИСТКА_С", add_days(очень_давно, -1)), patch.object(frappe.db, "commit"):
+			# Первого удалил администратор — отметки «не дано» нет; второго убрала чистка.
+			frappe.delete_doc("User", вернулся_сразу, ignore_permissions=True)
+			consent.удалить_без_согласия()
+			убран = {"user": вернулся_давно, "method": consent.НЕ_ДАНО}
+			frappe.db.set_value(
+				"Agent Consent", убран, "accepted_at", add_days(очень_давно, 1), update_modified=False
+			)
+			frappe.set_user("Guest")
+			for адрес in (вернулся_сразу, вернулся_давно):
+				зарегистрировать(адрес, провайдер="google")
+			frappe.set_user("Administrator")
+			новый_вход = {"user": вернулся_давно, "method": ВНЕШНИЙ_ВХОД, "accepted_at": [">", очень_давно]}
+			frappe.db.set_value("Agent Consent", новый_вход, "accepted_at", давно, update_modified=False)
+			frappe.db.set_value("User", вернулся_давно, "creation", давно, update_modified=False)
+
+			consent.удалить_без_согласия()
+
+		self.assertTrue(frappe.db.exists("User", вернулся_сразу), "по входу прежнего аккаунта — раньше срока")
+		self.assertFalse(frappe.db.exists("User", вернулся_давно), "отметка прежнего аккаунта не спасает")
 
 
 class UnitTestПутиСогласия(UnitTestCase):
