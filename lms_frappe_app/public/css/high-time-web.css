@@ -266,11 +266,6 @@ body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .c
 	color: var(--ht-ink);
 	cursor: pointer;
 }
-body:is([data-path="login"], [data-path="consent"]) section[class] .page-card .consent-hint {
-	margin: -6px 0 12px 26px;
-	font-size: 0.8rem;
-	color: var(--ht-muted);
-}
 body[data-path="consent"] section[class] .page-card :is(.consent-underage, .consent-done) p {
 	font-size: 0.9rem;
 	line-height: 1.5;

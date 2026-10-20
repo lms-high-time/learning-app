@@ -25,7 +25,7 @@ from werkzeug.wrappers import Request
 from lms_frappe_app.agent_learning import consent
 from lms_frappe_app.agent_learning.consent import ВНЕШНИЙ_ВХОД, РЕГИСТРАЦИЯ
 from lms_frappe_app.api import consent as consent_api
-from lms_frappe_app.www.consent import ДОМОЙ
+from lms_frappe_app.www.consent import ДОМОЙ, get_context
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
 )
@@ -217,6 +217,39 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-11-01")
 
 		self.assertFalse(consent.есть_явное(адрес))
+
+	def test_экран_отличает_незавершённую_регистрацию_от_новой_редакции(self):
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-10-20")
+		через_google = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user("Administrator")
+		без_записи = зарегистрировать(почта())
+
+		def экран(пользователь: str) -> tuple[str, str]:
+			frappe.set_user(пользователь)
+			контекст = frappe._dict()
+			with запрос("/consent"), patch("frappe.sessions.get_csrf_token", return_value="x"):
+				get_context(контекст)
+			return контекст.title, контекст.subtitle
+
+		self.assertEqual(
+			экран(через_google), ("Завершите регистрацию", "Осталось подтвердить возраст и принять условия.")
+		)
+		self.assertEqual(экран(без_записи)[0], "Мы обновили условия", "аккаунт старше записей согласия")
+
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-11-01")
+		self.assertEqual(
+			экран(через_google),
+			(
+				"Мы обновили условия",
+				"С 1 ноября 2026 года действуют новые Условия использования и Политика конфиденциальности.",
+			),
+		)
+
+		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "v2")
+		self.assertIsNone(consent.дата_редакции())
+		self.assertEqual(
+			экран(через_google)[1], "Действуют новые Условия использования и Политика конфиденциальности."
+		)
 
 
 class IntegrationTestUnderage(IntegrationTestCase):

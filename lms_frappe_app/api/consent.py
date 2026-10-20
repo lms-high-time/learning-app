@@ -39,7 +39,7 @@ def accept(age_confirmed=False, documents_accepted=False) -> dict:
 	if not (_да(age_confirmed) and _да(documents_accepted)):
 		raise Отказ(
 			НУЖНЫ_ОТМЕТКИ,
-			"Необходимо подтвердить возраст и принять Условия использования и Политику конфиденциальности",
+			"Чтобы продолжить, подтвердите возраст и примите условия",
 		)
 	consent.принять(пользователь)
 	return {"version": consent.редакция_документов()}
