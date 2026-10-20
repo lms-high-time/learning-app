@@ -1,19 +1,29 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Запись согласия с документами при самостоятельной регистрации (learning-services#577).
+"""Согласие с документами: при регистрации и на экране согласия
+(learning-services#577, #624).
 
 Проверяется, кто получает запись и с чем: регистрация формой и первым входом
 через провайдера — да, с редакцией документов из настроек; аккаунт от
-администратора — нет. Пустая настройка не роняет регистрацию.
+администратора — нет. Пустая настройка не роняет регистрацию. Явное
+согласие — отметки формы или экрана согласия; без него страницы платформы
+ведут на экран согласия.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
+from werkzeug.exceptions import HTTPException
+from werkzeug.test import EnvironBuilder
+from werkzeug.wrappers import Request
 
+from lms_frappe_app.agent_learning import consent
 from lms_frappe_app.agent_learning.consent import ВНЕШНИЙ_ВХОД, РЕГИСТРАЦИЯ
+from lms_frappe_app.api import consent as consent_api
+from lms_frappe_app.www.consent import ДОМОЙ, куда_вернуть
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
 )
@@ -39,8 +49,20 @@ def согласия(почта: str) -> list[frappe._dict]:
 	return frappe.get_all(
 		"Agent Consent",
 		filters={"user": почта},
-		fields=["documents_version", "method", "provider", "accepted_at"],
+		fields=["documents_version", "method", "provider", "accepted_at", "explicit", "age_confirmed"],
 	)
+
+
+@contextmanager
+def запрос(путь: str = "/lms", метод: str = "GET", cookie: str | None = None):
+	"""Запрос браузера на время проверки: путь, метод и cookie."""
+	прежний = getattr(frappe.local, "request", None)
+	заголовки = {"Cookie": cookie} if cookie else {}
+	frappe.local.request = Request(EnvironBuilder(path=путь, method=метод, headers=заголовки).get_environ())
+	try:
+		yield
+	finally:
+		frappe.local.request = прежний
 
 
 class IntegrationTestConsent(IntegrationTestCase):
@@ -105,6 +127,108 @@ class IntegrationTestConsent(IntegrationTestCase):
 		self.assertEqual(len(согласия(адрес)), 1)
 
 
+class IntegrationTestExplicitConsent(IntegrationTestCase):
+	"""Явное согласие и экран согласия (learning-services#624)."""
+
+	def setUp(self):
+		frappe.set_user("Guest")
+		self.addCleanup(frappe.set_user, "Administrator")
+
+	def test_отметки_формы_делают_регистрацию_явной(self):
+		with запрос(cookie=f"{consent.ЯВНОЕ_СОГЛАСИЕ}=1"):
+			[с_отметками] = согласия(зарегистрировать(почта()))
+			[через_google] = согласия(зарегистрировать(почта(), провайдер="google"))
+		with запрос():
+			[без_отметок] = согласия(зарегистрировать(почта()))
+
+		self.assertEqual((с_отметками.explicit, с_отметками.age_confirmed), (1, 1))
+		self.assertEqual((через_google.explicit, без_отметок.explicit), (0, 0), "отметок здесь не было")
+
+	def test_без_явного_согласия_страница_ведёт_на_экран_согласия(self):
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(адрес)
+
+		with запрос("/lms/courses?x=1"), self.assertRaises(HTTPException) as переход:
+			consent.потребовать_согласие()
+		ответ = переход.exception.get_response()
+		self.assertEqual(ответ.status_code, 302)
+		self.assertEqual(ответ.headers["Location"], "/consent?redirect-to=%2Flms%2Fcourses%3Fx%3D1")
+
+		with self.subTest("API не трогается"), запрос("/api/method/lms_frappe_app.api.student.whoami"):
+			consent.потребовать_согласие()
+
+		with self.subTest("после согласия — пропускает"):
+			ответ = consent_api.accept(age_confirmed=1, documents_accepted="true")
+			self.assertTrue(ответ["ok"], ответ)
+			with запрос("/lms"):
+				consent.потребовать_согласие()
+			[_, явное] = sorted(согласия(адрес), key=lambda с: с.explicit)
+			self.assertEqual(
+				(явное.method, явное.explicit, явное.age_confirmed), (consent.ЭКРАН_СОГЛАСИЯ, 1, 1)
+			)
+
+	def test_согласие_без_обеих_отметок_не_записывается(self):
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(адрес)
+
+		ответ = consent_api.accept(age_confirmed=1, documents_accepted=0)
+
+		self.assertEqual(ответ["error"]["code"], consent_api.НУЖНЫ_ОТМЕТКИ)
+		self.assertFalse(consent.есть_явное(адрес))
+
+	def test_новая_редакция_снова_просит_согласия(self):
+		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-10-20")
+		адрес = зарегистрировать(почта(), провайдер="google")
+		frappe.set_user(адрес)
+		consent_api.accept(age_confirmed=1, documents_accepted=1)
+		self.assertTrue(consent.есть_явное(адрес))
+
+		frappe.db.set_single_value("Agent Learning Settings", "legal_version", "2026-11-01")
+
+		self.assertFalse(consent.есть_явное(адрес))
+
+
+class UnitTestПутиСогласия(UnitTestCase):
+	def test_какие_страницы_ведут_на_экран_согласия(self):
+		for путь, метод, ведёт in (
+			("/lms", "GET", True),
+			("/app/user", "GET", True),
+			("/me", "GET", True),
+			("/api/method/frappe.integrations.oauth2.authorize?client_id=x", "GET", True),
+			("/api/method/lms_frappe_app.api.student.whoami", "GET", False),
+			("/lms", "POST", False),
+			("/consent", "GET", False),
+			("/login", "GET", False),
+			("/logout", "GET", False),
+			("/assets/app.js", "GET", False),
+			("/update-password", "GET", False),
+		):
+			with self.subTest(путь=путь, метод=метод):
+				self.assertEqual(consent.путь_под_согласием(путь, метод), ведёт)
+
+	def test_возврат_только_на_свой_адрес(self):
+		for адрес, ожидается in (
+			("/lms/courses", "/lms/courses"),
+			(
+				"/api/method/frappe.integrations.oauth2.authorize?a=1",
+				"/api/method/frappe.integrations.oauth2.authorize?a=1",
+			),
+			("https://evil.example", ДОМОЙ),
+			("//evil.example", ДОМОЙ),
+			("/\\evil.example", ДОМОЙ),
+			("/consent?redirect-to=/lms", ДОМОЙ),
+			("", ДОМОЙ),
+			(None, ДОМОЙ),
+		):
+			with self.subTest(адрес=адрес):
+				self.assertEqual(куда_вернуть(адрес), ожидается)
+
+	def test_гейт_подключён(self):
+		self.assertIn(
+			"lms_frappe_app.agent_learning.consent.потребовать_согласие", frappe.get_hooks("before_request")
+		)
+
+
 class UnitTestConsentNotice(UnitTestCase):
 	def test_подпись_подключена_к_веб_страницам(self):
 		"""Без подписи запись согласия ничего не доказывает: человек не видел,
@@ -116,5 +240,5 @@ class UnitTestConsentNotice(UnitTestCase):
 		self.assertIn("/site/analytics.js", frappe.get_hooks("web_include_js"))
 		файл = Path(frappe.get_app_path("lms_frappe_app", "public", "js", "consent-notice.js"))
 		текст = файл.read_text(encoding="utf-8")
-		for нужное in ('"/terms"', '"/privacy"', ".for-login", ".for-signup"):
+		for нужное in ('"/terms"', '"/privacy"', ".for-login", ".for-signup", "cenda_consent"):
 			self.assertIn(нужное, текст)

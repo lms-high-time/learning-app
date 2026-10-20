@@ -1,21 +1,29 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Запись согласия с документами при самостоятельной регистрации.
+"""Согласие с документами: при регистрации и на экране согласия.
 
-Подпись «Продолжая, вы принимаете Условия использования и Политику
-конфиденциальности» стоит под кнопками входа и регистрации
-(`public/js/consent-notice.js`). Принимает их тот, кто создаёт аккаунт сам —
-формой регистрации или первым входом через Google, где кнопка «Войти» и есть
-регистрация. Обычный вход ничего не записывает: аккаунт уже есть.
+Явное согласие — две отметки: «мне есть 18 лет» и «принимаю Условия
+использования и Политику конфиденциальности» (learning-services#624). В форме
+регистрации они обязательны (`public/js/consent-notice.js`), и скрипт ставит
+cookie `ЯВНОЕ_СОГЛАСИЕ` — по нему запись регистрации становится явной. Вход
+через Google создаёт аккаунт при возврате от провайдера, до него отметок не
+спросить: такая запись не явная, и пользователь до явного согласия видит
+экран `/consent` (`потребовать_согласие`). Тот же экран видят все, у кого
+явного согласия с действующей редакцией нет: прежние пользователи и все после
+смены редакции. Обычный вход ничего не записывает: аккаунт уже есть.
 
 Аккаунт, который завели вручную (Desk, импорт), записи не получает: человек
 этих страниц не видел. Такие аккаунты заводим только мы и только по просьбе
 самого человека (политика конфиденциальности, раздел 3).
 """
 
+from urllib.parse import quote
+
 import frappe
 from frappe.utils import now_datetime
+from werkzeug.exceptions import HTTPException
+from werkzeug.utils import redirect
 
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
@@ -23,6 +31,33 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 
 РЕГИСТРАЦИЯ = "Sign Up"
 ВНЕШНИЙ_ВХОД = "Social Login"
+ЭКРАН_СОГЛАСИЯ = "Consent Screen"
+#: Cookie формы регистрации: обе отметки поставлены (`consent-notice.js`).
+ЯВНОЕ_СОГЛАСИЕ = "cenda_consent"
+#: Экран согласия.
+СТРАНИЦА = "/consent"
+#: Пути, которые работают и без явного согласия: сам экран, вход и выход,
+#: статика и API. `Why:` API зовут скрипты уже открытых страниц и агенты по
+#: токену — им экран не показать, а переадресация вместо JSON сломала бы их.
+СВОБОДНЫЕ = (
+	СТРАНИЦА,
+	"/login",
+	"/logout",
+	"/update-password",
+	"/api/",
+	"/assets/",
+	"/files/",
+	"/private/",
+	"/socket.io",
+	"/.well-known/",
+	"/website_script.js",
+	"/favicon",
+	"/robots.txt",
+	"/sitemap",
+)
+#: Исключение из `/api/`: экран согласия OAuth открывается в браузере, когда
+#: ученик подключает агента, — до согласия его ведём сначала на `/consent`.
+АВТОРИЗАЦИЯ_АГЕНТА = "/api/method/frappe.integrations.oauth2.authorize"
 #: Служебная строка входа, которую Frappe в `User.validate` добавляет каждому
 #: пользователю, — не внешний провайдер. `Why:` без исключения любая
 #: регистрация формой записывалась как вход через провайдера `frappe`.
@@ -38,6 +73,65 @@ def редакция_документов() -> str:
 	"""
 	поле = frappe.get_meta(НАСТРОЙКИ).get_field("legal_version")
 	return frappe.db.get_single_value(НАСТРОЙКИ, "legal_version") or (поле.default if поле else "")
+
+
+def путь_под_согласием(путь: str, метод: str) -> bool:
+	"""Ведёт ли страница на экран согласия, пока явного согласия нет.
+
+	Только страницы, которые открывают в браузере, — `GET`, кроме свободных
+	путей; авторизация агента — тоже страница, хоть и под `/api/`.
+	"""
+	if метод not in ("GET", "HEAD"):
+		return False
+	if путь.startswith(АВТОРИЗАЦИЯ_АГЕНТА):
+		return True
+	return not путь.startswith(СВОБОДНЫЕ)
+
+
+def есть_явное(пользователь: str) -> bool:
+	"""Явное согласие с действующей редакцией документов уже дано."""
+	return bool(
+		frappe.db.exists(
+			"Agent Consent",
+			{"user": пользователь, "documents_version": редакция_документов(), "explicit": 1},
+		)
+	)
+
+
+def потребовать_согласие():
+	"""`before_request`: без явного согласия страницы платформы ведут на `/consent`.
+
+	Сессия из cookie к этому моменту уже поднята (`frappe.auth.HTTPRequest`),
+	а вход по токену — нет: агенты по API сюда и не попадают. Переадресация —
+	ответом werkzeug: `frappe.Redirect`, брошенный здесь, Frappe отрисовал бы
+	страницей ошибки.
+	"""
+	пользователь = frappe.session.user
+	if пользователь in ("Guest", "Administrator", None) or not frappe.request:
+		return
+	if not путь_под_согласием(frappe.request.path, frappe.request.method):
+		return
+	if not frappe.db.table_exists("Agent Consent") or есть_явное(пользователь):
+		return
+	куда = frappe.request.full_path.rstrip("?")
+	raise HTTPException(response=redirect(f"{СТРАНИЦА}?redirect-to={quote(куда, safe='')}", 302))
+
+
+def принять(пользователь: str) -> None:
+	"""Явное согласие с экрана согласия: обе отметки поставлены."""
+	if есть_явное(пользователь):
+		return
+	frappe.get_doc(
+		{
+			"doctype": "Agent Consent",
+			"user": пользователь,
+			"documents_version": редакция_документов(),
+			"accepted_at": now_datetime(),
+			"method": ЭКРАН_СОГЛАСИЯ,
+			"explicit": 1,
+			"age_confirmed": 1,
+		}
+	).insert(ignore_permissions=True)
 
 
 def записать_согласие(user, method=None):
@@ -66,5 +160,13 @@ def записать_согласие(user, method=None):
 			"accepted_at": now_datetime(),
 			"method": ВНЕШНИЙ_ВХОД if провайдеры else РЕГИСТРАЦИЯ,
 			"provider": провайдеры[0] if провайдеры else "",
+			# Отметки есть только в форме регистрации: у входа через провайдера
+			# их не спросить, и он придёт на экран согласия.
+			**({"explicit": 1, "age_confirmed": 1} if not провайдеры and _отметки_формы() else {}),
 		}
 	).insert(ignore_permissions=True)
+
+
+def _отметки_формы() -> bool:
+	"""Форма регистрации прислала обе отметки: cookie ставит её скрипт."""
+	return bool(frappe.request and frappe.request.cookies.get(ЯВНОЕ_СОГЛАСИЕ) == "1")
