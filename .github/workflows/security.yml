@@ -1,0 +1,244 @@
+# Ворота безопасности: секреты (gitleaks) и код (semgrep с правилами Frappe).
+# Дизайн и дом конвенции — learning-services: docs/plans/2026-10-20-release-
+# security-design.md и docs/process/gates.md (lms-high-time/learning-services#629).
+#
+# Без pip-audit и baseline уязвимостей: зависимостей у приложения нет
+# (`dependencies = []`), а Frappe и Learning, которые реально стоят, проверяет
+# trivy по образу стенда. Поэтому и без общего `security/gate.py` — он живёт в
+# приватном learning-services, и публичный CI его без секрета не достанет;
+# порог здесь проще: блокирует ERROR и любой незнакомый уровень, ошибка в
+# отчёте, ненулевой код сканера и любой секрет, WARNING — в сводке. Вместо
+# комментария в PR — сводка прогона: у PR из форка токен только на чтение.
+#
+# Ручной запуск с `base`/`sha` — проверка ровно выкатываемого диффа:
+# `python deploy/release.py deploy` в learning-services двигает указатель
+# `deploy`, только если этот прогон зелёный.
+#
+# Чего ворота НЕ делают:
+# - на PR только советуют: в ruleset обязателен `bench run-tests`, а выкатку
+#   держит `release.py`;
+# - правку самих ворот из ветки PR (этот файл, `.gitleaksignore`,
+#   `.semgrepignore`, новые `nosemgrep`) не блокируют, а выносят первой
+#   строкой сводки — её смотрит ревью; `.gitleaks.toml` из дерева не
+#   действует вовсе — конфиг gitleaks задаётся здесь;
+# - не закрепляют `p/python` из реестра: удалённое правило — тихое
+#   ослабление, новое может покрасить неделю;
+# - не сканируют `tests/` (действует встроенный `.semgrepignore` semgrep) и
+#   файлы, которые semgrep не разобрал (`warn` в отчёте — только в сводке);
+# - секрет в публичном репозитории ловят, но не предотвращают — это push
+#   protection в настройках;
+# - красная неделя — только письмо GitHub автору последней правки cron, а
+#   после 60 дней без активности GitHub выключает `schedule` сам.
+name: Безопасность
+# Метка и диапазон выкатки в названии: по метке release.py находит прогон.
+run-name: ${{ inputs.label && format('Безопасность · выкатка {0} · {1}..{2}', inputs.label, inputs.base, inputs.sha) || '' }}
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "47 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "sha указателя: начало проверяемого диапазона"
+        required: false
+        default: ""
+      sha:
+        description: "sha цели выкатки: конец диапазона"
+        required: false
+        default: ""
+      label:
+        description: "метка выкатки — по ней release.py находит прогон"
+        required: false
+        default: ""
+
+# PR — одна группа на ветку; остальное — своя группа на прогон, чтобы третий
+# пуш подряд не отменил ожидающий второй (learning-services#637).
+concurrency:
+  group: security-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Правила закреплены по sha: обновление — осознанной правкой. Дом правил
+  # Frappe — upstream frappe/semgrep-rules, правил Learning — форк.
+  FRAPPE_RULES_SHA: 81a6e3d47a328249e8ddf04c586e493dd5553002
+  FORK_RULES_SHA: 8eb2d5997e46e01e759b9f7a4411685c6cda9dee
+  SEMGREP_IMAGE: semgrep/semgrep:1.95.0@sha256:30e6afa99ebd8e7b4115d4904898108eb4bf77025819e9263f09cf14e6f6e549
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46
+
+jobs:
+  security:
+    name: ворота безопасности
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # До checkout: произвольный ref в `sha` был бы вычекан и исполнен.
+      - name: Входы выкатки
+        if: github.event_name == 'workflow_dispatch' && (inputs.base != '' || inputs.sha != '')
+        env:
+          IN_BASE: ${{ inputs.base }}
+          IN_SHA: ${{ inputs.sha }}
+        run: |
+          for v in "$IN_BASE" "$IN_SHA"; do
+            [[ $v =~ ^[0-9a-f]{40}$ ]] || { echo "::error::base и sha — полные sha коммитов, получено «$v»"; exit 1; }
+          done
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.sha }}
+
+      # PR: база — первый родитель merge-коммита (текущий master). Пуш:
+      # пришедшие коммиты, недоступный `before` — полный скан. Выкатка — ровно
+      # base..sha. Неделя и ручной запуск без диапазона — всё. Список файлов
+      # диапазона — для строки о правке самих ворот.
+      - name: Диапазон
+        id: range
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          IN_BASE: ${{ inputs.base }}
+          IN_SHA: ${{ inputs.sha }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] && [ -n "$IN_BASE$IN_SHA" ]; then
+            EVENT=deploy
+          fi
+          case "$EVENT" in
+            deploy)
+              git cat-file -e "$IN_BASE^{commit}" 2>/dev/null \
+                || { echo "::error::base $IN_BASE нет в истории — указатель не из этого репозитория или ушёл вбок"; exit 1; }
+              base=$IN_BASE
+              echo "log=$IN_BASE..$IN_SHA" >> "$GITHUB_OUTPUT" ;;
+            pull_request)
+              base=$(git rev-parse HEAD^1)
+              echo "log=$PR_BASE..$PR_HEAD" >> "$GITHUB_OUTPUT" ;;
+            push)
+              if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                base=$BEFORE
+                echo "log=$BEFORE..$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+              else
+                base=
+                echo "log=--all" >> "$GITHUB_OUTPUT"
+                echo "⚠️ \`before\` ($BEFORE) недоступен — полный скан." >> "$GITHUB_STEP_SUMMARY"
+              fi ;;
+            *)
+              base=
+              echo "log=--all" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if [ -n "$base" ]; then
+            echo "mode=$EVENT, ${base:0:7}..$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+            git diff --name-only "$base" HEAD > "$RUNNER_TEMP/changed.txt"
+            git diff -U0 "$base" HEAD > "$RUNNER_TEMP/diff.patch"
+          else
+            echo "mode=$EVENT, полный скан" >> "$GITHUB_OUTPUT"
+            : > "$RUNNER_TEMP/changed.txt"
+            : > "$RUNNER_TEMP/diff.patch"
+          fi
+
+      # Правила — fetch ровно закреплённого sha, без всей истории upstream.
+      # Конфиг gitleaks — свой: явный `--config` главнее `.gitleaks.toml` в
+      # дереве, и PR не может выключить проверку allowlist'ом из своей ветки;
+      # `.gitleaksignore` при этом действует (проверено на подложенном секрете).
+      - name: Правила
+        run: |
+          r="$RUNNER_TEMP/frappe-rules"
+          git init -q "$r"
+          git -C "$r" fetch -q --depth 1 https://github.com/frappe/semgrep-rules.git "$FRAPPE_RULES_SHA"
+          git -C "$r" checkout -q FETCH_HEAD
+          curl -fsSL -o "$RUNNER_TEMP/lms-security.yml" \
+            "https://raw.githubusercontent.com/lms-high-time/learning-fork/$FORK_RULES_SHA/.github/semgrep/security.yml"
+          printf '[extend]\nuseDefault = true\n' > "$RUNNER_TEMP/gitleaks.toml"
+
+      # Сканеры не валят свой шаг: код выхода пишется в файл и разбирается в
+      # «Решении» вместе с отчётом — пустой отчёт упавшего сканера не «чисто».
+      # Отчёты — в $RUNNER_TEMP, вне дерева: базовый режим semgrep сверяет
+      # дерево с коммитом.
+      - name: Код
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+        run: |
+          rc=0
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/src" -v "$RUNNER_TEMP:/out" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan --metrics=off \
+            --config /out/frappe-rules/rules --config /out/lms-security.yml --config p/python \
+            ${BASE:+--baseline-commit "$BASE"} --json -o /out/semgrep.json . || rc=$?
+          echo "$rc" > "$RUNNER_TEMP/semgrep.rc"
+
+      - name: Секреты
+        env:
+          LOG_OPTS: ${{ steps.range.outputs.log }}
+        run: |
+          rc=0
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/repo:ro" -v "$RUNNER_TEMP:/out" "$GITLEAKS_IMAGE" \
+            git /repo --redact --no-banner --config /out/gitleaks.toml --log-opts="$LOG_OPTS" \
+            --exit-code 0 -f json -r /out/gitleaks.json || rc=$?
+          echo "$rc" > "$RUNNER_TEMP/gitleaks.rc"
+
+      - name: Решение
+        env:
+          MODE: ${{ steps.range.outputs.mode }}
+        run: |
+          fail=0
+          t=$RUNNER_TEMP
+          for s in semgrep gitleaks; do
+            rc=$(cat "$t/$s.rc" 2>/dev/null || echo нет)
+            [ "$rc" = 0 ] || { echo "::error::$s вышел с ошибкой (код $rc) — смотри его шаг"; fail=1; }
+            jq -e . "$t/$s.json" >/dev/null 2>&1 || { echo "::error::$s: отчёт не прочитан — сканер упал"; fail=1; }
+          done
+          [ "$fail" = 0 ] || exit 1
+
+          # Значения из отчётов идут в команды workflow — экранируются, иначе
+          # имя файла с переводом строки внедрило бы свою команду.
+          esc='def msg: gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A");
+               def prop: msg | gsub(":";"%3A") | gsub(",";"%2C");'
+          # Блокирует всё, кроме известных неблокирующих уровней: после
+          # обновления semgrep уровень может назваться иначе.
+          quiet='["WARNING","INFO","INVENTORY","EXPERIMENT"]'
+
+          leaks=$(jq 'length' "$t/gitleaks.json")
+          jq -r "$esc"' .[] | "::error file=\(.File | prop),line=\(.StartLine)::секрет \(.RuleID | msg) в \(.Commit[0:7]) — отзови и убери из истории; ложное — в .gitleaksignore с комментарием"' "$t/gitleaks.json"
+
+          jq -r "$esc"' .errors[] | select(.level == "error") | "::error::semgrep: \(.message | tostring | msg)"' "$t/semgrep.json"
+          scan_errors=$(jq '[.errors[] | select(.level == "error")] | length' "$t/semgrep.json")
+          scan_warns=$(jq '[.errors[] | select(.level != "error")] | length' "$t/semgrep.json")
+          blocking=$(jq --argjson q "$quiet" '[.results[] | select(.extra.severity as $s | $q | index($s) | not)] | length' "$t/semgrep.json")
+          jq -r --argjson q "$quiet" "$esc"' .results[] | select(.extra.severity as $s | $q | index($s) | not)
+            | (.check_id | split(".") | last) as $r
+            | "::error file=\(.path | prop),line=\(.start.line)::\($r | msg): \(.extra.message | split("\n")[0] | msg) — исправь или `# nosemgrep: \($r | msg) — <причина>`"' "$t/semgrep.json"
+
+          gates=$(grep -E '^(\.github/workflows/security\.yml|\.gitleaks\.toml|\.gitleaksignore|\.semgrepignore)$' "$t/changed.txt" | paste -sd, - || true)
+          [ -z "$gates" ] || echo "::warning::здесь изменены сами ворота: $gates — проверь на ревью"
+          nosem=$(grep -cE '^\+.*nosemgrep' "$t/diff.patch" || true)
+          [ "$nosem" = 0 ] || echo "::warning::новых nosemgrep в диффе: $nosem — проверь на ревью, голый nosemgrep без id глушит все правила"
+
+          {
+            echo "## Безопасность"
+            echo
+            echo "_${MODE}_"
+            echo
+            [ -z "$gates" ] || { echo "⚠️ **Здесь изменены сами ворота:** $gates — проверь на ревью."; echo; }
+            [ "$nosem" = 0 ] || { echo "⚠️ **Новых \`nosemgrep\` в диффе: $nosem** — проверь на ревью."; echo; }
+            echo "**Блокирует:** секретов $leaks, находок semgrep $blocking, ошибок сканера $scan_errors"
+            echo
+            echo "<details><summary>Видно, не блокирует</summary>"
+            echo
+            echo "Предупреждений сканера (файл не разобран и т. п.): $scan_warns"
+            echo
+            jq -r --argjson q "$quiet" '[.results[] | select(.extra.severity as $s | $q | index($s))]
+              | group_by(.check_id) | sort_by(-length) | .[]
+              | "- \(.[0].check_id | split(".") | last): \(length)"' "$t/semgrep.json"
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ "$leaks" = 0 ] && [ "$blocking" = 0 ] && [ "$scan_errors" = 0 ]
