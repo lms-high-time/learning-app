@@ -67,6 +67,18 @@ def _срез_урока(ключ: str, разделы: list[str]) -> dict:
 	}
 
 
+#: Схема урока l-1 (learning-services#644): HTML — только `lesson_diagram`,
+#: в старте урока — без него.
+HTML_СХЕМЫ = "<!doctype html><html><head><title>Порядок</title></head><body><p>HTML схемы из релиза</p></body></html>"
+СХЕМА = {
+	"key": "task-flow",
+	"title": "Куда отправить задачу",
+	"description": "Шаги: срок, зона, данные.",
+	"when": "когда ученик спрашивает, с чего начать",
+	"html": HTML_СХЕМЫ,
+}
+
+
 _РЕЛИЗ = {
 	"format": "lms-release/1",
 	"course": {
@@ -141,7 +153,7 @@ _РЕЛИЗ = {
 			{"key": "c-team", "text": "Сколько людей в команде ученика.", "changes": True},
 		],
 		"lessons": {
-			"l-1": _срез_урока("l-1", ["log"]),
+			"l-1": {**_срез_урока("l-1", ["log"]), "diagrams": [СХЕМА]},
 			"l-2": _срез_урока("l-2", ["log", "rules"]),
 			"l-3": _срез_урока("l-3", []),
 		},

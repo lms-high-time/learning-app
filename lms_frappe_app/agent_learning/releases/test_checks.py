@@ -214,3 +214,35 @@ class TestПроверкиРелиза(unittest.TestCase):
 				("agent_leak", "agent.lessons.l-1.answers"),
 			],
 		)
+
+	def test_схемы_уроков(self):
+		"""Схема ломается у ученика, а не при публикации: окно закрывает сеть
+		(learning-services#644). Коды — как у валидатора компилятора курса."""
+		for случай, правка, ожидается in (
+			("нет описания", {"description": " "}, "diagram_no_description"),
+			("нет названия", {"title": ""}, "diagram_no_title"),
+			("длинное название", {"title": "я" * 141}, "text_too_long"),
+			("пустой HTML", {"html": ""}, "diagram_empty"),
+			("больше предела", {"html": "<p>" + "я" * 50_001 + "</p>"}, "diagram_too_large"),
+			("шрифт с CDN", {"html": '<link href="https://fonts.example.com/a.css">'}, "diagram_external"),
+			("запрос из скрипта", {"html": "<script>fetch('/x')</script>"}, "diagram_external"),
+			("ключ не годится", {"key": "Task Flow"}, "diagram_shape"),
+			("лишнее поле", {"extra": 1}, "diagram_shape"),
+			("поле не строка", {"when": 7}, "diagram_shape"),
+		):
+			with self.subTest(случай):
+				р = пример_релиза()
+				р["agent"]["lessons"]["l-1"]["diagrams"][0].update(правка)
+				self.assertIn(ожидается, _коды(р))
+		р = пример_релиза()
+		схемы = р["agent"]["lessons"]["l-1"]["diagrams"]
+		схемы.append(dict(схемы[0]))
+		р["agent"]["lessons"]["l-2"]["diagrams"] = "не список"
+		self.assertEqual(
+			sorted((п["code"], п["where"]) for п in checks.проблемы(р)[0]),
+			[("diagram_shape", "agent.lessons.l-2.diagrams"), ("duplicate_key", "agent.lessons.l-1.diagrams")],
+		)
+		чисто = '<a href="#step">шаг</a><img src="data:image/png;base64,AA"><div data-step="1"></div>'
+		р = пример_релиза()
+		р["agent"]["lessons"]["l-1"]["diagrams"][0]["html"] = чисто
+		self.assertEqual(checks.проблемы(р), ([], []))
