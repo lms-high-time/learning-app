@@ -158,6 +158,17 @@ class IntegrationTestArtifactAPI(IntegrationTestCase):
 		ответ = self.записать("agreements", fields={"topic": "x"})
 		self.assertEqual(ответ["error"]["code"], codes.НЕ_ТОТ_РАЗДЕЛ)
 
+	def test_только_дописать_доходит_до_записи(self):
+		"""Проводка `fill_only` (#614): дописывание проходит, правка заполненного —
+		отказ со списком затронутого. Отказы самой записи — `test_отказы_записи`."""
+		self.assertTrue(self.записать("agreements", rows=[{"topic": "Ретро"}], fill_only=True)["ok"])
+
+		ответ = self.записать("agreements", rows=[{"id": "A1", "topic": "Демо"}], fill_only=True)
+
+		self.assertEqual(
+			(ответ["error"]["code"], ответ["error"]["touched"]), (codes.ПРАВКА_ЗАПОЛНЕННОГО, ["A1.topic"])
+		)
+
 	def test_отказы_записи(self):
 		"""Отказы, которые даёт сама запись (`write.записать_блок`), — до записи."""
 		self.записать("agreements", rows=[{"topic": "Ретро"}])
@@ -167,6 +178,19 @@ class IntegrationTestArtifactAPI(IntegrationTestCase):
 			"очистка с записью": (
 				{"key": "agreements", "rows": [{"topic": "x"}], "clear": True},
 				codes.ОЧИСТКА_С_ЗАПИСЬЮ,
+			),
+			# Только дописать (#614): заполненное, удаление и очистка — отказ.
+			"дописать: правка": (
+				{"key": "agreements", "rows": [{"id": "A1", "topic": "Демо"}], "fill_only": True},
+				codes.ПРАВКА_ЗАПОЛНЕННОГО,
+			),
+			"дописать: удаление": (
+				{"key": "agreements", "delete_rows": ["A1"], "fill_only": True},
+				codes.ПРАВКА_ЗАПОЛНЕННОГО,
+			),
+			"дописать: очистка": (
+				{"key": "agreements", "clear": True, "fill_only": True},
+				codes.ПРАВКА_ЗАПОЛНЕННОГО,
 			),
 		}.items():
 			with self.subTest(что):

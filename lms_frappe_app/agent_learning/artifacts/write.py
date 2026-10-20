@@ -14,7 +14,7 @@ import json
 import frappe
 
 from lms_frappe_app.agent_learning.artifacts import data, fill, schema
-from lms_frappe_app.agent_learning.artifacts.codes import ОЧИСТКА_С_ЗАПИСЬЮ
+from lms_frappe_app.agent_learning.artifacts.codes import ОЧИСТКА_С_ЗАПИСЬЮ, ПРАВКА_ЗАПОЛНЕННОГО
 from lms_frappe_app.agent_learning.artifacts.course import _блок_схемы
 from lms_frappe_app.agent_learning.artifacts.document import _данные, _заполненность, _экземпляр
 from lms_frappe_app.agent_learning.errors import Отказ
@@ -30,8 +30,13 @@ def записать_блок(
 	delete_rows=None,
 	fields=None,
 	clear=False,
+	fill_only=False,
 ) -> dict:
 	"""Строки или поля раздела документа ученика — или очистка раздела.
+
+	`fill_only` — только дописать: новые строки и пустые клетки. Удаление,
+	очистка и правка заполненного тогда — отказ `artifact_overwrite` со
+	списком того, что запись изменила бы (`touched`).
 
 	Контракт — у `api.student.update_artifact`; доступ к курсу и пространство
 	проверяет он. Ответ: заполненность документа, чего не хватает разделу
@@ -41,8 +46,17 @@ def записать_блок(
 	раздел = schema.раздел(блок)
 	документ = _экземпляр(ученик, course, схема.slug, пространство)
 	прежние = _данные(документ)
-	# Флаг приходит и булевым из JSON, и строкой из формы.
+	# Флаги приходят и булевыми из JSON, и строкой из формы.
 	очистка = clear in (True, 1, "1", "true")
+	только_дописать = fill_only in (True, 1, "1", "true")
+	if очистка and только_дописать:
+		raise Отказ(
+			ПРАВКА_ЗАПОЛНЕННОГО,
+			"Очистка раздела — не дописывание",
+			artifact=схема.slug,
+			key=раздел["key"],
+			touched=["clear"],
+		)
 	if очистка:
 		if any(значение not in (None, "", [], {}) for значение in (rows, delete_rows, fields)):
 			raise Отказ(
@@ -55,6 +69,14 @@ def записать_блок(
 		созданы = []
 	else:
 		новые = data.записать(раздел, прежние, rows=rows, delete_rows=delete_rows, fields=fields)
+		if только_дописать and (затронуто := data.затронутое(раздел, прежние, новые)):
+			raise Отказ(
+				ПРАВКА_ЗАПОЛНЕННОГО,
+				"Запись меняет заполненное или удаляет строки — это правка, а не дописывание",
+				artifact=схема.slug,
+				key=раздел["key"],
+				touched=затронуто,
+			)
 		было = {с["id"] for с in прежние["tables"].get(раздел["key"]) or []}
 		созданы = [с["id"] for с in новые["tables"].get(раздел["key"]) or [] if с["id"] not in было]
 
