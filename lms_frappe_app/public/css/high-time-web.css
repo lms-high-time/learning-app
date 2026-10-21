@@ -383,13 +383,16 @@ body:has(.cenda-oauth) .error-page :is(.details, .details > p) {
 	line-height: 1.55;
 	color: var(--ht-muted, #5f656e);
 }
-.cenda-oauth :is(.cenda-oauth__scopes, .cenda-oauth__fine) {
+.cenda-oauth :is(.cenda-oauth__scopes, .cenda-oauth__redirect, .cenda-oauth__fine) {
 	font-size: 0.85rem;
 	line-height: 1.5;
 	color: var(--ht-muted, #5f656e);
 }
-.cenda-oauth__scopes {
+.cenda-oauth :is(.cenda-oauth__scopes, .cenda-oauth__redirect) {
 	margin: -12px 0 24px;
+}
+.cenda-oauth__redirect--local {
+	color: var(--ht-text, #1f2329);
 }
 .cenda-oauth__fine {
 	margin: 18px 0 0;

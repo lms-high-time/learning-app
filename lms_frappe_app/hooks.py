@@ -126,7 +126,11 @@ website_redirects = [
 # и на сайте без загруженного логотипа не показывает битую картинку
 # (learning-services#622).
 jinja = {
-	"methods": ["frappe.core.doctype.navbar_settings.navbar_settings.get_app_logo"],
+	"methods": [
+		"frappe.core.doctype.navbar_settings.navbar_settings.get_app_logo",
+		# Хост адреса возврата на экране подтверждения OAuth (learning-services#661).
+		"lms_frappe_app.agent_learning.oauth_server.возврат_подключения",
+	],
 }
 
 # Права
@@ -428,6 +432,7 @@ before_tests = "lms_frappe_app.testing.before_tests"
 _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 
 _прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
+_oauth = "lms_frappe_app.agent_learning.oauth_server"
 
 # Урок закрывает занятие с агентом, а не время на странице урока —
 # обоснование в модуле (lms-platform#305). Подмена сверяет строку вызова, а
@@ -450,6 +455,13 @@ override_whitelisted_methods = {
 	"lms.lms.api.delete_lesson": f"{_редактор}.delete_lesson",
 	"lms.lms.api.create_lesson": f"{_редактор}.create_lesson",
 	"lms.lms.api.upsert_chapter": f"{_редактор}.upsert_chapter",
+	# Эндпоинты OAuth — с валидатором платформы: клиенты по адресу документа,
+	# локальный адрес возврата с любым портом, `invalid_grant` на мёртвый токен
+	# обновления — обоснование в модуле (learning-services#661).
+	**{
+		f"frappe.integrations.oauth2.{метод}": f"{_oauth}.{метод}"
+		for метод in ("authorize", "approve", "get_token", "revoke_token")
+	},
 }
 #
 # each overriding function accepts a `data` argument;
