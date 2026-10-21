@@ -1,6 +1,6 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""OAuth-клиенты агентов: роли и чей это агент.
+"""OAuth-клиенты агентов: роли, чей это агент и когда их токены отзываются.
 
 Агент ученика или куратора регистрирует OAuth-клиента во Frappe сам
 (динамическая регистрация) и авторизуется им от имени пользователя. Frappe
@@ -98,3 +98,46 @@ def отозвать_чат_при_выходе(login_manager=None) -> None:
 		)
 	except Exception:
 		frappe.log_error(title="Токены веб-чата не отозваны при выходе")
+
+
+def отозвать_токены_пользователя(пользователь: str) -> None:
+	"""Все действующие токены пользователя — у всех агентов и веб-чата.
+
+	`Why:` токен обновления не смотрел ни на пароль, ни на `enabled`: агент
+	закрытого аккаунта получал новые токены, а интроспекция Frappe называла их
+	действующими (learning-services#631). Смена пароля — признак, что прежний
+	мог утечь, и подключения, сделанные с ним, тоже под подозрением.
+	"""
+	frappe.db.set_value(
+		"OAuth Bearer Token",
+		{"user": пользователь, "status": "Active"},
+		"status",
+		"Revoked",
+		update_modified=False,
+	)
+
+
+def заметить_смену_пароля(doc, method=None) -> None:
+	"""Хук `before_validate` User: новый пароль виден только до `validate`.
+
+	`Why:` `User.validate` переносит `new_password` в закрытый атрибут и
+	очищает поле, а сам пароль пишет в `on_update` — там его уже не видно.
+	"""
+	doc.flags.lms_пароль_сменён = bool(doc.new_password) and not doc.is_new()
+
+
+def отозвать_при_смене_доступа(doc, method=None) -> None:
+	"""Хук `on_update` User: пароль сменён в desk или аккаунт отключён."""
+	отключён = not doc.enabled and doc.has_value_changed("enabled")
+	if doc.flags.lms_пароль_сменён or отключён:
+		отозвать_токены_пользователя(doc.name)
+
+
+def удалить_токены(doc, method=None) -> None:
+	"""Хук `on_trash` User: токены удаляются вместе с пользователем.
+
+	Удаляются, а не отзываются: отозванный токен по-прежнему ссылается на
+	пользователя, и Frappe не дал бы его удалить. Проверка ссылок идёт после
+	`on_trash`, а отказ в ней откатывает и это удаление.
+	"""
+	frappe.db.delete("OAuth Bearer Token", {"user": doc.name})

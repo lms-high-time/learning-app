@@ -23,6 +23,7 @@ from frappe.website.utils import is_signup_disabled
 
 from lms_frappe_app.agent_learning.notices import почта_есть
 from lms_frappe_app.passwords import проверить_пароль, сведения_пользователя
+from lms_frappe_app.agent_learning.oauth_client import отозвать_токены_пользователя
 
 КЛЮЧ_ДЕЙСТВУЕТ = "valid"
 КЛЮЧ_УСТАРЕЛ = "expired"
@@ -74,7 +75,7 @@ def update_password(
 	key: str | None = None,
 	old_password: str | None = None,
 ):
-	"""`update_password` Frappe и письмо «Пароль изменён».
+	"""`update_password` Frappe, письмо «Пароль изменён» и отзыв токенов агентов.
 
 	`Why:` Frappe шлёт такое письмо только при смене пароля в desk, а смену по
 	ссылке не подтверждает ничем: человек не знает, сработала ли она, и не
@@ -90,6 +91,10 @@ def update_password(
 	документа его не видит. Предел длины Frappe — раньше наших проверок:
 	zxcvbn и хеш для сервиса утечек не должны получать мегабайт. Пользователь
 	не найден — ключ недействителен, и Frappe ответит 410 сам.
+
+	Токены OAuth пользователя отзываются при любой удачной смене, и первой
+	тоже (learning-services#665): `update_password` Frappe завершает только
+	сессии браузера, а агент жил на токене обновления, выданном до смены.
 	"""
 	if len(new_password) > MAX_PASSWORD_SIZE:
 		frappe.throw(_("Password size exceeded the maximum allowed size."))
@@ -102,7 +107,10 @@ def update_password(
 		new_password, logout_all_sessions=logout_all_sessions, key=key, old_password=old_password
 	)
 	сменён = frappe.local.response.get("http_status_code") != 410
-	if not впервые and пользователь != "Guest" and сменён:
+	if not пользователь or пользователь == "Guest" or not сменён:
+		return ответ
+	отозвать_токены_пользователя(пользователь)
+	if not впервые:
 		_письмо_пароль_изменён(пользователь)
 	if key and сменён and should_run_2fa(пользователь):
 		return _на_вход_со_вторым_фактором(ответ)

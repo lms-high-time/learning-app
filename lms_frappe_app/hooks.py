@@ -187,6 +187,8 @@ fixtures = [
 	# Зачин, обещание и описание главы хранятся как есть, без очистки Frappe
 	# (`ignore_xss_filter`, learning-services#521), и скрыты из отчётов и печати
 	# Desk: там Frappe выводит их без экранирования.
+	# Семья токена OAuth — на самом токене: Frappe удаляет отозванные токены
+	# каждый час, и ссылка на первый токен семьи пропала бы (learning-services#665).
 	{
 		"dt": "Custom Field",
 		"filters": [
@@ -204,6 +206,9 @@ fixtures = [
 					"Course Chapter-chapter_description",
 					"Course Chapter-chapter_key",
 					"Course Lesson-lesson_key",
+					"OAuth Bearer Token-lms_token_family",
+					"OAuth Bearer Token-lms_family_started",
+					"OAuth Bearer Token-lms_previous_refresh",
 				],
 			]
 		],
@@ -317,10 +322,18 @@ doc_events = {
 	},
 	# Самостоятельная регистрация — формой или первым входом через Google —
 	# записывает согласие с документами (learning-services#577).
+	# Смена пароля в desk, отключение и удаление аккаунта отзывают его токены
+	# OAuth (learning-services#631, #665); смену по ссылке — `access.update_password`.
 	"User": {
 		"after_insert": "lms_frappe_app.agent_learning.consent.записать_согласие",
-		# Длина, контекстные слова и утечки пароля из desk и REST (learning-services#666).
-		"before_validate": "lms_frappe_app.passwords.проверить_пароль_пользователя",
+		# Длина, контекстные слова и утечки пароля из desk и REST (learning-services#666);
+		# смена пароля замечается для отзыва токенов (learning-services#665).
+		"before_validate": [
+			"lms_frappe_app.passwords.проверить_пароль_пользователя",
+			"lms_frappe_app.agent_learning.oauth_client.заметить_смену_пароля",
+		],
+		"on_update": "lms_frappe_app.agent_learning.oauth_client.отозвать_при_смене_доступа",
+		"on_trash": "lms_frappe_app.agent_learning.oauth_client.удалить_токены",
 	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
@@ -435,6 +448,7 @@ _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 
 _прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
 _oauth = "lms_frappe_app.agent_learning.oauth_server"
+_методы_oauth = ("authorize", "approve", "get_token", "revoke_token", "introspect_token", "register_client")
 
 # Урок закрывает занятие с агентом, а не время на странице урока —
 # обоснование в модуле (lms-platform#305). Подмена сверяет строку вызова, а
@@ -459,11 +473,10 @@ override_whitelisted_methods = {
 	"lms.lms.api.upsert_chapter": f"{_редактор}.upsert_chapter",
 	# Эндпоинты OAuth — с валидатором платформы: клиенты по адресу документа,
 	# локальный адрес возврата с любым портом, `invalid_grant` на мёртвый токен
-	# обновления — обоснование в модуле (learning-services#661).
-	**{
-		f"frappe.integrations.oauth2.{метод}": f"{_oauth}.{метод}"
-		for метод in ("authorize", "approve", "get_token", "revoke_token")
-	},
+	# обновления (learning-services#661); секрет клиента, PKCE S256, срок кода,
+	# семьи токенов, интроспекция только клиенту с секретом, область и предел
+	# регистрации (learning-services#665) — обоснование в модуле.
+	**{f"frappe.integrations.oauth2.{метод}": f"{_oauth}.{метод}" for метод in _методы_oauth},
 	# Вход через Google — только с подтверждённым адресом и тем же аккаунтом
 	# Google, что при первом входе: все три пути к входу Frappe через Google —
 	# обоснование в модуле (learning-services#666).

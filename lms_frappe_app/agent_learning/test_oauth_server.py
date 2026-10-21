@@ -1,6 +1,6 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""Сервер OAuth с валидатором платформы (learning-services#661).
+"""Сервер OAuth с валидатором платформы (learning-services#661, #665).
 
 Вход проходит через сервер oauthlib с нашим валидатором напрямую, без HTTP:
 эндпоинты Frappe только передают ему запрос, а их подмена проверена отдельно.
@@ -10,18 +10,22 @@ import base64
 import hashlib
 import json
 import time
+from datetime import timedelta
 from unittest import mock
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import frappe
 from frappe.integrations import oauth2
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_to_date, now_datetime, set_request
+from oauthlib.common import Request as ЗапросOAuth
 from oauthlib.oauth2 import (
 	InvalidClientIdError,
 	InvalidRedirectURIError,
 	MismatchingRedirectURIError,
+	OAuth2Error,
 )
-from oauthlib.oauth2.rfc6749.errors import MissingCodeChallengeError
+from oauthlib.oauth2.rfc6749.errors import MissingCodeChallengeError, UnsupportedCodeChallengeMethodError
 
 from lms_frappe_app.agent_learning import cimd, oauth_server
 from lms_frappe_app.agent_learning.test_cimd import ДОКУМЕНТ as ДОКУМЕНТ_CLAUDE_CODE
@@ -33,6 +37,8 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 ФОРМА = {"Content-Type": "application/x-www-form-urlencoded"}
 ПРОВЕРКА = "v" * 64
 ВЫЗОВ = base64.urlsafe_b64encode(hashlib.sha256(ПРОВЕРКА.encode()).digest()).decode().rstrip("=")
+ЛОКАЛЬНЫЙ = "http://localhost:54321/callback"
+ВОЗВРАТ_АГЕНТА = "https://agent.example/cb"
 
 
 class IntegrationTestOAuthServer(IntegrationTestCase):
@@ -49,12 +55,12 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.загрузить = загрузка.start()
 		self.addCleanup(загрузка.stop)
 		self.addCleanup(frappe.set_user, "Administrator")
-		self.сервер = oauth_server.Server(oauth_server.Валидатор())
+		self.сервер = oauth_server.Сервер()
 
 	def _войти(self):
 		frappe.set_user(создать_ученика(f"cimd-{frappe.generate_hash(length=6)}@example.com"))
 
-	def _авторизовать(self, возврат="http://localhost:54321/callback", **поправки):
+	def _авторизовать(self, возврат=ЛОКАЛЬНЫЙ, **поправки):
 		поля = {
 			"response_type": "code",
 			"client_id": АДРЕС,
@@ -70,16 +76,50 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		заголовки, _, _ = self.сервер.create_authorization_response(адрес, "GET", "", {}, права, данные)
 		return parse_qs(urlsplit(заголовки["Location"]).query)["code"][0]
 
-	def _токен(self, client_id=АДРЕС, **поля):
-		_, тело, статус = self.сервер.create_token_response(
-			f"{САЙТ}.get_token", "POST", urlencode({"client_id": client_id, **поля}), ФОРМА
+	def _токен(self, client_id=АДРЕС, заголовки=None, **поля):
+		тело = urlencode({к: з for к, з in {"client_id": client_id, **поля}.items() if з is not None})
+		_, ответ, статус = self.сервер.create_token_response(
+			f"{САЙТ}.get_token", "POST", тело, {**ФОРМА, **(заголовки or {})}
 		)
-		return статус, json.loads(тело)
+		return статус, json.loads(ответ)
 
-	def _обменять(self, код, возврат="http://localhost:54321/callback", проверка=ПРОВЕРКА):
+	def _обменять(self, код, возврат=ЛОКАЛЬНЫЙ, проверка=ПРОВЕРКА, client_id=АДРЕС, **поля):
 		return self._токен(
-			grant_type="authorization_code", code=код, redirect_uri=возврат, code_verifier=проверка
+			client_id=client_id,
+			grant_type="authorization_code",
+			code=код,
+			redirect_uri=возврат,
+			code_verifier=проверка,
+			**поля,
 		)
+
+	def _клиент(self, метод="None"):
+		"""Клиент динамической регистрации или из desk — не по адресу."""
+		return frappe.get_doc(
+			{
+				"doctype": "OAuth Client",
+				"app_name": "Агент",
+				"redirect_uris": ВОЗВРАТ_АГЕНТА,
+				"default_redirect_uri": ВОЗВРАТ_АГЕНТА,
+				"grant_type": "Authorization Code",
+				"response_type": "Code",
+				"scopes": "all",
+				"token_endpoint_auth_method": метод,
+			}
+		).insert(ignore_permissions=True)
+
+	def _вход_клиента(self, клиент, **поля):
+		"""Код клиента `клиент` и обмен его на токен; конфиденциальный — с секретом в теле."""
+		секрет = клиент.client_secret if клиент.token_endpoint_auth_method != "None" else None
+		код = self._авторизовать(client_id=клиент.name, возврат=ВОЗВРАТ_АГЕНТА)
+		статус, токен = self._обменять(
+			код, возврат=ВОЗВРАТ_АГЕНТА, client_id=клиент.name, client_secret=секрет, **поля
+		)
+		self.assertEqual(статус, 200, токен)
+		return код, токен
+
+	def _статус(self, токен) -> str:
+		return frappe.db.get_value("OAuth Bearer Token", токен["access_token"], "status")
 
 	def _сбросить_кэш(self):
 		frappe.cache.delete_value(cimd.КЛЮЧ_КЭША + АДРЕС)
@@ -143,7 +183,6 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 	def test_запрос_без_client_id_с_чужим_токеном_invalid_client(self):
 		"""Без `client_id` Frappe ищет клиента по токену: неизвестный давал 403
 		мимо OAuth, а без токена и заголовка — 500 (learning-services#663)."""
-		self.addCleanup(setattr, frappe.local, "form_dict", frappe._dict())
 		for что, форма in (
 			("неизвестный токен обновления", {"grant_type": "refresh_token", "refresh_token": "нет-такого"}),
 			(
@@ -151,12 +190,9 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				{"grant_type": "authorization_code", "code": "x", "client_assertion": "jwt"},
 			),
 		):
-			with self.subTest(что), mock.patch.object(frappe, "get_request_header", return_value=None):
-				frappe.local.form_dict = frappe._dict(форма)
-				_, тело, статус = self.сервер.create_token_response(
-					f"{САЙТ}.get_token", "POST", urlencode(форма), ФОРМА
-				)
-				self.assertEqual((статус, json.loads(тело).get("error")), (401, "invalid_client"))
+			with self.subTest(что):
+				статус, ответ = self._токен(client_id=None, **форма)
+				self.assertEqual((статус, ответ.get("error")), (401, "invalid_client"))
 
 	def test_код_обменивается_только_на_свой_адрес_возврата(self):
 		"""Обмен сверяет адрес с тем, к которому привязан код (RFC 6749 §4.1.3)."""
@@ -165,16 +201,50 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.assertEqual(статус, 400)
 		self.assertNotIn("access_token", ответ)
 
-	def test_клиенту_по_адресу_нужен_pkce_s256(self):
-		"""Клиент по адресу публичный, и вход держит только PKCE."""
+	def test_pkce_только_s256_и_обязателен_публичным(self):
+		"""Публичному клиенту вход держит только PKCE: прежде он был обязателен
+		лишь клиентам по адресу, а `plain` принимался (learning-services#665)."""
 		self._войти()
-		with self.subTest("без PKCE"), self.assertRaises(MissingCodeChallengeError):
-			self._авторизовать(code_challenge=None, code_challenge_method=None)
-		with self.subTest("plain"):
-			код = self._авторизовать(code_challenge=ПРОВЕРКА, code_challenge_method="plain")
+		публичный = self._клиент()
+		конфиденциальный = self._клиент("Client Secret Post")
+		без_pkce = {"code_challenge": None, "code_challenge_method": None}
+		plain = {"code_challenge": ПРОВЕРКА, "code_challenge_method": "plain"}
+		for что, поправки, ошибка in (
+			("клиент по адресу без PKCE", {**без_pkce}, MissingCodeChallengeError),
+			("публичный без PKCE", {"client_id": публичный.name, **без_pkce}, MissingCodeChallengeError),
+			(
+				"plain у публичного",
+				{"client_id": публичный.name, **plain},
+				UnsupportedCodeChallengeMethodError,
+			),
+			(
+				"plain у конфиденциального",
+				{"client_id": конфиденциальный.name, **plain},
+				UnsupportedCodeChallengeMethodError,
+			),
+			(
+				"вызов без метода — это plain",
+				{"client_id": публичный.name, "code_challenge_method": None},
+				UnsupportedCodeChallengeMethodError,
+			),
+		):
+			with self.subTest(что), self.assertRaises(ошибка):
+				возврат = ЛОКАЛЬНЫЙ if "client_id" not in поправки else ВОЗВРАТ_АГЕНТА
+				self._авторизовать(возврат=возврат, **поправки)
+
+		with self.subTest("код с plain, выданный до learning-services#665"):
+			код = self._авторизовать()
+			frappe.db.set_value(
+				"OAuth Authorization Code",
+				код,
+				{"code_challenge": ПРОВЕРКА, "code_challenge_method": "plain"},
+			)
 			статус, ответ = self._обменять(код)
-			self.assertEqual(статус, 400)
-			self.assertNotIn("access_token", ответ)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+
+		with self.subTest("неверная проверка S256"):
+			статус, ответ = self._обменять(self._авторизовать(), проверка="w" * 64)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
 
 	def test_отказы_клиенту_по_адресу(self):
 		self._войти()
@@ -289,7 +359,14 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				self.assertTrue(oauth_server.Валидатор().validate_redirect_uri(клиент.name, адрес, None))
 
 	def test_эндпоинты_с_валидатором_платформы(self):
-		for метод in ("authorize", "approve", "get_token", "revoke_token"):
+		for метод in (
+			"authorize",
+			"approve",
+			"get_token",
+			"revoke_token",
+			"introspect_token",
+			"register_client",
+		):
 			with self.subTest(метод):
 				self.assertEqual(
 					frappe.get_hooks("override_whitelisted_methods")[f"frappe.integrations.oauth2.{метод}"],
@@ -298,6 +375,7 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.addCleanup(setattr, frappe.local, "oauth_server", None)
 		oauth_server._свой_сервер()
 		сервер = oauth2.get_oauth_server()
+		self.assertIsInstance(сервер, oauth_server.Сервер)
 		self.assertIsInstance(сервер.request_validator, oauth_server.Валидатор)
 
 	def test_метаданные_обещают_клиентов_по_адресу(self):
@@ -310,3 +388,330 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		# Claude выбирает клиента по адресу, только если сервер принимает публичных.
 		self.assertIn("none", метаданные["token_endpoint_auth_methods_supported"])
 		self.assertEqual(метаданные["issuer"], "https://cenda.test")
+
+	def test_только_код_авторизации_и_обновление(self):
+		"""Frappe разрешал всем клиентам вход по паролю — мимо экрана согласия —
+		и ответы implicit и hybrid (learning-services#665)."""
+		self._войти()
+		for ответ in ("token", "id_token", "id_token token", "code id_token", "code token id_token", "none"):
+			with self.subTest(ответ), self.assertRaises(OAuth2Error):
+				self._авторизовать(response_type=ответ)
+
+		клиент = self._клиент("Client Secret Post")
+		for что, поля in (
+			("пароль", {"grant_type": "password", "username": "Administrator", "password": "admin"}),
+			("учётные данные клиента", {"grant_type": "client_credentials"}),
+		):
+			with (
+				self.subTest(что),
+				mock.patch("frappe.oauth.LoginManager") as пароль,
+			):
+				статус, ответ = self._токен(client_id=клиент.name, client_secret=клиент.client_secret, **поля)
+				self.assertEqual(статус, 400, ответ)
+				self.assertNotIn("access_token", ответ)
+				# Пароль не сверяется вовсе: иначе эндпоинт отвечал бы, верен ли он.
+				пароль.assert_not_called()
+
+	def test_конфиденциальный_клиент_входит_только_с_секретом(self):
+		"""Frappe не сверял секрет: конфиденциальный клиент входил по одному
+		`client_id` (learning-services#665). Секрет — в теле, как шлют веб-чат и
+		сервис MCP, или заголовком Basic."""
+		self._войти()
+		пост = self._клиент("Client Secret Post")
+		базовый = self._клиент("Client Secret Basic")
+
+		def basic(клиент, секрет):
+			return {"Authorization": "Basic " + base64.b64encode(f"{клиент.name}:{секрет}".encode()).decode()}
+
+		for что, клиент, поля, ожидается in (
+			("без секрета", пост, {}, 401),
+			("неверный секрет", пост, {"client_secret": "не-тот"}, 401),
+			("секрет в теле", пост, {"client_secret": пост.client_secret}, 200),
+			("секрет в теле у клиента Basic", базовый, {"client_secret": базовый.client_secret}, 200),
+			(
+				"заголовок Basic",
+				базовый,
+				{"client_id": None, "заголовки": basic(базовый, базовый.client_secret)},
+				200,
+			),
+			(
+				"Basic с неверным секретом",
+				базовый,
+				{"client_id": None, "заголовки": basic(базовый, "x")},
+				401,
+			),
+		):
+			with self.subTest(что):
+				код = self._авторизовать(
+					client_id=клиент.name,
+					возврат=ВОЗВРАТ_АГЕНТА,
+					code_challenge=None,
+					code_challenge_method=None,
+				)
+				статус, ответ = self._обменять(
+					код, **{"возврат": ВОЗВРАТ_АГЕНТА, "проверка": None, "client_id": клиент.name, **поля}
+				)
+				self.assertEqual(статус, ожидается, ответ)
+				if ожидается == 401:
+					self.assertEqual(ответ.get("error"), "invalid_client")
+
+		with self.subTest("обновление без секрета"):
+			_, токен = self._вход_клиента(пост)
+			статус, ответ = self._токен(
+				client_id=пост.name, grant_type="refresh_token", refresh_token=токен["refresh_token"]
+			)
+			self.assertEqual((статус, ответ.get("error")), (401, "invalid_client"))
+			self.assertEqual(self._статус(токен), "Active")
+
+	def test_код_живёт_десять_минут_и_обменивается_один_раз(self):
+		"""У кода не было срока, а повторный обмен не отзывал выданное по нему
+		(learning-services#665)."""
+		self._войти()
+		клиент = self._клиент()
+
+		with self.subTest("срок ставится при выдаче"):
+			код = self._авторизовать(client_id=клиент.name, возврат=ВОЗВРАТ_АГЕНТА)
+			срок = frappe.db.get_value("OAuth Authorization Code", код, "expiration_time")
+			ожидается = add_to_date(now_datetime(), seconds=oauth_server.СРОК_КОДА)
+			self.assertLess(abs((срок - ожидается).total_seconds()), 60)
+
+		with self.subTest("истёкший"):
+			frappe.db.set_value(
+				"OAuth Authorization Code", код, "expiration_time", add_to_date(now_datetime(), seconds=-1)
+			)
+			статус, ответ = self._обменять(код, возврат=ВОЗВРАТ_АГЕНТА, client_id=клиент.name)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+
+		for что, удалить_код in (("повтор", False), ("повтор после ежечасной чистки кодов", True)):
+			with self.subTest(что):
+				код, токен = self._вход_клиента(клиент)
+				_, обновлённый = self._токен(
+					client_id=клиент.name, grant_type="refresh_token", refresh_token=токен["refresh_token"]
+				)
+				if удалить_код:
+					frappe.db.delete("OAuth Authorization Code", {"name": код})
+				статус, ответ = self._обменять(код, возврат=ВОЗВРАТ_АГЕНТА, client_id=клиент.name)
+				self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+				# Отозвана вся семья, и токен, полученный обновлением, тоже.
+				self.assertEqual(self._статус(обновлённый), "Revoked")
+
+	def test_токен_обновления_одноразовый_у_всех_клиентов(self):
+		"""Ротация была только у клиентов по адресу, повтор заменённого токена
+		не отзывал ничего, а срока у семьи не было (learning-services#665)."""
+		self._войти()
+		клиент = self._клиент()
+
+		def обновить(токен):
+			return self._токен(
+				client_id=клиент.name, grant_type="refresh_token", refresh_token=токен["refresh_token"]
+			)
+
+		def постарить(токен, **сдвиг):
+			frappe.db.set_value(
+				"OAuth Bearer Token", токен["access_token"], "creation", add_to_date(now_datetime(), **сдвиг)
+			)
+
+		with self.subTest("ротация переносит семью"):
+			код, первый = self._вход_клиента(клиент)
+			статус, второй = обновить(первый)
+			self.assertEqual(статус, 200, второй)
+			self.assertEqual(self._статус(первый), "Revoked")
+			семья = frappe.db.get_value(
+				"OAuth Bearer Token",
+				второй["access_token"],
+				[oauth_server.ПОЛЕ_СЕМЬИ, oauth_server.ПОЛЕ_НАЧАЛА, oauth_server.ПОЛЕ_ПРЕЖНЕГО],
+			)
+			начало = frappe.db.get_value(
+				"OAuth Bearer Token", первый["access_token"], oauth_server.ПОЛЕ_НАЧАЛА
+			)
+			self.assertEqual(семья, (код, начало, oauth_server.отпечаток(первый["refresh_token"])))
+
+		with self.subTest("повтор в окне гонки — отказ без отзыва семьи"):
+			статус, ответ = обновить(первый)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(второй), "Active")
+
+		with self.subTest("повтор заменённого отзывает семью, и после ежечасной чистки"):
+			постарить(второй, minutes=-2)
+			frappe.db.delete("OAuth Bearer Token", {"name": первый["access_token"]})
+			статус, ответ = обновить(первый)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(второй), "Revoked")
+
+		with self.subTest("семья старше предельного срока"):
+			_, токен = self._вход_клиента(клиент)
+			frappe.db.set_value(
+				"OAuth Bearer Token",
+				токен["access_token"],
+				oauth_server.ПОЛЕ_НАЧАЛА,
+				now_datetime() - oauth_server.СРОК_СЕМЬИ - timedelta(minutes=1),
+			)
+			статус, ответ = обновить(токен)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(токен), "Revoked")
+
+		with self.subTest("токен до learning-services#665 — сам себе семья"):
+			прежний = {"access_token": frappe.generate_hash(), "refresh_token": frappe.generate_hash()}
+			frappe.get_doc(
+				{
+					"doctype": "OAuth Bearer Token",
+					"client": клиент.name,
+					"user": frappe.session.user,
+					"scopes": "all",
+					"expires_in": 3600,
+					"status": "Active",
+					**прежний,
+				}
+			).insert(ignore_permissions=True)
+			статус, новый = обновить(прежний)
+			self.assertEqual(статус, 200, новый)
+			выдан = frappe.db.get_value("OAuth Bearer Token", прежний["access_token"], "creation")
+			self.assertEqual(
+				frappe.db.get_value(
+					"OAuth Bearer Token",
+					новый["access_token"],
+					[oauth_server.ПОЛЕ_СЕМЬИ, oauth_server.ПОЛЕ_НАЧАЛА],
+				),
+				(прежний["access_token"], выдан),
+			)
+
+	def test_отзыв_только_своему_клиенту(self):
+		"""Frappe отзывал любой токен, кто бы о нём ни попросил
+		(learning-services#665). Ответ один — 200, по нему не узнать, чей токен."""
+		self._войти()
+		_, токен = self._обменять(self._авторизовать())
+		чужой = self._клиент()
+		конфиденциальный = self._клиент("Client Secret Post")
+
+		def отозвать(**поля):
+			_, _, статус = self.сервер.create_revocation_response(
+				f"{САЙТ}.revoke_token", "POST", urlencode(поля), ФОРМА
+			)
+			return статус
+
+		for что, поля, ожидается in (
+			("чужой клиент", {"client_id": чужой.name}, 200),
+			("конфиденциальный без секрета", {"client_id": конфиденциальный.name}, 401),
+		):
+			with self.subTest(что):
+				self.assertEqual(отозвать(token=токен["access_token"], **поля), ожидается)
+				self.assertEqual(self._статус(токен), "Active")
+
+		with self.subTest("свой клиент — токен и его семья"):
+			_, новый = self._токен(grant_type="refresh_token", refresh_token=токен["refresh_token"])
+			self.assertEqual(
+				отозвать(token=новый["refresh_token"], token_type_hint="refresh_token", client_id=АДРЕС), 200
+			)
+			self.assertEqual(self._статус(новый), "Revoked")
+
+	def test_интроспекция_только_клиенту_с_секретом(self):
+		"""Интроспекция отвечала любому гостю; `exp` уходил на 5 часов вперёд
+		(наивное время сайта в Asia/Samarkand как UTC), а истёкший токен
+		назывался действующим (learning-services#665)."""
+		self._войти()
+		_, токен = self._обменять(self._авторизовать())
+		сервис = self._клиент("Client Secret Basic")
+
+		def спросить(**поля):
+			запрос = ЗапросOAuth(f"{САЙТ}.introspect_token", "POST", urlencode(поля), ФОРМА)
+			return oauth_server.ответ_интроспекции(запрос, поля.get("token"), поля.get("token_type_hint"))
+
+		for что, поля in (
+			("без клиента", {}),
+			("публичный клиент", {"client_id": АДРЕС}),
+			("неверный секрет", {"client_id": сервис.name, "client_secret": "не-тот"}),
+		):
+			with self.subTest(что):
+				self.assertEqual(
+					спросить(token=токен["access_token"], **поля), (401, {"error": "invalid_client"})
+				)
+
+		свой = {"client_id": сервис.name, "client_secret": сервис.client_secret}
+		with self.subTest("действующий"):
+			статус, ответ = спросить(token=токен["access_token"], **свой)
+			self.assertEqual((статус, ответ["active"], ответ["client_id"]), (200, True, АДРЕС))
+			self.assertLess(abs(ответ["exp"] - (time.time() + токен["expires_in"])), 60)
+		with self.subTest("токен обновления"):
+			_, ответ = спросить(token=токен["refresh_token"], token_type_hint="refresh_token", **свой)
+			self.assertIs(ответ["active"], True)
+
+		frappe.db.set_value(
+			"OAuth Bearer Token",
+			токен["access_token"],
+			"expiration_time",
+			add_to_date(now_datetime(), seconds=-1),
+		)
+		with self.subTest("истёкший"):
+			self.assertEqual(спросить(token=токен["access_token"], **свой), (200, {"active": False}))
+		frappe.db.set_value("OAuth Bearer Token", токен["access_token"], "status", "Revoked")
+		for что, значение in (("отозванный", токен["refresh_token"]), ("неизвестный", "нет-такого")):
+			with self.subTest(что):
+				self.assertEqual(спросить(token=значение, **свой), (200, {"active": False}))
+
+	def test_регистрация_клиента_с_областью_all_и_пределом(self):
+		"""Клиент выбирал область сам, вплоть до `openid`, а регистрация была
+		без предела (learning-services#665)."""
+		настоящий = frappe.get_cached_value
+		with (
+			mock.patch.object(
+				frappe,
+				"get_cached_value",
+				side_effect=lambda *а, **к: 1
+				if а[-1:] == ("enable_dynamic_client_registration",)
+				else настоящий(*а, **к),
+			),
+			mock.patch.object(oauth_server, "РЕГИСТРАЦИЙ_ЗА_ЧАС", 1),
+		):
+			for имя in ("request", "request_ip", "form_dict"):
+				self.addCleanup(setattr, frappe.local, имя, getattr(frappe.local, имя, None))
+			frappe.local.request_ip = f"test-{frappe.generate_hash(length=8)}"
+			frappe.local.form_dict = frappe._dict(cmd="frappe.integrations.oauth2.register_client")
+			заявка = {"client_name": "Агент", "redirect_uris": [ВОЗВРАТ_АГЕНТА], "scope": "openid all"}
+
+			set_request(method="POST", path="/", json=заявка)
+			ответ = json.loads(oauth_server.register_client().get_data())
+			self.assertEqual(ответ["scope"], "all")
+			self.assertEqual(frappe.db.get_value("OAuth Client", ответ["client_id"], "scopes"), "all")
+
+			set_request(method="POST", path="/", json=заявка)
+			with self.assertRaises(frappe.RateLimitExceededError):
+				oauth_server.register_client()
+
+	def test_токены_отзываются_при_смене_доступа(self):
+		"""Отключённый аккаунт сохранял токены агента, и токен обновления выдавал
+		новые (learning-services#631); смена пароля их тоже не трогала
+		(learning-services#665)."""
+		клиент = self._клиент()
+
+		def с_токеном():
+			пользователь = frappe.get_doc(
+				"User", создать_ученика(f"revoke-{frappe.generate_hash(length=6)}@example.com")
+			)
+			токен = {"access_token": frappe.generate_hash(), "refresh_token": frappe.generate_hash()}
+			frappe.get_doc(
+				{
+					"doctype": "OAuth Bearer Token",
+					"client": клиент.name,
+					"user": пользователь.name,
+					"scopes": "all",
+					"expires_in": 3600,
+					**токен,
+				}
+			).insert(ignore_permissions=True)
+			return пользователь, токен
+
+		for что, правка, ожидается in (
+			("сохранение без изменений", lambda п: None, "Active"),
+			("смена пароля в desk", lambda п: setattr(п, "new_password", "Kx9#vLq2!mPz7-рыба"), "Revoked"),
+			("отключение", lambda п: setattr(п, "enabled", 0), "Revoked"),
+		):
+			with self.subTest(что):
+				пользователь, токен = с_токеном()
+				правка(пользователь)
+				пользователь.save(ignore_permissions=True)
+				self.assertEqual(self._статус(токен), ожидается)
+
+		with self.subTest("удаление"):
+			пользователь, токен = с_токеном()
+			frappe.delete_doc("User", пользователь.name, ignore_permissions=True)
+			self.assertFalse(frappe.db.exists("OAuth Bearer Token", токен["access_token"]))
