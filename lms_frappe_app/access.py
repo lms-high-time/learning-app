@@ -19,6 +19,7 @@ from frappe.utils.data import sha256_hash
 from frappe.website.utils import is_signup_disabled
 
 from lms_frappe_app.agent_learning.notices import почта_есть
+from lms_frappe_app.passwords import проверить_пароль, сведения_пользователя
 
 КЛЮЧ_ДЕЙСТВУЕТ = "valid"
 КЛЮЧ_УСТАРЕЛ = "expired"
@@ -80,9 +81,16 @@ def update_password(
 	пустой `last_password_reset_date`, как и у самого Frappe. Он ошибается в
 	двух случаях: пароль, заданный в desk, даты не ставит, а включение
 	`force_user_to_reset_password` проставляет её всем пустым.
+
+	Пароль проверяется требованиями платформы до Frappe (`passwords.py`,
+	learning-services#666): Frappe пишет пароль мимо документа `User`, и хук
+	документа его не видит. Пользователь не найден — ключ недействителен, и
+	Frappe ответит 410 сам.
 	"""
 	запись = запись_ключа(key)
 	пользователь = запись.name if запись else (None if key else frappe.session.user)
+	if пользователь and пользователь != "Guest":
+		проверить_пароль(new_password, сведения_пользователя(пользователь))
 	впервые = not пользователь or not frappe.db.get_value("User", пользователь, "last_password_reset_date")
 	ответ = frappe_user.update_password(
 		new_password, logout_all_sessions=logout_all_sessions, key=key, old_password=old_password

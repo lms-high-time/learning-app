@@ -13,6 +13,7 @@ import frappe
 from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 
 from lms_frappe_app.access import КЛЮЧ_ДЕЙСТВУЕТ, запись_ключа, состояние_ключа
+from lms_frappe_app.passwords import МИНИМУМ_ДЛИНЫ
 
 no_cache = 1
 
@@ -45,6 +46,8 @@ def get_context(context):
 	context.title = "Задайте пароль"
 	context.logo = get_app_logo()
 	context.password_expired = bool(frappe.form_dict.get("password_expired"))
+	# Подсказка и проверка формы — из требований сервера (learning-services#666).
+	context.min_length = МИНИМУМ_ДЛИНЫ
 	# Гостевые вызовы токен не проверяют; вошедшему без него POST отклонят.
 	context.csrf_token = frappe.sessions.get_csrf_token() if вошедший else ""
 	if key:

@@ -7,6 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import get_html_for_route
 
+from lms_frappe_app.passwords import МИНИМУМ_ДЛИНЫ
 from lms_frappe_app.tests.test_access import ключ, ученик
 from lms_frappe_app.www.update_password import ЗАПРОС_ССЫЛКИ, get_context
 
@@ -37,9 +38,9 @@ class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
 		self.assertEqual(контекст.state, ЗАПРОС_ССЫЛКИ)
 		self.assertEqual(контекст.email, пользователь)
 
-	def test_форма_пароля_с_логином_и_без_обещания_длины(self):
-		"""Логин нужен менеджеру паролей, а длину Frappe не проверяет — решает
-		политика паролей, если она включена."""
+	def test_форма_пароля_с_логином_и_требованием_длины(self):
+		"""Логин нужен менеджеру паролей. Длина в подсказке и в проверке формы —
+		та, что проверяет сервер (learning-services#666)."""
 		пользователь = ученик()
 		frappe.form_dict.key = ключ(пользователь)
 
@@ -48,7 +49,8 @@ class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
 		self.assertIn(f'value="{пользователь}"', html)
 		self.assertIn(frappe.form_dict.key, html)
 		self.assertIn('autocomplete="username"', html)
-		self.assertNotIn("8 символов", html)
+		self.assertIn(f"Не короче {МИНИМУМ_ДЛИНЫ} символов", html)
+		self.assertIn(f'"min_length": {МИНИМУМ_ДЛИНЫ}', html)
 
 	def test_frappe_отдаёт_нашу_страницу(self):
 		"""Страница приложения, установленного позже, перекрывает страницу Frappe.

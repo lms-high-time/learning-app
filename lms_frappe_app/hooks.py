@@ -319,6 +319,8 @@ doc_events = {
 	# записывает согласие с документами (learning-services#577).
 	"User": {
 		"after_insert": "lms_frappe_app.agent_learning.consent.записать_согласие",
+		# Длина, контекстные слова и утечки пароля из desk и REST (learning-services#666).
+		"before_validate": "lms_frappe_app.passwords.проверить_пароль_пользователя",
 	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
