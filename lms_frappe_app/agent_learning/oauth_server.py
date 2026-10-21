@@ -1,0 +1,238 @@
+# Copyright (c) 2026, NikoMusaev and Contributors
+# See license.txt
+"""Сервер OAuth Frappe с правилами платформы (learning-services#661).
+
+Эндпоинты OAuth — функции Frappe; они берут сервер oauthlib из
+`frappe.local.oauth_server` и создают его, только если его там нет. Подмены
+из `override_whitelisted_methods` кладут туда сервер со своим валидатором —
+наследником валидатора Frappe — и зовут исходную функцию. Код Frappe не
+меняется, а правки валидатора видны в одном классе.
+
+Что валидатор меняет:
+
+- клиент с `client_id`-адресом — клиент по документу о себе (`cimd.py`);
+- адрес возврата на этот же компьютер принимается с любым портом, как требует
+  RFC 8252 §7.3: Claude Code слушает случайный порт, а в документе адрес без
+  него. Адреса клиента делятся любым пробелом — динамическая регистрация Frappe
+  пишет их через перевод строки, а проверка Frappe делила только пробелом;
+- обмен кода сверяет адрес возврата с тем, к которому привязан код (RFC 6749
+  §4.1.3), а не со списком клиента: иначе локальный адрес с портом здесь бы и
+  не прошёл;
+- отозванный, неизвестный или чужой токен обновления — `invalid_grant`, как
+  требует RFC 6749 §5.2. Frappe отвечал на него ошибкой «запись не найдена»
+  мимо OAuth, и агент не понимал, что пора войти заново;
+- клиенту по адресу — только PKCE с S256 и одноразовый токен обновления.
+  Клиент по адресу всегда публичный: секрета нет, вход держится на PKCE, а
+  спецификация MCP требует для публичных клиентов ротацию токена обновления.
+  Остальным клиентам Frappe это не навязывается — их поведение здесь не
+  меняется.
+"""
+
+from urllib.parse import urlsplit
+
+import frappe
+from frappe.integrations import oauth2
+from frappe.oauth import OAuthWebRequestValidator
+from frappe.utils import cstr
+from oauthlib.openid.connect.core.endpoints.pre_configured import Server
+from werkzeug import Response
+from werkzeug.exceptions import NotFound
+
+from lms_frappe_app.agent_learning import cimd
+
+
+def адрес_возврата_разрешён(адрес: str | None, зарегистрированные: list[str]) -> bool:
+	"""Адрес возврата из запроса — один из адресов клиента.
+
+	Локальный адрес (`http://localhost`, `http://127.0.0.1`) совпадает с
+	зарегистрированным с точностью до порта: схема, хост, путь и запрос — те же.
+	"""
+	if not адрес:
+		return False
+	if адрес in зарегистрированные:
+		return True
+	try:
+		части = urlsplit(адрес)
+		части.port  # негодный порт urlsplit замечает только здесь
+	except ValueError:
+		return False
+	if (
+		части.scheme != "http"
+		or not cimd.адрес_петли(части.hostname)
+		or части.fragment
+		or "@" in части.netloc
+	):
+		return False
+	for свой in зарегистрированные:
+		try:
+			образец = urlsplit(свой)
+		except ValueError:
+			continue
+		if (образец.scheme, образец.hostname, образец.path, образец.query) == (
+			части.scheme,
+			части.hostname,
+			части.path,
+			части.query,
+		):
+			return True
+	return False
+
+
+def _адреса_клиента(client_id) -> list[str]:
+	адреса, по_умолчанию = frappe.db.get_value(
+		"OAuth Client", client_id, ["redirect_uris", "default_redirect_uri"]
+	) or (None, None)
+	return cstr(адреса).split() or ([по_умолчанию] if по_умолчанию else [])
+
+
+class Валидатор(OAuthWebRequestValidator):
+	def validate_client_id(self, client_id, request, *args, **kwargs):
+		if cimd.это_адрес_клиента(client_id) and not cimd.обеспечить_клиента(client_id):
+			return False
+		return super().validate_client_id(client_id, request, *args, **kwargs)
+
+	def validate_redirect_uri(self, client_id, redirect_uri, request, *args, **kwargs):
+		return адрес_возврата_разрешён(redirect_uri, _адреса_клиента(client_id))
+
+	def confirm_redirect_uri(self, client_id, code, redirect_uri, client, *args, **kwargs):
+		привязан = frappe.db.get_value(
+			"OAuth Authorization Code",
+			{"name": code, "client": client_id},
+			"redirect_uri_bound_to_authorization_code",
+		)
+		return bool(привязан) and привязан == redirect_uri
+
+	def authenticate_client(self, request, *args, **kwargs):
+		# Запрос без `client_id` Frappe относит к клиенту по токену и ищет того
+		# через `get_doc`: неизвестный токен давал «запись не найдена» мимо
+		# OAuth. Теперь это `invalid_client` — клиента и правда не опознать.
+		try:
+			return super().authenticate_client(request, *args, **kwargs)
+		except frappe.DoesNotExistError:
+			return False
+
+	def is_pkce_required(self, client_id, request):
+		return cimd.это_адрес_клиента(client_id)
+
+	# С обязательным PKCE oauthlib сверяет вызов кода сам и спрашивает его
+	# здесь; Frappe этих методов не задаёт и сверяет в `validate_code`. Прочим
+	# клиентам вызов не отдаётся — для них остаётся проверка Frappe, как была.
+	def get_code_challenge(self, code, request):
+		if not cimd.это_адрес_клиента(request.client_id):
+			return None
+		return frappe.db.get_value("OAuth Authorization Code", code, "code_challenge")
+
+	def get_code_challenge_method(self, code, request):
+		метод = frappe.db.get_value("OAuth Authorization Code", code, "code_challenge_method")
+		# Frappe хранит метод в нижнем регистре, oauthlib ждёт его как в RFC 7636.
+		return "S256" if метод == "s256" else метод
+
+	def validate_code(self, client_id, code, client, request, *args, **kwargs):
+		# Метаданные обещают только S256, а Frappe принимает и `plain`.
+		if cimd.это_адрес_клиента(client_id) and (
+			frappe.db.get_value("OAuth Authorization Code", code, "code_challenge_method") != "s256"
+		):
+			return False
+		return super().validate_code(client_id, code, client, request, *args, **kwargs)
+
+	def validate_refresh_token(self, refresh_token, client, request, *args, **kwargs):
+		клиент = (client or {}).get("name")
+		имя = frappe.db.get_value(
+			"OAuth Bearer Token",
+			{"refresh_token": refresh_token, "status": "Active", "client": клиент},
+			"name",
+		)
+		if имя and cimd.это_адрес_клиента(клиент):
+			# Клиенту по адресу токен обновления одноразовый. Запись блокируется
+			# по первичному ключу — блокировка по неиндексированному
+			# `refresh_token` встала бы на всю таблицу — и перечитывается: второе
+			# одновременное обновление тем же токеном увидит её отозванной.
+			имя = frappe.db.get_value(
+				"OAuth Bearer Token", {"name": имя, "status": "Active"}, "name", for_update=True
+			)
+			request.lms_прежний_токен = имя
+		if not имя:
+			return False
+		request.user = frappe.db.get_value("OAuth Bearer Token", имя, "user")
+		return True
+
+	def save_bearer_token(self, token, request, *args, **kwargs):
+		# Прежний токен отзывается, только когда новый выдаётся, — и в одной
+		# транзакции с ним: Frappe коммитит сразу после записи нового.
+		прежний = getattr(request, "lms_прежний_токен", None)
+		if прежний:
+			frappe.db.set_value("OAuth Bearer Token", прежний, "status", "Revoked")
+		return super().save_bearer_token(token, request, *args, **kwargs)
+
+
+def _свой_сервер() -> None:
+	frappe.local.oauth_server = Server(Валидатор())
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
+def authorize(**kwargs):
+	_свой_сервер()
+	return oauth2.authorize(**kwargs)
+
+
+@frappe.whitelist(methods=["POST"])
+def approve(*args, **kwargs):
+	_свой_сервер()
+	return oauth2.approve(*args, **kwargs)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def get_token(*args, **kwargs):
+	_свой_сервер()
+	return oauth2.get_token(*args, **kwargs)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def revoke_token(*args, **kwargs):
+	_свой_сервер()
+	return oauth2.revoke_token(*args, **kwargs)
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def authorization_server_metadata():
+	"""Метаданные сервера авторизации (RFC 8414) с поддержкой клиентов по адресу.
+
+	`/.well-known/` Frappe обслуживает до маршрутов и хуков, поэтому
+	`/.well-known/oauth-authorization-server` сюда переадресует nginx сайта
+	(`site/nginx/default.conf` в learning-services).
+	"""
+	if not oauth2.is_oauth_metadata_enabled("auth_server"):
+		raise NotFound
+	метаданные = oauth2._get_authorization_server_metadata()
+	метаданные["client_id_metadata_document_supported"] = True
+	ответ = Response(frappe.as_json(метаданные), mimetype="application/json")
+	frappe.local.allow_cors = "*"
+	return ответ
+
+
+def возврат_подключения() -> dict:
+	"""Куда агент получит доступ — для экрана подтверждения.
+
+	`Why:` имя агента клиент пишет о себе сам, а адрес возврата — то, куда
+	Frappe отдаст код. Спецификация клиентов по адресу требует показать его хост
+	человеку, а локальный адрес — предупредить: так подключается программа на
+	этом компьютере, и чужая ссылка на подключение выглядит так же.
+	"""
+	данные = frappe.flags.oauth_credentials or {}
+	if not isinstance(данные, dict):
+		данные = {}
+	хост = _хост(данные.get("redirect_uri"))
+	# Клиенту по адресу документ о себе публикует его сайт, и имя агента без
+	# этого сайта ничего не доказывает: «Claude Code» назовётся кто угодно.
+	client_id = данные.get("client_id")
+	сайт = _хост(client_id) if cimd.это_адрес_клиента(client_id) else None
+	return {"хост": хост, "локальный": cimd.адрес_петли(хост), "сайт_клиента": сайт}
+
+
+def _хост(адрес) -> str | None:
+	if not isinstance(адрес, str) or not адрес:
+		return None
+	try:
+		return urlsplit(адрес).hostname
+	except ValueError:
+		return None

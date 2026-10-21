@@ -34,6 +34,9 @@ class TestАгентКлиента(UnitTestCase):
 			("c6", "http://localhost/cb", ДРУГОЙ_АГЕНТ),
 			("c7", None, ДРУГОЙ_АГЕНТ),
 			("чат", "https://cenda.app/chat/callback", ВЕБ_ЧАТ),
+			# Клиент по адресу документа — по сайту документа (learning-services#661).
+			("https://claude.ai/oauth/claude-code-client-metadata", "http://localhost/callback", "Claude"),
+			("https://evil.example/claude", CLAUDE, ДРУГОЙ_АГЕНТ),
 		):
 			with self.subTest(адреса=адреса):
 				self.assertEqual(агент_клиента(клиент, адреса, "чат"), ожидается)
