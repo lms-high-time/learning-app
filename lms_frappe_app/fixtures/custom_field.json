@@ -147,7 +147,8 @@
   "search_index": 1,
   "description": "Вход, от которого идёт токен: его код авторизации. Повтор кода или заменённого токена обновления отзывает всю семью.",
   "insert_after": "status",
-  "module": "Agent Learning"
+  "module": "Agent Learning",
+  "report_hide": 1
  },
  {
   "doctype": "Custom Field",
@@ -175,6 +176,7 @@
   "hidden": 1,
   "description": "SHA-256 токена обновления, на смену которому выдан этот токен: по нему узнаётся повтор заменённого токена.",
   "insert_after": "lms_family_started",
-  "module": "Agent Learning"
+  "module": "Agent Learning",
+  "report_hide": 1
  }
 ]
