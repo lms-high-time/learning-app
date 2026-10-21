@@ -140,8 +140,7 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 
 		# Публичному клиенту токен обновления — одноразовый (спецификация MCP).
 		with self.subTest("прежний токен обновления отозван"):
-			статус, ответ = self._токен(grant_type="refresh_token", refresh_token=токен["refresh_token"])
-			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(токен), "Revoked")
 			статус, _ = self._токен(grant_type="refresh_token", refresh_token=новый["refresh_token"])
 			self.assertEqual(статус, 200)
 
@@ -386,7 +385,13 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			метаданные = json.loads(oauth_server.authorization_server_metadata().get_data())
 		self.assertIs(метаданные["client_id_metadata_document_supported"], True)
 		# Claude выбирает клиента по адресу, только если сервер принимает публичных.
-		self.assertIn("none", метаданные["token_endpoint_auth_methods_supported"])
+		# Basic не обещается: Frappe отвечает на него 401 раньше OAuth
+		# (learning-services#665).
+		self.assertEqual(метаданные["token_endpoint_auth_methods_supported"], ["none", "client_secret_post"])
+		for эндпоинт in ("revocation", "introspection"):
+			self.assertEqual(
+				метаданные[f"{эндпоинт}_endpoint_auth_methods_supported"], ["client_secret_post"]
+			)
 		self.assertEqual(метаданные["issuer"], "https://cenda.test")
 
 	def test_только_код_авторизации_и_обновление(self):
@@ -428,14 +433,16 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			("неверный секрет", пост, {"client_secret": "не-тот"}, 401),
 			("секрет в теле", пост, {"client_secret": пост.client_secret}, 200),
 			("секрет в теле у клиента Basic", базовый, {"client_secret": базовый.client_secret}, 200),
+			# Заголовок Basic — проверка самого валидатора: по HTTP Frappe отвечает
+			# на него 401 раньше OAuth, и этот путь недостижим (learning-services#665).
 			(
-				"заголовок Basic",
+				"заголовок Basic, только валидатор",
 				базовый,
 				{"client_id": None, "заголовки": basic(базовый, базовый.client_secret)},
 				200,
 			),
 			(
-				"Basic с неверным секретом",
+				"Basic с неверным секретом, только валидатор",
 				базовый,
 				{"client_id": None, "заголовки": basic(базовый, "x")},
 				401,
@@ -482,8 +489,15 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			статус, ответ = self._обменять(код, возврат=ВОЗВРАТ_АГЕНТА, client_id=клиент.name)
 			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
 
+		with self.subTest("пользователь отключён мимо save"):
+			код = self._авторизовать(client_id=клиент.name, возврат=ВОЗВРАТ_АГЕНТА)
+			frappe.db.set_value("User", frappe.session.user, "enabled", 0)
+			статус, ответ = self._обменять(код, возврат=ВОЗВРАТ_АГЕНТА, client_id=клиент.name)
+			frappe.db.set_value("User", frappe.session.user, "enabled", 1)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+
 		for что, удалить_код in (("повтор", False), ("повтор после ежечасной чистки кодов", True)):
-			with self.subTest(что):
+			with self.subTest(что), mock.patch.object(frappe, "log_error") as журнал:
 				код, токен = self._вход_клиента(клиент)
 				_, обновлённый = self._токен(
 					client_id=клиент.name, grant_type="refresh_token", refresh_token=токен["refresh_token"]
@@ -494,6 +508,8 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
 				# Отозвана вся семья, и токен, полученный обновлением, тоже.
 				self.assertEqual(self._статус(обновлённый), "Revoked")
+				self.assertEqual(журнал.call_args.kwargs["title"], "Повтор кода авторизации — семья отозвана")
+				self.assertNotIn(код, журнал.call_args.kwargs["message"])
 
 	def test_токен_обновления_одноразовый_у_всех_клиентов(self):
 		"""Ротация была только у клиентов по адресу, повтор заменённого токена
@@ -526,17 +542,34 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			)
 			self.assertEqual(семья, (код, начало, oauth_server.отпечаток(первый["refresh_token"])))
 
-		with self.subTest("повтор в окне гонки — отказ без отзыва семьи"):
-			статус, ответ = обновить(первый)
-			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
-			self.assertEqual(self._статус(второй), "Active")
-
-		with self.subTest("повтор заменённого отзывает семью, и после ежечасной чистки"):
-			постарить(второй, minutes=-2)
-			frappe.db.delete("OAuth Bearer Token", {"name": первый["access_token"]})
-			статус, ответ = обновить(первый)
-			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+		with self.subTest("повтор в окне гонки — новая пара той же семьи"):
+			# Ответ на обновление потерялся, и клиент повторил прежним токеном.
+			статус, третий = обновить(первый)
+			self.assertEqual(статус, 200, третий)
 			self.assertEqual(self._статус(второй), "Revoked")
+			self.assertEqual(
+				frappe.db.get_value(
+					"OAuth Bearer Token",
+					третий["access_token"],
+					[oauth_server.ПОЛЕ_СЕМЬИ, oauth_server.ПОЛЕ_НАЧАЛА],
+				),
+				(код, начало),
+			)
+
+		with self.subTest("повтор вне окна отзывает семью с записью в журнал, и после ежечасной чистки"):
+			постарить(второй, minutes=-3)
+			постарить(третий, minutes=-2)
+			frappe.db.delete("OAuth Bearer Token", {"name": первый["access_token"]})
+			with mock.patch.object(frappe, "log_error") as журнал:
+				статус, ответ = обновить(первый)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(третий), "Revoked")
+			запись = журнал.call_args.kwargs
+			self.assertEqual(запись["title"], "Повтор токена обновления — семья отозвана")
+			self.assertIn(клиент.name, запись["message"])
+			self.assertIn("после замены", запись["message"])
+			for значение in (*первый.values(), *третий.values(), код):
+				self.assertNotIn(str(значение), запись["message"])
 
 		with self.subTest("семья старше предельного срока"):
 			_, токен = self._вход_клиента(клиент)
@@ -597,12 +630,31 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				self.assertEqual(отозвать(token=токен["access_token"], **поля), ожидается)
 				self.assertEqual(self._статус(токен), "Active")
 
-		with self.subTest("свой клиент — токен и его семья"):
-			_, новый = self._токен(grant_type="refresh_token", refresh_token=токен["refresh_token"])
+		with self.subTest("публичный клиент — свой токен доступа"):
+			self.assertEqual(
+				отозвать(token=токен["access_token"], token_type_hint="access_token", client_id=АДРЕС), 200
+			)
+			self.assertEqual(self._статус(токен), "Revoked")
+
+		with self.subTest("свой клиент — токен обновления и его семья"):
+			_, второй = self._обменять(self._авторизовать())
+			_, новый = self._токен(grant_type="refresh_token", refresh_token=второй["refresh_token"])
 			self.assertEqual(
 				отозвать(token=новый["refresh_token"], token_type_hint="refresh_token", client_id=АДРЕС), 200
 			)
 			self.assertEqual(self._статус(новый), "Revoked")
+
+		with self.subTest("конфиденциальный клиент с секретом"):
+			_, свой = self._вход_клиента(конфиденциальный)
+			self.assertEqual(
+				отозвать(
+					token=свой["access_token"],
+					client_id=конфиденциальный.name,
+					client_secret=конфиденциальный.client_secret,
+				),
+				200,
+			)
+			self.assertEqual(self._статус(свой), "Revoked")
 
 	def test_интроспекция_только_клиенту_с_секретом(self):
 		"""Интроспекция отвечала любому гостю; `exp` уходил на 5 часов вперёд
@@ -611,29 +663,50 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self._войти()
 		_, токен = self._обменять(self._авторизовать())
 		сервис = self._клиент("Client Secret Basic")
+		другой = self._клиент("Client Secret Post")
+		свой = {"client_id": сервис.name, "client_secret": сервис.client_secret}
+		список = mock.patch.dict(frappe.conf, {oauth_server.КЛЮЧ_ИНТРОСПЕКЦИИ: [сервис.name]})
 
-		def спросить(**поля):
-			запрос = ЗапросOAuth(f"{САЙТ}.introspect_token", "POST", urlencode(поля), ФОРМА)
+		def спросить(адрес=f"{САЙТ}.introspect_token", **поля):
+			запрос = ЗапросOAuth(адрес, "POST", urlencode(поля), ФОРМА)
 			return oauth_server.ответ_интроспекции(запрос, поля.get("token"), поля.get("token_type_hint"))
 
-		for что, поля in (
-			("без клиента", {}),
-			("публичный клиент", {"client_id": АДРЕС}),
-			("неверный секрет", {"client_id": сервис.name, "client_secret": "не-тот"}),
-		):
-			with self.subTest(что):
-				self.assertEqual(
-					спросить(token=токен["access_token"], **поля), (401, {"error": "invalid_client"})
-				)
+		with список:
+			for что, поля in (
+				("без клиента", {}),
+				("публичный клиент", {"client_id": АДРЕС}),
+				("неверный секрет", {"client_id": сервис.name, "client_secret": "не-тот"}),
+				("клиент не из списка", {"client_id": другой.name, "client_secret": другой.client_secret}),
+			):
+				with self.subTest(что):
+					self.assertEqual(
+						спросить(token=токен["access_token"], **поля), (401, {"error": "invalid_client"})
+					)
+			with self.subTest("параметры в строке запроса"):
+				статус, ответ = спросить(адрес=f"{САЙТ}.introspect_token?client_secret=x", **свой)
+				self.assertEqual((статус, ответ["error"]), (400, "invalid_request"))
 
-		свой = {"client_id": сервис.name, "client_secret": сервис.client_secret}
-		with self.subTest("действующий"):
-			статус, ответ = спросить(token=токен["access_token"], **свой)
-			self.assertEqual((статус, ответ["active"], ответ["client_id"]), (200, True, АДРЕС))
-			self.assertLess(abs(ответ["exp"] - (time.time() + токен["expires_in"])), 60)
-		with self.subTest("токен обновления"):
-			_, ответ = спросить(token=токен["refresh_token"], token_type_hint="refresh_token", **свой)
-			self.assertIs(ответ["active"], True)
+			with self.subTest("действующий"):
+				статус, ответ = спросить(token=токен["access_token"], **свой)
+				self.assertEqual((статус, ответ["active"], ответ["client_id"]), (200, True, АДРЕС))
+				self.assertLess(abs(ответ["exp"] - (time.time() + токен["expires_in"])), 60)
+			for что, подсказка, ожидается in (
+				("токен обновления", "refresh_token", True),
+				("токен обновления под видом токена доступа", "access_token", False),
+			):
+				with self.subTest(что):
+					_, ответ = спросить(token=токен["refresh_token"], token_type_hint=подсказка, **свой)
+					self.assertIs(ответ["active"], ожидается)
+
+		with self.subTest("без списка — любому конфиденциальному, предупреждение раз"):
+			frappe.cache.delete_value(oauth_server.КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ)
+			with mock.patch.object(frappe, "log_error") as журнал:
+				for _ in range(2):
+					статус = спросить(
+						token=токен["access_token"], client_id=другой.name, client_secret=другой.client_secret
+					)[0]
+					self.assertEqual(статус, 200)
+			журнал.assert_called_once()
 
 		frappe.db.set_value(
 			"OAuth Bearer Token",
@@ -641,12 +714,56 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			"expiration_time",
 			add_to_date(now_datetime(), seconds=-1),
 		)
-		with self.subTest("истёкший"):
+		with список, self.subTest("истёкший"):
 			self.assertEqual(спросить(token=токен["access_token"], **свой), (200, {"active": False}))
 		frappe.db.set_value("OAuth Bearer Token", токен["access_token"], "status", "Revoked")
 		for что, значение in (("отозванный", токен["refresh_token"]), ("неизвестный", "нет-такого")):
-			with self.subTest(что):
-				self.assertEqual(спросить(token=значение, **свой), (200, {"active": False}))
+			with список, self.subTest(что):
+				self.assertEqual(
+					спросить(token=значение, token_type_hint="refresh_token", **свой),
+					(200, {"active": False}),
+				)
+
+	def test_интроспекция_с_openid_отдаёт_пользователя(self):
+		"""Ветка `openid` ответа Frappe сохранена: `sub` и данные пользователя."""
+		self._войти()
+		_, токен = self._обменять(self._авторизовать())
+		frappe.db.set_value("OAuth Bearer Token", токен["access_token"], "scopes", "all openid")
+		пользователь = frappe.get_doc("User", frappe.session.user)
+		# `sub` — идентификатор пользователя во Frappe: его заводит сама вставка User.
+		sub = frappe.db.get_value(
+			"User Social Login", {"parent": пользователь.name, "provider": "frappe"}, "userid"
+		)
+		# `iss` данных пользователя Frappe берёт из адреса запроса.
+		self.addCleanup(setattr, frappe.local, "request", getattr(frappe.local, "request", None))
+		set_request(method="POST", path="/")
+
+		ответ = oauth_server.сведения_о_токене(токен["access_token"], "access_token")
+
+		self.assertTrue(sub)
+		self.assertEqual((ответ["sub"], ответ["email"]), (sub, пользователь.email))
+
+	def test_интроспекция_через_эндпоинт(self):
+		"""Проводка: форма запроса доходит до проверки клиента и токена."""
+		self._войти()
+		_, токен = self._обменять(self._авторизовать())
+		сервис = self._клиент("Client Secret Post")
+		for имя in ("request", "response"):
+			self.addCleanup(setattr, frappe.local, имя, getattr(frappe.local, имя, None))
+		адрес = "/api/method/frappe.integrations.oauth2.introspect_token"
+		for что, поля, ожидается in (
+			("без секрета", {"client_id": сервис.name}, (401, None)),
+			("с секретом", {"client_id": сервис.name, "client_secret": сервис.client_secret}, (None, True)),
+		):
+			with (
+				self.subTest(что),
+				mock.patch.dict(frappe.conf, {oauth_server.КЛЮЧ_ИНТРОСПЕКЦИИ: [сервис.name]}),
+			):
+				set_request(method="POST", path=адрес, data={"token": токен["access_token"], **поля})
+				frappe.local.response = frappe._dict()
+				oauth_server.introspect_token(token=токен["access_token"])
+				ответ = frappe.local.response
+				self.assertEqual((ответ.get("http_status_code"), ответ.get("active")), ожидается)
 
 	def test_регистрация_клиента_с_областью_all_и_пределом(self):
 		"""Клиент выбирал область сам, вплоть до `openid`, а регистрация была
@@ -660,27 +777,46 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				if а[-1:] == ("enable_dynamic_client_registration",)
 				else настоящий(*а, **к),
 			),
-			mock.patch.object(oauth_server, "РЕГИСТРАЦИЙ_ЗА_ЧАС", 1),
+			mock.patch.object(oauth_server, "РЕГИСТРАЦИЙ_ЗА_ЧАС", 2),
 		):
 			for имя in ("request", "request_ip", "form_dict"):
 				self.addCleanup(setattr, frappe.local, имя, getattr(frappe.local, имя, None))
 			frappe.local.request_ip = f"test-{frappe.generate_hash(length=8)}"
 			frappe.local.form_dict = frappe._dict(cmd="frappe.integrations.oauth2.register_client")
-			заявка = {"client_name": "Агент", "redirect_uris": [ВОЗВРАТ_АГЕНТА], "scope": "openid all"}
+			заявка = {"client_name": "Агент", "redirect_uris": [ВОЗВРАТ_АГЕНТА]}
+			# Basic Frappe по HTTP не принимает: конфиденциальный клиент — post
+			# и секрет в 32 байта вместо 10 знаков Frappe.
+			for что, поля, метод in (
+				("метод не назван, просит openid", {"scope": "openid all"}, "client_secret_post"),
+				("публичный", {"token_endpoint_auth_method": "none"}, "none"),
+			):
+				with self.subTest(что):
+					set_request(method="POST", path="/", json={**заявка, **поля})
+					ответ = json.loads(oauth_server.register_client().get_data())
+					запись = frappe.db.get_value(
+						"OAuth Client",
+						ответ["client_id"],
+						["scopes", "token_endpoint_auth_method", "client_secret"],
+						as_dict=True,
+					)
+					self.assertEqual((ответ["scope"], запись.scopes), ("all", "all"))
+					self.assertEqual(ответ["token_endpoint_auth_method"], метод)
+					if метод == "none":
+						self.assertNotIn("client_secret", ответ)
+					else:
+						self.assertEqual(запись.token_endpoint_auth_method, "Client Secret Post")
+						self.assertEqual(ответ["client_secret"], запись.client_secret)
+						self.assertGreaterEqual(len(запись.client_secret), 43)
 
-			set_request(method="POST", path="/", json=заявка)
-			ответ = json.loads(oauth_server.register_client().get_data())
-			self.assertEqual(ответ["scope"], "all")
-			self.assertEqual(frappe.db.get_value("OAuth Client", ответ["client_id"], "scopes"), "all")
-
-			set_request(method="POST", path="/", json=заявка)
-			with self.assertRaises(frappe.RateLimitExceededError):
-				oauth_server.register_client()
+			with self.subTest("предел"):
+				set_request(method="POST", path="/", json=заявка)
+				with self.assertRaises(frappe.RateLimitExceededError):
+					oauth_server.register_client()
 
 	def test_токены_отзываются_при_смене_доступа(self):
 		"""Отключённый аккаунт сохранял токены агента, и токен обновления выдавал
-		новые (learning-services#631); смена пароля их тоже не трогала
-		(learning-services#665)."""
+		новые (learning-services#631); смена пароля их тоже не трогала, а код,
+		выданный до неё, обменивался после (learning-services#665)."""
 		клиент = self._клиент()
 
 		def с_токеном():
@@ -698,6 +834,18 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 					**токен,
 				}
 			).insert(ignore_permissions=True)
+			токен["code"] = frappe.generate_hash()
+			frappe.get_doc(
+				{
+					"doctype": "OAuth Authorization Code",
+					"client": клиент.name,
+					"user": пользователь.name,
+					"scopes": "all",
+					"authorization_code": токен["code"],
+					"redirect_uri_bound_to_authorization_code": ВОЗВРАТ_АГЕНТА,
+					"validity": "Valid",
+				}
+			).insert(ignore_permissions=True)
 			return пользователь, токен
 
 		for что, правка, ожидается in (
@@ -710,6 +858,10 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				правка(пользователь)
 				пользователь.save(ignore_permissions=True)
 				self.assertEqual(self._статус(токен), ожидается)
+				self.assertEqual(
+					frappe.db.get_value("OAuth Authorization Code", токен["code"], "validity"),
+					"Valid" if ожидается == "Active" else "Invalid",
+				)
 
 		with self.subTest("удаление"):
 			пользователь, токен = с_токеном()

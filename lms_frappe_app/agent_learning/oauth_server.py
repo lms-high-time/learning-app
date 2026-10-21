@@ -25,11 +25,12 @@
   (`token`, `id_token token`, `code id_token`), а наши агенты и веб-чат
   просят только `code` (learning-services#665);
 - клиент аутентифицируется по способу из своей записи. Конфиденциальный
-  (`Client Secret Basic` и `Client Secret Post`) — секретом, в заголовке Basic
-  или в теле: Frappe секрет не сверял вовсе. Сервис MCP заведён как
-  `client_secret_basic`, а секрет шлёт в теле — заголовок Basic Frappe
-  принимает за вход по API-ключу и отвечает 401 раньше OAuth. Публичный
-  (`None`) — без секрета, и вход ему держит PKCE;
+  (`Client Secret Basic` и `Client Secret Post`) — секретом в теле: Frappe
+  секрет не сверял вовсе. Сервис MCP заведён как `client_secret_basic`, а
+  секрет шлёт в теле. Заголовок Basic валидатор тоже понимает, но по HTTP до
+  него не доходит: Frappe принимает Basic за вход по API-ключу и отвечает 401
+  раньше OAuth, поэтому метаданные обещают только `client_secret_post`.
+  Публичный (`None`) — без секрета, и вход ему держит PKCE;
 - PKCE — только S256: обязателен публичным клиентам, у конфиденциальных
   проверяется, если прислан. `plain` не принимается: метаданные обещают S256;
 - код авторизации живёт `СРОК_КОДА` и обменивается один раз под блокировкой
@@ -40,9 +41,14 @@
   мимо OAuth, и агент не понимал, что пора войти заново;
 - токен обновления одноразовый у всех клиентов. Токены одного входа — одна
   семья: повтор уже заменённого токена обновления отзывает всю семью (RFC 9700
-  §4.14.2), а через `СРОК_СЕМЬИ` от входа семья больше не обновляется;
+  §4.14.2) с записью в журнал, а через `СРОК_СЕМЬИ` от входа семья больше не
+  обновляется. Исключение — повтор в `ОКНО_ГОНКИ` после замены: ответ на
+  обновление мог потеряться, и клиент получает новую пару той же семьи;
 - отзыв токена (RFC 7009) снимает токен только своему клиенту и вместе с его
-  семьёй; чужой или неизвестный токен — тот же ответ 200.
+  семьёй; чужой или неизвестный токен — тот же ответ 200;
+- интроспекция — только конфиденциальному клиенту с секретом из списка в
+  конфигурации сайта; динамическая регистрация — с областью `all`,
+  конфиденциальным — `client_secret_post` и длинный секрет, с пределом частоты.
 
 Семья хранится в полях токена, а не ссылкой на первый: Frappe каждый час
 удаляет отозванные токены (`delete_oauth2_data`), а истёкшие — через 30 дней
@@ -56,6 +62,7 @@
 import base64
 import hashlib
 import hmac
+import secrets
 from datetime import timedelta
 from urllib.parse import unquote_plus, urlsplit
 from zoneinfo import ZoneInfo
@@ -82,12 +89,14 @@ from lms_frappe_app.agent_learning import cimd
 #: открытого браузера, и повторный вход раз в 90 дней — небольшая цена, а
 #: утёкший токен перестаёт работать сам.
 СРОК_СЕМЬИ = timedelta(days=90)
-#: Повтор токена обновления в эти секунды после замены — гонка, а не утечка.
-#: `Why:` клиент, обновивший токен двумя запросами разом, второй ответ
-#: получает `invalid_grant`; отзывать за это всю семью — разлогинить агента на
-#: ровном месте. Украденный токен в этом окне ничего не даёт: он уже заменён.
+#: Повтор токена обновления в эти секунды после замены продолжает семью: клиент
+#: получает новую пару, а преемник гасится. `Why:` ответ на обновление
+#: теряется (обрыв связи, таймаут), клиент повторяет запрос прежним токеном, и
+#: отказ или отзыв семьи разлогинил бы агента на ровном месте. Так же делают
+#: Okta и Auth0. Позже повтор — признак утечки.
 ОКНО_ГОНКИ = timedelta(seconds=60)
-#: Регистраций клиента за час с одного адреса. `Why:` регистрация открыта
+#: Регистраций клиента за час с одного адреса (реальный адрес клиента nginx
+#: сайта передаёт с learning-services#667). `Why:` регистрация открыта
 #: гостям, и каждая — запись OAuth Client. Claude, ChatGPT и Claude Code
 #: входят адресом документа о себе и не регистрируются, так что регистрация —
 #: редкое событие: прочие агенты, раз на подключение. Двадцать в час покрывают
@@ -96,6 +105,9 @@ from lms_frappe_app.agent_learning import cimd
 РЕГИСТРАЦИЙ_ЗА_ЧАС = 20
 
 ПУБЛИЧНЫЙ = "None"
+#: Ключ конфигурации сайта: `client_id`, которым можно спрашивать интроспекцию.
+КЛЮЧ_ИНТРОСПЕКЦИИ = "lms_introspection_clients"
+КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ = "lms_introspection_open_warned"
 ПОЛЕ_СЕМЬИ = "lms_token_family"
 ПОЛЕ_НАЧАЛА = "lms_family_started"
 ПОЛЕ_ПРЕЖНЕГО = "lms_previous_refresh"
@@ -299,18 +311,24 @@ class Валидатор(OAuthWebRequestValidator):
 		if not запись:
 			# Использованные коды Frappe удаляет каждый час, а семья токенов
 			# названа кодом: повтор узнаётся и после удаления.
-			отозвать_семью(code, client_id)
+			if отозвать_семью(code, client_id):
+				_в_журнал_повтор("Повтор кода авторизации — семья отозвана", client_id, None, code)
 			return False
 		if запись.client != client_id:
 			return False
 		if запись.validity != "Valid":
-			отозвать_семью(code, client_id)
+			if отозвать_семью(code, client_id):
+				_в_журнал_повтор("Повтор кода авторизации — семья отозвана", client_id, запись.user, code)
 			return False
 		if not запись.expiration_time or now_datetime() > запись.expiration_time:
 			return False
 		# Метаданные обещают только S256; `plain` остаётся у кодов, выданных до
 		# learning-services#665.
 		if запись.code_challenge and запись.code_challenge_method != "s256":
+			return False
+		# Смена пароля и отключение гасят коды, но отключение мимо `save`
+		# (`db.set_value`) хуков не зовёт.
+		if not frappe.db.exists("User", {"name": запись.user, "enabled": 1}):
 			return False
 		request.scopes = cstr(запись.scopes).split()
 		request.user = запись.user
@@ -332,10 +350,14 @@ class Валидатор(OAuthWebRequestValidator):
 				"OAuth Bearer Token", {"name": имя, "status": "Active"}, "name", for_update=True
 			)
 		if not имя:
-			_повтор_обновления(refresh_token, клиент)
+			имя = _повтор_обновления(refresh_token, клиент)
+		if not имя:
 			return False
 		запись = frappe.db.get_value(
-			"OAuth Bearer Token", имя, ["user", "creation", ПОЛЕ_СЕМЬИ, ПОЛЕ_НАЧАЛА], as_dict=True
+			"OAuth Bearer Token",
+			имя,
+			["user", "scopes", "creation", ПОЛЕ_СЕМЬИ, ПОЛЕ_НАЧАЛА],
+			as_dict=True,
 		)
 		# Токены, выданные до learning-services#665, без семьи: семья — сам
 		# токен, начало — его выдача.
@@ -347,9 +369,17 @@ class Валидатор(OAuthWebRequestValidator):
 			return False
 		request.user = запись.user
 		request.lms_прежний_токен = имя
+		request.lms_области = запись.scopes
 		request.lms_семья = запись.get(ПОЛЕ_СЕМЬИ) or имя
 		request.lms_начало_семьи = начало
 		return True
+
+	def get_original_scopes(self, refresh_token, request, *args, **kwargs):
+		# Области — того токена, который продолжается: при повторе в окне гонки
+		# это преемник, а запись предъявленного Frappe мог уже удалить.
+		return getattr(request, "lms_области", None) or super().get_original_scopes(
+			refresh_token, request, *args, **kwargs
+		)
 
 	def save_bearer_token(self, token, request, *args, **kwargs):
 		"""Токен — с семьёй; прежний токен и код гасятся в той же транзакции.
@@ -433,39 +463,83 @@ class Сервер(Server):
 			грант.custom_validators.pre_auth.append(_только_s256)
 
 
-def отозвать_семью(семья: str | None, клиент: str | None) -> None:
-	"""Отозвать действующие токены семьи у её клиента."""
+def отозвать_семью(семья: str | None, клиент: str | None) -> int:
+	"""Отозвать действующие токены семьи у её клиента; сколько отозвано."""
 	if not семья or not клиент:
-		return
-	frappe.db.set_value(
+		return 0
+	имена = frappe.get_all(
 		"OAuth Bearer Token",
-		{ПОЛЕ_СЕМЬИ: семья, "client": клиент, "status": "Active"},
-		"status",
-		"Revoked",
-		update_modified=False,
+		filters={ПОЛЕ_СЕМЬИ: семья, "client": клиент, "status": "Active"},
+		pluck="name",
 	)
+	if имена:
+		frappe.db.set_value(
+			"OAuth Bearer Token",
+			{"name": ("in", имена)},
+			"status",
+			"Revoked",
+			update_modified=False,
+		)
+	return len(имена)
 
 
-def _повтор_обновления(refresh_token: str, клиент: str | None) -> None:
-	"""Предъявлен уже заменённый токен обновления — семья отзывается.
+def _повтор_обновления(refresh_token: str, клиент: str | None) -> str | None:
+	"""Предъявлен уже заменённый токен обновления: имя токена, который продолжит
+	семью, или `None` — отказ.
 
 	Заменённый токен узнаётся по преемнику: в нём отпечаток прежнего токена
 	обновления. Сам заменённый токен Frappe удаляет в течение часа, а
 	действующий преемник живёт, пока жива семья. Токен, отозванный не заменой
-	(выход, отзыв, смена пароля), — просто `invalid_grant`: его семья уже
-	отозвана тем же действием.
+	(выход, отзыв, смена пароля), — просто отказ: его семья уже отозвана тем же
+	действием.
+
+	В `ОКНО_ГОНКИ` после замены повтор продолжает семью: действующий преемник
+	гасится, как гасился бы сам предъявленный токен, и клиент получает новую
+	пару. Позже — семья отзывается, и это пишется в журнал (ASVS 7.2.4).
 	"""
 	if not клиент:
-		return
+		return None
 	преемник = frappe.db.get_value(
 		"OAuth Bearer Token",
 		{ПОЛЕ_ПРЕЖНЕГО: отпечаток(refresh_token), "client": клиент},
-		[ПОЛЕ_СЕМЬИ, "creation"],
+		["name", "status", "user", "creation", ПОЛЕ_СЕМЬИ],
 		as_dict=True,
+		order_by="creation desc",
 	)
-	if not преемник or now_datetime() - преемник.creation < ОКНО_ГОНКИ:
-		return
-	отозвать_семью(преемник.get(ПОЛЕ_СЕМЬИ), клиент)
+	if not преемник:
+		return None
+	прошло = now_datetime() - преемник.creation
+	if прошло < ОКНО_ГОНКИ:
+		if преемник.status != "Active":
+			return None
+		return frappe.db.get_value(
+			"OAuth Bearer Token", {"name": преемник.name, "status": "Active"}, "name", for_update=True
+		)
+	if отозвать_семью(преемник.get(ПОЛЕ_СЕМЬИ), клиент):
+		_в_журнал_повтор(
+			"Повтор токена обновления — семья отозвана",
+			клиент,
+			преемник.user,
+			преемник.get(ПОЛЕ_СЕМЬИ),
+			f"через {int(прошло.total_seconds())} с после замены",
+		)
+	return None
+
+
+def _в_журнал_повтор(заголовок: str, клиент, пользователь, семья, подробность: str = "") -> None:
+	"""Запись о повторе в журнал ошибок — без значений токенов и кодов.
+
+	Семья названа кодом, а у токенов до learning-services#665 — самим токеном,
+	поэтому в журнал идёт её отпечаток: по нему запись находится в базе, а
+	учётных данных в журнале нет.
+	"""
+	frappe.log_error(
+		title=заголовок,
+		message=(
+			f"клиент {клиент}, пользователь {пользователь}, "
+			f"семья (отпечаток) {отпечаток(семья or '')[:16]}" + (f", {подробность}" if подробность else "")
+		),
+	)
 
 
 def _клиент_по_токену(request) -> str | None:
@@ -526,6 +600,10 @@ def introspect_token(token: str | None = None, token_type_hint: str | None = Non
 	`Why:` Frappe отвечал любому гостю. Ответ — в формате Frappe; `exp` — в
 	UTC, а не наивным временем сайта (сайт в Asia/Samarkand, контейнер в UTC,
 	`exp` уходил на 5 часов вперёд), и истёкший токен не активен.
+
+	Каким клиентам можно спрашивать — список `client_id` в `КЛЮЧ_ИНТРОСПЕКЦИИ`
+	конфигурации сайта (на стенде — клиент сервиса MCP). Без ключа — любому
+	конфиденциальному, как до learning-services#665, с предупреждением в журнале.
 	"""
 	r = frappe.request
 	статус, тело = ответ_интроспекции(ЗапросOAuth(r.url, r.method, r.form, r.headers), token, token_type_hint)
@@ -535,30 +613,44 @@ def introspect_token(token: str | None = None, token_type_hint: str | None = Non
 
 
 def ответ_интроспекции(запрос, token: str | None, token_type_hint: str | None) -> tuple[int, dict]:
-	if not Валидатор().authenticate_client(запрос):
+	# Параметры в строке запроса — секрет и токен в журналах прокси и сервера.
+	if запрос.uri_query:
+		return 400, {"error": "invalid_request", "error_description": "query parameters are not allowed"}
+	if not Валидатор().authenticate_client(запрос) or not _можно_спрашивать(запрос.client["name"]):
 		return 401, {"error": "invalid_client"}
 	return 200, сведения_о_токене(token, token_type_hint)
 
 
+def _можно_спрашивать(клиент: str) -> bool:
+	разрешённые = frappe.conf.get(КЛЮЧ_ИНТРОСПЕКЦИИ)
+	if разрешённые is not None:
+		return клиент in разрешённые
+	# Предупреждение — раз, а не на каждый вызов инструмента агента.
+	if not frappe.cache.get_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ):
+		frappe.cache.set_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ, 1)
+		frappe.log_error(
+			title="Интроспекция открыта любому конфиденциальному клиенту",
+			message=f"В конфигурации сайта нет {КЛЮЧ_ИНТРОСПЕКЦИИ}: список client_id, которым можно спрашивать.",
+		)
+	return True
+
+
 def сведения_о_токене(token: str | None, token_type_hint: str | None) -> dict:
-	"""Ответ интроспекции о токене. Неактивному — только `active: false` (RFC 7662 §2.2)."""
+	"""Ответ интроспекции о токене. Неактивному — только `active: false` (RFC 7662 §2.2).
+
+	Токен ищется по виду из подсказки, как у Frappe, и только по нему: токен
+	обновления, предъявленный как токен доступа, — не действующий токен доступа.
+	"""
 	if not token:
 		return {"active": False}
-	виды = (
-		("refresh_token", "access_token")
-		if token_type_hint == "refresh_token"
-		else ("access_token", "refresh_token")
+	вид = "refresh_token" if token_type_hint == "refresh_token" else "access_token"
+	запись = frappe.db.get_value(
+		"OAuth Bearer Token",
+		{вид: token},
+		["client", "user", "status", "scopes", "expiration_time", "creation", ПОЛЕ_НАЧАЛА],
+		as_dict=True,
 	)
-	for вид in виды:
-		запись = frappe.db.get_value(
-			"OAuth Bearer Token",
-			{вид: token},
-			["client", "user", "status", "scopes", "expiration_time", "creation", ПОЛЕ_НАЧАЛА],
-			as_dict=True,
-		)
-		if запись:
-			break
-	else:
+	if not запись:
 		return {"active": False}
 
 	сейчас = now_datetime()
@@ -609,14 +701,27 @@ def register_client():
 	остальных клиентов; RFC 7591 §3.2.1 позволяет серверу заменить
 	запрошенное и требует вернуть то, что записано.
 
-	Предел — по IP запроса. Пока nginx публичного сайта подставляет свой адрес
-	(см. `access.py`), это предел на весь сайт.
+	Конфиденциальный клиент записывается с `client_secret_post` — и когда
+	просил `client_secret_basic`, и когда метода не назвал (умолчание RFC 7591 —
+	basic): заголовок Basic Frappe принимает за вход по API-ключу и отвечает 401
+	раньше OAuth, и такой клиент не вошёл бы. Секрет — 32 случайных байта:
+	Frappe выдаёт 10 шестнадцатеричных знаков, около 40 бит. Публичный клиент
+	(`none`) записывается как есть.
+
+	Предел — по IP запроса: реальный адрес клиента nginx публичного сайта
+	передаёт с learning-services#667, до него это предел на весь сайт.
 	"""
 	ответ = oauth2.register_client()
 	if ответ.status_code != 201:
 		return ответ
 	данные = frappe.parse_json(ответ.get_data(as_text=True))
-	frappe.db.set_value("OAuth Client", данные["client_id"], "scopes", "all", update_modified=False)
+	поля = {"scopes": "all"}
+	if frappe.db.get_value("OAuth Client", данные["client_id"], "token_endpoint_auth_method") == ПУБЛИЧНЫЙ:
+		данные["token_endpoint_auth_method"] = "none"
+	else:
+		поля.update(token_endpoint_auth_method="Client Secret Post", client_secret=secrets.token_urlsafe(32))
+		данные.update(token_endpoint_auth_method="client_secret_post", client_secret=поля["client_secret"])
+	frappe.db.set_value("OAuth Client", данные["client_id"], поля, update_modified=False)
 	данные["scope"] = "all"
 	ответ.set_data(frappe.as_json(данные))
 	return ответ
@@ -634,6 +739,11 @@ def authorization_server_metadata():
 		raise NotFound
 	метаданные = oauth2._get_authorization_server_metadata()
 	метаданные["client_id_metadata_document_supported"] = True
+	# Frappe обещает `client_secret_basic`, но заголовок Basic сам же принимает
+	# за вход по API-ключу и отвечает 401 раньше OAuth (learning-services#665).
+	метаданные["token_endpoint_auth_methods_supported"] = ["none", "client_secret_post"]
+	метаданные["revocation_endpoint_auth_methods_supported"] = ["client_secret_post"]
+	метаданные["introspection_endpoint_auth_methods_supported"] = ["client_secret_post"]
 	ответ = Response(frappe.as_json(метаданные), mimetype="application/json")
 	frappe.local.allow_cors = "*"
 	return ответ
