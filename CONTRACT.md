@@ -3652,9 +3652,10 @@ HEAD`:
 `where` — путь до него, например `agent.lessons.l-1.answers`; схемы уроков
 (`releases.diagrams`, `where` — `agent.lessons.<урок>.diagrams[<ключ>]`,
 `key`): `diagram_shape` — `diagrams` не список записей, ключ схемы не
-`^[a-z0-9][a-z0-9-]{0,63}$`, поле не строка или лишнее; `duplicate_key` —
+`^[a-z0-9][a-z0-9-]{0,63}$` (`where` — `agent.lessons.<урок>.diagrams`,
+`index` — номер записи), поле не строка или лишнее; `duplicate_key` —
 ключ повторяется в уроке; `diagram_no_title`, `diagram_no_description`,
-`text_too_long` — название длиннее 140 знаков (`limit`), `diagram_empty`,
+`text_too_long` — название длиннее 140 знаков (`limit`, `length`), `diagram_empty`,
 `diagram_too_large` — HTML больше 100 000 байт (`limit`), `diagram_external` —
 HTML зависит от сети: внешний адрес в атрибуте или `url()`, `@import`,
 `<iframe>`, `<base>`, запрос из скрипта (`found`); `total`);

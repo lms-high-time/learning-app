@@ -24,7 +24,7 @@ import re
 
 #: Адрес в сеть: `https://…` или `//…` в кавычках. Протокол-относительный без
 #: кавычек не ловится — иначе `data = // комментарий` в JS был бы «ссылкой».
-_АДРЕС = r"""(?:["']\s*(?:https?:)?//|https?://)"""
+_АДРЕС = r"""(?:["'`]\s*(?:https?:)?//|https?://)"""
 #: Тот же список — у валидатора компилятора (`tools/diagrams.py` course-design);
 #: его тест сверяет оба на одних примерах.
 _ВНЕШНЕЕ = [
@@ -32,12 +32,15 @@ _ВНЕШНЕЕ = [
 		re.compile(
 			r"""(?<![\w-])(?:src|href|action|formaction|poster|data|background|ping|xlink:href)\s*=\s*"""
 			+ _АДРЕС
-			+ r"""|(?<![\w-])srcset\s*=\s*["'][^"']*(?:https?:)?//""",
+			+ r"""|(?<![\w-])srcset\s*=\s*["'](?:[^"']*(?:\s|,\s))?\s*(?:https?:)?//""",
 			re.I,
 		),
 		"ссылка на внешний ресурс",
 	),
-	(re.compile(r"""(?:url|image-set)\(\s*["']?\s*(?:https?:)?//""", re.I), "внешний адрес в CSS"),
+	(
+		re.compile(r"""url\(\s*["']?\s*(?:https?:)?//|image-set\([^)]*?["']\s*(?:https?:)?//""", re.I),
+		"внешний адрес в CSS",
+	),
 	(re.compile(r"@import\b", re.I), "@import в CSS"),
 	(re.compile(r"<\s*(?:iframe|object|embed|base|frame)(?![\w-])", re.I), "встроенная страница или <base>"),
 	(re.compile(r"""<\s*meta\b[^>]*http-equiv\s*=\s*["']?refresh""", re.I), "переход по <meta refresh>"),
@@ -83,7 +86,8 @@ def проблемы(срезы: dict) -> list[dict]:
 				or not isinstance(схема.get("key"), str)
 				or not КЛЮЧ.fullmatch(схема["key"])
 			):
-				найдено.append({"code": "diagram_shape", "where": f"{где}[{н}]"})
+				# Ключа нет или он негодный — место по номеру записи, как у компилятора.
+				найдено.append({"code": "diagram_shape", "where": где, "index": н})
 				continue
 			ключ = схема["key"]
 			if ключ in видел:
@@ -101,7 +105,7 @@ def _проблемы_схемы(схема: dict) -> list[dict]:
 	if not (поля["title"] or "").strip():
 		итог.append({"code": "diagram_no_title"})
 	elif len(поля["title"]) > НАЗВАНИЕ:
-		итог.append({"code": "text_too_long", "limit": НАЗВАНИЕ})
+		итог.append({"code": "text_too_long", "limit": НАЗВАНИЕ, "length": len(поля["title"])})
 	if not (поля["description"] or "").strip():
 		итог.append({"code": "diagram_no_description"})
 	html = поля["html"] or ""
@@ -122,7 +126,9 @@ def список(пакет: dict) -> list[dict]:
 
 def схема(пакет: dict, ключ: str) -> dict | None:
 	"""Схема среза урока целиком, с HTML; нет — `None`."""
-	return next((с for с in _схемы(пакет) if с["key"] == ключ), None)
+	схема = next((с for с in _схемы(пакет) if с["key"] == ключ), None)
+	# Пустого `when` нет, как и в `список`: «нет — ключа нет».
+	return {п: з for п, з in схема.items() if п != "when" or з} if схема else None
 
 
 def _схемы(пакет: dict) -> list[dict]:

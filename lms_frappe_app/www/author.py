@@ -75,6 +75,7 @@ no_cache = 1
 	"material": "Материал урока",
 	"items": "Пункты",
 	"sections": "Разделы документа",
+	"diagrams": "Схемы урока",
 }
 
 РЕЖИМЫ_ОТВЕТА = {"text": "текстом", "files": "файлами", "text_and_files": "текстом и файлами"}
@@ -408,6 +409,9 @@ def _части(пакет: dict, урок: dict | None, пункты: dict[str,
 				_запись(ключ, з, названия.get(ключ), урок if имя == "items" else None)
 				for ключ, з in значение.items()
 			]
+		elif имя == "diagrams" and isinstance(значение, list):
+			# HTML схемы — до 100 КБ: на странице — что видит агент, без страницы автора.
+			часть["entries"] = [_схема(з) for з in значение]
 		elif isinstance(значение, list):
 			часть["entries"] = [_запись(None, з, None, None) for з in значение]
 		else:
@@ -431,6 +435,17 @@ def _запись(ключ: str | None, значение, название: str 
 			f"{урок['label']} · пакет агента · пункт «{название or ключ}»",
 		)
 	return запись
+
+
+def _схема(схема) -> dict:
+	"""Схема урока без HTML: название, описание, когда показать и размер страницы."""
+	if not isinstance(схема, dict):
+		return _запись(None, схема, None, None)
+	строки = [схема.get("description") or ""]
+	if схема.get("when"):
+		строки.append(f"Когда показать: {схема['when']}")
+	строки.append(f"HTML: {len(str(схема.get('html') or '').encode('utf-8'))} байт")
+	return _запись(схема.get("key"), "\n".join(строки), схема.get("title"), None)
 
 
 def _json(значение) -> str:

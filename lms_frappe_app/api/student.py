@@ -88,6 +88,8 @@ from lms_frappe_app.agent_learning.structure import уроки_курса
 from lms_frappe_app.api import контракт, текущий_пользователь
 
 НЕЧЕГО_УЧИТЬ = "nothing_to_study"
+#: Схемы с этим ключом нет в уроке занятия (`lesson_diagram`).
+СХЕМА_НЕИЗВЕСТНА = "diagram_unknown"
 НУЖЕН_КВИЗ = "quiz_required"
 ПУНКТЫ_ОТКРЫТЫ = "goals_open"
 ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
@@ -588,10 +590,6 @@ def lesson_item(session: str, goal: str) -> dict:
 		},
 		"details": _текст_пакета(подробности.get(goal) if isinstance(подробности, dict) else None),
 	}
-
-
-#: Схемы с этим ключом нет в уроке занятия.
-СХЕМА_НЕИЗВЕСТНА = "diagram_unknown"
 
 
 @frappe.whitelist()

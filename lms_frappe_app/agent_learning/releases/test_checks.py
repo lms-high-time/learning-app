@@ -238,9 +238,14 @@ class TestПроверкиРелиза(unittest.TestCase):
 		схемы = р["agent"]["lessons"]["l-1"]["diagrams"]
 		схемы.append(dict(схемы[0]))
 		р["agent"]["lessons"]["l-2"]["diagrams"] = "не список"
+		схемы.append({**схемы[0], "key": "Bad Key"})
 		self.assertEqual(
-			sorted((п["code"], п["where"]) for п in checks.проблемы(р)[0]),
-			[("diagram_shape", "agent.lessons.l-2.diagrams"), ("duplicate_key", "agent.lessons.l-1.diagrams")],
+			sorted((п["code"], п["where"], п.get("index")) for п in checks.проблемы(р)[0]),
+			[
+				("diagram_shape", "agent.lessons.l-1.diagrams", 2),
+				("diagram_shape", "agent.lessons.l-2.diagrams", None),
+				("duplicate_key", "agent.lessons.l-1.diagrams", None),
+			],
 		)
 		чисто = '<a href="#step">шаг</a><img src="data:image/png;base64,AA"><div data-step="1"></div>'
 		р = пример_релиза()
