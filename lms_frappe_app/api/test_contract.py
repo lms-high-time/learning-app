@@ -514,6 +514,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		старт = self.сверить("student.start_lesson", student.start_lesson(lesson=урок_релиза(курс, "l-1")))
 		занятие = старт["session"]
 		self.сверить("student.lesson_item", student.lesson_item(session=занятие, goal="term:T1"))
+		self.сверить("student.lesson_diagram", student.lesson_diagram(session=занятие, key="task-flow"))
 		self._отметить_обязательные(занятие, старт["lesson_map"])
 		прежняя = self.сверить("student.request_quiz", student.request_quiz(session=занятие))["attempt"]
 		self._гонка_с_публикацией(курс, прежняя)

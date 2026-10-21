@@ -241,6 +241,10 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 СЛОВА_УЧЕНИКА = "Слова ученика в ответ на вопрос из релиза"
 #: Подробности пункта из пакета агента — отдаёт только `lesson_item`.
 ТЕКСТ_ПУНКТА = "Подробности пункта из пакета агента"
+#: Схема урока (learning-services#644): описание — старту урока и
+#: `lesson_diagram`, HTML — только `lesson_diagram`.
+ОПИСАНИЕ_СХЕМЫ = "Описание схемы из пакета агента"
+HTML_СХЕМЫ = "<p>HTML схемы из пакета агента</p>"
 #: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
 ЗАКРЫТОЕ_РЕЛИЗА = (
 	ПОЯСНЕНИЕ_РЕЛИЗА,
@@ -248,6 +252,8 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 	ПАКЕТ_АГЕНТА,
 	ПОДСКАЗКА_РАЗДЕЛА,
 	ТЕКСТ_ПУНКТА,
+	ОПИСАНИЕ_СХЕМЫ,
+	HTML_СХЕМЫ,
 	КАРТА_КУРСА,
 	СВИДЕТЕЛЬСТВО,
 )
@@ -298,6 +304,9 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 					"directive": ПАКЕТ_АГЕНТА,
 					"items": {"term:T1": ТЕКСТ_ПУНКТА},
 					"sections": {"log": ПОДСКАЗКА_РАЗДЕЛА},
+					"diagrams": [
+						{"key": "flow", "title": "Схема", "description": ОПИСАНИЕ_СХЕМЫ, "html": HTML_СХЕМЫ}
+					],
 				}
 			}
 		}
@@ -339,7 +348,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.assertTrue(урок["ok"], урок)
 		# Пакет агента — только агентским методам, и старт отдаёт его урок
 		# (learning-services#506); ответы, карта и свидетельство — никому.
-		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА)
+		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА, ОПИСАНИЕ_СХЕМЫ)
 		выдано = проверить_ответ(
 			self, урок, "start_lesson", запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные)
 		)
@@ -354,6 +363,14 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ТЕКСТ_ПУНКТА),
 		)
 		self.assertIn(ТЕКСТ_ПУНКТА, выдано)
+		# Схема с HTML — только по ключу, своему окну.
+		выдано = проверить_ответ(
+			self,
+			student.lesson_diagram(занятие, "flow"),
+			"lesson_diagram",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in (ОПИСАНИЕ_СХЕМЫ, HTML_СХЕМЫ)),
+		)
+		self.assertIn(HTML_СХЕМЫ, выдано)
 		self.проверить("lesson_item", student.lesson_item(занятие, "l-1-D1/V1"))
 		self.проверить(
 			"mark_goal",

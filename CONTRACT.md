@@ -748,6 +748,9 @@ learning-services#405).
   "resume_from": "Начать с примера ученика про отчёты",
   "directive": "…", "material": "…",
   "section_hints": { "log": "…" },
+  "diagrams": [ { "key": "task-flow", "title": "Куда отправить задачу",
+                  "description": "Шаги: срок, зона, данные.",
+                  "when": "когда ученик спрашивает, с чего начать" } ],
   "course_frame": { "frame": "…",
                     "learn_about_student": [ { "key": "where_applies", "text": "…", "changes": false } ] },
   "history": {
@@ -813,7 +816,10 @@ learning-services#405).
 (`agent.lessons.<ключ>` релиза); нет — пустая строка. `section_hints` —
 подсказки агенту по разделам документа из того же среза (`sections`): ключ
 раздела → текст; пустые не приходят, нет ни одной — `{}`. Ключи — разделы
-документа действующего релиза: публикация не пропускает другие. `course_frame` — рамка
+документа действующего релиза: публикация не пропускает другие. `diagrams` —
+схемы урока из того же среза (learning-services#644): ключ, название,
+описание для модели и `when` — когда показать (нет — ключа нет); без HTML —
+его отдаёт `lesson_diagram` по ключу. Схем нет — `[]`. `course_frame` — рамка
 пакета (`frame`, `learn_about_student`, какие есть) — только при `frame:
 true`; при `false` ключа нет. **Пакет агента отдаёт только этот метод**,
 подробности пункта — `lesson_item`: ученик и руководитель его не видят ни в
@@ -961,6 +967,32 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 `release`) — урок прохождения занятия снят из действующего релиза;
 `goal_unknown` (с `goal` и `goals` — ключами пунктов урока в действующем
 релизе).
+
+## `lms_frappe_app.api.student.lesson_diagram`
+
+Схема урока по занятию — целиком, с HTML для окна (learning-services#644).
+Только чтение.
+
+**Параметры:** `session`, `key` — ключ схемы (`diagrams[].key` у
+`start_lesson`).
+
+```json
+{ "ok": true, "data": {
+  "diagram": { "key": "task-flow", "title": "Куда отправить задачу",
+               "description": "Шаги: срок, зона, данные.",
+               "when": "когда ученик спрашивает, с чего начать",
+               "html": "<!doctype html>…" } } }
+```
+
+Схема — из среза пакета агента урока занятия в действующем релизе
+(`agent.lessons.<ключ>.diagrams`). HTML — страница автора: публикация
+пропускает её только без внешних ресурсов и не больше 100 000 байт
+(`releases.diagrams`). `when` — когда показать; нет — ключа нет.
+
+**Отказы:** `not_your_session`; `course_not_released` (с `course` и `lesson`);
+`not_enrolled`, `organization_suspended`; `lesson_not_in_release` (с `course`,
+`lesson_key`, `release`); `diagram_unknown` (с `key` и `diagrams` — ключами схем
+урока).
 
 ## `lms_frappe_app.api.student.mark_goal`
 
@@ -3617,7 +3649,16 @@ HEAD`:
 лишний ключ), `chapter_order`, `quiz_correct`, `document_key`, `text_too_long`,
 `title_forbidden_chars` — `<` или `>` в названии главы, урока, домашки или
 документа (`chars` — какие из них), `agent_leak` — ключ `answers` или `correct` в пакете агента,
-`where` — путь до него, например `agent.lessons.l-1.answers`; `total`);
+`where` — путь до него, например `agent.lessons.l-1.answers`; схемы уроков
+(`releases.diagrams`, `where` — `agent.lessons.<урок>.diagrams[<ключ>]`,
+`key`): `diagram_shape` — `diagrams` не список записей, ключ схемы не
+`^[a-z0-9][a-z0-9-]{0,63}$` (`where` — `agent.lessons.<урок>.diagrams`,
+`index` — номер записи), поле не строка или лишнее; `duplicate_key` —
+ключ повторяется в уроке; `diagram_no_title`, `diagram_no_description`,
+`text_too_long` — название длиннее 140 знаков (`limit`, `length`), `diagram_empty`,
+`diagram_too_large` — HTML больше 100 000 байт (`limit`), `diagram_external` —
+HTML зависит от сети: внешний адрес в атрибуте или `url()`, `@import`,
+`<iframe>`, `<base>`, запрос из скрипта (`found`); `total`);
 `course_not_found` (`id`); `course_key_mismatch` — у переданного курса другой
 ключ (`course`, `course_key`, `release_key`); `course_key_taken` — ключ
 релиза уже у другого курса или его курс сейчас заводит другая публикация,

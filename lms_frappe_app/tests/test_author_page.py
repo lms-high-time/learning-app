@@ -17,7 +17,7 @@ from frappe.utils import add_to_date, now_datetime
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.agent_learning.releases import lesson_map
 from lms_frappe_app.api import authoring
-from lms_frappe_app.tests.release_sample import пример_карты, пример_релиза
+from lms_frappe_app.tests.release_sample import HTML_СХЕМЫ, пример_карты, пример_релиза
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 from lms_frappe_app.www import author
 
@@ -399,6 +399,17 @@ class IntegrationTestAuthorPageView(IntegrationTestCase):
 					self.assertRegex(значение, r"^[\w-]+$", имя)
 				for адрес in re.findall(r'\shref="([^"]*)"', html):
 					self.assertNotRegex(адрес, r"[<>]")
+
+	def test_схемы_урока_без_html(self):
+		"""Схема — до 100 КБ HTML: на странице — что видит агент, и размер страницы (#644)."""
+		с = сведения_для(self.куратор, course=self.курс, lesson="l-1")
+
+		[схема] = next(ч for ч in с["lesson"]["agent"] if ч["name"] == "diagrams")["entries"]
+		self.assertEqual((схема["key"], схема["title"]), ("task-flow", "Куда отправить задачу"))
+		self.assertIn("Шаги: срок, зона, данные.", схема["text"])
+		self.assertIn("Когда показать: когда ученик спрашивает, с чего начать", схема["text"])
+		self.assertIn(f"HTML: {len(HTML_СХЕМЫ.encode())} байт", схема["text"])
+		self.assertNotIn("HTML схемы из релиза", страница(self.куратор, course=self.курс, lesson="l-1"))
 
 	def test_урок_не_из_релиза_и_неизвестный_курс_дают_пометку(self):
 		self.assertTrue(сведения_для(self.куратор, course=self.курс, lesson="l-9")["missing"])

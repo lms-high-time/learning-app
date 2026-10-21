@@ -11,7 +11,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
-from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей
+from lms_frappe_app.tests.release_sample import СХЕМА, пример_релиза, релиз_двух_целей
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
 	зачислить_на_курс,
@@ -175,6 +175,36 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 				ошибка = self.отказ(вызов(), код)
 				if что == "неизвестный пункт":
 					self.assertEqual(ошибка["goals"], ["term:T1", "l-1-D1/V1", "refute:M1"])
+
+	# --- схемы урока (learning-services#644) ---
+
+	def test_схемы_урока_список_на_старте_html_по_ключу(self):
+		старт = self.старт()
+		без_html = {к: в for к, в in СХЕМА.items() if к != "html"}
+
+		self.assertEqual(старт["diagrams"], [без_html])
+		self.assertNotIn(СХЕМА["html"], json.dumps(старт, ensure_ascii=False))
+		self.assertEqual(self.данные(student.lesson_diagram(старт["session"], "task-flow")), {"diagram": СХЕМА})
+
+	def test_схемы_урока_отказы(self):
+		занятие = self.старт()["session"]
+		frappe.set_user("Administrator")
+		чужое = создать_занятие(создать_ученика(f"chain-d-{frappe.generate_hash(length=6)}@example.com"), self.урок)
+		frappe.set_user(self.ученик)
+		старое = создать_занятие(self.ученик, self.курс_без_релиза())
+
+		ошибка = self.отказ(student.lesson_diagram(занятие, "nope"), student.СХЕМА_НЕИЗВЕСТНА)
+		self.assertEqual(ошибка["diagrams"], ["task-flow"])
+		self.отказ(student.lesson_diagram(чужое, "task-flow"), "not_your_session")
+		self.отказ(student.lesson_diagram(старое, "task-flow"), "course_not_released")
+
+	def test_урок_без_схем(self):
+		self.свой_курс()
+		frappe.db.set_value("Agent Release Lesson", {"parent": self.релиз, "lesson_key": "l-1"}, "agent", "{}")
+		старт = self.старт()
+
+		self.assertEqual(старт["diagrams"], [])
+		self.assertEqual(self.отказ(student.lesson_diagram(старт["session"], "task-flow"), "diagram_unknown")["diagrams"], [])
 
 	def test_урок_снят_из_релиза_подробностей_и_закрытия_нет(self):
 		"""Прохождение урока, снятого новым релизом, отстаёт от действующего: подробности

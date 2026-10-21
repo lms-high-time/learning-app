@@ -79,6 +79,7 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 	ЧУЖОЕ_ЗАНЯТИЕ,
 )
+from lms_frappe_app.agent_learning.releases import diagrams as схемы
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.agent_learning.permissions import видит_всё
@@ -87,6 +88,8 @@ from lms_frappe_app.agent_learning.structure import уроки_курса
 from lms_frappe_app.api import контракт, текущий_пользователь
 
 НЕЧЕГО_УЧИТЬ = "nothing_to_study"
+#: Схемы с этим ключом нет в уроке занятия (`lesson_diagram`).
+СХЕМА_НЕИЗВЕСТНА = "diagram_unknown"
 НУЖЕН_КВИЗ = "quiz_required"
 ПУНКТЫ_ОТКРЫТЫ = "goals_open"
 ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
@@ -433,6 +436,8 @@ def start_lesson(
 		"directive": _текст_пакета(пакет.get("directive")),
 		"material": _текст_пакета(пакет.get("material")),
 		"section_hints": _подсказки_разделов(пакет),
+		# Без HTML: его отдаёт `lesson_diagram` по ключу (learning-services#644).
+		"diagrams": схемы.список(пакет),
 		"history": {
 			"lessons": история,
 			"notes": _заметки_по_ключам(ученик, курс, index.ключи_рамки(рамка)),
@@ -585,6 +590,31 @@ def lesson_item(session: str, goal: str) -> dict:
 		},
 		"details": _текст_пакета(подробности.get(goal) if isinstance(подробности, dict) else None),
 	}
+
+
+@frappe.whitelist()
+@контракт
+def lesson_diagram(session: str, key: str) -> dict:
+	"""Схема урока по занятию — с HTML, для окна (learning-services#644).
+
+	Только чтение. Схема — из среза пакета агента урока в действующем релизе;
+	проверки доступа — как у `lesson_item`.
+	"""
+	занятие = _своё_занятие(session)
+	релиз, урок = _урок_занятия(занятие)
+	_требовать_доступ_к_курсу(занятие.student, занятие.course)
+	if not index.урок(релиз, урок):
+		raise прохождения.урок_не_в_релизе(занятие.course, урок, релиз)
+	пакет = index.пакет_урока(релиз, урок)
+	схема = схемы.схема(пакет, key)
+	if not схема:
+		raise Отказ(
+			СХЕМА_НЕИЗВЕСТНА,
+			"В уроке нет такой схемы",
+			key=key,
+			diagrams=[с["key"] for с in схемы.список(пакет)],
+		)
+	return {"diagram": схема}
 
 
 @frappe.whitelist(methods=["POST"])
