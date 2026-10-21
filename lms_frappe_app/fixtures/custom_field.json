@@ -134,5 +134,49 @@
   "description": "Ключ урока из релиза: по нему публикация находит урок. Ставится при создании и не меняется.",
   "insert_after": "lesson_hook",
   "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "OAuth Bearer Token-lms_token_family",
+  "dt": "OAuth Bearer Token",
+  "fieldname": "lms_token_family",
+  "fieldtype": "Data",
+  "label": "Семья токенов",
+  "read_only": 1,
+  "no_copy": 1,
+  "search_index": 1,
+  "description": "Вход, от которого идёт токен: его код авторизации. Повтор кода или заменённого токена обновления отзывает всю семью.",
+  "insert_after": "status",
+  "module": "Agent Learning",
+  "report_hide": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "OAuth Bearer Token-lms_family_started",
+  "dt": "OAuth Bearer Token",
+  "fieldname": "lms_family_started",
+  "fieldtype": "Datetime",
+  "label": "Начало семьи",
+  "read_only": 1,
+  "no_copy": 1,
+  "description": "Когда выдан первый токен семьи. От него считается предельный срок обновления.",
+  "insert_after": "lms_token_family",
+  "module": "Agent Learning"
+ },
+ {
+  "doctype": "Custom Field",
+  "name": "OAuth Bearer Token-lms_previous_refresh",
+  "dt": "OAuth Bearer Token",
+  "fieldname": "lms_previous_refresh",
+  "fieldtype": "Data",
+  "label": "Отпечаток прежнего токена обновления",
+  "read_only": 1,
+  "no_copy": 1,
+  "search_index": 1,
+  "hidden": 1,
+  "description": "SHA-256 токена обновления, на смену которому выдан этот токен: по нему узнаётся повтор заменённого токена.",
+  "insert_after": "lms_family_started",
+  "module": "Agent Learning",
+  "report_hide": 1
  }
 ]

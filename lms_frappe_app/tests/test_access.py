@@ -200,6 +200,44 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 			self.assertEqual(frappe.session.user, "Guest")
 			self.assertTrue(frappe.db.get_value("User", пользователь, "last_password_reset_date"))
 
+	def test_смена_пароля_отзывает_токены_агентов(self):
+		"""Смена пароля завершала только сессии браузера, а агент и веб-чат
+		жили на прежнем токене обновления (learning-services#665). Отказ Frappe
+		(410) пароль не меняет и токены не трогает."""
+		клиент = frappe.get_doc(
+			{
+				"doctype": "OAuth Client",
+				"app_name": "Агент",
+				"redirect_uris": "https://agent.example/cb",
+				"default_redirect_uri": "https://agent.example/cb",
+				"grant_type": "Authorization Code",
+				"response_type": "Code",
+				"scopes": "all",
+			}
+		).insert(ignore_permissions=True)
+		for что, (подготовка, срок, статус) in {
+			"первое задание пароля": (без_пароля, None, "Revoked"),
+			"просроченный ключ": (с_просроченным_ключом, 3600, "Active"),
+		}.items():
+			with self.subTest(что), self.запрос():
+				свой, пользователь = подготовка()
+				токен = frappe.get_doc(
+					{
+						"doctype": "OAuth Bearer Token",
+						"client": клиент.name,
+						"user": пользователь,
+						"scopes": "all",
+						"access_token": frappe.generate_hash(),
+						"refresh_token": frappe.generate_hash(),
+						"expires_in": 3600,
+					}
+				).insert(ignore_permissions=True)
+
+				with со_сроком(срок) if срок is not None else nullcontext():
+					update_password(НОВЫЙ_ПАРОЛЬ, key=свой)
+
+				self.assertEqual(frappe.db.get_value("OAuth Bearer Token", токен.name, "status"), статус)
+
 	def test_перекрытия_подключены(self):
 		"""Смена пароля и обе формы регистрации идут через приложение."""
 		перекрытия = frappe.get_hooks("override_whitelisted_methods")

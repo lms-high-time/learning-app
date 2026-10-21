@@ -40,7 +40,14 @@ from lms_frappe_app.tests.sample_data import зачислить, раздел, �
 #: хотя флага у них нет: в них пишется JSON строкой (`html_text.JSON_СТРОКОЙ`)
 #: или текст `db.set_value` мимо `validate` — цели анонса (`announce_course`,
 #: `api.authoring`).
-ТЕКСТ_МИМО_ОЧИСТКИ = html_text.JSON_СТРОКОЙ | {("LMS Course", "announce_objectives")}
+ТЕКСТ_МИМО_ОЧИСТКИ = html_text.JSON_СТРОКОЙ | {
+	("LMS Course", "announce_objectives"),
+	# Семья токенов OAuth: пишет только код сервера — имя кода авторизации и
+	# отпечаток sha256, текста человека в них не бывает; доктайп Frappe хук
+	# очистки приложения не охватывает (learning-services#665).
+	("OAuth Bearer Token", "lms_token_family"),
+	("OAuth Bearer Token", "lms_previous_refresh"),
+}
 #: Типы полей, в которые пишется текст.
 ТЕКСТОВЫЕ = frozenset(
 	{
