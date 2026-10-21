@@ -193,7 +193,7 @@ def поля_клиента(адрес: str, документ) -> dict:
 	# Первый адрес — адрес возврата по умолчанию, у него поле `Data`.
 	if len(адреса[0]) > ДЛИНА_ПОЛЯ:
 		raise ДокументНеПринят("первый адрес возврата длиннее 140 знаков")
-	if документ.get("token_endpoint_auth_method", "none") != "none":
+	if not _умеет_публичным(документ):
 		raise ДокументНеПринят(
 			"клиент по адресу принимается только публичным (token_endpoint_auth_method: none)"
 		)
@@ -215,6 +215,21 @@ def поля_клиента(адрес: str, документ) -> dict:
 		"scopes": "all",
 		"skip_authorization": 0,
 	}
+
+
+def _умеет_публичным(документ: dict) -> bool:
+	"""Клиент войдёт без своей аутентификации на токен-эндпоинте.
+
+	Сервер умеет для клиентов по адресу только `none`: секрета у них нет, а
+	`private_key_jwt` не поддержан. ChatGPT предпочитает `private_key_jwt`, но
+	перечисляет `none` в `token_endpoint_auth_methods_supported` — по
+	метаданным сервера он выбирает `none` (learning-services#663). Вход такого
+	клиента держит PKCE S256, как у остальных клиентов по адресу.
+	"""
+	if документ.get("token_endpoint_auth_method", "none") == "none":
+		return True
+	умеет = документ.get("token_endpoint_auth_methods_supported")
+	return isinstance(умеет, list) and "none" in умеет
 
 
 def срок_кэша(cache_control: str | None) -> int:
