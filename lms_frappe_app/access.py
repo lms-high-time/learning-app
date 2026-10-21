@@ -9,11 +9,14 @@
 """
 
 from datetime import timedelta
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
+from frappe.auth import MAX_PASSWORD_SIZE
 from frappe.core.doctype.user import user as frappe_user
 from frappe.rate_limiter import rate_limit
+from frappe.twofactor import should_run_2fa
 from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
 from frappe.website.utils import is_signup_disabled
@@ -84,9 +87,12 @@ def update_password(
 
 	Пароль проверяется требованиями платформы до Frappe (`passwords.py`,
 	learning-services#666): Frappe пишет пароль мимо документа `User`, и хук
-	документа его не видит. Пользователь не найден — ключ недействителен, и
-	Frappe ответит 410 сам.
+	документа его не видит. Предел длины Frappe — раньше наших проверок:
+	zxcvbn и хеш для сервиса утечек не должны получать мегабайт. Пользователь
+	не найден — ключ недействителен, и Frappe ответит 410 сам.
 	"""
+	if len(new_password) > MAX_PASSWORD_SIZE:
+		frappe.throw(_("Password size exceeded the maximum allowed size."))
 	запись = запись_ключа(key)
 	пользователь = запись.name if запись else (None if key else frappe.session.user)
 	if пользователь and пользователь != "Guest":
@@ -95,9 +101,25 @@ def update_password(
 	ответ = frappe_user.update_password(
 		new_password, logout_all_sessions=logout_all_sessions, key=key, old_password=old_password
 	)
-	if not впервые and пользователь != "Guest" and frappe.local.response.get("http_status_code") != 410:
+	сменён = frappe.local.response.get("http_status_code") != 410
+	if not впервые and пользователь != "Guest" and сменён:
 		_письмо_пароль_изменён(пользователь)
+	if key and сменён and should_run_2fa(пользователь):
+		return _на_вход_со_вторым_фактором(ответ)
 	return ответ
+
+
+def _на_вход_со_вторым_фактором(куда: str | None) -> str:
+	"""Выход из сессии, которую открыл `update_password` Frappe, и адрес входа.
+
+	`Why:` после смены пароля по ссылке Frappe входит под пользователем сам
+	(`login_as`), мимо второго фактора, — и ссылка из письма заменяла бы
+	код из приложения (learning-services#666). Пользователю со вторым
+	фактором пароль меняется, но входит он обычным входом, где спросят код;
+	адрес, куда Frappe вёл после смены, становится адресом возврата.
+	"""
+	frappe.local.login_manager.logout()
+	return f"/login?{urlencode({'redirect-to': куда})}" if куда else "/login"
 
 
 def _письмо_пароль_изменён(пользователь: str) -> None:

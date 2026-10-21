@@ -3,7 +3,7 @@
 """Настройка при установке и миграции."""
 
 import frappe
-from frappe.utils import get_url
+from frappe.utils import cint, get_url
 
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
@@ -514,9 +514,23 @@ def обеспечить_значения_настроек() -> None:
 #: поэтому флаг пишется в базу, а не сохранением документа.
 РОЛИ_С_2FA = ("System Manager",)
 
+#: Роли, у которых второй фактор снимается. `Why:` Frappe сам ставит его роли
+#: `All` — всем пользователям, ученикам тоже, — когда 2FA включают сохранением
+#: формы System Settings (`toggle_two_factor_auth`); на стенде так и случилось,
+#: и флаг снимали вручную. Второй фактор ученикам владелец не вводил.
+РОЛИ_БЕЗ_2FA = ("All",)
+
+#: Ключ `site_config.json`: 1 — второй фактор на этом сайте выключен.
+#: `Why:` только для локальной разработки: у Administrator локального сайта
+#: почта `admin@example.com`, письмо с QR-кодом приложения-генератора до него
+#: не дойдёт, и после миграции в desk не войти. На стенде ключа нет.
+БЕЗ_2FA = "lms_disable_2fa_enforcement"
+
 
 def обеспечить_настройки_входа() -> None:
-	"""`НАСТРОЙКИ_ВХОДА` в System Settings и второй фактор ролям `РОЛИ_С_2FA`.
+	"""`НАСТРОЙКИ_ВХОДА` в System Settings, второй фактор ролям `РОЛИ_С_2FA` и
+	ни одной из `РОЛИ_БЕЗ_2FA`. С ключом `БЕЗ_2FA` в конфигурации сайта второй
+	фактор выключается целиком, а ролям не ставится.
 
 	Пишутся только расходящиеся поля: `after_migrate` зовётся на каждый старт
 	контейнера, и безусловная запись меняла бы `modified` на ровном месте.
@@ -527,8 +541,10 @@ def обеспечить_настройки_входа() -> None:
 	"""
 	from frappe.core.doctype.system_settings.system_settings import clear_system_settings_cache
 
+	без_2fa = cint(frappe.conf.get(БЕЗ_2FA))
+	нужные = {**НАСТРОЙКИ_ВХОДА, "enable_two_factor_auth": 0} if без_2fa else НАСТРОЙКИ_ВХОДА
 	текущие = frappe.db.get_singles_dict("System Settings", cast=True)
-	новые = {поле: значение for поле, значение in НАСТРОЙКИ_ВХОДА.items() if текущие.get(поле) != значение}
+	новые = {поле: значение for поле, значение in нужные.items() if текущие.get(поле) != значение}
 	if новые:
 		frappe.db.set_single_value("System Settings", новые)
 		# Умолчания читает desk: форма пользователя смотрит
@@ -538,9 +554,13 @@ def обеспечить_настройки_входа() -> None:
 		frappe.clear_document_cache("System Settings", "System Settings")
 		clear_system_settings_cache()
 		frappe.local.system_settings = None
-	for роль in РОЛИ_С_2FA:
-		if frappe.db.exists("Role", роль) and not frappe.db.get_value("Role", роль, "two_factor_auth"):
-			frappe.db.set_value("Role", роль, "two_factor_auth", 1)
+	роли = {роль: 0 for роль in РОЛИ_БЕЗ_2FA}
+	if not без_2fa:
+		роли.update({роль: 1 for роль in РОЛИ_С_2FA})
+	for роль, значение in роли.items():
+		прежнее = frappe.db.get_value("Role", роль, "two_factor_auth")
+		if прежнее is not None and прежнее != значение:
+			frappe.db.set_value("Role", роль, "two_factor_auth", значение)
 
 
 def after_install() -> None:

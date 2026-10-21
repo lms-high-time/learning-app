@@ -100,6 +100,17 @@ docker compose exec backend bench --site lms.localhost migrate     # после 
 docker compose exec backend bench --site lms.localhost run-tests --app lms_frappe_app
 ```
 
+Миграция включает второй фактор для роли System Manager
+(learning-services#666). У Administrator локального сайта почта
+`admin@example.com`, письмо с QR-кодом приложения-генератора до него не
+дойдёт, и в desk будет не войти. Локально второй фактор выключается ключом
+конфигурации сайта — до миграции; следующая миграция с ним выключит и уже
+включённый:
+
+```bash
+docker compose exec backend bench --site lms.localhost set-config -p lms_disable_2fa_enforcement 1
+```
+
 ### Одноразовые патчи
 
 Патч из `patches.txt` удаляется вместе со своим тестом и кодом, нужным только

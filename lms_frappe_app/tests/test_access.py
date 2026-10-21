@@ -178,6 +178,28 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 			self.assertEqual(состояние_ключа(свой), КЛЮЧ_ДЕЙСТВУЕТ)
 			письма.assert_not_called()
 
+	def test_длинный_пароль_отклоняется_до_проверок(self):
+		"""Предел Frappe — раньше zxcvbn и сервиса утечек (learning-services#666)."""
+		with self.запрос(), patch("lms_frappe_app.access.проверить_пароль") as проверка:
+			свой, _ = менявший_пароль()
+
+			with self.assertRaises(frappe.ValidationError):
+				update_password("п" * 513, key=свой)
+
+			проверка.assert_not_called()
+
+	def test_со_вторым_фактором_после_смены_вход_заново(self):
+		"""Вход Frappe после смены пароля по ссылке обходил второй фактор:
+		пароль меняется, а вход — обычный, с кодом (learning-services#666)."""
+		with self.запрос(), patch("lms_frappe_app.access.should_run_2fa", return_value=True):
+			свой, пользователь = менявший_пароль()
+
+			переход = update_password(НОВЫЙ_ПАРОЛЬ, key=свой)
+
+			self.assertTrue(переход.startswith("/login?redirect-to="), переход)
+			self.assertEqual(frappe.session.user, "Guest")
+			self.assertTrue(frappe.db.get_value("User", пользователь, "last_password_reset_date"))
+
 	def test_перекрытия_подключены(self):
 		"""Смена пароля и обе формы регистрации идут через приложение."""
 		перекрытия = frappe.get_hooks("override_whitelisted_methods")

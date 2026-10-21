@@ -3,11 +3,13 @@
 
 """Настройки входа из кода (learning-services#666)."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.core.doctype.system_settings.system_settings import clear_system_settings_cache
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.install import НАСТРОЙКИ_ВХОДА, РОЛИ_С_2FA, обеспечить_настройки_входа
+from lms_frappe_app.install import БЕЗ_2FA, НАСТРОЙКИ_ВХОДА, РОЛИ_С_2FA, обеспечить_настройки_входа
 
 НАСТРОЙКИ = "System Settings"
 
@@ -34,13 +36,13 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 	def test_настройки_приводятся_и_не_пишутся_зря(self):
 		"""Ручная правка возвращается миграцией; совпадающие значения не пишутся:
 		`after_migrate` зовётся на каждый старт контейнера. Второй фактор —
-		только ролям из списка: роль `All` (все пользователи) не трогается."""
+		только ролям из списка, у роли `All` (все пользователи) он снимается."""
 		frappe.db.set_single_value(
 			НАСТРОЙКИ,
 			{"login_with_email_link": 1, "allow_login_after_fail": 60, "enable_two_factor_auth": 0},
 		)
 		frappe.db.set_value("Role", "System Manager", "two_factor_auth", 0)
-		frappe.db.set_value("Role", "All", "two_factor_auth", 0)
+		frappe.db.set_value("Role", "All", "two_factor_auth", 1)
 		frappe.local.system_settings = None
 
 		обеспечить_настройки_входа()
@@ -57,3 +59,17 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 		обеспечить_настройки_входа()
 		self.assertEqual(frappe.db.get_singles_dict(НАСТРОЙКИ)["modified"], записано)
 		self.assertEqual(frappe.db.get_value("Role", "System Manager", "modified"), роль)
+
+	def test_без_2fa_для_локальной_разработки(self):
+		"""Ключ конфигурации выключает второй фактор и не ставит его ролям:
+		письмо с QR-кодом Administrator локального сайта не получит."""
+		frappe.db.set_single_value(НАСТРОЙКИ, "enable_two_factor_auth", 1)
+		frappe.db.set_value("Role", "System Manager", "two_factor_auth", 0)
+		frappe.local.system_settings = None
+
+		with patch.dict(frappe.conf, {БЕЗ_2FA: 1}):
+			обеспечить_настройки_входа()
+
+		self.assertEqual(frappe.get_system_settings("enable_two_factor_auth"), 0)
+		self.assertEqual(frappe.get_system_settings("allow_error_traceback"), 0)
+		self.assertEqual(frappe.db.get_value("Role", "System Manager", "two_factor_auth"), 0)
