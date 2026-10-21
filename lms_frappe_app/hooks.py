@@ -492,14 +492,22 @@ ignore_links_on_delete = ["Agent Consent"]
 # Без явного согласия с документами страницы платформы ведут на экран
 # согласия (learning-services#624): вошедшие через Google и прежние
 # пользователи отмечают «мне есть 18» и «принимаю документы» один раз.
-before_request = ["lms_frappe_app.agent_learning.consent.потребовать_согласие"]
-# after_request = ["lms_frappe_app.utils.after_request"]
+#
+# `sid` в параметрах запроса — отказ, и первым: переадресация следующих хуков
+# поставила бы cookie сессии из параметра (learning-services#666).
+before_request = [
+	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
+]
+after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
 
 # Session Events
 # --------------
 # Выход из Cenda отзывает токены веб-чата: у чата свой вход, и без этого он
 # переживал «Выйти» (learning-services#656).
 on_logout = "lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе"
+# Абсолютный срок сессии от входа (learning-services#666).
+on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
 
 # Job Events
 # ----------
