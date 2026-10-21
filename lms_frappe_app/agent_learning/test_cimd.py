@@ -71,6 +71,20 @@ class UnitTestCIMD(UnitTestCase):
 			("адрес возврата http не на этот компьютер", {"redirect_uris": ["http://evil.example/cb"]}),
 			("адрес возврата с якорем", {"redirect_uris": ["https://agent.example/cb#x"]}),
 			("клиент с секретом", {"token_endpoint_auth_method": "client_secret_basic"}),
+			(
+				"private_key_jwt без none в поддержанных",
+				{
+					"token_endpoint_auth_method": "private_key_jwt",
+					"token_endpoint_auth_methods_supported": ["private_key_jwt"],
+				},
+			),
+			(
+				"поддержанные — не список",
+				{
+					"token_endpoint_auth_method": "private_key_jwt",
+					"token_endpoint_auth_methods_supported": "none",
+				},
+			),
 			("секрет в документе", {"client_secret": "s"}),
 			("нет authorization_code", {"grant_types": ["client_credentials"]}),
 			("grant_types не список", {"grant_types": 1}),
@@ -80,6 +94,27 @@ class UnitTestCIMD(UnitTestCase):
 				cimd.поля_клиента(АДРЕС, {**ДОКУМЕНТ, **правка})
 		with self.subTest("не объект"), self.assertRaises(cimd.ДокументНеПринят):
 			cimd.поля_клиента(АДРЕС, [ДОКУМЕНТ])
+
+	def test_документ_chatgpt_принимается_публичным(self):
+		"""ChatGPT предпочитает private_key_jwt, но умеет и none — клиент
+		заводится публичным; без этого ChatGPT не подключался вовсе
+		(learning-services#663). Документ — как его отдаёт chatgpt.com."""
+		адрес = "https://chatgpt.com/oauth/okEdNMt96pKW/client.json"
+		документ = {
+			"client_id": адрес,
+			"client_uri": "https://chatgpt.com/",
+			"redirect_uris": ["https://chatgpt.com/connector/oauth/okEdNMt96pKW"],
+			"token_endpoint_auth_method": "private_key_jwt",
+			"token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+			"grant_types": ["authorization_code", "refresh_token"],
+			"response_types": ["code"],
+			"client_name": "ChatGPT",
+			"logo_uri": "https://persistent.oaistatic.com/sonic/misc/openai-logo.png",
+			"token_endpoint_auth_signing_alg": "RS256",
+			"jwks_uri": "https://chatgpt.com/oauth/jwks.json",
+		}
+		поля = cimd.поля_клиента(адрес, документ)
+		self.assertEqual(поля["token_endpoint_auth_method"], "None")
 
 	def test_разметка_и_длинные_ссылки_не_берутся(self):
 		поля = cimd.поля_клиента(

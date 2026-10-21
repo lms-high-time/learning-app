@@ -140,6 +140,24 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				статус, ответ = self._токен(grant_type="refresh_token", refresh_token=refresh)
 				self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
 
+	def test_запрос_без_client_id_с_чужим_токеном_invalid_client(self):
+		"""Без `client_id` Frappe ищет клиента по токену: неизвестный давал 403
+		мимо OAuth, а без токена и заголовка — 500 (learning-services#663)."""
+		self.addCleanup(setattr, frappe.local, "form_dict", frappe._dict())
+		for что, форма in (
+			("неизвестный токен обновления", {"grant_type": "refresh_token", "refresh_token": "нет-такого"}),
+			(
+				"код с client_assertion",
+				{"grant_type": "authorization_code", "code": "x", "client_assertion": "jwt"},
+			),
+		):
+			with self.subTest(что), mock.patch.object(frappe, "get_request_header", return_value=None):
+				frappe.local.form_dict = frappe._dict(форма)
+				_, тело, статус = self.сервер.create_token_response(
+					f"{САЙТ}.get_token", "POST", urlencode(форма), ФОРМА
+				)
+				self.assertEqual((статус, json.loads(тело).get("error")), (401, "invalid_client"))
+
 	def test_код_обменивается_только_на_свой_адрес_возврата(self):
 		"""Обмен сверяет адрес с тем, к которому привязан код (RFC 6749 §4.1.3)."""
 		self._войти()
