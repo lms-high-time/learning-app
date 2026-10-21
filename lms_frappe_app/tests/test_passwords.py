@@ -13,6 +13,7 @@ from frappe.tests import UnitTestCase
 from lms_frappe_app import passwords
 from lms_frappe_app.passwords import (
 	АДРЕС_УТЕЧЕК,
+	ВХОД_ЧЕРЕЗ_GOOGLE,
 	КОРОТКИЙ,
 	МИНИМУМ_ДЛИНЫ,
 	ПРОСТОЙ,
@@ -39,6 +40,9 @@ class UnitTestPasswordRules(UnitTestCase):
 			"название с цифрами вместо букв и разделителем": ("Super-C3nd4-Pass", (), False, С_НАЗВАНИЕМ),
 			"название через точку": ("High.Time.Forever!", (), False, С_НАЗВАНИЕМ),
 			"название по-русски": ("Мой-ХайТайм-пароль", (), False, С_НАЗВАНИЕМ),
+			"название на стыке слов": ("МойCendaПароль", (), False, С_НАЗВАНИЕМ),
+			"название внутри слова — не название": ("Descendant-ведро-кит", (), False, None),
+			"название внутри слова заглавными": ("ASCENDANT-ведро-кит", (), False, None),
 			"контекстное слово и простые цифры": ("lms123456789", (), False, ПРОСТОЙ),
 			"своё имя дважды": ("ivanovivanov", ("Ivanov", None), False, ПРОСТОЙ),
 			"утёкший пароль": (ХОРОШИЙ, (), True, УТЁК),
@@ -94,6 +98,13 @@ class UnitTestPasswordRules(UnitTestCase):
 		self.assertEqual(пароль_к_проверке(документ("короткий")), "короткий")
 		self.assertIsNone(пароль_к_проверке(документ("короткий", без_политики=True)))
 		self.assertIsNone(пароль_к_проверке(документ("")))
+
+		# Аккаунт, который заводит первый вход через Google, — случайный пароль Frappe.
+		новый = frappe.new_doc("User")
+		новый.new_password = "короткий"
+		self.assertEqual(пароль_к_проверке(новый), "короткий")
+		with patch.dict(frappe.flags, {ВХОД_ЧЕРЕЗ_GOOGLE: True}):
+			self.assertIsNone(пароль_к_проверке(новый))
 
 		with patch.object(frappe, "in_test", False), self.assertRaises(frappe.ValidationError) as отказ:
 			проверить_пароль_пользователя(документ("короткий"))

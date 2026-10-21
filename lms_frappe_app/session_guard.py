@@ -9,6 +9,7 @@
 from datetime import UTC, datetime, timedelta
 
 import frappe
+import orjson
 from werkzeug.exceptions import HTTPException
 from werkzeug.wrappers import Response
 
@@ -26,15 +27,23 @@ def sid_в_параметрах(запрос) -> bool:
 	"""Пришёл ли `sid` параметром: в адресе, в форме или в JSON-теле.
 
 	Те же три источника, из которых Frappe собирает `form_dict`
-	(`frappe.app.make_form_dict`). Сам `form_dict` уже не годится: `sid` из
-	него Frappe вынимает, поднимая сессию.
+	(`frappe.app.make_form_dict`), и тело разбирается так же — `orjson` по
+	тексту тела, иначе `sid`, который увидит Frappe, мы бы не увидели. Тело,
+	которое не разобрать, Frappe отклоняет сам; сбой разбора здесь — «нет».
+	Сам `form_dict` уже не годится: `sid` из него Frappe вынимает, поднимая
+	сессию. Адрес и форма смотрятся и у JSON-запроса: Frappe их тогда не
+	читает, но токен в адресе всё равно оседает в журналах.
 	"""
 	if "sid" in запрос.args or "sid" in запрос.form:
 		return True
-	if запрос.is_json:
-		тело = запрос.get_json(silent=True)
-		return isinstance(тело, dict) and "sid" in тело
-	return False
+	данные = запрос.get_data(as_text=True)
+	if not (данные and запрос.is_json):
+		return False
+	try:
+		тело = orjson.loads(данные)
+	except Exception:  # в том числе RecursionError глубокой вложенности
+		return False
+	return isinstance(тело, dict) and "sid" in тело
 
 
 def отклонить_sid_из_запроса() -> None:

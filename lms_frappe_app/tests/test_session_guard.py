@@ -53,6 +53,11 @@ class UnitTestSidInRequest(_ЗапросНаВремя, UnitTestCase):
 			"в форме": ({"method": "POST", "data": {"sid": "abc"}}, True),
 			"в JSON": ({"method": "POST", "json": {"sid": "abc"}}, True),
 			"JSON списком": ({"method": "POST", "json": ["sid"]}, False),
+			"битый JSON": ({"method": "POST", "data": '{"sid": ', "content_type": "application/json"}, False),
+			"JSON глубже предела разбора": (
+				{"method": "POST", "data": "[" * 100_000 + "]" * 100_000, "content_type": "application/json"},
+				False,
+			),
 			"только cookie": ({"headers": {"Cookie": "sid=abc"}}, False),
 			"другие параметры": ({"query_string": "side=1&key=sid"}, False),
 		}
