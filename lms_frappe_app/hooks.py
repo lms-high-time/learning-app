@@ -481,6 +481,12 @@ ignore_links_on_delete = ["Agent Consent"]
 before_request = ["lms_frappe_app.agent_learning.consent.потребовать_согласие"]
 # after_request = ["lms_frappe_app.utils.after_request"]
 
+# Session Events
+# --------------
+# Выход из Cenda отзывает токены веб-чата: у чата свой вход, и без этого он
+# переживал «Выйти» (learning-services#656).
+on_logout = "lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе"
+
 # Job Events
 # ----------
 # before_job = ["lms_frappe_app.utils.before_job"]
