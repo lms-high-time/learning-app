@@ -103,9 +103,13 @@ class Валидатор(OAuthWebRequestValidator):
 		return bool(привязан) and привязан == redirect_uri
 
 	def authenticate_client(self, request, *args, **kwargs):
-		# Запрос без `client_id` Frappe относит к клиенту по токену и ищет того
-		# через `get_doc`: неизвестный токен давал «запись не найдена» мимо
-		# OAuth. Теперь это `invalid_client` — клиента и правда не опознать.
+		# Запрос без `client_id` Frappe относит к клиенту по токену из формы
+		# или заголовка и грузит его `get_doc` без проверки: неизвестный токен
+		# давал 403 «нет доступа к OAuth-клиенту», запрос без токена и
+		# заголовка (клиент с `client_assertion`) — 500. Клиента не опознать —
+		# это `invalid_client` (learning-services#663).
+		if not request.client_id and not _клиент_по_токену():
+			return False
 		try:
 			return super().authenticate_client(request, *args, **kwargs)
 		except frappe.DoesNotExistError:
@@ -163,6 +167,21 @@ class Валидатор(OAuthWebRequestValidator):
 		if прежний:
 			frappe.db.set_value("OAuth Bearer Token", прежний, "status", "Revoked")
 		return super().save_bearer_token(token, request, *args, **kwargs)
+
+
+def _клиент_по_токену() -> str | None:
+	"""Клиент токена из запроса — там же, где его ищет `authenticate_client` Frappe."""
+	форма = frappe.form_dict
+	if форма.get("refresh_token"):
+		фильтры = {"refresh_token": форма.refresh_token}
+	elif форма.get("token"):
+		фильтры = {"name": форма.token}
+	else:
+		_, _, токен = (frappe.get_request_header("Authorization") or "").partition(" ")
+		if not токен.strip():
+			return None
+		фильтры = {"name": токен.strip()}
+	return frappe.db.get_value("OAuth Bearer Token", фильтры, "client")
 
 
 def _свой_сервер() -> None:

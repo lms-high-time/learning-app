@@ -195,7 +195,8 @@ def поля_клиента(адрес: str, документ) -> dict:
 		raise ДокументНеПринят("первый адрес возврата длиннее 140 знаков")
 	if not _умеет_публичным(документ):
 		raise ДокументНеПринят(
-			"клиент по адресу принимается только публичным (token_endpoint_auth_method: none)"
+			"клиент по адресу принимается только публичным (none в token_endpoint_auth_method"
+			" или в token_endpoint_auth_methods_supported)"
 		)
 	if "client_secret" in документ or "client_secret_expires_at" in документ:
 		raise ДокументНеПринят("в документе клиента секрет")

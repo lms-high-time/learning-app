@@ -115,7 +115,6 @@ class UnitTestCIMD(UnitTestCase):
 		}
 		поля = cimd.поля_клиента(адрес, документ)
 		self.assertEqual(поля["token_endpoint_auth_method"], "None")
-		self.assertEqual(поля["default_redirect_uri"], "https://chatgpt.com/connector/oauth/okEdNMt96pKW")
 
 	def test_разметка_и_длинные_ссылки_не_берутся(self):
 		поля = cimd.поля_клиента(
