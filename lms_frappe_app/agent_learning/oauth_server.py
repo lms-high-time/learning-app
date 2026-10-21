@@ -18,9 +18,14 @@
 - обмен кода сверяет адрес возврата с тем, к которому привязан код (RFC 6749
   §4.1.3), а не со списком клиента: иначе локальный адрес с портом здесь бы и
   не прошёл;
-- отозванный или неизвестный токен обновления — `invalid_grant`, как требует
-  RFC 6749 §5.2. Frappe отвечал на него ошибкой «запись не найдена» мимо
-  OAuth, и агент не понимал, что пора войти заново.
+- отозванный, неизвестный или чужой токен обновления — `invalid_grant`, как
+  требует RFC 6749 §5.2. Frappe отвечал на него ошибкой «запись не найдена»
+  мимо OAuth, и агент не понимал, что пора войти заново;
+- клиенту по адресу — только PKCE с S256 и одноразовый токен обновления.
+  Клиент по адресу всегда публичный: секрета нет, вход держится на PKCE, а
+  спецификация MCP требует для публичных клиентов ротацию токена обновления.
+  Остальным клиентам Frappe это не навязывается — их поведение здесь не
+  меняется.
 """
 
 from urllib.parse import urlsplit
@@ -98,22 +103,56 @@ class Валидатор(OAuthWebRequestValidator):
 		return bool(привязан) and привязан == redirect_uri
 
 	def authenticate_client(self, request, *args, **kwargs):
-		# Frappe ищет клиента через `get_doc`: токен обновления, которого нет,
-		# давал «запись не найдена» вместо ответа OAuth.
+		# Запрос без `client_id` Frappe относит к клиенту по токену и ищет того
+		# через `get_doc`: неизвестный токен давал «запись не найдена» мимо
+		# OAuth. Теперь это `invalid_client` — клиента и правда не опознать.
 		try:
 			return super().authenticate_client(request, *args, **kwargs)
 		except frappe.DoesNotExistError:
 			return False
 
-	def validate_refresh_token(self, refresh_token, client, request, *args, **kwargs):
-		пользователь = frappe.db.get_value(
-			"OAuth Bearer Token",
-			{"refresh_token": refresh_token, "status": "Active", "client": client.get("name")},
-			"user",
-		)
-		if not пользователь:
+	def is_pkce_required(self, client_id, request):
+		return cimd.это_адрес_клиента(client_id)
+
+	# С обязательным PKCE oauthlib сверяет вызов кода сам и спрашивает его
+	# здесь; Frappe этих методов не задаёт и сверяет в `validate_code`. Прочим
+	# клиентам вызов не отдаётся — для них остаётся проверка Frappe, как была.
+	def get_code_challenge(self, code, request):
+		if not cimd.это_адрес_клиента(request.client_id):
+			return None
+		return frappe.db.get_value("OAuth Authorization Code", code, "code_challenge")
+
+	def get_code_challenge_method(self, code, request):
+		метод = frappe.db.get_value("OAuth Authorization Code", code, "code_challenge_method")
+		# Frappe хранит метод в нижнем регистре, oauthlib ждёт его как в RFC 7636.
+		return "S256" if метод == "s256" else метод
+
+	def validate_code(self, client_id, code, client, request, *args, **kwargs):
+		# Метаданные обещают только S256, а Frappe принимает и `plain`.
+		if cimd.это_адрес_клиента(client_id) and (
+			frappe.db.get_value("OAuth Authorization Code", code, "code_challenge_method") != "s256"
+		):
 			return False
-		request.user = пользователь
+		return super().validate_code(client_id, code, client, request, *args, **kwargs)
+
+	def validate_refresh_token(self, refresh_token, client, request, *args, **kwargs):
+		клиент = (client or {}).get("name")
+		# Клиенту по адресу токен обновления одноразовый: запись читается с
+		# блокировкой и отзывается сразу, до коммита Frappe после выдачи нового
+		# токена. Два одновременных обновления одним токеном иначе прошли бы оба.
+		одноразовый = cimd.это_адрес_клиента(клиент)
+		запись = frappe.db.get_value(
+			"OAuth Bearer Token",
+			{"refresh_token": refresh_token, "status": "Active", "client": клиент},
+			["name", "user"],
+			as_dict=True,
+			for_update=одноразовый,
+		)
+		if not запись:
+			return False
+		if одноразовый:
+			frappe.db.set_value("OAuth Bearer Token", запись.name, "status", "Revoked")
+		request.user = запись.user
 		return True
 
 
@@ -171,9 +210,20 @@ def возврат_подключения() -> dict:
 	этом компьютере, и чужая ссылка на подключение выглядит так же.
 	"""
 	данные = frappe.flags.oauth_credentials or {}
-	адрес = данные.get("redirect_uri") if isinstance(данные, dict) else None
+	if not isinstance(данные, dict):
+		данные = {}
+	хост = _хост(данные.get("redirect_uri"))
+	# Клиенту по адресу документ о себе публикует его сайт, и имя агента без
+	# этого сайта ничего не доказывает: «Claude Code» назовётся кто угодно.
+	client_id = данные.get("client_id")
+	сайт = _хост(client_id) if cimd.это_адрес_клиента(client_id) else None
+	return {"хост": хост, "локальный": cimd.адрес_петли(хост), "сайт_клиента": сайт}
+
+
+def _хост(адрес) -> str | None:
+	if not isinstance(адрес, str) or not адрес:
+		return None
 	try:
-		хост = urlsplit(адрес).hostname if адрес else None
+		return urlsplit(адрес).hostname
 	except ValueError:
-		хост = None
-	return {"хост": хост, "локальный": cimd.адрес_петли(хост)}
+		return None

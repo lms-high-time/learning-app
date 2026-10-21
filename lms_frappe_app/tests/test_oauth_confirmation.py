@@ -78,3 +78,34 @@ class IntegrationTestOAuthConfirmation(IntegrationTestCase):
 			self.assertIn("Не удалось подключить Claude", ошибка)
 			self.assertIn("invalid_request", ошибка)
 			self.assertNotIn(КОНТЕКСТ["success_url"], ошибка)
+
+	def test_экран_называет_хост_возврата_и_сайт_клиента(self):
+		"""Имя агента клиент пишет о себе сам; хост адреса возврата и сайт
+		документа клиента — нет (learning-services#661)."""
+		self.addCleanup(lambda: frappe.flags.pop("oauth_credentials", None))
+		claude_code = "https://claude.ai/oauth/claude-code-client-metadata"
+		for что, данные, есть, нет in (
+			(
+				"сайт",
+				{"client_id": "abc123", "redirect_uri": "https://claude.ai/api/mcp/auth_callback"},
+				"Доступ получит сайт <b>claude.ai</b>",
+				"Сведения об",
+			),
+			(
+				"этот компьютер, клиент по адресу",
+				{"client_id": claude_code, "redirect_uri": "http://localhost:54321/callback"},
+				"программа на&nbsp;этом компьютере (localhost)",
+				"сайт <b>localhost",
+			),
+			("разметка в хосте", {"redirect_uri": "https://<b>x/cb"}, "&lt;b&gt;x", "<b>x"),
+		):
+			with self.subTest(что):
+				frappe.flags.oauth_credentials = данные
+				страница = frappe.render_template(ШАБЛОН, КОНТЕКСТ)
+				self.assertIn(есть, страница)
+				self.assertNotIn(нет, страница)
+		with self.subTest("сайт документа клиента"):
+			frappe.flags.oauth_credentials = {"client_id": claude_code, "redirect_uri": "http://localhost/cb"}
+			self.assertIn(
+				"опубликованы на&nbsp;сайте <b>claude.ai</b>", frappe.render_template(ШАБЛОН, КОНТЕКСТ)
+			)

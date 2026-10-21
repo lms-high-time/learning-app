@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import frappe
 
+from lms_frappe_app.agent_learning import cimd
 from lms_frappe_app.install import КЛЮЧ_ЧАТА_ID
 
 РОЛИ_ПЛАТФОРМЫ = ("LMS Student", "Course Creator")
@@ -45,6 +46,10 @@ def агент_клиента(клиент: str, redirect_uris: str | None, кл
 	"""
 	if клиент_чата and клиент == клиент_чата:
 		return ВЕБ_ЧАТ
+	# Клиент по адресу документа назван сайтом, который этот документ публикует
+	# (learning-services#661): у Claude Code адреса возврата локальные.
+	if cimd.это_адрес_клиента(клиент):
+		return _агент_адреса(клиент) or ДРУГОЙ_АГЕНТ
 	агенты = {_агент_адреса(адрес) for адрес in (redirect_uris or "").split()}
 	if len(агенты) == 1 and None not in агенты:
 		return агенты.pop()
