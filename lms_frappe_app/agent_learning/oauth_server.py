@@ -350,7 +350,7 @@ class Валидатор(OAuthWebRequestValidator):
 				"OAuth Bearer Token", {"name": имя, "status": "Active"}, "name", for_update=True
 			)
 		if not имя:
-			имя = _повтор_обновления(refresh_token, клиент)
+			имя = _повтор_обновления(refresh_token, клиент, request)
 		if not имя:
 			return False
 		запись = frappe.db.get_value(
@@ -411,7 +411,11 @@ class Валидатор(OAuthWebRequestValidator):
 				"expires_in": token["expires_in"],
 				ПОЛЕ_СЕМЬИ: семья,
 				ПОЛЕ_НАЧАЛА: начало,
-				ПОЛЕ_ПРЕЖНЕГО: отпечаток(request.refresh_token) if прежний else None,
+				ПОЛЕ_ПРЕЖНЕГО: (
+					getattr(request, "lms_отпечаток_прежнего", None) or отпечаток(request.refresh_token)
+				)
+				if прежний
+				else None,
 			}
 		).insert(ignore_permissions=True)
 		frappe.db.commit()
@@ -483,7 +487,7 @@ def отозвать_семью(семья: str | None, клиент: str | None
 	return len(имена)
 
 
-def _повтор_обновления(refresh_token: str, клиент: str | None) -> str | None:
+def _повтор_обновления(refresh_token: str, клиент: str | None, request) -> str | None:
 	"""Предъявлен уже заменённый токен обновления: имя токена, который продолжит
 	семью, или `None` — отказ.
 
@@ -496,6 +500,13 @@ def _повтор_обновления(refresh_token: str, клиент: str | N
 	В `ОКНО_ГОНКИ` после замены повтор продолжает семью: действующий преемник
 	гасится, как гасился бы сам предъявленный токен, и клиент получает новую
 	пару. Позже — семья отзывается, и это пишется в журнал (ASVS 7.2.4).
+
+	Новый токен помнит отпечаток погашенного преемника, а не предъявленного
+	токена. `Why:` иначе украденный прежний токен, предъявленный в окне, гасил
+	бы преемника законного клиента, и его токен обновления не находил бы ни
+	записи, ни преемника — отказ без отзыва семьи и без журнала, а вор
+	продлевал бы семью повторами того же токена. Так прежний токен продолжает
+	семью не больше одного раза, а токен погашенного преемника находит нового.
 	"""
 	if not клиент:
 		return None
@@ -512,9 +523,14 @@ def _повтор_обновления(refresh_token: str, клиент: str | N
 	if прошло < ОКНО_ГОНКИ:
 		if преемник.status != "Active":
 			return None
-		return frappe.db.get_value(
+		имя = frappe.db.get_value(
 			"OAuth Bearer Token", {"name": преемник.name, "status": "Active"}, "name", for_update=True
 		)
+		if имя:
+			request.lms_отпечаток_прежнего = отпечаток(
+				frappe.db.get_value("OAuth Bearer Token", имя, "refresh_token")
+			)
+		return имя
 	if отозвать_семью(преемник.get(ПОЛЕ_СЕМЬИ), клиент):
 		_в_журнал_повтор(
 			"Повтор токена обновления — семья отозвана",
@@ -623,8 +639,15 @@ def ответ_интроспекции(запрос, token: str | None, token_t
 
 def _можно_спрашивать(клиент: str) -> bool:
 	разрешённые = frappe.conf.get(КЛЮЧ_ИНТРОСПЕКЦИИ)
-	if разрешённые is not None:
+	if isinstance(разрешённые, list):
 		return клиент in разрешённые
+	if разрешённые is not None:
+		# Строка сравнивалась бы подстроками: `"abc"` пускал бы клиента `b`.
+		frappe.log_error(
+			title="Интроспекция закрыта: список клиентов задан не списком",
+			message=f"{КЛЮЧ_ИНТРОСПЕКЦИИ} в конфигурации сайта — {type(разрешённые).__name__}, нужен список client_id.",
+		)
+		return False
 	# Предупреждение — раз, а не на каждый вызов инструмента агента.
 	if not frappe.cache.get_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ):
 		frappe.cache.set_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ, 1)
@@ -723,6 +746,9 @@ def register_client():
 		данные.update(token_endpoint_auth_method="client_secret_post", client_secret=поля["client_secret"])
 	frappe.db.set_value("OAuth Client", данные["client_id"], поля, update_modified=False)
 	данные["scope"] = "all"
+	# Frappe отвечает `grant_types: ["authorization_code"]`, а токен обновления
+	# выдаёт всем: ответ называет то, что клиенту действительно доступно.
+	данные.update(grant_types=["authorization_code", "refresh_token"], response_types=["code"])
 	ответ.set_data(frappe.as_json(данные))
 	return ответ
 
@@ -742,7 +768,8 @@ def authorization_server_metadata():
 	# Frappe обещает `client_secret_basic`, но заголовок Basic сам же принимает
 	# за вход по API-ключу и отвечает 401 раньше OAuth (learning-services#665).
 	метаданные["token_endpoint_auth_methods_supported"] = ["none", "client_secret_post"]
-	метаданные["revocation_endpoint_auth_methods_supported"] = ["client_secret_post"]
+	# Публичные клиенты (по адресу документа) отзывают свои токены без секрета.
+	метаданные["revocation_endpoint_auth_methods_supported"] = ["none", "client_secret_post"]
 	метаданные["introspection_endpoint_auth_methods_supported"] = ["client_secret_post"]
 	ответ = Response(frappe.as_json(метаданные), mimetype="application/json")
 	frappe.local.allow_cors = "*"

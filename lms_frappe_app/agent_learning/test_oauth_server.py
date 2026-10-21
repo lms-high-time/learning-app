@@ -388,10 +388,11 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		# Basic не обещается: Frappe отвечает на него 401 раньше OAuth
 		# (learning-services#665).
 		self.assertEqual(метаданные["token_endpoint_auth_methods_supported"], ["none", "client_secret_post"])
-		for эндпоинт in ("revocation", "introspection"):
-			self.assertEqual(
-				метаданные[f"{эндпоинт}_endpoint_auth_methods_supported"], ["client_secret_post"]
-			)
+		# Отзывают и публичные клиенты — по одному `client_id`.
+		self.assertEqual(
+			метаданные["revocation_endpoint_auth_methods_supported"], ["none", "client_secret_post"]
+		)
+		self.assertEqual(метаданные["introspection_endpoint_auth_methods_supported"], ["client_secret_post"])
 		self.assertEqual(метаданные["issuer"], "https://cenda.test")
 
 	def test_только_код_авторизации_и_обновление(self):
@@ -608,6 +609,47 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				(прежний["access_token"], выдан),
 			)
 
+	def test_украденный_токен_в_окне_гонки_не_перехватывает_семью(self):
+		"""Продолжение в окне гонки помнило отпечаток предъявленного токена, а не
+		погашенного преемника: вор с прежним токеном гасил преемника клиента, а
+		клиент получал отказ без отзыва семьи и журнала (learning-services#665)."""
+		self._войти()
+		клиент = self._клиент()
+
+		def обновить(токен):
+			return self._токен(
+				client_id=клиент.name, grant_type="refresh_token", refresh_token=токен["refresh_token"]
+			)
+
+		_, прежний = self._вход_клиента(клиент)
+		_, свой = обновить(прежний)
+		статус, чужой = обновить(прежний)
+		self.assertEqual(статус, 200, чужой)
+
+		with self.subTest("прежний токен продолжает семью не больше раза"):
+			статус, ответ = обновить(прежний)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(чужой), "Active")
+
+		with self.subTest("токен клиента гасит токен вора"):
+			статус, новый = обновить(свой)
+			self.assertEqual(статус, 200, новый)
+			self.assertEqual(self._статус(чужой), "Revoked")
+
+		with self.subTest("повтор прежнего вне окна — отзыв семьи и журнал"):
+			for токен, минут in ((свой, -4), (чужой, -3), (новый, -2)):
+				frappe.db.set_value(
+					"OAuth Bearer Token",
+					токен["access_token"],
+					"creation",
+					add_to_date(now_datetime(), minutes=минут),
+				)
+			with mock.patch.object(frappe, "log_error") as журнал:
+				статус, ответ = обновить(прежний)
+			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
+			self.assertEqual(self._статус(новый), "Revoked")
+			журнал.assert_called_once()
+
 	def test_отзыв_только_своему_клиенту(self):
 		"""Frappe отзывал любой токен, кто бы о нём ни попросил
 		(learning-services#665). Ответ один — 200, по нему не узнать, чей токен."""
@@ -697,6 +739,15 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				with self.subTest(что):
 					_, ответ = спросить(token=токен["refresh_token"], token_type_hint=подсказка, **свой)
 					self.assertIs(ответ["active"], ожидается)
+
+		with (
+			self.subTest("список строкой — отказ всем"),
+			mock.patch.dict(frappe.conf, {oauth_server.КЛЮЧ_ИНТРОСПЕКЦИИ: f"x{сервис.name}x"}),
+			mock.patch.object(frappe, "log_error") as журнал,
+		):
+			статус = спросить(token=токен["access_token"], **свой)[0]
+			self.assertEqual(статус, 401)
+			журнал.assert_called_once()
 
 		with self.subTest("без списка — любому конфиденциальному, предупреждение раз"):
 			frappe.cache.delete_value(oauth_server.КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ)
@@ -801,6 +852,10 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 					)
 					self.assertEqual((ответ["scope"], запись.scopes), ("all", "all"))
 					self.assertEqual(ответ["token_endpoint_auth_method"], метод)
+					self.assertEqual(
+						(ответ["grant_types"], ответ["response_types"]),
+						(["authorization_code", "refresh_token"], ["code"]),
+					)
 					if метод == "none":
 						self.assertNotIn("client_secret", ответ)
 					else:

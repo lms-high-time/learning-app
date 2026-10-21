@@ -110,15 +110,10 @@ def отозвать_токены_пользователя(пользовате�
 	мог утечь, и подключения, сделанные с ним, тоже под подозрением. Код,
 	выданный до смены, обменялся бы на новый токен уже после неё.
 	"""
-	frappe.db.set_value(
-		"OAuth Bearer Token",
-		{"user": пользователь, "status": "Active"},
-		"status",
-		"Revoked",
-		update_modified=False,
-	)
-	# Коды — по первичному ключу: у `user` кода нет индекса, и обновление по
-	# нему заблокировало бы всю таблицу кодов.
+	# Коды — первыми: обмен кода держит его строку до выдачи токена, и
+	# обновление ждёт его, а токен, выданный этим обменом, гасится следом.
+	# По первичному ключу: у `user` кода нет индекса, и обновление по нему
+	# заблокировало бы всю таблицу кодов.
 	коды = frappe.get_all(
 		"OAuth Authorization Code", filters={"user": пользователь, "validity": "Valid"}, pluck="name"
 	)
@@ -126,6 +121,13 @@ def отозвать_токены_пользователя(пользовате�
 		frappe.db.set_value(
 			"OAuth Authorization Code", {"name": ("in", коды)}, "validity", "Invalid", update_modified=False
 		)
+	frappe.db.set_value(
+		"OAuth Bearer Token",
+		{"user": пользователь, "status": "Active"},
+		"status",
+		"Revoked",
+		update_modified=False,
+	)
 
 
 def заметить_смену_пароля(doc, method=None) -> None:
