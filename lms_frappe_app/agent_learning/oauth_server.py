@@ -137,23 +137,32 @@ class Валидатор(OAuthWebRequestValidator):
 
 	def validate_refresh_token(self, refresh_token, client, request, *args, **kwargs):
 		клиент = (client or {}).get("name")
-		# Клиенту по адресу токен обновления одноразовый: запись читается с
-		# блокировкой и отзывается сразу, до коммита Frappe после выдачи нового
-		# токена. Два одновременных обновления одним токеном иначе прошли бы оба.
-		одноразовый = cimd.это_адрес_клиента(клиент)
-		запись = frappe.db.get_value(
+		имя = frappe.db.get_value(
 			"OAuth Bearer Token",
 			{"refresh_token": refresh_token, "status": "Active", "client": клиент},
-			["name", "user"],
-			as_dict=True,
-			for_update=одноразовый,
+			"name",
 		)
-		if not запись:
+		if имя and cimd.это_адрес_клиента(клиент):
+			# Клиенту по адресу токен обновления одноразовый. Запись блокируется
+			# по первичному ключу — блокировка по неиндексированному
+			# `refresh_token` встала бы на всю таблицу — и перечитывается: второе
+			# одновременное обновление тем же токеном увидит её отозванной.
+			имя = frappe.db.get_value(
+				"OAuth Bearer Token", {"name": имя, "status": "Active"}, "name", for_update=True
+			)
+			request.lms_прежний_токен = имя
+		if not имя:
 			return False
-		if одноразовый:
-			frappe.db.set_value("OAuth Bearer Token", запись.name, "status", "Revoked")
-		request.user = запись.user
+		request.user = frappe.db.get_value("OAuth Bearer Token", имя, "user")
 		return True
+
+	def save_bearer_token(self, token, request, *args, **kwargs):
+		# Прежний токен отзывается, только когда новый выдаётся, — и в одной
+		# транзакции с ним: Frappe коммитит сразу после записи нового.
+		прежний = getattr(request, "lms_прежний_токен", None)
+		if прежний:
+			frappe.db.set_value("OAuth Bearer Token", прежний, "status", "Revoked")
+		return super().save_bearer_token(token, request, *args, **kwargs)
 
 
 def _свой_сервер() -> None:
