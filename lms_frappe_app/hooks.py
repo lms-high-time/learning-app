@@ -319,6 +319,8 @@ doc_events = {
 	# записывает согласие с документами (learning-services#577).
 	"User": {
 		"after_insert": "lms_frappe_app.agent_learning.consent.записать_согласие",
+		# Длина, контекстные слова и утечки пароля из desk и REST (learning-services#666).
+		"before_validate": "lms_frappe_app.passwords.проверить_пароль_пользователя",
 	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
@@ -462,6 +464,12 @@ override_whitelisted_methods = {
 		f"frappe.integrations.oauth2.{метод}": f"{_oauth}.{метод}"
 		for метод in ("authorize", "approve", "get_token", "revoke_token")
 	},
+	# Вход через Google — только с подтверждённым адресом и тем же аккаунтом
+	# Google, что при первом входе: все три пути к входу Frappe через Google —
+	# обоснование в модуле (learning-services#666).
+	"frappe.integrations.oauth2_logins.login_via_google": "lms_frappe_app.google_login.login_via_google",
+	"frappe.www.login.login_via_google": "lms_frappe_app.google_login.login_via_google",
+	"frappe.integrations.oauth2_logins.custom": "lms_frappe_app.google_login.custom",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -490,14 +498,22 @@ ignore_links_on_delete = ["Agent Consent"]
 # Без явного согласия с документами страницы платформы ведут на экран
 # согласия (learning-services#624): вошедшие через Google и прежние
 # пользователи отмечают «мне есть 18» и «принимаю документы» один раз.
-before_request = ["lms_frappe_app.agent_learning.consent.потребовать_согласие"]
-# after_request = ["lms_frappe_app.utils.after_request"]
+#
+# `sid` в параметрах запроса — отказ, и первым: переадресация следующих хуков
+# поставила бы cookie сессии из параметра (learning-services#666).
+before_request = [
+	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
+]
+after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
 
 # Session Events
 # --------------
 # Выход из Cenda отзывает токены веб-чата: у чата свой вход, и без этого он
 # переживал «Выйти» (learning-services#656).
 on_logout = "lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе"
+# Абсолютный срок сессии от входа (learning-services#666).
+on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
 
 # Job Events
 # ----------

@@ -144,8 +144,13 @@ body:is([data-path="login"], [data-path="update-password"], [data-path="consent"
 body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]
 	.page-card
-	:is(.page-card-subtitle, .form-label, .sign-up-message, .forgot-password-message > *) {
+	:is(.page-card-subtitle, .form-label, .field-hint, .sign-up-message, .forgot-password-message > *) {
 	color: var(--ht-muted);
+}
+/* Требования к паролю под полем (learning-services#666). */
+body[data-path="update-password"] section.for-reset-password .field-hint {
+	margin: 6px 0 0;
+	font-size: 0.85rem;
 }
 body:is([data-path="login"], [data-path="update-password"], [data-path="consent"])
 	section[class]

@@ -21,6 +21,7 @@ from lms_frappe_app.access import (
 	update_password,
 	состояние_ключа,
 )
+from lms_frappe_app.passwords import КОРОТКИЙ
 from lms_frappe_app.tests.sample_data import создать_ученика
 
 СРОК = "reset_password_link_expiry_duration"
@@ -130,6 +131,8 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 			with (
 				patch("frappe.sendmail") as письма,
 				patch("lms_frappe_app.access.почта_есть", return_value=True),
+				# Сеть тестам не положена: проверка утечек — в `test_passwords`.
+				patch("lms_frappe_app.passwords.утёк", return_value=False),
 			):
 				yield письма
 		finally:
@@ -160,6 +163,42 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 					[(в.kwargs["recipients"], в.kwargs["subject"]) for в in письма.call_args_list],
 					[([пользователь], тема)] if тема else [],
 				)
+
+	def test_пароль_по_ссылке_проверяется_до_frappe(self):
+		"""Frappe пишет пароль по ссылке мимо документа `User`, и хук документа
+		его не видит (learning-services#666). Отказ — до смены: ключ действует,
+		и человек пробует снова по той же ссылке."""
+		with self.запрос() as письма:
+			свой, _ = менявший_пароль()
+
+			with self.assertRaises(frappe.ValidationError) as отказ:
+				update_password("короткий", key=свой)
+
+			self.assertIn(КОРОТКИЙ, str(отказ.exception))
+			self.assertEqual(состояние_ключа(свой), КЛЮЧ_ДЕЙСТВУЕТ)
+			письма.assert_not_called()
+
+	def test_длинный_пароль_отклоняется_до_проверок(self):
+		"""Предел Frappe — раньше zxcvbn и сервиса утечек (learning-services#666)."""
+		with self.запрос(), patch("lms_frappe_app.access.проверить_пароль") as проверка:
+			свой, _ = менявший_пароль()
+
+			with self.assertRaises(frappe.ValidationError):
+				update_password("п" * 513, key=свой)
+
+			проверка.assert_not_called()
+
+	def test_со_вторым_фактором_после_смены_вход_заново(self):
+		"""Вход Frappe после смены пароля по ссылке обходил второй фактор:
+		пароль меняется, а вход — обычный, с кодом (learning-services#666)."""
+		with self.запрос(), patch("lms_frappe_app.access.should_run_2fa", return_value=True):
+			свой, пользователь = менявший_пароль()
+
+			переход = update_password(НОВЫЙ_ПАРОЛЬ, key=свой)
+
+			self.assertTrue(переход.startswith("/login?redirect-to="), переход)
+			self.assertEqual(frappe.session.user, "Guest")
+			self.assertTrue(frappe.db.get_value("User", пользователь, "last_password_reset_date"))
 
 	def test_перекрытия_подключены(self):
 		"""Смена пароля и обе формы регистрации идут через приложение."""
@@ -193,6 +232,7 @@ class IntegrationTestSignUp(IntegrationTestCase):
 		self.письма = patch("frappe.sendmail").start()
 		self.почта = patch("lms_frappe_app.access.почта_есть", return_value=True)
 		self.почта.start()
+		patch("lms_frappe_app.passwords.утёк", return_value=False).start()
 		# Регистрация открыта, как на стенде; локальный сайт может быть закрыт.
 		for модуль in ("lms_frappe_app.access", "frappe.core.doctype.user.user", "lms.lms.user"):
 			patch(f"{модуль}.is_signup_disabled", return_value=False).start()

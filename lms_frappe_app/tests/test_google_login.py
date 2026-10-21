@@ -1,19 +1,28 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Настройка входа через Google.
+"""Вход через Google: настройка и проверка аккаунта.
 
 `Why:` ключ провайдера — данные, а не код, и заводить его кликами значит
 терять при пересоздании сайта. Здесь проверяется, что настройка приезжает из
 конфигурации сайта, переживает повторные миграции и не требует секретов там,
-где их нет.
+где их нет. И что вход пускает только подтверждённый адрес и тот же аккаунт
+Google (learning-services#666).
 """
 
+from unittest.mock import patch
+
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.integrations import oauth2_logins
+from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import set_request
 from frappe.utils.password import get_decrypted_password
 
+from lms_frappe_app import google_login
+from lms_frappe_app.google_login import ДРУГОЙ_АККАУНТ, НЕ_ПОДТВЕРЖДЁН, причина_отказа
 from lms_frappe_app.install import КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ, обеспечить_вход_через_google
+from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
+from lms_frappe_app.tests.sample_data import создать_ученика
 
 ЗАПИСЬ = ("Social Login Key", "google")
 
@@ -96,3 +105,89 @@ class IntegrationTestGoogleLogin(IntegrationTestCase):
 		обеспечить_вход_через_google()
 
 		self.assertTrue(frappe.db.get_value(*ЗАПИСЬ, "enable_social_login"))
+
+
+class UnitTestGoogleAccount(UnitTestCase):
+	def test_причина_отказа(self):
+		"""Ответ `oauth2/v2/userinfo`, которым пользуется Frappe, — `verified_email`
+		и `id`; OpenID Connect — `email_verified` и `sub`. Подтверждение — только
+		булево `True`."""
+		v2 = {"email": "a@gmail.com", "verified_email": True, "id": "111"}
+		случаи = {
+			"v2, первый вход": (v2, None, None),
+			"v2, тот же аккаунт": (v2, "111", None),
+			"OIDC, тот же аккаунт": ({"email_verified": True, "sub": "111"}, "111", None),
+			"число и строка — один идентификатор": ({**v2, "id": 111}, "111", None),
+			"адрес не подтверждён": ({**v2, "verified_email": False}, None, НЕ_ПОДТВЕРЖДЁН),
+			"флага нет": ({"email": "a@gmail.com", "id": "111"}, None, НЕ_ПОДТВЕРЖДЁН),
+			"флаг строкой": ({**v2, "verified_email": "true"}, None, НЕ_ПОДТВЕРЖДЁН),
+			"другой аккаунт Google": ({**v2, "id": "222"}, "111", ДРУГОЙ_АККАУНТ),
+		}
+		for что, (данные, привязанный, причина) in случаи.items():
+			with self.subTest(что):
+				self.assertEqual(причина_отказа(данные, привязанный), причина)
+
+
+class IntegrationTestGoogleAccount(IntegrationTestCase):
+	def test_вход_сверяет_аккаунт_привязки(self):
+		"""Адрес, уже привязанный к аккаунту Google, впускает только этот
+		аккаунт; отказ — страницей, без входа (learning-services#666)."""
+		подмены = frappe.get_hooks("override_whitelisted_methods")
+		self.assertEqual(
+			подмены["frappe.integrations.oauth2_logins.login_via_google"][-1],
+			"lms_frappe_app.google_login.login_via_google",
+		)
+		пользователь = создать_ученика(f"google-{frappe.generate_hash(length=8)}@example.com")
+		документ = frappe.get_doc("User", пользователь)
+		документ.set_social_login_userid("google", userid="111")
+		документ.save(ignore_permissions=True)
+
+		флаги = []
+		for что, идентификатор, впущен in (("тот же", "111", True), ("другой", "222", False)):
+			данные = {"email": пользователь.upper(), "verified_email": True, "id": идентификатор}
+			with (
+				self.subTest(что),
+				patch.object(google_login, "get_info_via_oauth", return_value=данные),
+				patch.object(
+					google_login,
+					"login_oauth_user",
+					side_effect=lambda *_, **__: флаги.append(frappe.flags.get(ВХОД_ЧЕРЕЗ_GOOGLE)),
+				) as вход,
+				patch.object(google_login, "consume_oauth_state"),
+				patch("frappe.respond_as_web_page") as страница,
+			):
+				google_login.login_via_google(code="код", state="состояние")
+
+				self.assertEqual(вход.called, впущен)
+				self.assertEqual(страница.called, not впущен)
+				if not впущен:
+					self.assertEqual(страница.call_args.args[1], ДРУГОЙ_АККАУНТ)
+		# Вход Frappe идёт под флагом: случайный пароль нового аккаунта не проверяется.
+		self.assertEqual(флаги, [True])
+		self.assertIsNone(frappe.flags.get(ВХОД_ЧЕРЕЗ_GOOGLE))
+
+	def test_custom_google_идёт_через_проверку(self):
+		"""`custom/google` вёл во вход Frappe мимо подмены `login_via_google`
+		(learning-services#666). Имя провайдера — без регистра и пробелов, как
+		его находит MariaDB; прочие провайдеры — во Frappe."""
+		подмены = frappe.get_hooks("override_whitelisted_methods")
+		for метод, наш in (
+			("frappe.www.login.login_via_google", "login_via_google"),
+			("frappe.integrations.oauth2_logins.custom", "custom"),
+		):
+			with self.subTest(метод):
+				self.assertEqual(подмены[метод][-1], f"lms_frappe_app.google_login.{наш}")
+
+		прежний = getattr(frappe.local, "request", None)
+		self.addCleanup(setattr, frappe.local, "request", прежний)
+		for провайдер, наш in (("google", True), ("Google%20", True), ("github", False)):
+			set_request(path=f"/api/method/frappe.integrations.oauth2_logins.custom/{провайдер}")
+			with (
+				self.subTest(провайдер),
+				patch.object(google_login, "login_via_google") as проверка,
+				patch.object(oauth2_logins, "custom") as frappe_custom,
+			):
+				google_login.custom(code="код", state="состояние")
+
+				self.assertEqual(проверка.called, наш)
+				self.assertEqual(frappe_custom.called, not наш)

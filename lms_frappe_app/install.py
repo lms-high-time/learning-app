@@ -3,7 +3,7 @@
 """Настройка при установке и миграции."""
 
 import frappe
-from frappe.utils import get_url
+from frappe.utils import cint, get_url
 
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
@@ -481,6 +481,88 @@ def обеспечить_значения_настроек() -> None:
 	frappe.clear_document_cache(НАСТРОЙКИ, НАСТРОЙКИ)
 
 
+#: Настройки входа, которые держит код, а не админка (learning-services#666,
+#: самооценка ASVS learning-services#664). Ручная правка возвращается на
+#: следующей миграции.
+НАСТРОЙКИ_ВХОДА = {
+	# Вход по ссылке из письма без пароля отклонён решением владельца 1 октября
+	# 2026 (learning-services, `docs/plans/2026-10-01-access-flows-design.md`);
+	# ASVS 6.3.4 — ссылка в обход будущего второго фактора. Кнопку на `/login`
+	# Frappe рисует по этому же флагу, других зависимостей у страницы нет.
+	"login_with_email_link": 0,
+	# Трассировка в ответе раскрывает код и данные; машинные коды отказов
+	# контракта едут успешным ответом и от неё не зависят (`agent_learning/errors.py`).
+	"allow_error_traceback": 0,
+	# Блокировка входа по паролю после неудач — на аккаунт, а не на IP
+	# (`frappe.auth.get_login_attempt_tracker`). Было 10 попыток на 60 секунд:
+	# около 14 тысяч в сутки. 5 попыток на 15 минут — около 480: ASVS 6.3.1
+	# и NIST SP 800-63B-4 (не больше 100 неудач подряд) с запасом. Плата —
+	# чужой может держать аккаунт закрытым для пароля, но вход через Google и
+	# ссылка сброса пароля входят мимо счётчика (`login_as`).
+	"allow_consecutive_login_attempts": 5,
+	"allow_login_after_fail": 15 * 60,
+	# Второй фактор — решение владельца (ASVS 6.3.3, learning-services#664):
+	# приложение-генератор, для роли `System Manager` — см. `РОЛИ_С_2FA`.
+	"enable_two_factor_auth": 1,
+	"two_factor_method": "OTP App",
+	"otp_issuer_name": "Cenda",
+}
+
+#: Роли, которым нужен второй фактор. Administrator — тоже System Manager.
+#: Ученикам и сотрудникам без desk второй фактор не включается: Frappe при
+#: включении 2FA через форму настроек ставит его роли `All`, то есть всем, —
+#: поэтому флаг пишется в базу, а не сохранением документа.
+РОЛИ_С_2FA = ("System Manager",)
+
+#: Роли, у которых второй фактор снимается. `Why:` Frappe сам ставит его роли
+#: `All` — всем пользователям, ученикам тоже, — когда 2FA включают сохранением
+#: формы System Settings (`toggle_two_factor_auth`); на стенде так и случилось,
+#: и флаг снимали вручную. Второй фактор ученикам владелец не вводил.
+РОЛИ_БЕЗ_2FA = ("All",)
+
+#: Ключ `site_config.json`: 1 — второй фактор на этом сайте выключен.
+#: `Why:` только для локальной разработки: у Administrator локального сайта
+#: почта `admin@example.com`, письмо с QR-кодом приложения-генератора до него
+#: не дойдёт, и после миграции в desk не войти. На стенде ключа нет.
+БЕЗ_2FA = "lms_disable_2fa_enforcement"
+
+
+def обеспечить_настройки_входа() -> None:
+	"""`НАСТРОЙКИ_ВХОДА` в System Settings, второй фактор ролям `РОЛИ_С_2FA` и
+	ни одной из `РОЛИ_БЕЗ_2FA`. С ключом `БЕЗ_2FA` в конфигурации сайта второй
+	фактор выключается целиком, а ролям не ставится.
+
+	Пишутся только расходящиеся поля: `after_migrate` зовётся на каждый старт
+	контейнера, и безусловная запись меняла бы `modified` на ровном месте.
+	Прямой записью, а не сохранением документа: `validate` System Settings
+	проверяет и чужие поля, и сбой в них остановил бы миграцию; включение 2FA
+	в `validate` ставит его роли `All`. Что делает `on_update` — умолчания
+	полей и сброс кэша, — повторено здесь.
+	"""
+	from frappe.core.doctype.system_settings.system_settings import clear_system_settings_cache
+
+	без_2fa = cint(frappe.conf.get(БЕЗ_2FA))
+	нужные = {**НАСТРОЙКИ_ВХОДА, "enable_two_factor_auth": 0} if без_2fa else НАСТРОЙКИ_ВХОДА
+	текущие = frappe.db.get_singles_dict("System Settings", cast=True)
+	новые = {поле: значение for поле, значение in нужные.items() if текущие.get(поле) != значение}
+	if новые:
+		frappe.db.set_single_value("System Settings", новые)
+		# Умолчания читает desk: форма пользователя смотрит
+		# `frappe.defaults.is_enabled("enable_two_factor_auth")`.
+		for поле, значение in новые.items():
+			frappe.db.set_default(поле, значение)
+		frappe.clear_document_cache("System Settings", "System Settings")
+		clear_system_settings_cache()
+		frappe.local.system_settings = None
+	роли = {роль: 0 for роль in РОЛИ_БЕЗ_2FA}
+	if not без_2fa:
+		роли.update({роль: 1 for роль in РОЛИ_С_2FA})
+	for роль, значение in роли.items():
+		прежнее = frappe.db.get_value("Role", роль, "two_factor_auth")
+		if прежнее is not None and прежнее != значение:
+			frappe.db.set_value("Role", роль, "two_factor_auth", значение)
+
+
 def after_install() -> None:
 	обеспечить_пункты_сайдбара()
 	обеспечить_индекс_заметок()
@@ -494,6 +576,7 @@ def after_install() -> None:
 	обеспечить_вход_через_google()
 	обеспечить_клиента_веб_чата()
 	обеспечить_значения_настроек()
+	обеспечить_настройки_входа()
 	обеспечить_русский_язык()
 
 
@@ -516,3 +599,4 @@ def after_migrate() -> None:
 	обеспечить_вход_через_google()
 	обеспечить_клиента_веб_чата()
 	обеспечить_значения_настроек()
+	обеспечить_настройки_входа()
