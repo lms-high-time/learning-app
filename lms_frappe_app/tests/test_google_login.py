@@ -13,12 +13,15 @@ Google (learning-services#666).
 from unittest.mock import patch
 
 import frappe
+from frappe.integrations import oauth2_logins
 from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import set_request
 from frappe.utils.password import get_decrypted_password
 
 from lms_frappe_app import google_login
 from lms_frappe_app.google_login import ДРУГОЙ_АККАУНТ, НЕ_ПОДТВЕРЖДЁН, причина_отказа
 from lms_frappe_app.install import КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ, обеспечить_вход_через_google
+from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
 from lms_frappe_app.tests.sample_data import создать_ученика
 
 ЗАПИСЬ = ("Social Login Key", "google")
@@ -139,12 +142,17 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 		документ.set_social_login_userid("google", userid="111")
 		документ.save(ignore_permissions=True)
 
+		флаги = []
 		for что, идентификатор, впущен in (("тот же", "111", True), ("другой", "222", False)):
 			данные = {"email": пользователь.upper(), "verified_email": True, "id": идентификатор}
 			with (
 				self.subTest(что),
 				patch.object(google_login, "get_info_via_oauth", return_value=данные),
-				patch.object(google_login, "login_oauth_user") as вход,
+				patch.object(
+					google_login,
+					"login_oauth_user",
+					side_effect=lambda *_, **__: флаги.append(frappe.flags.get(ВХОД_ЧЕРЕЗ_GOOGLE)),
+				) as вход,
 				patch.object(google_login, "consume_oauth_state"),
 				patch("frappe.respond_as_web_page") as страница,
 			):
@@ -154,3 +162,32 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 				self.assertEqual(страница.called, not впущен)
 				if not впущен:
 					self.assertEqual(страница.call_args.args[1], ДРУГОЙ_АККАУНТ)
+		# Вход Frappe идёт под флагом: случайный пароль нового аккаунта не проверяется.
+		self.assertEqual(флаги, [True])
+		self.assertIsNone(frappe.flags.get(ВХОД_ЧЕРЕЗ_GOOGLE))
+
+	def test_custom_google_идёт_через_проверку(self):
+		"""`custom/google` вёл во вход Frappe мимо подмены `login_via_google`
+		(learning-services#666). Имя провайдера — без регистра и пробелов, как
+		его находит MariaDB; прочие провайдеры — во Frappe."""
+		подмены = frappe.get_hooks("override_whitelisted_methods")
+		for метод, наш in (
+			("frappe.www.login.login_via_google", "login_via_google"),
+			("frappe.integrations.oauth2_logins.custom", "custom"),
+		):
+			with self.subTest(метод):
+				self.assertEqual(подмены[метод][-1], f"lms_frappe_app.google_login.{наш}")
+
+		прежний = getattr(frappe.local, "request", None)
+		self.addCleanup(setattr, frappe.local, "request", прежний)
+		for провайдер, наш in (("google", True), ("Google%20", True), ("github", False)):
+			set_request(path=f"/api/method/frappe.integrations.oauth2_logins.custom/{провайдер}")
+			with (
+				self.subTest(провайдер),
+				patch.object(google_login, "login_via_google") as проверка,
+				patch.object(oauth2_logins, "custom") as frappe_custom,
+			):
+				google_login.custom(code="код", state="состояние")
+
+				self.assertEqual(проверка.called, наш)
+				self.assertEqual(frappe_custom.called, not наш)

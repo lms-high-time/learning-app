@@ -465,8 +465,11 @@ override_whitelisted_methods = {
 		for метод in ("authorize", "approve", "get_token", "revoke_token")
 	},
 	# Вход через Google — только с подтверждённым адресом и тем же аккаунтом
-	# Google, что при первом входе (learning-services#666).
+	# Google, что при первом входе: все три пути к входу Frappe через Google —
+	# обоснование в модуле (learning-services#666).
 	"frappe.integrations.oauth2_logins.login_via_google": "lms_frappe_app.google_login.login_via_google",
+	"frappe.www.login.login_via_google": "lms_frappe_app.google_login.login_via_google",
+	"frappe.integrations.oauth2_logins.custom": "lms_frappe_app.google_login.custom",
 }
 #
 # each overriding function accepts a `data` argument;
