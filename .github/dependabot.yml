@@ -1,0 +1,21 @@
+# Dependabot: только действия GitHub Actions. Why: в workflow они закреплены
+# по sha с комментарием версии — без бота закреплённая версия стареет молча.
+# Бот поднимает и sha, и комментарий; все обновления недели — одним PR.
+#
+# Без pip: у приложения нет своих зависимостей (`dependencies = []` в
+# pyproject.toml), а Frappe и Learning ставит bench — ревизия Frappe
+# закреплена в tests.yml (FRAPPE_REV) и в образе стенда и двигается вместе с
+# ним, а не ботом.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"
+    labels: []
