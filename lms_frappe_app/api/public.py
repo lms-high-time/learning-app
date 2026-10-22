@@ -157,6 +157,9 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	Материал и директива сюда не выходят: материал написан для агента, а зачин
 	(`lesson_hook`) — единственное в уроке, что обращено к ученику. Цели урока
 	— как у урока в `course_map` (learning-services#547).
+
+	Урок курса вне витрины — неопубликованного или анонса — для незачисленного
+	не существует, как курс в `course_map` (learning-services#692).
 	"""
 	ученик = текущий_пользователь()
 	if not lesson and course:
@@ -164,13 +167,13 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	урок = lesson and frappe.db.get_value(
 		"Course Lesson", lesson, ["name", "title", "course", "lesson_hook"], as_dict=True
 	)
-	if not урок:
+	зачислен = bool(урок) and _зачислен(урок.course)
+	if not урок or (not зачислен and not _на_витрине(урок.course)):
 		raise Отказ(УРОК_НЕ_НАЙДЕН, "Урок не найден", id=lesson or course)
 
 	пройден = frappe.db.exists(
 		"LMS Course Progress", {"member": ученик, "lesson": lesson, "status": ПРОЙДЕН}
 	)
-	зачислен = _зачислен(урок.course)
 	return {
 		"lesson": урок.name,
 		"course": урок.course,
@@ -224,6 +227,13 @@ def дорога_на_занятие(lesson: str, сервис: str, испол�
 			"demo_left": осталось,
 		}
 	return {"channel": "agent", "url": СТРАНИЦА_АГЕНТА, "demo_left": осталось}
+
+
+def _на_витрине(course: str) -> bool:
+	"""Опубликован и не анонс (`announcements.анонсирован`): такой курс открыт и
+	тому, кто на него не записан."""
+	курс = frappe.db.get_value("LMS Course", course, ["published", "upcoming"], as_dict=True)
+	return bool(курс and курс.published and not курс.upcoming)
 
 
 def _зачислен(course: str) -> bool:

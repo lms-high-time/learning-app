@@ -185,6 +185,32 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 			self.assertEqual(вход["lesson"], первый)
 			self.assertTrue(вход["completed"])
 
+	def test_урок_курса_вне_витрины_не_зачисленному_не_найден(self):
+		"""Урок неопубликованного курса или анонса не зачисленному не существует —
+		как курс в `course_map`. Опубликованный курс открыт и не зачисленному:
+		страница урока зовёт вход до записи (learning-services#692)."""
+		frappe.set_user("Administrator")
+		урок = создать_урок(f"Вне витрины {frappe.generate_hash(length=6)}")
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		витрина = {
+			"неопубликованный": ({"published": 0, "upcoming": 0}, False),
+			"анонс": ({"published": 1, "upcoming": 1}, False),
+			"опубликованный": ({"published": 1, "upcoming": 0}, True),
+		}
+		for что, (поля, открыт) in витрина.items():
+			with self.subTest(что):
+				frappe.set_user("Administrator")
+				frappe.db.set_value("LMS Course", курс, поля)
+				frappe.set_user(self.ученик)
+				for параметры in ({"lesson": урок}, {"course": курс}):
+					ответ = public.lesson_entry(**параметры)
+					if открыт:
+						self.assertTrue(ответ["ok"], ответ.get("error"))
+						self.assertEqual(ответ["data"]["lesson"], урок)
+					else:
+						self.assertFalse(ответ["ok"])
+						self.assertEqual(ответ["error"]["code"], УРОК_НЕ_НАЙДЕН)
+
 	def test_курс_без_уроков_и_пустой_вызов_отказываются(self):
 		for параметры in ({"lesson": "нет-такого-урока"}, {"course": "нет-такого-курса"}, {}):
 			with self.subTest(параметры=параметры):
