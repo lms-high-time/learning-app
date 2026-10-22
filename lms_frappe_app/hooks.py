@@ -251,6 +251,8 @@ after_install = "lms_frappe_app.install.after_install"
 # Индексы по полям фикстур: при установке фикстуры синхронизируются после
 # `after_install`, а `after_sync` — следом за ними.
 after_sync = "lms_frappe_app.install.after_sync"
+# Сайт с флагом разработки не мигрирует — до схемы и патчей (learning-services#691).
+before_migrate = ["lms_frappe_app.install.проверить_флаги_разработки"]
 after_migrate = ["lms_frappe_app.install.after_migrate"]
 
 # Uninstallation
@@ -465,6 +467,8 @@ override_whitelisted_methods = {
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
 	"lms.lms.user.sign_up": "lms_frappe_app.access.sign_up_learning",
 	"frappe.core.doctype.user.user.update_password": "lms_frappe_app.access.update_password",
+	# Приглашение Frappe принимается без входа под приглашённым (learning-services#691).
+	"frappe.core.api.user_invitation.accept_invitation": "lms_frappe_app.access.accept_invitation",
 	# Редактор Learning не правит главы и уроки курса из релиза: порядок он пишет
 	# мимо `validate` — обоснование в модуле (learning-services#512).
 	"lms.lms.api.delete_chapter": f"{_редактор}.delete_chapter",
@@ -485,6 +489,15 @@ override_whitelisted_methods = {
 	"frappe.integrations.oauth2_logins.login_via_google": "lms_frappe_app.google_login.login_via_google",
 	"frappe.www.login.login_via_google": "lms_frappe_app.google_login.login_via_google",
 	"frappe.integrations.oauth2_logins.custom": "lms_frappe_app.google_login.custom",
+	# Прочие провайдеры входа — отказ: вход через внешний провайдер только
+	# Google (learning-services#691) — обоснование в модуле. Список — копия
+	# `google_login.ПРОВАЙДЕРЫ_FRAPPE`: импорт модулей приложения в hooks
+	# тянул бы Frappe при чтении хуков; расхождение ловит тест.
+	**{
+		f"{модуль}.login_via_{провайдер}": "lms_frappe_app.google_login.отклонить_провайдера"
+		for модуль in ("frappe.integrations.oauth2_logins", "frappe.www.login")
+		for провайдер in ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
+	},
 }
 #
 # each overriding function accepts a `data` argument;
@@ -516,8 +529,12 @@ ignore_links_on_delete = ["Agent Consent"]
 #
 # `sid` в параметрах запроса — отказ, и первым: переадресация следующих хуков
 # поставила бы cookie сессии из параметра (learning-services#666).
+#
+# Абсолютный срок сессии, поднятой из базы, — следом: Frappe сверяет его
+# только у сессии из кэша (learning-services#691).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+	"lms_frappe_app.session_guard.завершить_истёкшую",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]

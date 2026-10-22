@@ -16,6 +16,7 @@ from lms_frappe_app.access import (
 	КЛЮЧ_УСТАРЕЛ,
 	ЛИМИТ_РЕГИСТРАЦИИ,
 	ПРОВЕРЬТЕ_ПОЧТУ,
+	accept_invitation,
 	sign_up,
 	sign_up_learning,
 	update_password,
@@ -400,3 +401,45 @@ class IntegrationTestSignUp(IntegrationTestCase):
 
 		self.assertEqual(sign_up_learning(адрес, "Новый Ученик", 1, ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
 		self.assertTrue(frappe.db.exists("User", адрес))
+
+
+class IntegrationTestInvitation(IntegrationTestCase):
+	def _приглашение(self, адрес: str) -> str:
+		"""Приглашение Frappe и ключ из его письма."""
+		with patch("frappe.sendmail"):
+			приглашение = frappe.get_doc(
+				{
+					"doctype": "User Invitation",
+					"email": адрес,
+					"app_name": "frappe",
+					"redirect_to_path": "desk",
+					"roles": [{"role": "LMS Student"}],
+				}
+			).insert(ignore_permissions=True)
+			return приглашение.send_invitation_mail()
+
+	def test_приглашение_не_входит_само(self):
+		"""Принятое приглашение ведёт на обычный вход с возвратом по адресу
+		приглашения, а без пароля — на ссылку его задать; само не входит
+		(learning-services#691)."""
+		перекрытия = frappe.get_hooks("override_whitelisted_methods")
+		self.assertEqual(
+			перекрытия["frappe.core.api.user_invitation.accept_invitation"][-1],
+			"lms_frappe_app.access.accept_invitation",
+		)
+		с_паролем = ученик()
+		frappe.db.set_value("User", с_паролем, "last_password_reset_date", now_datetime().date())
+		без_пароля = f"invite-{frappe.generate_hash(length=8)}@example.com"
+		for что, адрес, ожидается in (
+			("с паролем", с_паролем, "/login?redirect-to=%2Fdesk"),
+			("без пароля", без_пароля, "/update-password?key="),
+		):
+			with self.subTest(что), patch("frappe.auth.LoginManager.login_as") as вход:
+				frappe.local.response = frappe._dict()
+				accept_invitation(self._приглашение(адрес))
+
+				вход.assert_not_called()
+				self.assertIn(ожидается, frappe.local.response["location"])
+				self.assertEqual(
+					frappe.db.get_value("User Invitation", {"email": адрес}, "status"), "Accepted"
+				)
