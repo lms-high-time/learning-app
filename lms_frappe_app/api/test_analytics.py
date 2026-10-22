@@ -72,7 +72,7 @@ class UnitTestAnalyticsSecret(UnitTestCase):
 				analytics.идентификатор("a@example.com")
 
 	def test_секрет_заводится_один_раз(self):
-		with patch.dict(frappe.conf), patch.object(analytics, "update_site_config") as запись:
+		with patch.dict(frappe.conf), patch("frappe.installer.update_site_config") as запись:
 			frappe.conf.pop(analytics.КЛЮЧ_СЕКРЕТА, None)
 
 			analytics.обеспечить_секрет()

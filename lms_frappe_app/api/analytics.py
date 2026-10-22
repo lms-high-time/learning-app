@@ -26,7 +26,6 @@ import hmac
 import secrets
 
 import frappe
-from frappe.installer import update_site_config
 
 from lms_frappe_app.api import контракт, текущий_пользователь
 
@@ -46,6 +45,9 @@ def обеспечить_секрет() -> None:
 	"""
 	if frappe.conf.get(КЛЮЧ_СЕКРЕТА):
 		return
+	# Установщик Frappe тянет за собой много модулей — только когда пишем.
+	from frappe.installer import update_site_config
+
 	secret = secrets.token_hex(32)
 	update_site_config(КЛЮЧ_СЕКРЕТА, secret)
 	frappe.conf[КЛЮЧ_СЕКРЕТА] = secret
