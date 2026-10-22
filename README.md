@@ -111,6 +111,26 @@ docker compose exec backend bench --site lms.localhost run-tests --app lms_frapp
 docker compose exec backend bench --site lms.localhost set-config -p lms_disable_2fa_enforcement 1
 ```
 
+### Вывод в HTML
+
+Значение, пришедшее снаружи или из базы, выводится в HTML только
+экранированным: в шаблонах Jinja — `| e` (списки — `| map("e")`), в HTML,
+собранном строкой в Python, — `frappe.utils.escape_html`, в JS — `textContent`,
+во фронтенде форка — интерполяция Vue для текста и `v-safe-html` для HTML.
+Экранированное не раскодируется перед вставкой как HTML: `striptags`,
+`unescape`, `innerHTML` из прочитанного `textContent`.
+
+`Why:` Jinja во Frappe работает без автоэкранирования — `{{ x }}` вставляет
+строку как есть, — а очистка при сохранении документа режет скрипты, но не
+разметку. Базовый шаблон Frappe выводит заголовок вкладки `{{ title |
+striptags }}`, и `striptags` раскодирует сущности: строка без `<` и `>`
+становится тегом (learning-services#512).
+
+**How to apply:** у нового шаблона — тест с разметкой во входе; страница
+`www/` перекрывает блок `title` выводом через `| e` — это держит
+`tests/test_page_titles.py`, вывод кабинета автора — `TestЭкранированиеШаблонов`
+в `tests/test_author_page.py`. Ссылка в письме — `notices.ссылка`.
+
 ### Одноразовые патчи
 
 Патч из `patches.txt` удаляется вместе со своим тестом и кодом, нужным только
