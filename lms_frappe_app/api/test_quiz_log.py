@@ -66,6 +66,10 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		# Порядок вопросов у попытки свой: первый — тот, что выдан.
 		self.первый = начало["data"]["question"]["id"]
 		[self.второй] = {"S1/l-1-D1", "S2/l-1-D1"} - {self.первый}
+		# `id` варианта у попытки свой; в журнал ложится ключ релиза.
+		self.id_первого = next(
+			в["id"] for в in начало["data"]["question"]["options"] if в["text"] == "Первый"
+		)
 
 	def события(self) -> list:
 		return frappe.get_all(
@@ -92,7 +96,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 	# --- что пишется ---
 
 	def test_попытка_целиком_ложится_в_журнал_по_порядку(self):
-		self.assertTrue(self.ответить(self.первый, "V1", "Первый, конечно")["ok"])
+		self.assertTrue(self.ответить(self.первый, self.id_первого, "Первый, конечно")["ok"])
 		итог = self.ответить(self.второй, "мимо", "Не помню, пусть будет «мимо»")
 		self.assertTrue(итог["data"]["attempt_finished"])
 
@@ -130,7 +134,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 	def test_отказ_в_ответе_ничего_не_пишет(self):
 		"""Ответ на чужой вопрос отклонён: ни ответа, ни записи о нём, и тот же
 		вопрос остаётся открытым."""
-		ответ = self.ответить("S9/l-1-D1", "V1", "да")
+		ответ = self.ответить("S9/l-1-D1", "Первый", "да")
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], quiz.ЧУЖОЙ_ВОПРОС)
@@ -141,12 +145,12 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		"""Слова ученика необязательны: каталоги коннекторов не принимают сбор
 		слов разговора, которые инструменту не нужны (learning-services#602).
 		Нет их — в журнале пусто, вердикт тот же."""
-		self.assertTrue(self.ответить(self.первый, "V1", "   \n\t")["ok"])
+		self.assertTrue(self.ответить(self.первый, "Первый", "   \n\t")["ok"])
 		принят = next(с for с in self.события() if с.kind == ПРИНЯТ)
 		self.assertFalse(принят.student_words)
 
 	def test_длинные_слова_обрезаются_а_не_отклоняются(self):
-		ответ = self.ответить(self.первый, "V1", "я" * (quiz.ДЛИНА_СЛОВ + 500))
+		ответ = self.ответить(self.первый, "Первый", "я" * (quiz.ДЛИНА_СЛОВ + 500))
 
 		self.assertTrue(ответ["ok"])
 		принят = next(с for с in self.события() if с.kind == ПРИНЯТ)
@@ -154,7 +158,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 
 	def test_слова_на_вердикт_не_влияют(self):
 		"""Судит сервер по `answer`: слова только лежат в журнале."""
-		вердикт = self.ответить(self.первый, "V2", "Первый, я уверен")["data"]["verdict"]
+		вердикт = self.ответить(self.первый, "Второй", "Первый, я уверен")["data"]["verdict"]
 
 		self.assertFalse(вердикт["correct"])
 
@@ -164,7 +168,7 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		"""В журнале ответы рядом с вердиктом — готовые эталоны. Ученик журнал не
 		читает. Руководитель попытку своего сотрудника читает, а журнал по ней —
 		нет. Модератор журнал читает, но не правит."""
-		self.ответить(self.первый, "V1", "Первый")
+		self.ответить(self.первый, "Первый", "Первый")
 		frappe.set_user("Administrator")
 		события = frappe.get_all(ЖУРНАЛ, filters={"attempt": self.попытка}, pluck="name")
 		событие = события[0]

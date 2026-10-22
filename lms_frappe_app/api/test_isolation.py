@@ -137,7 +137,7 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 		# Чужая попытка не читается даже по имени.
 		self.assertFalse(frappe.has_permission("Agent Quiz Attempt", "read", doc=попытка))
 
-		ответ = student.submit_answer(попытка, "S1/l-1-D1", "V1", "слова ученика")
+		ответ = student.submit_answer(попытка, "S1/l-1-D1", "Первый", "слова ученика")
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], student.ЧУЖОЕ_ЗАНЯТИЕ)
@@ -211,7 +211,7 @@ class IntegrationTestQuizAnswerLeak(IntegrationTestCase):
 		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"))
 		frappe.set_user(self.сотрудник)
 		попытка = student.request_quiz(занятие)["data"]
-		student.submit_answer(попытка["attempt"], попытка["question"]["id"], "V1", "слова ученика")
+		student.submit_answer(попытка["attempt"], попытка["question"]["id"], "Первый", "слова ученика")
 		frappe.set_user("Administrator")
 
 		for кто in (self.руководитель, self.сотрудник):

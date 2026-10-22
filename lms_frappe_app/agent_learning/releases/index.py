@@ -419,7 +419,8 @@ def есть_вопрос(релиз: str, ключ_урока: str, ключ_в
 
 
 def эталон(релиз: str, ключ_урока: str, ключ_вопроса: str) -> dict | None:
-	"""Верный вариант и пояснение вопроса урока: `{correct, explanation}`; нет вопроса — `None`."""
+	"""Варианты, верный вариант и пояснение вопроса урока: `{options, correct, explanation}`,
+	варианты — `{key, text}` по порядку релиза; нет вопроса — `None`."""
 	найдено = frappe.get_all(
 		ВОПРОС,
 		filters={
@@ -428,10 +429,15 @@ def эталон(релиз: str, ключ_урока: str, ключ_вопро�
 			"lesson_key": ключ_урока,
 			"question_key": ключ_вопроса,
 		},
-		fields=["correct", "explanation"],
+		fields=["option_list", "correct", "explanation"],
 		limit=1,
 	)
-	return найдено[0] if найдено else None
+	if not найдено:
+		return None
+	строка = найдено[0]
+	return frappe._dict(
+		options=json.loads(строка.option_list), correct=строка.correct, explanation=строка.explanation
+	)
 
 
 def _из_json(значение) -> dict:
