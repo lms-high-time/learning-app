@@ -200,9 +200,10 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.assertEqual(статус, 400)
 		self.assertNotIn("access_token", ответ)
 
-	def test_pkce_только_s256_и_обязателен_публичным(self):
-		"""Публичному клиенту вход держит только PKCE: прежде он был обязателен
-		лишь клиентам по адресу, а `plain` принимался (learning-services#665)."""
+	def test_pkce_только_s256_и_обязателен_всем(self):
+		"""PKCE прежде был обязателен лишь клиентам по адресу, а `plain`
+		принимался (learning-services#665); конфиденциальному клиенту он был
+		необязателен (learning-services#691, ASVS 10.4.6)."""
 		self._войти()
 		публичный = self._клиент()
 		конфиденциальный = self._клиент("Client Secret Post")
@@ -211,6 +212,11 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		for что, поправки, ошибка in (
 			("клиент по адресу без PKCE", {**без_pkce}, MissingCodeChallengeError),
 			("публичный без PKCE", {"client_id": публичный.name, **без_pkce}, MissingCodeChallengeError),
+			(
+				"конфиденциальный без PKCE",
+				{"client_id": конфиденциальный.name, **без_pkce},
+				MissingCodeChallengeError,
+			),
 			(
 				"plain у публичного",
 				{"client_id": публичный.name, **plain},
@@ -231,7 +237,7 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				возврат = ЛОКАЛЬНЫЙ if "client_id" not in поправки else ВОЗВРАТ_АГЕНТА
 				self._авторизовать(возврат=возврат, **поправки)
 
-		with self.subTest("код с plain, выданный до learning-services#665"):
+		with self.subTest("код с plain в базе"):
 			код = self._авторизовать()
 			frappe.db.set_value(
 				"OAuth Authorization Code",
@@ -450,14 +456,9 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			),
 		):
 			with self.subTest(что):
-				код = self._авторизовать(
-					client_id=клиент.name,
-					возврат=ВОЗВРАТ_АГЕНТА,
-					code_challenge=None,
-					code_challenge_method=None,
-				)
+				код = self._авторизовать(client_id=клиент.name, возврат=ВОЗВРАТ_АГЕНТА)
 				статус, ответ = self._обменять(
-					код, **{"возврат": ВОЗВРАТ_АГЕНТА, "проверка": None, "client_id": клиент.name, **поля}
+					код, **{"возврат": ВОЗВРАТ_АГЕНТА, "client_id": клиент.name, **поля}
 				)
 				self.assertEqual(статус, ожидается, ответ)
 				if ожидается == 401:

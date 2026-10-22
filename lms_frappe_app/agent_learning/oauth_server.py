@@ -31,8 +31,9 @@
   него не доходит: Frappe принимает Basic за вход по API-ключу и отвечает 401
   раньше OAuth, поэтому метаданные обещают только `client_secret_post`.
   Публичный (`None`) — без секрета, и вход ему держит PKCE;
-- PKCE — только S256: обязателен публичным клиентам, у конфиденциальных
-  проверяется, если прислан. `plain` не принимается: метаданные обещают S256;
+- PKCE — только S256 и обязателен всем клиентам, конфиденциальным тоже
+  (ASVS 10.4.6, RFC 9700 §2.1.1). `plain` не принимается: метаданные
+  обещают S256;
 - код авторизации живёт `СРОК_КОДА` и обменивается один раз под блокировкой
   своей строки. Повторное предъявление кода отзывает токены, выданные по нему
   (RFC 6749 §4.1.2);
@@ -197,17 +198,6 @@ def _клиент(имя) -> dict | None:
 	return клиент if клиент and клиент.name == имя else None
 
 
-def публичный(client_id) -> bool:
-	"""Клиент без секрета: клиент по адресу или записанный с `None`.
-
-	Неизвестный клиент — тоже: проверка PKCE строже, а не мягче.
-	"""
-	if cimd.это_адрес_клиента(client_id):
-		return True
-	клиент = _клиент(client_id)
-	return not клиент or клиент.token_endpoint_auth_method == ПУБЛИЧНЫЙ
-
-
 class Валидатор(OAuthWebRequestValidator):
 	def validate_client_id(self, client_id, request, *args, **kwargs):
 		if cimd.это_адрес_клиента(client_id) and not cimd.обеспечить_клиента(client_id):
@@ -275,7 +265,7 @@ class Валидатор(OAuthWebRequestValidator):
 	# здесь; Frappe этих методов не задаёт и сверял в `validate_code`.
 
 	def is_pkce_required(self, client_id, request):
-		return публичный(client_id)
+		return True
 
 	def get_code_challenge(self, code_token, request):
 		return frappe.db.get_value("OAuth Authorization Code", code_token, "code_challenge") or None
@@ -333,9 +323,9 @@ class Валидатор(OAuthWebRequestValidator):
 			return False
 		if not запись.expiration_time or now_datetime() > запись.expiration_time:
 			return False
-		# Метаданные обещают только S256; `plain` остаётся у кодов, выданных до
-		# learning-services#665.
-		if запись.code_challenge and запись.code_challenge_method != "s256":
+		# Вызов с проверкой oauthlib сверяет сам; метод — только S256, как
+		# обещают метаданные.
+		if not запись.code_challenge or запись.code_challenge_method != "s256":
 			return False
 		# Смена пароля и отключение гасят коды, но отключение мимо `save`
 		# (`db.set_value`) хуков не зовёт.
