@@ -24,8 +24,8 @@ from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
 	адрес_сервиса,
-	пробных_уроков,
 	веб_уроки_ученика,
+	пробных_уроков,
 )
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, УРОК_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import index
@@ -168,7 +168,7 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 		"Course Lesson", lesson, ["name", "title", "course", "lesson_hook"], as_dict=True
 	)
 	зачислен = bool(урок) and _зачислен(урок.course)
-	if not урок or (not зачислен and not _на_витрине(урок.course)):
+	if not урок or (not зачислен and not announcements.на_витрине(урок.course)):
 		raise Отказ(УРОК_НЕ_НАЙДЕН, "Урок не найден", id=lesson or course)
 
 	пройден = frappe.db.exists(
@@ -227,13 +227,6 @@ def дорога_на_занятие(lesson: str, сервис: str, испол�
 			"demo_left": осталось,
 		}
 	return {"channel": "agent", "url": СТРАНИЦА_АГЕНТА, "demo_left": осталось}
-
-
-def _на_витрине(course: str) -> bool:
-	"""Опубликован и не анонс (`announcements.анонсирован`): такой курс открыт и
-	тому, кто на него не записан."""
-	курс = frappe.db.get_value("LMS Course", course, ["published", "upcoming"], as_dict=True)
-	return bool(курс and курс.published and not курс.upcoming)
 
 
 def _зачислен(course: str) -> bool:

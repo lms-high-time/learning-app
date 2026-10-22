@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import frappe
 
+from lms_frappe_app.agent_learning import announcements
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 
 ВСЕВИДЯЩИЕ_РОЛИ = frozenset({"System Manager", "Administrator", "Agent Service"})
@@ -452,6 +453,38 @@ def доступна_сдача(doc, ptype: str = "read", user: str | None = Non
 	if not doc.organization or doc.organization not in организации_менеджера(user):
 		return False
 	return bool(doc.member) and действует_в(doc.member, doc.organization)
+
+
+# --- главы Learning ---
+#
+# `Course Chapter` — доктайп Learning: роль `LMS Student` читает его по всем
+# курсам, а в главе название, описание из релиза и состав уроков. Ученику
+# открыты главы курса на витрине и курса, на который он записан, — то же
+# правило, что у карты курса и входа в урок (learning-services#692). Право
+# ролей с Desk не сужается: главу правят и читают авторы.
+
+
+def _главы_без_ограничений(user: str) -> bool:
+	return user == "Administrator" or bool(set(frappe.get_roles(user)) & АДМИНИСТРАТИВНЫЕ_РОЛИ)
+
+
+def условие_главы(user: str | None = None) -> str:
+	"""`Course Chapter`: главы курсов на витрине и курсов, на которые записан."""
+	user = user or frappe.session.user
+	if _главы_без_ограничений(user):
+		return ""
+	колонка = "`tabCourse Chapter`.`course`"
+	записан = f"select `course` from `tabLMS Enrollment` where `member` = {frappe.db.escape(user)}"
+	return f"({announcements.условие_витрины(колонка)} or {колонка} in ({записан}))"
+
+
+def доступна_глава(doc, ptype: str = "read", user: str | None = None) -> bool:
+	user = user or frappe.session.user
+	if _главы_без_ограничений(user):
+		return True
+	return announcements.на_витрине(doc.course) or bool(
+		frappe.db.exists("LMS Enrollment", {"member": user, "course": doc.course})
+	)
 
 
 def может_проверять(doc, user: str) -> bool:

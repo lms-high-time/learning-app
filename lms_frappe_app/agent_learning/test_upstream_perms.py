@@ -31,7 +31,7 @@ import frappe.client
 from frappe.desk import reportview
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.tests.sample_data import зачислить, создать_ученика, создать_урок
+from lms_frappe_app.tests.sample_data import зачислить, создать_куратора, создать_урок, создать_ученика
 
 РОЛЬ = "LMS Student"
 ЭТАЛОН = "LMS Question"
@@ -226,3 +226,52 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 		self.assertNotIn(
 			чужая, имена, сигнал(ПОПЫТКА, "увидела попытку чужого ученика в списке")
 		)
+
+
+class IntegrationTestCourseChapters(IntegrationTestCase):
+	"""Главы Learning через REST: ученику — курсы на витрине и свои
+	(`permissions.доступна_глава`, learning-services#692).
+
+	Роль `LMS Student` читает `Course Chapter` по правам Learning, поэтому
+	проверяются оба пути REST-слоя: список и глава по имени.
+	"""
+
+	def test_главы_курса_вне_витрины_видит_только_записанный(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		ученик = создать_ученика(f"ch-{суффикс}@example.com")
+		записанный = создать_ученика(f"ch-in-{суффикс}@example.com")
+		модератор = создать_куратора(f"ch-mod-{суффикс}@example.com", "Moderator")
+		урок = создать_урок(f"Главы {суффикс}")
+		зачислить(записанный, урок)
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		глава = frappe.db.get_value("Course Lesson", урок, "chapter")
+		витрина = {
+			"неопубликованный": {"published": 0, "upcoming": 0},
+			"анонс": {"published": 1, "upcoming": 1},
+			"опубликованный": {"published": 1, "upcoming": 0},
+		}
+		for что, поля in витрина.items():
+			frappe.db.set_value("LMS Course", курс, поля)
+			for кто, видит in (
+				(ученик, что == "опубликованный"),
+				(записанный, True),
+				(модератор, True),
+			):
+				with self.subTest(что, кто=кто):
+					frappe.set_user(кто)
+					try:
+						видимые = {
+							строка["name"]
+							for строка in frappe.client.get_list(
+								"Course Chapter", filters={"course": курс}, limit_page_length=0
+							)
+						}
+						self.assertEqual(глава in видимые, видит)
+						if видит:
+							self.assertEqual(frappe.client.get("Course Chapter", глава).get("course"), курс)
+						else:
+							with self.assertRaises(frappe.PermissionError):
+								frappe.client.get("Course Chapter", глава)
+					finally:
+						frappe.set_user("Administrator")
