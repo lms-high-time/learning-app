@@ -16,6 +16,7 @@ from unittest import mock
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from lms_frappe_app.agent_learning import permissions
 from lms_frappe_app.agent_learning.releases import service
 from lms_frappe_app.api import authoring
 from lms_frappe_app.tests.release_sample import пример_релиза
@@ -23,6 +24,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
+	создать_пользователя,
 	создать_ученика,
 )
 
@@ -364,3 +366,65 @@ class IntegrationTestКурсыИОткрытие(IntegrationTestCase):
 			"прогресс ученика пропал вместе с публикацией",
 		)
 		self.assertTrue(authoring.publish_course(course=курс)["data"]["published"])
+
+
+class IntegrationTestReleasePublisher(IntegrationTestCase):
+	"""Роль служебной учётки конвейера курсов: публикация и нужное ей чтение
+	(learning-services#685)."""
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		self.публикатор = создать_пользователя(f"rel-bot-{суффикс}@example.com", authoring.РОЛЬ_ПУБЛИКАТОРА)
+		self.куратор = создать_куратора(f"rel-bot-cur-{суффикс}@example.com")
+		self.ключ = f"bot-{суффикс}"
+		frappe.set_user(self.публикатор)
+
+	def test_публикует_и_читает_нужное_публикации(self):
+		"""Новый курс — только со списком инструкторов: сам публикатор курс не
+		ведёт. Новая версия, повтор и чтение, которым конвейер сверяет версию."""
+		with self.subTest("новый курс без списка — отказ до записи"):
+			ответ = authoring.publish_release(release=пример_релиза(self.ключ))
+			self.assertEqual(ответ.get("error", {}).get("code"), "instructors_empty", ответ)
+			self.assertFalse(frappe.db.exists("LMS Course", {"course_key": self.ключ}))
+
+		данные = authoring.publish_release(release=пример_релиза(self.ключ), instructors=[self.куратор])["data"]
+		курс = данные["course"]
+		self.assertEqual(данные["instructors"], [self.куратор])
+
+		релиз = пример_релиза(self.ключ)
+		релиз["lessons"][0]["title"] = "Урок первый, второе издание"
+		self.assertEqual(authoring.publish_release(release=релиз)["data"]["version"], 2)
+		self.assertTrue(authoring.publish_release(release=релиз)["data"]["unchanged"])
+		self.assertEqual(
+			frappe.db.get_value("Agent Course Release", {"course": курс, "version": 2}, "published_by"),
+			self.публикатор,
+		)
+
+		курсы = authoring.list_courses()["data"]["courses"]
+		self.assertIn(self.ключ, [к["course_key"] for к in курсы])
+		версии = authoring.course_releases(course=курс)["data"]["releases"]
+		self.assertEqual([в["version"] for в in версии], [2, 1])
+
+	def test_домашки_эталоны_и_прохождения_закрыты(self):
+		"""Публикатору закрыто то, что открывает авторская роль: домашки всех
+		организаций, эталоны квиза, прохождения, правка курсов."""
+		frappe.set_user("Administrator")
+		курс = authoring.publish_release(release=пример_релиза(self.ключ), instructors=[self.куратор])["data"][
+			"course"
+		]
+		frappe.set_user(self.публикатор)
+		for что, вызов in {
+			"релиз с эталонами": lambda: authoring.course_release(course=курс),
+			"прохождения": lambda: authoring.goal_runs(course=курс),
+			"репорты": lambda: authoring.course_reports(course=курс),
+			"открыть курс": lambda: authoring.publish_course(course=курс),
+			"новый курс-анонс": lambda: authoring.create_course(title="Т", summary="С"),
+		}.items():
+			with self.subTest(что), self.assertRaises(frappe.PermissionError):
+				вызов()
+		# Роль ученика Learning даёт каждому пользователю, публикатору тоже: из
+		# сдач домашки ему видны только свои — то есть никаких.
+		self.assertFalse(permissions.методист(self.публикатор))
+		self.assertNotEqual(permissions.условие_сдачи(self.публикатор), "")
+		self.assertFalse(frappe.has_permission("LMS Course", "write", user=self.публикатор))

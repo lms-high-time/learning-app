@@ -191,7 +191,7 @@ def _порядок(курс: str, главы: list[str], уроки_глав: d
 	if было != главы:
 		курс_документ.set("chapters", [{"chapter": глава} for глава in главы])
 		курс_документ.flags[ИЗ_РЕЛИЗА] = True
-		курс_документ.save()
+		курс_документ.save(ignore_permissions=True)
 	for глава in dict.fromkeys(было + главы):
 		нужно = уроки_глав.get(глава, [])
 		документ = frappe.get_doc(ГЛАВА, глава)
