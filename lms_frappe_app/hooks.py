@@ -516,8 +516,12 @@ ignore_links_on_delete = ["Agent Consent"]
 #
 # `sid` в параметрах запроса — отказ, и первым: переадресация следующих хуков
 # поставила бы cookie сессии из параметра (learning-services#666).
+#
+# Абсолютный срок сессии, поднятой из базы, — следом: Frappe сверяет его
+# только у сессии из кэша (learning-services#691).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+	"lms_frappe_app.session_guard.завершить_истёкшую",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
