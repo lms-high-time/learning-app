@@ -150,9 +150,13 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 			self.assertIn(self.занятие_а.name, видимые)
 			self.assertIn(self.занятие_б.name, видимые)
 
-	def test_состав_назначения_виден_руководителю(self):
-		"""Кому назначен курс, через `/api/resource` видит руководитель, а не
-		участник: назначение ему видно, его адресаты — нет (learning-services#692).
+	def test_адресаты_назначения_через_rest_только_персоналу(self):
+		"""Кому назначен курс, через `/api/resource` видит только персонал платформы:
+		участник видит назначение без адресатов, руководитель — тоже, его адресаты
+		отдают методы команды (`team.allocations`). `Why:` роль руководителя
+		одна на все организации, а назначение видно любому участнику — по роли
+		адресаты открылись бы и руководителю другой организации
+		(learning-services#692).
 
 		Два пути: документ назначения и его список с полем адресатов.
 		"""
@@ -165,7 +169,15 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 				"members": [{"user": self.ученик_а}],
 			}
 		).insert(ignore_permissions=True)
-		for кто, видит in ((self.ученик_а, False), (self.менеджер_а, True)):
+		руководитель_б = создать_менеджера(f"m-b-{frappe.generate_hash(length=6)}@example.com", self.компания_б)
+		добавить_в_организацию(руководитель_б, self.компания_а)
+		администратор = создать_пользователя(f"sm-{frappe.generate_hash(length=6)}@example.com", "System Manager")
+		for кто, видит in (
+			(self.ученик_а, False),
+			(self.менеджер_а, False),
+			(руководитель_б, False),
+			(администратор, True),
+		):
 			with self.subTest(кто):
 				frappe.set_user(кто)
 				try:
