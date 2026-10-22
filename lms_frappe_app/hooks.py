@@ -573,9 +573,14 @@ ignore_links_on_delete = ["Agent Consent"]
 #
 # Абсолютный срок сессии, поднятой из базы, — следом: Frappe сверяет его
 # только у сессии из кэша (learning-services#691).
+#
+# Оригиналы подменённых методов снимаются из реестра whitelisted на каждом
+# запросе и задаче: иначе до них доходят под другим путём модуля
+# (learning-services#692).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
 	"lms_frappe_app.session_guard.завершить_истёкшую",
+	"lms_frappe_app.whitelist_guard.снять_подменённые",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 # Выход очищает данные сайта в браузере, приватные файлы не кэшируются
@@ -599,7 +604,7 @@ on_session_creation = "lms_frappe_app.session_guard.ограничить_сро�
 
 # Job Events
 # ----------
-# before_job = ["lms_frappe_app.utils.before_job"]
+before_job = ["lms_frappe_app.whitelist_guard.снять_подменённые"]
 # after_job = ["lms_frappe_app.utils.after_job"]
 
 # User Data Protection
