@@ -9,6 +9,7 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 	# Чат живёт в MCP-сервисе на том же домене, что и сайт, — как `/mcp`.
 	("study-in-browser", "Заниматься в браузере", "/chat"),
 	("artifacts-sidebar", "Мои документы", "/lms/documents"),
+	("connections-sidebar", "Агенты и сессии", "/connections"),
 )
 
 
@@ -198,7 +199,7 @@ class TestСоставПунктовСайдбара(UnitTestCase):
 
 		self.assertEqual(
 			[п["route"] for п in ПУНКТЫ_САЙДБАРА],
-			["study-in-browser", "agent-sidebar", "artifacts-sidebar"],
+			["study-in-browser", "agent-sidebar", "artifacts-sidebar", "connections-sidebar"],
 		)
 
 	def test_заглушки_не_попадают_в_пути_mcp_сервиса(self):

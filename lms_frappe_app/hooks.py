@@ -105,14 +105,16 @@ get_website_user_home_page = "lms_frappe_app.www.home.домашняя_стра�
 
 # Пункт сайдбара Frappe Learning ведёт по маршруту своей Web Page (fetch_from),
 # а страницы «Подключить ассистента» и «Мои документы» живут в SPA Learning
-# (learning-services#331, #470), веб-чат — в MCP-сервисе на том же домене.
-# Редирект отрабатывает до выбора страницы, поэтому заглушки публиковать не
-# нужно. `/agent` — адрес, который уже разошёлся по ссылкам и закладкам.
+# (learning-services#331, #470), веб-чат — в MCP-сервисе на том же домене,
+# «Агенты и сессии» — страница приложения `/connections` (learning-services
+# #669). Редирект отрабатывает до выбора страницы, поэтому заглушки
+# публиковать не нужно. `/agent` — адрес, который уже разошёлся по ссылкам и закладкам.
 website_redirects = [
 	{"source": "/agent-sidebar", "target": "/lms/agent"},
 	{"source": "/agent", "target": "/lms/agent", "forward_query_parameters": True},
 	{"source": "/study-in-browser", "target": "/chat"},
 	{"source": "/artifacts-sidebar", "target": "/lms/documents"},
+	{"source": "/connections-sidebar", "target": "/connections"},
 ]
 
 # automatically load and sync documents of this doctype from downstream apps

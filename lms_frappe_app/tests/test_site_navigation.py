@@ -11,7 +11,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.site_navigation import КАБИНЕТ_АВТОРА, ПУНКТЫ, шапка_платформы
+from lms_frappe_app.site_navigation import АГЕНТЫ_И_СЕССИИ, КАБИНЕТ_АВТОРА, ПУНКТЫ, шапка_платформы
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 
 
@@ -43,6 +43,15 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 
 		with self.subTest("подвал ведёт к исходникам, а не на Frappe"):
 			self.assertIn("github.com/lms-high-time/learning-app", шапка.footer_powered)
+
+		with self.subTest("меню пользователя: «Агенты и сессии» перед пунктами Frappe"):
+			context = frappe._dict(post_login=[{"label": "My Account", "url": "/me"}])
+			шапка_платформы(context)
+
+			self.assertEqual(
+				[(п["label"], п["url"]) for п in context.post_login],
+				[АГЕНТЫ_И_СЕССИИ, ("My Account", "/me")],
+			)
 
 	def test_кабинет_автора_только_автору(self):
 		у_ученика = [п.url for п in self.шапка(self.ученик).top_bar_items]
