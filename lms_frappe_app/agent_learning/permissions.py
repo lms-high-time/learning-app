@@ -455,23 +455,31 @@ def доступна_сдача(doc, ptype: str = "read", user: str | None = Non
 	return bool(doc.member) and действует_в(doc.member, doc.organization)
 
 
-# --- главы Learning ---
+# --- курс вне витрины: главы и чтения Learning ---
 #
-# `Course Chapter` — доктайп Learning: роль `LMS Student` читает его по всем
-# курсам, а в главе название, описание из релиза и состав уроков. Ученику
-# открыты главы курса на витрине и курса, на который он записан, — то же
-# правило, что у карты курса и входа в урок (learning-services#692). Право
-# ролей с Desk не сужается: главу правят и читают авторы.
+# Состав курса — главы, уроки, зачины — открыт тому, кто записан, и курсу на
+# витрине (`announcements.на_витрине`); персонал (`АДМИНИСТРАТИВНЫЕ_РОЛИ`) видит всё: курсы правят и
+# читают авторы. Это правило карты курса и входа в урок, и его же держат
+# главы Learning через `/api/resource` и подменённые чтения Learning
+# (`learning_reads.py`, learning-services#692).
 
 
-def _главы_без_ограничений(user: str) -> bool:
+def курсы_без_ограничений(user: str) -> bool:
 	return user == "Administrator" or bool(set(frappe.get_roles(user)) & АДМИНИСТРАТИВНЫЕ_РОЛИ)
+
+
+def курс_открыт(course: str, user: str | None = None) -> bool:
+	"""Открыт ли пользователю состав курса: роль персонала, курс на витрине или запись на курс."""
+	user = user or frappe.session.user
+	if курсы_без_ограничений(user) or announcements.на_витрине(course):
+		return True
+	return user != "Guest" and bool(frappe.db.exists("LMS Enrollment", {"member": user, "course": course}))
 
 
 def условие_главы(user: str | None = None) -> str:
 	"""`Course Chapter`: главы курсов на витрине и курсов, на которые записан."""
 	user = user or frappe.session.user
-	if _главы_без_ограничений(user):
+	if курсы_без_ограничений(user):
 		return ""
 	колонка = "`tabCourse Chapter`.`course`"
 	записан = f"select `course` from `tabLMS Enrollment` where `member` = {frappe.db.escape(user)}"
@@ -479,12 +487,7 @@ def условие_главы(user: str | None = None) -> str:
 
 
 def доступна_глава(doc, ptype: str = "read", user: str | None = None) -> bool:
-	user = user or frappe.session.user
-	if _главы_без_ограничений(user):
-		return True
-	return announcements.на_витрине(doc.course) or bool(
-		frappe.db.exists("LMS Enrollment", {"member": user, "course": doc.course})
-	)
+	return курс_открыт(doc.course, user)
 
 
 def может_проверять(doc, user: str) -> bool:
