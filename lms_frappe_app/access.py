@@ -9,7 +9,7 @@
 """
 
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import frappe
 from frappe import _
@@ -128,6 +128,30 @@ def _на_вход_со_вторым_фактором(куда: str | None) -> s
 	"""
 	frappe.local.login_manager.logout()
 	return f"/login?{urlencode({'redirect-to': куда})}" if куда else "/login"
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def accept_invitation(key: str) -> None:
+	"""Подмена `frappe.core.api.user_invitation.accept_invitation`: приглашение
+	принимается, а входит человек обычным входом (learning-services#691).
+
+	`Why:` Frappe, приняв приглашение пользователя, у которого уже есть
+	пароль, входит под ним сам (`login_as`), а вход на платформе — только
+	страницей входа или Google, с их проверками (`docs/process/auth-security.md`
+	в learning-services). Здесь принимает приглашение тот же код Frappe, но
+	без входа: флаг `in_test` у `_accept_invitation` ровно это и отключает. Без пароля человек идёт его задать (ссылка Frappe, дальше —
+	`update_password` выше), с паролем — на `/login` с возвратом туда, куда
+	вело приглашение.
+	"""
+	from frappe.core.api.user_invitation import _accept_invitation
+
+	_accept_invitation(key, True)
+	куда = frappe.local.response.get("location") or ""
+	if "/update-password?" in куда:
+		return
+	адрес = urlsplit(куда)
+	путь = адрес.path + (f"?{адрес.query}" if адрес.query else "")
+	frappe.local.response["location"] = f"/login?{urlencode({'redirect-to': путь or '/'})}"
 
 
 def _письмо_пароль_изменён(пользователь: str) -> None:

@@ -465,6 +465,8 @@ override_whitelisted_methods = {
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
 	"lms.lms.user.sign_up": "lms_frappe_app.access.sign_up_learning",
 	"frappe.core.doctype.user.user.update_password": "lms_frappe_app.access.update_password",
+	# Приглашение Frappe принимается без входа под приглашённым (learning-services#691).
+	"frappe.core.api.user_invitation.accept_invitation": "lms_frappe_app.access.accept_invitation",
 	# Редактор Learning не правит главы и уроки курса из релиза: порядок он пишет
 	# мимо `validate` — обоснование в модуле (learning-services#512).
 	"lms.lms.api.delete_chapter": f"{_редактор}.delete_chapter",
