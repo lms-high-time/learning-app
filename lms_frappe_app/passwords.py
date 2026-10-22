@@ -18,6 +18,13 @@ learning-services#664: 6.2.1, 6.2.11, 6.2.12). Здесь — длина, кон
 задаёт по ссылке из письма — через `update_password`. Первый вход через
 Google тоже заводит аккаунт со случайным паролем, но без флага; такой
 аккаунт узнаётся по флагу запроса `ВХОД_ЧЕРЕЗ_GOOGLE`.
+
+Пароль и его хеш в переменных названы латиницей (`password`, `password_sha1`)
+вопреки стилю. `Why:` трассировку с переменными
+(`frappe.get_traceback(with_context=True)` — Error Log и Sentry) Frappe
+чистит по латинским подстрокам имён: `password`, `secret`, `token`, `key`.
+Кириллическое `пароль` ушло бы в журнал как есть (learning-services#664), а
+здесь есть сетевой вызов, и исключения вероятны.
 """
 
 import hashlib
@@ -106,36 +113,36 @@ _НАЗВАНИЯ = [_шаблон_названия(название) for наз
 ПОЛЯ_ПОЛЬЗОВАТЕЛЯ = ("first_name", "middle_name", "last_name", "email", "birth_date")
 
 
-def проверить_пароль(пароль: str, сведения: Iterable = ()) -> None:
+def проверить_пароль(password: str, сведения: Iterable = ()) -> None:
 	"""Отказ `ValidationError`, если пароль не годится; `сведения` — имя,
 	почта и прочее о самом пользователе, для оценки zxcvbn."""
-	if причина := причина_отказа(пароль, сведения):
+	if причина := причина_отказа(password, сведения):
 		frappe.throw(причина, title="Пароль не подходит")
 
 
-def причина_отказа(пароль: str, сведения: Iterable = ()) -> str | None:
+def причина_отказа(password: str, сведения: Iterable = ()) -> str | None:
 	"""Текст отказа или `None`. Проверки — от дешёвой к сетевой: до сервиса
 	утечек доходит только пароль, прошедший остальные."""
-	if len(пароль) < МИНИМУМ_ДЛИНЫ:
+	if len(password) < МИНИМУМ_ДЛИНЫ:
 		return КОРОТКИЙ
-	if есть_название(пароль):
+	if есть_название(password):
 		return С_НАЗВАНИЕМ
 	слова = [*КОНТЕКСТНЫЕ_СЛОВА, *(str(с) for с in сведения if с)]
 	порог = cint(frappe.get_system_settings("minimum_password_score")) or БАЛЛ_ПО_УМОЛЧАНИЮ
-	if test_password_strength(пароль, user_inputs=слова).get("score", 0) < порог:
+	if test_password_strength(password, user_inputs=слова).get("score", 0) < порог:
 		return ПРОСТОЙ
-	if утёк(пароль):
+	if утёк(password):
 		return УТЁК
 	return None
 
 
-def есть_название(пароль: str) -> bool:
+def есть_название(password: str) -> bool:
 	"""Есть ли в пароле название платформы отдельным словом: `C3nda-2026`,
 	`High.Time`, `МойCenda` — да, `descendant` — нет."""
-	return any(шаблон.search(пароль) for шаблон in _НАЗВАНИЯ)
+	return any(шаблон.search(password) for шаблон in _НАЗВАНИЯ)
 
 
-def утёк(пароль: str) -> bool:
+def утёк(password: str) -> bool:
 	"""Встречается ли пароль в базе утечек Have I Been Pwned.
 
 	Сервису уходят первые 5 знаков SHA-1, а не пароль и не хеш целиком; с
@@ -149,10 +156,10 @@ def утёк(пароль: str) -> bool:
 	пишется в журнал приложения.
 	"""
 	# SHA-1 — формат базы HIBP, а не хеширование пароля для хранения.
-	хеш = hashlib.sha1(пароль.encode(), usedforsecurity=False).hexdigest().upper()
+	password_sha1 = hashlib.sha1(password.encode(), usedforsecurity=False).hexdigest().upper()
 	try:
 		ответ = requests.get(
-			АДРЕС_УТЕЧЕК + хеш[:5],
+			АДРЕС_УТЕЧЕК + password_sha1[:5],
 			headers={"Add-Padding": "true", "User-Agent": "Cenda password check"},
 			timeout=ТАЙМАУТ_УТЕЧЕК,
 		)
@@ -160,15 +167,15 @@ def утёк(пароль: str) -> bool:
 	except requests.RequestException as ошибка:
 		frappe.logger("lms_frappe_app.passwords").warning(f"Проверка пароля по утечкам пропущена: {ошибка!r}")
 		return False
-	return есть_в_диапазоне(ответ.text, хеш[5:])
+	return есть_в_диапазоне(ответ.text, password_sha1[5:])
 
 
-def есть_в_диапазоне(ответ: str, хвост: str) -> bool:
+def есть_в_диапазоне(ответ: str, password_sha1_tail: str) -> bool:
 	"""Есть ли хвост хеша в ответе range API: строки `ХВОСТ:ЧИСЛО`. Число 0 —
 	у фиктивных строк дополнения, такая строка утечкой не считается."""
 	for строка in ответ.splitlines():
 		свой, _, число = строка.strip().partition(":")
-		if свой.upper() == хвост and cint(число) > 0:
+		if свой.upper() == password_sha1_tail and cint(число) > 0:
 			return True
 	return False
 
@@ -200,5 +207,5 @@ def проверить_пароль_пользователя(doc, method=None) -
 	"""
 	if frappe.in_test:
 		return
-	if пароль := пароль_к_проверке(doc):
-		проверить_пароль(пароль, [doc.get(поле) for поле in ПОЛЯ_ПОЛЬЗОВАТЕЛЯ])
+	if password := пароль_к_проверке(doc):
+		проверить_пароль(password, [doc.get(поле) for поле in ПОЛЯ_ПОЛЬЗОВАТЕЛЯ])

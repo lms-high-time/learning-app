@@ -4,6 +4,12 @@
 
 Самооценка ASVS, learning-services#664: 7.2.4 — Frappe берёт `sid` и из
 параметров запроса, 7.3.2 — у сессии нет абсолютного срока, только простой.
+
+Тело запроса (в нём бывает пароль входа) и данные сессии (токен CSRF) лежат в
+переменных с латинским `secrets` вопреки стилю. `Why:` трассировку с
+переменными (`frappe.get_traceback(with_context=True)` — Error Log и Sentry)
+Frappe чистит по латинским подстрокам имён: `password`, `secret`, `token`,
+`key` (learning-services#664).
 """
 
 from datetime import UTC, datetime, timedelta
@@ -36,14 +42,14 @@ def sid_в_параметрах(запрос) -> bool:
 	"""
 	if "sid" in запрос.args or "sid" in запрос.form:
 		return True
-	данные = запрос.get_data(as_text=True)
-	if not (данные and запрос.is_json):
+	body_secrets = запрос.get_data(as_text=True)
+	if not (body_secrets and запрос.is_json):
 		return False
 	try:
-		тело = orjson.loads(данные)
+		parsed_body_secrets = orjson.loads(body_secrets)
 	except Exception:  # в том числе RecursionError глубокой вложенности
 		return False
-	return isinstance(тело, dict) and "sid" in тело
+	return isinstance(parsed_body_secrets, dict) and "sid" in parsed_body_secrets
 
 
 def отклонить_sid_из_запроса() -> None:
@@ -116,15 +122,15 @@ def ограничить_срок_сессии(login_manager=None) -> None:
 	сессия = getattr(frappe.local, "session_obj", None)
 	if not сессия or сессия.user == "Guest":
 		return
-	данные = сессия.data.data
-	конец = конец_сессии(данные.get("session_end"), datetime.now(tz=UTC))
-	if данные.get("session_end") == конец:
+	session_secrets = сессия.data.data
+	конец = конец_сессии(session_secrets.get("session_end"), datetime.now(tz=UTC))
+	if session_secrets.get("session_end") == конец:
 		return
-	данные.session_end = конец
+	session_secrets.session_end = конец
 	сессии = frappe.qb.DocType("Sessions")
 	(
 		frappe.qb.update(сессии)
-		.set(сессии.sessiondata, frappe.as_json(данные, indent=None, separators=(",", ":")))
+		.set(сессии.sessiondata, frappe.as_json(session_secrets, indent=None, separators=(",", ":")))
 		.where(сессии.sid == сессия.sid)
 	).run()
 	frappe.cache.hset("session", сессия.sid, сессия.data)

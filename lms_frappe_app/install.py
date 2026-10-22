@@ -353,10 +353,13 @@ def _расходится(ключ, client_id: str, client_secret: str) -> bool:
 		return True
 	if ключ.sign_ups != "Allow":
 		return True
-	прежний = get_decrypted_password(
+	# Латиница вопреки стилю: трассировку с переменными (Error Log, Sentry)
+	# Frappe чистит по латинским подстрокам имён — кириллическое имя с секретом
+	# ушло бы в журнал как есть (learning-services#664).
+	previous_secret = get_decrypted_password(
 		"Social Login Key", "google", "client_secret", raise_exception=False
 	)
-	return прежний != client_secret
+	return previous_secret != client_secret
 
 
 #: OAuth-клиент веб-чата тоже приезжает из конфигурации сайта: те же id и
