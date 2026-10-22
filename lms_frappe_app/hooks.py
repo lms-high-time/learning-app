@@ -520,13 +520,22 @@ before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
-after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
+# Выход очищает данные сайта в браузере, приватные файлы не кэшируются
+# (learning-services#688).
+after_request = [
+	"lms_frappe_app.session_guard.не_ставить_cookie",
+	"lms_frappe_app.browser_data.заголовки_ответа",
+]
 
 # Session Events
 # --------------
 # Выход из Cenda отзывает токены веб-чата: у чата свой вход, и без этого он
-# переживал «Выйти» (learning-services#656).
-on_logout = "lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе"
+# переживал «Выйти» (learning-services#656). Второй хук запоминает, кто
+# вышел, — для очистки данных сайта в браузере (learning-services#688).
+on_logout = [
+	"lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе",
+	"lms_frappe_app.browser_data.запомнить_выход",
+]
 # Абсолютный срок сессии от входа (learning-services#666).
 on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
 
