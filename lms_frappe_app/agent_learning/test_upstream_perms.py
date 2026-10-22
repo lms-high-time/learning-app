@@ -31,11 +31,19 @@ import frappe.client
 from frappe.desk import reportview
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.tests.sample_data import зачислить, создать_ученика, создать_урок
+from lms_frappe_app.tests.sample_data import (
+	зачислить,
+	зачислить_на_курс,
+	создать_куратора,
+	создать_курс,
+	создать_урок,
+	создать_ученика,
+)
 
 РОЛЬ = "LMS Student"
 ЭТАЛОН = "LMS Question"
 ПОПЫТКА = "LMS Quiz Submission"
+ЗАЧИСЛЕНИЕ = "LMS Enrollment"
 
 
 def сигнал(доктайп: str, что: str) -> str:
@@ -225,4 +233,133 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 		self.assertIn(своя, имена)
 		self.assertNotIn(
 			чужая, имена, сигнал(ПОПЫТКА, "увидела попытку чужого ученика в списке")
+		)
+
+
+class IntegrationTestEnrollmentWrites(IntegrationTestCase):
+	"""Поля зачисления пишет код платформы (`agent_learning/enrollment_guard.py`).
+
+	Проверки идут теми же вызовами, которыми отвечает
+	`/api/resource/LMS Enrollment`: `frappe.client.set_value` и
+	`frappe.client.insert` сохраняют документ без `ignore_permissions`, как
+	`PUT` и `POST` REST-слоя.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		суффикс = frappe.generate_hash(length=6)
+		cls.ученик = создать_ученика(f"enr-{суффикс}@example.com")
+		cls.чужой = создать_ученика(f"enr-other-{суффикс}@example.com")
+		cls.свой_курс = создать_курс(f"Свой курс {суффикс}")
+		cls.другой_курс = создать_курс(f"Другой курс {суффикс}")
+		for курс in (cls.свой_курс, cls.другой_курс):
+			frappe.db.set_value("LMS Course", курс, "published", 1)
+		cls.неопубликованный = создать_курс(f"Неопубликованный курс {суффикс}")
+		зачислить_на_курс(cls.ученик, cls.свой_курс)
+		cls.зачисление = frappe.db.get_value(ЗАЧИСЛЕНИЕ, {"member": cls.ученик, "course": cls.свой_курс})
+		cls.группа = cls._группа(суффикс, cls.другой_курс)
+
+	@staticmethod
+	def _группа(суффикс: str, курс: str) -> str:
+		"""Группа Learning с самозаписью и одним курсом.
+
+		Проверки группы (даты, преподаватели, расписание) к правилу не
+		относятся, поэтому `validate` её пропускается.
+		"""
+		группа = frappe.get_doc(
+			{
+				"doctype": "LMS Batch",
+				"title": f"Группа {суффикс}",
+				"allow_self_enrollment": 1,
+				"courses": [{"course": курс}],
+			}
+		)
+		группа.flags.ignore_validate = True
+		группа.flags.ignore_mandatory = True
+		return группа.insert(ignore_permissions=True).name
+
+	def setUp(self):
+		self.addCleanup(frappe.set_user, "Administrator")
+
+	def test_своё_зачисление_ученик_не_меняет(self):
+		"""Ни одно поле своей записи на курс ученику не меняется."""
+		поля = {
+			"course": self.неопубликованный,
+			"member": self.чужой,
+			"agent_tester": 1,
+			"role": "Admin",
+			"member_type": "Mentor",
+			"enrollment_from_batch": self.группа,
+		}
+		frappe.set_user(self.ученик)
+		for поле, значение in поля.items():
+			with self.subTest(поле=поле):
+				with self.assertRaises(frappe.PermissionError):
+					frappe.client.set_value(ЗАЧИСЛЕНИЕ, self.зачисление, поле, значение)
+
+		frappe.set_user("Administrator")
+		запись = frappe.db.get_value(ЗАЧИСЛЕНИЕ, self.зачисление, list(поля), as_dict=True)
+		self.assertEqual(запись.course, self.свой_курс)
+		self.assertEqual(запись.member, self.ученик)
+		self.assertFalse(запись.agent_tester)
+		self.assertFalse(запись.enrollment_from_batch)
+
+	def test_зачисление_меняет_роль_с_полным_правом(self):
+		"""Правило — для права только на свои записи: у `Moderator` оно полное."""
+		суффикс = frappe.generate_hash(length=6)
+		модератор = создать_куратора(f"enr-mod-{суффикс}@example.com", "Moderator")
+		зачисление = frappe.db.get_value(
+			ЗАЧИСЛЕНИЕ,
+			{"member": self.чужой, "course": зачислить_на_курс(self.чужой, создать_курс(f"Курс {суффикс}"))},
+		)
+		frappe.set_user(модератор)
+		frappe.client.set_value(ЗАЧИСЛЕНИЕ, зачисление, "agent_tester", 1)
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value(ЗАЧИСЛЕНИЕ, зачисление, "agent_tester"), 1)
+
+	def test_запись_на_курс_только_методами(self):
+		"""Вставка напрямую не заводит зачисление — ни на другого, ни на себя.
+
+		Запись на курс — метод `enroll`: там пространство, анонс и порядок
+		программы.
+		"""
+		заявки = {
+			"на другого": {"member": self.чужой},
+			"на себя": {"member": self.ученик},
+			"на себя тестером": {"member": self.ученик, "agent_tester": 1},
+		}
+		frappe.set_user(self.ученик)
+		for что, поля in заявки.items():
+			with self.subTest(что):
+				with self.assertRaises(frappe.PermissionError):
+					frappe.client.insert({"doctype": ЗАЧИСЛЕНИЕ, "course": self.другой_курс, **поля})
+
+		frappe.set_user("Administrator")
+		self.assertFalse(
+			frappe.db.exists(
+				ЗАЧИСЛЕНИЕ, {"course": self.другой_курс, "member": ("in", [self.ученик, self.чужой])}
+			)
+		)
+
+	def test_группа_learning_записывает_на_свои_курсы(self):
+		"""Самозапись в группу Learning заводит зачисление на её курс.
+
+		Learning вставляет его от имени ученика, без `ignore_permissions`, — это
+		единственный такой путь, и правило его пропускает.
+		"""
+		from lms.lms.utils import enroll_in_batch
+
+		суффикс = frappe.generate_hash(length=6)
+		курс = создать_курс(f"Курс группы {суффикс}")
+		frappe.db.set_value("LMS Course", курс, "published", 1)
+		группа = self._группа(суффикс, курс)
+
+		frappe.set_user(self.ученик)
+		enroll_in_batch(группа)
+
+		frappe.set_user("Administrator")
+		self.assertEqual(
+			frappe.db.get_value(ЗАЧИСЛЕНИЕ, {"member": self.ученик, "course": курс}, "enrollment_from_batch"),
+			группа,
 		)

@@ -380,9 +380,11 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
-	# Прогресс курса из релиза — по урокам программы: пройденный урок, снятый
-	# из релиза, Learning засчитывал бы (learning-services#522).
+	# Поля зачисления пишет код платформы (learning-services#674). Прогресс
+	# курса из релиза — по урокам программы: пройденный урок, снятый из релиза,
+	# Learning засчитывал бы (learning-services#522).
 	"LMS Enrollment": {
+		"validate": "lms_frappe_app.agent_learning.enrollment_guard.проверить_зачисление",
 		"on_update": "lms_frappe_app.agent_learning.course_progress.сверить",
 	},
 	# Отметка урока, один ключ на две ишью:
