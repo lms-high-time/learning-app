@@ -71,6 +71,7 @@ class IntegrationTestChatState(IntegrationTestCase):
 		for что, вызов in {
 			"читать": lambda: student.chat_state(чужое_занятие),
 			"писать": lambda: student.save_chat_state(чужое_занятие, СОСТОЯНИЕ, "1"),
+			"засчитать ход": lambda: student.count_lesson_turn(чужое_занятие),
 		}.items():
 			with self.subTest(что):
 				ответ = вызов()

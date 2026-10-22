@@ -489,6 +489,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			student.save_chat_state(session=занятие, state=json.dumps({"messages": []}), version="1"),
 		)
 		self.сверить("student.chat_state", student.chat_state(session=занятие))
+		self.сверить("student.count_lesson_turn", student.count_lesson_turn(session=занятие))
 		self.сверить(
 			"student.save_scenario_state",
 			student.save_scenario_state(key="profile", state=json.dumps({"messages": []}), version="1"),
