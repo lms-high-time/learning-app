@@ -15,6 +15,7 @@ from collections.abc import Callable
 
 import frappe
 
+from lms_frappe_app import security_log
 from lms_frappe_app.agent_learning.errors import Отказ
 
 
@@ -44,6 +45,9 @@ def контракт(метод: Callable) -> Callable:
 	Ожидаемые отказы возвращаются успешным HTTP с машинным кодом. Ошибки прав
 	наверх не перехватываются: чужая сессия обязана отклоняться правами
 	Frappe, а не нашей проверкой, и агент должен увидеть именно 403.
+
+	Отказ о доступе пишется в журнал событий безопасности: ответ успешный, и
+	иначе его не видно нигде (`security_log`).
 	"""
 
 	@functools.wraps(метод)
@@ -51,6 +55,7 @@ def контракт(метод: Callable) -> Callable:
 		try:
 			return успех(метод(*args, **kwargs))
 		except Отказ as причина:
+			security_log.отказ_контракта(метод, причина.код, причина.подробности)
 			return отказ(причина.код, причина.сообщение, **причина.подробности)
 
 	return обёртка

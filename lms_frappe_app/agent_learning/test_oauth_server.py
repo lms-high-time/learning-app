@@ -28,6 +28,7 @@ from oauthlib.oauth2 import (
 from oauthlib.oauth2.rfc6749.errors import MissingCodeChallengeError, UnsupportedCodeChallengeMethodError
 from werkzeug.exceptions import NotFound
 
+from lms_frappe_app import security_log
 from lms_frappe_app.agent_learning import cimd, oauth_server
 from lms_frappe_app.agent_learning.test_cimd import ДОКУМЕНТ as ДОКУМЕНТ_CLAUDE_CODE
 from lms_frappe_app.tests.sample_data import создать_ученика
@@ -553,9 +554,21 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			)
 
 		with self.subTest("ротация переносит семью"):
-			код, первый = self._вход_клиента(клиент)
-			статус, второй = обновить(первый)
+			with self.assertLogs(security_log.ИМЯ_ЖУРНАЛА, "INFO") as события:
+				код, первый = self._вход_клиента(клиент)
+				статус, второй = обновить(первый)
 			self.assertEqual(статус, 200, второй)
+			# Выдача и обновление — в журнале событий безопасности, без токенов и кода.
+			записи = [json.loads(з.getMessage()) for з in события.records]
+			self.assertEqual(
+				[(з["event"], з["user"], з["client"], з["grant"]) for з in записи],
+				[
+					("token_issued", frappe.session.user, клиент.name, "authorization_code"),
+					("token_refreshed", frappe.session.user, клиент.name, "refresh_token"),
+				],
+			)
+			for значение in (*первый.values(), *второй.values(), код):
+				self.assertNotIn(str(значение), " ".join(з.getMessage() for з in события.records))
 			self.assertEqual(self._статус(первый), "Revoked")
 			семья = frappe.db.get_value(
 				"OAuth Bearer Token",
@@ -585,7 +598,10 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			постарить(второй, minutes=-3)
 			постарить(третий, minutes=-2)
 			frappe.db.delete("OAuth Bearer Token", {"name": первый["access_token"]})
-			with mock.patch.object(frappe, "log_error") as журнал:
+			with (
+				mock.patch.object(frappe, "log_error") as журнал,
+				self.assertLogs(security_log.ИМЯ_ЖУРНАЛА, "INFO") as события,
+			):
 				статус, ответ = обновить(первый)
 			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
 			self.assertEqual(self._статус(третий), "Revoked")
@@ -593,8 +609,11 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			self.assertEqual(запись["title"], "Повтор токена обновления — семья отозвана")
 			self.assertIn(клиент.name, запись["message"])
 			self.assertIn("после замены", запись["message"])
+			(событие,) = [json.loads(з.getMessage()) for з in события.records]
+			self.assertEqual((событие["event"], событие["client"]), ("token_reuse", клиент.name))
 			for значение in (*первый.values(), *третий.values(), код):
 				self.assertNotIn(str(значение), запись["message"])
+				self.assertNotIn(str(значение), события.records[0].getMessage())
 
 		with self.subTest("семья старше предельного срока"):
 			_, токен = self._вход_клиента(клиент)

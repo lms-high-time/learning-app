@@ -558,9 +558,11 @@ before_request = [
 	"lms_frappe_app.session_guard.завершить_истёкшую",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
-# Выход очищает данные сайта в браузере, приватные файлы не кэшируются
-# (learning-services#688).
+# Отказы 401, 403, 429 и неудачный вход — в журнал событий безопасности
+# (learning-services#680). Выход очищает данные сайта в браузере, приватные
+# файлы не кэшируются (learning-services#688).
 after_request = [
+	"lms_frappe_app.security_log.записать_отказ",
 	"lms_frappe_app.session_guard.не_ставить_cookie",
 	"lms_frappe_app.browser_data.заголовки_ответа",
 ]
@@ -576,6 +578,8 @@ on_logout = [
 ]
 # Абсолютный срок сессии от входа (learning-services#666).
 on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
+# Вход в сессию — в журнал событий безопасности (learning-services#680).
+on_login = "lms_frappe_app.security_log.при_входе"
 
 # Job Events
 # ----------
@@ -651,9 +655,9 @@ user_data_fields = [
 # Authentication and authorization
 # --------------------------------
 
-# auth_hooks = [
-# 	"lms_frappe_app.auth.validate"
-# ]
+# Запрос с ключом API или токеном в заголовке — в журнал событий безопасности
+# (learning-services#680). Хук ничего не проверяет и никого не впускает.
+auth_hooks = ["lms_frappe_app.security_log.по_заголовку"]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True

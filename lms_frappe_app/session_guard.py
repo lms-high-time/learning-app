@@ -19,6 +19,8 @@ import orjson
 from werkzeug.exceptions import HTTPException
 from werkzeug.wrappers import Response
 
+from lms_frappe_app import security_log
+
 #: Абсолютный срок сессии от входа, сколько бы человек ни был активен.
 #: `Why:` ASVS 7.3.2 требует срок, после которого вход повторяется;
 #: NIST SP 800-63B-4 для уровня AAL1 (пароль или внешний вход, без второго
@@ -70,6 +72,7 @@ def отклонить_sid_из_запроса() -> None:
 	"""
 	if not frappe.request or not sid_в_параметрах(frappe.request):
 		return
+	security_log.записать("sid_rejected")
 	не_ставить_cookie()
 	raise HTTPException(response=Response(ОТКАЗ_SID, status=400, mimetype="text/plain"))
 

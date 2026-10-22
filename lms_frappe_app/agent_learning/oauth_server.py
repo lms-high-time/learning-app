@@ -88,6 +88,7 @@ from oauthlib.openid.connect.core.endpoints.pre_configured import Server
 from werkzeug import Response
 from werkzeug.exceptions import NotFound
 
+from lms_frappe_app import security_log
 from lms_frappe_app.agent_learning import cimd
 
 #: Срок кода авторизации, секунд: предел, который рекомендует RFC 6749 §4.1.2.
@@ -424,6 +425,12 @@ class Валидатор(OAuthWebRequestValidator):
 			}
 		).insert(ignore_permissions=True)
 		frappe.db.commit()
+		security_log.записать(
+			"token_refreshed" if previous_token else "token_issued",
+			user=request.user,
+			client=клиент,
+			grant=request.grant_type,
+		)
 		return frappe.db.get_value("OAuth Client", клиент, "default_redirect_uri")
 
 	def revoke_token(self, token, token_type_hint, request, *args, **kwargs):
@@ -562,6 +569,13 @@ def _в_журнал_повтор(заголовок: str, клиент, пол�
 			+ (f", {подробность}" if подробность else "")
 		),
 	)
+	security_log.записать(
+		"token_reuse",
+		user=пользователь,
+		client=клиент,
+		family=отпечаток(family_token or "")[:16],
+		note=f"{заголовок}{f', {подробность}' if подробность else ''}",
+	)
 
 
 def _клиент_по_токену(request) -> str | None:
@@ -606,7 +620,29 @@ def approve(*args, **kwargs):
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def get_token(*args, **kwargs):
 	_свой_сервер()
-	return oauth2.get_token(*args, **kwargs)
+	результат = oauth2.get_token(*args, **kwargs)
+	записать_отказ_в_токене()
+	return результат
+
+
+def записать_отказ_в_токене() -> None:
+	"""Отказ эндпоинта токенов — в журнал событий безопасности.
+
+	Выданный токен пишет `save_bearer_token`; здесь — только отказ: код ошибки
+	OAuth, вид гранта и клиент из запроса. Тело ответа с токенами в запись не
+	попадает.
+	"""
+	ответ = frappe.local.response or {}
+	if not ответ.get("error"):
+		return
+	форма = frappe.form_dict or {}
+	security_log.записать(
+		"token_denied",
+		error=ответ.get("error"),
+		grant=форма.get("grant_type"),
+		client=форма.get("client_id"),
+		status=ответ.get("http_status_code"),
+	)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
