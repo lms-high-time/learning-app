@@ -251,6 +251,8 @@ after_install = "lms_frappe_app.install.after_install"
 # Индексы по полям фикстур: при установке фикстуры синхронизируются после
 # `after_install`, а `after_sync` — следом за ними.
 after_sync = "lms_frappe_app.install.after_sync"
+# Сайт с флагом разработки не мигрирует — до схемы и патчей (learning-services#691).
+before_migrate = ["lms_frappe_app.install.проверить_флаги_разработки"]
 after_migrate = ["lms_frappe_app.install.after_migrate"]
 
 # Uninstallation

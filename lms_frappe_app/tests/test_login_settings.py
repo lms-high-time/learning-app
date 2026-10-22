@@ -119,6 +119,9 @@ class IntegrationTestOAuthSettings(IntegrationTestCase):
 
 
 class UnitTestDevelopmentFlags(UnitTestCase):
+	def test_флаги_проверяются_до_миграции(self):
+		self.assertIn("lms_frappe_app.install.проверить_флаги_разработки", frappe.get_hooks("before_migrate"))
+
 	def test_флаги_разработки_останавливают_миграцию(self):
 		"""Режим разработчика, тесты на сайте и серверные скрипты на стенде —
 		отказ миграции; сайт разработки ключом конфигурации их держит
