@@ -1,0 +1,349 @@
+{% extends "templates/web.html" %}
+
+{#
+	Шаблоны Frappe не экранируют вывод. Имя агента (`app_name`) клиент пишет о
+	себе сам, адрес и устройство сессии приходят из запроса — всё через `| e`.
+#}
+{% block title %}{{ title | e }}{% endblock %}
+
+{% macro дата(значение) %}{{ (frappe.utils.format_datetime(значение, "dd.MM.yyyy HH:mm") if значение else "—") | e }}{% endmacro %}
+
+{% block page_content %}
+<style>
+	.account-page {
+		--bg: #f6f6f3; --paper: #ffffff; --ink: #1b1e24; --muted: #5f656e;
+		--line: #dcdfe3; --accent: #0e6f7b; --accent-soft: #e2f0f1;
+		--danger: #b03a24; --danger-soft: #f8e1dc; --warn: #8a6a1f; --warn-soft: #f6ead0;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root:not([data-theme="light"]) .account-page {
+			color-scheme: dark;
+			--bg: #14171b; --paper: #1c2026; --ink: #e7e9ec; --muted: #a0a7b0;
+			--line: #2f353d; --accent: #5cc0cb; --accent-soft: #163a3f;
+			--danger: #ef7a63; --danger-soft: #4a2119; --warn: #d9a24a; --warn-soft: #3f3116;
+		}
+	}
+	:root[data-theme="dark"] .account-page {
+		color-scheme: dark;
+		--bg: #14171b; --paper: #1c2026; --ink: #e7e9ec; --muted: #a0a7b0;
+		--line: #2f353d; --accent: #5cc0cb; --accent-soft: #163a3f;
+		--danger: #ef7a63; --danger-soft: #4a2119; --warn: #d9a24a; --warn-soft: #3f3116;
+	}
+
+	/* Шапка, фон и подвал сайта — в тон странице, как в кабинете автора: в
+	   тёмной теме тёмный блок стоял бы между белой шапкой и белыми полями. */
+	body { background: #f6f6f3; }
+	.navbar .navbar-toggler .icon { stroke: currentColor; fill: none; stroke-width: 1.5; }
+	@media (prefers-color-scheme: dark) {
+		:root:not([data-theme="light"]) body { background: #14171b; }
+		:root:not([data-theme="light"]) :is(.navbar, .web-footer) { background: #14171b; color: #a0a7b0; border-color: #2f353d; }
+		:root:not([data-theme="light"]) :is(.navbar-brand, .nav-link, .dropdown-item) { color: #e7e9ec; }
+		:root:not([data-theme="light"]) .web-footer a { color: #a0a7b0; }
+		:root:not([data-theme="light"]) .navbar .dropdown-menu { background: #1c2026; border-color: #2f353d; }
+		:root:not([data-theme="light"]) .navbar .dropdown-item:is(:hover, :focus) { background: #2a323b; }
+		:root:not([data-theme="light"]) .navbar .navbar-toggler { color: #e7e9ec; border-color: #2f353d; }
+	}
+	:root[data-theme="dark"] body { background: #14171b; }
+	:root[data-theme="dark"] :is(.navbar, .web-footer) { background: #14171b; color: #a0a7b0; border-color: #2f353d; }
+	:root[data-theme="dark"] :is(.navbar-brand, .nav-link, .dropdown-item) { color: #e7e9ec; }
+	:root[data-theme="dark"] .web-footer a { color: #a0a7b0; }
+	:root[data-theme="dark"] .navbar .dropdown-menu { background: #1c2026; border-color: #2f353d; }
+	:root[data-theme="dark"] .navbar .dropdown-item:is(:hover, :focus) { background: #2a323b; }
+	:root[data-theme="dark"] .navbar .navbar-toggler { color: #e7e9ec; border-color: #2f353d; }
+
+	.account-page {
+		background: var(--bg); color: var(--ink);
+		font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; font-size: 15px; line-height: 1.5;
+		padding: 24px 16px 64px; margin: 0 -15px;
+	}
+	/* Тема сайта красит заголовки, `strong` и подписи своим тёмным цветом — в
+	   тёмной теме чёрное на тёмном. Цвет — от токенов страницы. */
+	.account-page :is(h1, h2, h3, strong, b, label, dt, dd) { color: inherit; }
+	/* Тема задаёт тексту вес 420, у шрифта есть 400 и 500 — браузер берёт 500. */
+	.account-page, .account-page p, .account-page li { font-weight: 400; }
+	.account-page .wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+	.account-page .wrap > * { min-width: 0; }
+	.account-page a { color: var(--accent); }
+	.account-page h2:focus { outline: none; }
+	.account-page :is(a, button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.account-page h1 { font-size: 26px; font-weight: 600; margin: 4px 0 6px; letter-spacing: -0.01em; }
+	.account-page h2 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+	.account-page strong { font-weight: 600; }
+	.account-page .intro { color: var(--muted); max-width: 64ch; margin: 0; }
+	.account-page .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+	.account-page .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+	.account-page .panel-note { color: var(--muted); font-size: 14px; margin: 0; max-width: 60ch; }
+	.account-page .muted { color: var(--muted); }
+
+	.account-page .rows { list-style: none; margin: 0; padding: 0; }
+	.account-page .item { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
+	.account-page .item:first-child { border-top: 0; }
+	.account-page .item-main { min-width: 0; }
+	.account-page .item-title { overflow-wrap: anywhere; }
+	.account-page .meta { margin: 2px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+	.account-page .hint { margin: 6px 0 0; font-size: 13px; color: var(--muted); max-width: 56ch; }
+	.account-page .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; margin-left: 6px; }
+	.account-page .badge.warn { background: var(--warn-soft); color: var(--warn); }
+	.account-page .empty { margin: 8px 0 0; color: var(--muted); }
+
+	.account-page .button {
+		font: inherit; font-size: 14px; line-height: 1.3; white-space: nowrap; cursor: pointer;
+		padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+	}
+	.account-page .button:hover { border-color: var(--muted); }
+	.account-page .button.danger { color: var(--danger); }
+	.account-page .button.danger:hover { border-color: var(--danger); }
+	.account-page .button.primary { background: var(--danger); border-color: var(--danger); color: var(--paper); }
+	.account-page .button:disabled { opacity: 0.6; cursor: default; }
+
+	.account-page .confirm { margin-top: 12px; padding: 14px 16px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+	.account-page .confirm h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+	.account-page .confirm p { margin: 0 0 10px; font-size: 14px; }
+	.account-page .confirm label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+	.account-page .confirm input[type="password"] {
+		font: inherit; width: 100%; max-width: 320px; padding: 6px 10px; border-radius: 6px;
+		border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+	}
+	.account-page .confirm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+	.account-page .error { color: var(--danger); font-size: 14px; margin: 8px 0 0; min-height: 0; }
+	.account-page .error:empty { display: none; }
+	.account-page .status { font-size: 14px; color: var(--accent); margin: 0; }
+	.account-page .status:empty { display: none; }
+	.account-page .footnote { margin: 12px 0 0; font-size: 13px; color: var(--muted); max-width: 64ch; }
+
+	@media (max-width: 560px) {
+		.account-page h1 { font-size: 22px; }
+		.account-page .item { flex-direction: column; gap: 8px; }
+	}
+</style>
+
+<div class="account-page">
+<div class="wrap">
+	<header>
+		<h1>Агенты и сессии</h1>
+		<p class="intro">Какие агенты подключены к вашему аккаунту и где вы вошли в Cenda. Отключите то, чем больше не пользуетесь, и завершите сессии на устройствах, которых не узнаёте.</p>
+	</header>
+	<p class="status" id="account-status" role="status"></p>
+
+	<section class="panel" aria-labelledby="agents-title">
+		<div class="panel-head">
+			<div>
+				<h2 id="agents-title" tabindex="-1">Подключённые агенты</h2>
+				<p class="panel-note">Отключение отзывает доступ агента к Cenda. Чтобы снова работать с ним, подключите его заново.</p>
+			</div>
+		</div>
+		{% if agents %}
+		<ul class="rows" id="agents">
+			{% for п in agents %}
+			<li class="item" data-row="{{ п.id | e }}">
+				<div class="item-main">
+					<div class="item-title">
+						<strong>{{ п.agent | e }}</strong>
+						{%- if п.app_name and п.app_name != п.agent and not п.web_chat %} <span class="muted">— называет себя «{{ п.app_name | e }}»</span>{% endif %}
+					</div>
+					<p class="meta">
+						{%- if п.site %}Сайт агента: {{ п.site | e }} · {% endif -%}
+						подключён {{ дата(п.connected) }} · последняя активность {{ дата(п.last_active) }}
+					</p>
+					{% if п.web_chat %}<p class="hint">Веб-чат Cenda подключается сам, когда вы открываете чат. Отключение выведет из чата на всех устройствах; при следующем открытии он подключится снова.</p>{% endif %}
+				</div>
+				<button type="button" class="button danger" data-disconnect="{{ п.id | e }}" data-name="{{ п.agent | e }}">Отключить</button>
+			</li>
+			{% endfor %}
+		</ul>
+		{% else %}
+		<p class="empty">Подключённых агентов нет. <a href="{{ connect_url | e }}">Подключить ассистента</a></p>
+		{% endif %}
+		<p class="footnote">Коннектор в настройках самого агента после отключения остаётся — уберите его там, если он больше не нужен. «Последняя активность» — когда агент в последний раз получил доступ: пока он работает, это происходит раз в час.</p>
+	</section>
+
+	<section class="panel" aria-labelledby="sessions-title">
+		<div class="panel-head">
+			<div>
+				<h2 id="sessions-title" tabindex="-1">Мои сессии</h2>
+				<p class="panel-note">Браузеры и устройства, где вы вошли в Cenda. Завершить сессию можно, подтвердив пароль.</p>
+			</div>
+			{% if other_sessions %}<button type="button" class="button danger" id="end-others">Завершить все, кроме этой</button>{% endif %}
+		</div>
+		<ul class="rows" id="sessions">
+			{% for с in sessions %}
+			<li class="item" data-row="{{ с.id | e }}"{% if not с.current %} data-other{% endif %}>
+				<div class="item-main">
+					<div class="item-title">
+						<strong>{{ с.device | e }}</strong>
+						{%- if с.current %} <span class="badge">эта сессия</span>{% endif %}
+						{%- if с.impersonated %} <span class="badge warn">вход администратора от вашего имени</span>{% endif %}
+					</div>
+					<p class="meta">
+						{%- if с.ip %}IP {{ с.ip | e }} · {% endif -%}
+						вход {{ дата(с.started) }} · активность {{ дата(с.last_active) }}
+					</p>
+				</div>
+				{% if not с.current %}<button type="button" class="button danger" data-end="{{ с.id | e }}" data-name="{{ с.device | e }}">Завершить</button>{% endif %}
+			</li>
+			{% endfor %}
+		</ul>
+
+		<form class="confirm" id="confirm" hidden novalidate>
+			<h3 id="confirm-title" tabindex="-1"></h3>
+			<p>Подтвердите, что это вы: введите пароль от Cenda.</p>
+			{# Почта — менеджеру паролей: без неё он не найдёт, какой пароль подставить. #}
+			<input type="text" name="username" autocomplete="username" value="{{ user | e }}" hidden>
+			<label for="confirm-password">Пароль</label>
+			<input type="password" id="confirm-password" name="password" autocomplete="current-password" required>
+			<p class="error" id="confirm-error" role="alert"></p>
+			<p class="error" id="confirm-no-password" hidden>У аккаунта нет пароля. <a href="{{ set_password_url | e }}">Задайте его по ссылке из письма</a> — смена пароля сама завершит другие сессии.</p>
+			<div class="confirm-actions">
+				<button type="submit" class="button primary" id="confirm-submit">Завершить</button>
+				<button type="button" class="button" id="confirm-cancel">Отмена</button>
+			</div>
+		</form>
+
+		<p class="footnote">Входите через Google и не знаете пароля? <a href="{{ set_password_url | e }}">Задайте его по ссылке из письма</a>: смена пароля сама завершает все другие сессии и отключает агентов.</p>
+	</section>
+</div>
+</div>
+<script type="application/json" id="account-page-data">{{ page_data | tojson }}</script>
+{% endblock %}
+
+{% block script %}
+<script>
+(() => {
+	const данные = JSON.parse(document.getElementById("account-page-data").textContent);
+	const статус = document.getElementById("account-status");
+
+	// Явный адрес метода, а не `frappe.call`: тот шлёт вызов на корень сайта,
+	// где стоит лендинг (learning-services#459).
+	async function позвать(метод, параметры) {
+		let ответ;
+		try {
+			ответ = await fetch(`/api/method/${данные.methods[метод]}`, {
+				method: "POST",
+				credentials: "same-origin",
+				headers: { Accept: "application/json", "X-Frappe-CSRF-Token": данные.csrf },
+				body: new URLSearchParams(параметры),
+			});
+		} catch {
+			return { ошибка: "Нет связи с сервером. Попробуйте ещё раз." };
+		}
+		if (ответ.status === 429) {
+			return { ошибка: "Слишком много попыток. Подождите и попробуйте снова." };
+		}
+		const тело = await ответ.json().catch(() => ({}));
+		const итог = тело.message;
+		if (ответ.ok && итог && итог.ok) return { данные: итог.data };
+		if (ответ.ok && итог && итог.error) return { ошибка: итог.error.message, код: итог.error.code };
+		if (ответ.status === 400 || ответ.status === 403) {
+			return { ошибка: "Страница устарела. Обновите её и попробуйте снова." };
+		}
+		return { ошибка: "Не получилось. Попробуйте ещё раз." };
+	}
+
+	// Подключённые агенты: отключение без пароля — его можно вернуть, подключив
+	// агента заново.
+	for (const кнопка of document.querySelectorAll("[data-disconnect]")) {
+		кнопка.addEventListener("click", async () => {
+			if (!window.confirm(`Отключить «${кнопка.dataset.name}»? Агент потеряет доступ к Cenda.`)) return;
+			кнопка.disabled = true;
+			const итог = await позвать("disconnect", { connection: кнопка.dataset.disconnect });
+			// Уже отключён — тоже убрать строку: доступа у агента нет.
+			if (итог.данные || итог.код === "connection_not_found") {
+				const список = document.getElementById("agents");
+				кнопка.closest("[data-row]").remove();
+				статус.textContent = `«${кнопка.dataset.name}» отключён.`;
+				if (!список.children.length) {
+					список.outerHTML = '<p class="empty">Подключённых агентов нет.</p>';
+				}
+				// Кнопки больше нет — фокус к началу раздела, а не в начало страницы.
+				document.getElementById("agents-title").focus();
+				return;
+			}
+			статус.textContent = итог.ошибка;
+			кнопка.disabled = false;
+		});
+	}
+
+	// Сессии: завершение — после пароля. Форма одна на обе кнопки.
+	const форма = document.getElementById("confirm");
+	const заголовок = document.getElementById("confirm-title");
+	const пароль = document.getElementById("confirm-password");
+	const ошибка = document.getElementById("confirm-error");
+	const нетПароля = document.getElementById("confirm-no-password");
+	const подтвердить = document.getElementById("confirm-submit");
+	const всеКроме = document.getElementById("end-others");
+	let действие = null;
+
+	function открыть(новое, текст, откуда) {
+		действие = { ...новое, откуда };
+		заголовок.textContent = текст;
+		ошибка.textContent = "";
+		нетПароля.hidden = true;
+		пароль.value = "";
+		форма.hidden = false;
+		пароль.focus();
+	}
+
+	function закрыть() {
+		форма.hidden = true;
+		пароль.value = "";
+		const откуда = действие && действие.откуда;
+		действие = null;
+		if (откуда && откуда.isConnected) откуда.focus();
+	}
+
+	function прибрать_другие() {
+		if (всеКроме && !document.querySelector("#sessions [data-other]")) всеКроме.remove();
+	}
+
+	for (const кнопка of document.querySelectorAll("[data-end]")) {
+		кнопка.addEventListener("click", () =>
+			открыть({ метод: "end", параметры: { session: кнопка.dataset.end }, строка: кнопка.closest("[data-row]") },
+				`Завершить сессию «${кнопка.dataset.name}»?`, кнопка),
+		);
+	}
+	if (всеКроме) {
+		всеКроме.addEventListener("click", () =>
+			открыть({ метод: "end_others", параметры: {} }, "Завершить все сессии, кроме этой?", всеКроме),
+		);
+	}
+	document.getElementById("confirm-cancel").addEventListener("click", закрыть);
+
+	форма.addEventListener("submit", async (событие) => {
+		событие.preventDefault();
+		if (!действие) return;
+		if (!пароль.value) {
+			ошибка.textContent = "Введите пароль.";
+			пароль.focus();
+			return;
+		}
+		подтвердить.disabled = true;
+		const итог = await позвать(действие.метод, { ...действие.параметры, password: пароль.value });
+		подтвердить.disabled = false;
+		const уже = итог.код === "session_not_found";
+		if (итог.данные || уже) {
+			if (действие.метод === "end_others") {
+				for (const строка of document.querySelectorAll("#sessions [data-other]")) строка.remove();
+				const число = итог.данные ? итог.данные.ended : 0;
+				статус.textContent = число ? `Другие сессии завершены: ${число}.` : "Других сессий не было.";
+			} else {
+				действие.строка.remove();
+				статус.textContent = уже ? "Эта сессия уже была завершена." : "Сессия завершена.";
+			}
+			прибрать_другие();
+			действие = null;
+			форма.hidden = true;
+			пароль.value = "";
+			document.getElementById("sessions-title").focus();
+			return;
+		}
+		if (итог.код === "password_not_set") {
+			ошибка.textContent = "";
+			нетПароля.hidden = false;
+			return;
+		}
+		ошибка.textContent = итог.ошибка;
+		пароль.select();
+	});
+})();
+</script>
+{% endblock %}

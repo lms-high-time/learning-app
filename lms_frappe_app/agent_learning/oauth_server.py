@@ -57,6 +57,15 @@
 Действующий токен семьи жив, пока жива она, и повтор токена, заменённого
 последним, узнаётся всегда; более старого — пока Frappe не удалил его
 преемника. Повтор кода — так же: семья названа кодом.
+
+Переменные и параметры с секретом клиента, токенами и кодами авторизации
+названы латиницей (`client_secret`, `*_token`, `code_token`) вопреки стилю.
+`Why:` трассировку с переменными (`frappe.get_traceback(with_context=True)` —
+Error Log и Sentry) Frappe чистит по латинским подстрокам имён: `password`,
+`secret`, `token`, `key`. Кириллическое `секрет` ушло бы в журнал как есть
+(learning-services#664). Имя записи `OAuth Bearer Token` — сам токен
+доступа, поэтому и имена токенов — `access_token`. Семья названа кодом или,
+у токенов до learning-services#665, токеном — `family_token`.
 """
 
 import base64
@@ -157,21 +166,21 @@ def _адреса_клиента(client_id) -> list[str]:
 	return cstr(адреса).split() or ([по_умолчанию] if по_умолчанию else [])
 
 
-def отпечаток(токен: str) -> str:
+def отпечаток(token: str) -> str:
 	"""Отпечаток токена обновления: преемник хранит его, а не сам токен."""
-	return hashlib.sha256(токен.encode()).hexdigest()
+	return hashlib.sha256(token.encode()).hexdigest()
 
 
 def учётные_данные(request) -> tuple[str | None, str | None]:
 	"""`client_id` и секрет из заголовка Basic (RFC 6749 §2.3.1) или из тела."""
-	схема, _, данные = (request.headers.get("Authorization") or "").partition(" ")
+	схема, _, basic_secret = (request.headers.get("Authorization") or "").partition(" ")
 	if схема.lower() != "basic":
 		return request.client_id, request.client_secret
 	try:
-		id_, _, секрет = base64.b64decode(данные.strip(), validate=True).decode().partition(":")
+		id_, _, client_secret = base64.b64decode(basic_secret.strip(), validate=True).decode().partition(":")
 	except (ValueError, UnicodeDecodeError):
 		return None, None
-	return unquote_plus(id_), unquote_plus(секрет)
+	return unquote_plus(id_), unquote_plus(client_secret)
 
 
 def _клиент(имя) -> dict | None:
@@ -208,10 +217,10 @@ class Валидатор(OAuthWebRequestValidator):
 	def validate_redirect_uri(self, client_id, redirect_uri, request, *args, **kwargs):
 		return адрес_возврата_разрешён(redirect_uri, _адреса_клиента(client_id))
 
-	def confirm_redirect_uri(self, client_id, code, redirect_uri, client, *args, **kwargs):
+	def confirm_redirect_uri(self, client_id, code_token, redirect_uri, client, *args, **kwargs):
 		привязан = frappe.db.get_value(
 			"OAuth Authorization Code",
-			{"name": code, "client": client_id},
+			{"name": code_token, "client": client_id},
 			"redirect_uri_bound_to_authorization_code",
 		)
 		return bool(привязан) and привязан == redirect_uri
@@ -239,15 +248,15 @@ class Валидатор(OAuthWebRequestValidator):
 		return not клиент or клиент.token_endpoint_auth_method != ПУБЛИЧНЫЙ
 
 	def authenticate_client(self, request, *args, **kwargs):
-		id_, секрет = учётные_данные(request)
+		id_, client_secret = учётные_данные(request)
 		клиент = _клиент(id_)
 		if (
 			not клиент
-			or not секрет
+			or not client_secret
 			or клиент.token_endpoint_auth_method == ПУБЛИЧНЫЙ
 			or not клиент.client_secret
 			or (request.client_id and request.client_id != id_)
-			or not hmac.compare_digest(секрет.encode(), клиент.client_secret.encode())
+			or not hmac.compare_digest(client_secret.encode(), клиент.client_secret.encode())
 		):
 			return False
 		request.client = frappe.get_doc("OAuth Client", клиент.name).as_dict()
@@ -268,19 +277,19 @@ class Валидатор(OAuthWebRequestValidator):
 	def is_pkce_required(self, client_id, request):
 		return публичный(client_id)
 
-	def get_code_challenge(self, code, request):
-		return frappe.db.get_value("OAuth Authorization Code", code, "code_challenge") or None
+	def get_code_challenge(self, code_token, request):
+		return frappe.db.get_value("OAuth Authorization Code", code_token, "code_challenge") or None
 
-	def get_code_challenge_method(self, code, request):
-		метод = frappe.db.get_value("OAuth Authorization Code", code, "code_challenge_method")
+	def get_code_challenge_method(self, code_token, request):
+		метод = frappe.db.get_value("OAuth Authorization Code", code_token, "code_challenge_method")
 		# Frappe хранит метод в нижнем регистре, oauthlib ждёт его как в RFC 7636.
 		return "S256" if метод == "s256" else метод
 
-	def save_authorization_code(self, client_id, code, request, *args, **kwargs):
-		super().save_authorization_code(client_id, code, request, *args, **kwargs)
+	def save_authorization_code(self, client_id, code_token, request, *args, **kwargs):
+		super().save_authorization_code(client_id, code_token, request, *args, **kwargs)
 		frappe.db.set_value(
 			"OAuth Authorization Code",
-			code["code"],
+			code_token["code"],
 			"expiration_time",
 			add_to_date(now_datetime(), seconds=СРОК_КОДА),
 			update_modified=False,
@@ -288,14 +297,14 @@ class Валидатор(OAuthWebRequestValidator):
 		# Авторизация без экрана согласия приходит GET'ом, а GET Frappe не коммитит.
 		frappe.db.commit()
 
-	def validate_code(self, client_id, code, client, request, *args, **kwargs):
+	def validate_code(self, client_id, code_token, client, request, *args, **kwargs):
 		# Строка кода блокируется до выдачи токена: второй одновременный обмен
 		# ждёт и видит код уже использованным. Код отмечается использованным в
 		# `save_bearer_token`, в одной транзакции с токеном, — Frappe отмечал его
 		# после коммита токена, и между ними код проходил второй раз.
 		запись = frappe.db.get_value(
 			"OAuth Authorization Code",
-			code,
+			code_token,
 			[
 				"client",
 				"user",
@@ -311,14 +320,16 @@ class Валидатор(OAuthWebRequestValidator):
 		if not запись:
 			# Использованные коды Frappe удаляет каждый час, а семья токенов
 			# названа кодом: повтор узнаётся и после удаления.
-			if отозвать_семью(code, client_id):
-				_в_журнал_повтор("Повтор кода авторизации — семья отозвана", client_id, None, code)
+			if отозвать_семью(code_token, client_id):
+				_в_журнал_повтор("Повтор кода авторизации — семья отозвана", client_id, None, code_token)
 			return False
 		if запись.client != client_id:
 			return False
 		if запись.validity != "Valid":
-			if отозвать_семью(code, client_id):
-				_в_журнал_повтор("Повтор кода авторизации — семья отозвана", client_id, запись.user, code)
+			if отозвать_семью(code_token, client_id):
+				_в_журнал_повтор(
+					"Повтор кода авторизации — семья отозвана", client_id, запись.user, code_token
+				)
 			return False
 		if not запись.expiration_time or now_datetime() > запись.expiration_time:
 			return False
@@ -336,41 +347,43 @@ class Валидатор(OAuthWebRequestValidator):
 
 	def validate_refresh_token(self, refresh_token, client, request, *args, **kwargs):
 		клиент = (client or {}).get("name")
-		имя = frappe.db.get_value(
+		access_token = frappe.db.get_value(
 			"OAuth Bearer Token",
 			{"refresh_token": refresh_token, "status": "Active", "client": клиент},
 			"name",
 		)
-		if имя:
+		if access_token:
 			# Токен обновления одноразовый. Запись блокируется по первичному
 			# ключу — блокировка по неиндексированному `refresh_token` встала бы
 			# на всю таблицу — и перечитывается: второе одновременное обновление
 			# тем же токеном увидит её отозванной.
-			имя = frappe.db.get_value(
-				"OAuth Bearer Token", {"name": имя, "status": "Active"}, "name", for_update=True
+			access_token = frappe.db.get_value(
+				"OAuth Bearer Token", {"name": access_token, "status": "Active"}, "name", for_update=True
 			)
-		if not имя:
-			имя = _повтор_обновления(refresh_token, клиент, request)
-		if not имя:
+		if not access_token:
+			access_token = _повтор_обновления(refresh_token, клиент, request)
+		if not access_token:
 			return False
-		запись = frappe.db.get_value(
+		token_record = frappe.db.get_value(
 			"OAuth Bearer Token",
-			имя,
+			access_token,
 			["user", "scopes", "creation", ПОЛЕ_СЕМЬИ, ПОЛЕ_НАЧАЛА],
 			as_dict=True,
 		)
 		# Токены, выданные до learning-services#665, без семьи: семья — сам
 		# токен, начало — его выдача.
-		начало = запись.get(ПОЛЕ_НАЧАЛА) or запись.creation
+		начало = token_record.get(ПОЛЕ_НАЧАЛА) or token_record.creation
 		if now_datetime() > начало + СРОК_СЕМЬИ:
-			frappe.db.set_value("OAuth Bearer Token", имя, "status", "Revoked", update_modified=False)
+			frappe.db.set_value(
+				"OAuth Bearer Token", access_token, "status", "Revoked", update_modified=False
+			)
 			return False
-		if not frappe.db.exists("User", {"name": запись.user, "enabled": 1}):
+		if not frappe.db.exists("User", {"name": token_record.user, "enabled": 1}):
 			return False
-		request.user = запись.user
-		request.lms_прежний_токен = имя
-		request.lms_области = запись.scopes
-		request.lms_семья = запись.get(ПОЛЕ_СЕМЬИ) or имя
+		request.user = token_record.user
+		request.lms_прежний_токен = access_token
+		request.lms_области = token_record.scopes
+		request.lms_семья = token_record.get(ПОЛЕ_СЕМЬИ) or access_token
 		request.lms_начало_семьи = начало
 		return True
 
@@ -388,13 +401,15 @@ class Валидатор(OAuthWebRequestValidator):
 		токен и код отмечал отдельно — или не отмечал вовсе. Записывается здесь
 		сам, а не через `super()`: поля семьи нужны в той же вставке.
 		"""
-		прежний = getattr(request, "lms_прежний_токен", None)
-		if прежний:
-			frappe.db.set_value("OAuth Bearer Token", прежний, "status", "Revoked", update_modified=False)
-			семья, начало = request.lms_семья, request.lms_начало_семьи
+		previous_token = getattr(request, "lms_прежний_токен", None)
+		if previous_token:
+			frappe.db.set_value(
+				"OAuth Bearer Token", previous_token, "status", "Revoked", update_modified=False
+			)
+			family_token, начало = request.lms_семья, request.lms_начало_семьи
 		else:
-			# Обмен кода: семья названа кодом — по нему повтор кода находит токены.
-			семья, начало = request.code or token["access_token"], now_datetime()
+			# Обмен кода: family_token названа кодом — по нему повтор кода находит токены.
+			family_token, начало = request.code or token["access_token"], now_datetime()
 			if request.code:
 				frappe.db.set_value(
 					"OAuth Authorization Code", request.code, "validity", "Invalid", update_modified=False
@@ -409,12 +424,12 @@ class Валидатор(OAuthWebRequestValidator):
 				"access_token": token["access_token"],
 				"refresh_token": token.get("refresh_token"),
 				"expires_in": token["expires_in"],
-				ПОЛЕ_СЕМЬИ: семья,
+				ПОЛЕ_СЕМЬИ: family_token,
 				ПОЛЕ_НАЧАЛА: начало,
 				ПОЛЕ_ПРЕЖНЕГО: (
 					getattr(request, "lms_отпечаток_прежнего", None) or отпечаток(request.refresh_token)
 				)
-				if прежний
+				if previous_token
 				else None,
 			}
 		).insert(ignore_permissions=True)
@@ -431,15 +446,15 @@ class Валидатор(OAuthWebRequestValidator):
 		клиент = (request.client or {}).get("name")
 		поля = ("refresh_token", "name") if token_type_hint == "refresh_token" else ("name", "refresh_token")
 		for поле in поля:
-			запись = frappe.db.get_value(
+			token_record = frappe.db.get_value(
 				"OAuth Bearer Token", {поле: token, "client": клиент}, ["name", ПОЛЕ_СЕМЬИ], as_dict=True
 			)
-			if запись:
+			if token_record:
 				frappe.db.set_value(
-					"OAuth Bearer Token", запись.name, "status", "Revoked", update_modified=False
+					"OAuth Bearer Token", token_record.name, "status", "Revoked", update_modified=False
 				)
 				# Токен до learning-services#665 без семьи — сам корень семьи преемников.
-				отозвать_семью(запись.get(ПОЛЕ_СЕМЬИ) or запись.name, клиент)
+				отозвать_семью(token_record.get(ПОЛЕ_СЕМЬИ) or token_record.name, клиент)
 				return
 
 
@@ -467,24 +482,24 @@ class Сервер(Server):
 			грант.custom_validators.pre_auth.append(_только_s256)
 
 
-def отозвать_семью(семья: str | None, клиент: str | None) -> int:
+def отозвать_семью(family_token: str | None, клиент: str | None) -> int:
 	"""Отозвать действующие токены семьи у её клиента; сколько отозвано."""
-	if not семья or not клиент:
+	if not family_token or not клиент:
 		return 0
-	имена = frappe.get_all(
+	access_tokens = frappe.get_all(
 		"OAuth Bearer Token",
-		filters={ПОЛЕ_СЕМЬИ: семья, "client": клиент, "status": "Active"},
+		filters={ПОЛЕ_СЕМЬИ: family_token, "client": клиент, "status": "Active"},
 		pluck="name",
 	)
-	if имена:
+	if access_tokens:
 		frappe.db.set_value(
 			"OAuth Bearer Token",
-			{"name": ("in", имена)},
+			{"name": ("in", access_tokens)},
 			"status",
 			"Revoked",
 			update_modified=False,
 		)
-	return len(имена)
+	return len(access_tokens)
 
 
 def _повтор_обновления(refresh_token: str, клиент: str | None, request) -> str | None:
@@ -510,39 +525,39 @@ def _повтор_обновления(refresh_token: str, клиент: str | N
 	"""
 	if not клиент:
 		return None
-	преемник = frappe.db.get_value(
+	successor_token = frappe.db.get_value(
 		"OAuth Bearer Token",
 		{ПОЛЕ_ПРЕЖНЕГО: отпечаток(refresh_token), "client": клиент},
 		["name", "status", "user", "creation", ПОЛЕ_СЕМЬИ],
 		as_dict=True,
 		order_by="creation desc",
 	)
-	if not преемник:
+	if not successor_token:
 		return None
-	прошло = now_datetime() - преемник.creation
+	прошло = now_datetime() - successor_token.creation
 	if прошло < ОКНО_ГОНКИ:
-		if преемник.status != "Active":
+		if successor_token.status != "Active":
 			return None
-		имя = frappe.db.get_value(
-			"OAuth Bearer Token", {"name": преемник.name, "status": "Active"}, "name", for_update=True
+		access_token = frappe.db.get_value(
+			"OAuth Bearer Token", {"name": successor_token.name, "status": "Active"}, "name", for_update=True
 		)
-		if имя:
+		if access_token:
 			request.lms_отпечаток_прежнего = отпечаток(
-				frappe.db.get_value("OAuth Bearer Token", имя, "refresh_token")
+				frappe.db.get_value("OAuth Bearer Token", access_token, "refresh_token")
 			)
-		return имя
-	if отозвать_семью(преемник.get(ПОЛЕ_СЕМЬИ), клиент):
+		return access_token
+	if отозвать_семью(successor_token.get(ПОЛЕ_СЕМЬИ), клиент):
 		_в_журнал_повтор(
 			"Повтор токена обновления — семья отозвана",
 			клиент,
-			преемник.user,
-			преемник.get(ПОЛЕ_СЕМЬИ),
+			successor_token.user,
+			successor_token.get(ПОЛЕ_СЕМЬИ),
 			f"через {int(прошло.total_seconds())} с после замены",
 		)
 	return None
 
 
-def _в_журнал_повтор(заголовок: str, клиент, пользователь, семья, подробность: str = "") -> None:
+def _в_журнал_повтор(заголовок: str, клиент, пользователь, family_token, подробность: str = "") -> None:
 	"""Запись о повторе в журнал ошибок — без значений токенов и кодов.
 
 	Семья названа кодом, а у токенов до learning-services#665 — самим токеном,
@@ -553,7 +568,8 @@ def _в_журнал_повтор(заголовок: str, клиент, пол�
 		title=заголовок,
 		message=(
 			f"клиент {клиент}, пользователь {пользователь}, "
-			f"семья (отпечаток) {отпечаток(семья or '')[:16]}" + (f", {подробность}" if подробность else "")
+			f"семья (отпечаток) {отпечаток(family_token or '')[:16]}"
+			+ (f", {подробность}" if подробность else "")
 		),
 	)
 
@@ -567,16 +583,16 @@ def _клиент_по_токену(request) -> str | None:
 	(learning-services#663).
 	"""
 	if request.refresh_token:
-		варианты = [{"refresh_token": request.refresh_token}]
+		token_filters = [{"refresh_token": request.refresh_token}]
 	elif request.token:
-		варианты = [{"name": request.token}, {"refresh_token": request.token}]
+		token_filters = [{"name": request.token}, {"refresh_token": request.token}]
 	else:
-		схема, _, токен = (request.headers.get("Authorization") or "").partition(" ")
-		if схема.lower() != "bearer" or not токен.strip():
+		схема, _, access_token = (request.headers.get("Authorization") or "").partition(" ")
+		if схема.lower() != "bearer" or not access_token.strip():
 			return None
-		варианты = [{"name": токен.strip()}]
-	for фильтры in варианты:
-		if клиент := frappe.db.get_value("OAuth Bearer Token", фильтры, "client"):
+		token_filters = [{"name": access_token.strip()}]
+	for token_filter in token_filters:
+		if клиент := frappe.db.get_value("OAuth Bearer Token", token_filter, "client"):
 			return клиент
 	return None
 
@@ -667,45 +683,45 @@ def сведения_о_токене(token: str | None, token_type_hint: str | N
 	if not token:
 		return {"active": False}
 	вид = "refresh_token" if token_type_hint == "refresh_token" else "access_token"
-	запись = frappe.db.get_value(
+	token_record = frappe.db.get_value(
 		"OAuth Bearer Token",
 		{вид: token},
 		["client", "user", "status", "scopes", "expiration_time", "creation", ПОЛЕ_НАЧАЛА],
 		as_dict=True,
 	)
-	if not запись:
+	if not token_record:
 		return {"active": False}
 
 	сейчас = now_datetime()
 	if вид == "access_token":
-		срок = запись.expiration_time
+		срок = token_record.expiration_time
 	else:
-		срок = (запись.get(ПОЛЕ_НАЧАЛА) or запись.creation) + СРОК_СЕМЬИ
+		срок = (token_record.get(ПОЛЕ_НАЧАЛА) or token_record.creation) + СРОК_СЕМЬИ
 	if (
-		запись.status != "Active"
+		token_record.status != "Active"
 		or not срок
 		or сейчас >= срок
-		or not frappe.db.exists("User", {"name": запись.user, "enabled": 1})
+		or not frappe.db.exists("User", {"name": token_record.user, "enabled": 1})
 	):
 		return {"active": False}
 
 	клиент = frappe.db.get_value(
-		"OAuth Client", запись.client, ["client_id", "skip_authorization"], as_dict=True
+		"OAuth Client", token_record.client, ["client_id", "skip_authorization"], as_dict=True
 	)
 	ответ = {
 		"client_id": клиент.client_id,
 		"trusted_client": клиент.skip_authorization,
 		"active": True,
 		"exp": round(срок.replace(tzinfo=ZoneInfo(get_system_timezone())).timestamp()),
-		"scope": запись.scopes,
+		"scope": token_record.scopes,
 	}
-	if "openid" in cstr(запись.scopes).split():
+	if "openid" in cstr(token_record.scopes).split():
 		sub = frappe.db.get_value(
-			"User Social Login", {"provider": "frappe", "parent": запись.user}, "userid"
+			"User Social Login", {"provider": "frappe", "parent": token_record.user}, "userid"
 		)
 		if sub:
 			ответ["sub"] = sub
-			ответ.update(get_userinfo(frappe.get_doc("User", запись.user)))
+			ответ.update(get_userinfo(frappe.get_doc("User", token_record.user)))
 	return ответ
 
 

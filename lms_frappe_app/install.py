@@ -27,6 +27,10 @@ from lms_frappe_app.agent_learning.releases import projection
 	{"title": "Заниматься в браузере", "route": "study-in-browser", "icon": "MessageCircle", "page": "/chat"},
 	{"title": "Подключить ассистента", "route": "agent-sidebar", "icon": "Bot", "page": "/lms/agent"},
 	{"title": "Мои документы", "route": "artifacts-sidebar", "icon": "FileText", "page": "/lms/documents"},
+	# Подключённые агенты и сессии браузера (learning-services#669): меню
+	# пользователя живёт в Learning, а не в приложении, и дорога туда — пункт
+	# сайдбара.
+	{"title": "Агенты и сессии", "route": "connections-sidebar", "icon": "ShieldCheck", "page": "/connections"},
 )
 
 #: Иконки, которые прежде ставила сама установка, — их правка админа не трогает.
@@ -349,10 +353,13 @@ def _расходится(ключ, client_id: str, client_secret: str) -> bool:
 		return True
 	if ключ.sign_ups != "Allow":
 		return True
-	прежний = get_decrypted_password(
+	# Латиница вопреки стилю: трассировку с переменными (Error Log, Sentry)
+	# Frappe чистит по латинским подстрокам имён — кириллическое имя с секретом
+	# ушло бы в журнал как есть (learning-services#664).
+	previous_secret = get_decrypted_password(
 		"Social Login Key", "google", "client_secret", raise_exception=False
 	)
-	return прежний != client_secret
+	return previous_secret != client_secret
 
 
 #: OAuth-клиент веб-чата тоже приезжает из конфигурации сайта: те же id и

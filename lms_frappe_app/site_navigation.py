@@ -34,6 +34,10 @@ import frappe
 РОЛИ_АВТОРА = {"Course Creator", "Moderator"}
 КАБИНЕТ_АВТОРА = ("Кабинет автора", "/author")
 
+#: Первый пункт меню пользователя (аватар в шапке), перед «My Account» и
+#: «Log out» Frappe (learning-services#669).
+АГЕНТЫ_И_СЕССИИ = ("Агенты и сессии", "/connections")
+
 #: Подвал вместо «Built on Frappe»: исходники приложения платформы открыты под
 #: AGPL-3.0, и ссылка на них — то, что этим страницам положено по лицензии.
 ИСХОДНЫЙ_КОД = "https://github.com/lms-high-time/learning-app"
@@ -55,4 +59,6 @@ def шапка_платформы(context) -> None:
 	if имя:
 		context.brand_html = escape(имя)
 	context.top_bar_items = [frappe._dict(label=подпись, url=адрес) for подпись, адрес in пункты]
+	подпись, адрес = АГЕНТЫ_И_СЕССИИ
+	context.post_login = [frappe._dict(label=подпись, url=адрес), *(context.get("post_login") or [])]
 	context.footer_powered = ПОДВАЛ

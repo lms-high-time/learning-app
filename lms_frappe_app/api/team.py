@@ -226,8 +226,11 @@ def _админ_ли(user: str, organization: str) -> bool:
 	)
 
 
-def _ссылка(токен: str) -> str:
-	return frappe.utils.get_url(f"/lms/join/{токен}")
+def _ссылка(invite_token: str) -> str:
+	# Латиница вопреки стилю: трассировку с переменными (Error Log, Sentry)
+	# Frappe чистит по латинским подстрокам имён — кириллический `токен`
+	# приглашения ушёл бы в журнал как есть (learning-services#664).
+	return frappe.utils.get_url(f"/lms/join/{invite_token}")
 
 
 def _приглашение(token: str):
