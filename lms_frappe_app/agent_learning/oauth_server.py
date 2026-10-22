@@ -657,7 +657,8 @@ def _можно_спрашивать(клиент: str) -> bool:
 		return False
 	# Запись — раз, а не на каждый вызов инструмента агента.
 	if not frappe.cache.get_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ):
-		frappe.cache.set_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ, 1)
+		# Раз в сутки: ключ, пропавший однажды, не теряется в журнале навсегда.
+		frappe.cache.set_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ, 1, expires_in_sec=24 * 60 * 60)
 		frappe.log_error(
 			title="Интроспекция закрыта: список клиентов не задан",
 			message=f"В конфигурации сайта нет {КЛЮЧ_ИНТРОСПЕКЦИИ}: список client_id, которым можно спрашивать.",
@@ -791,8 +792,10 @@ def openid_configuration():
 	`id_token token`, …), которые валидатор отклоняет, и не называет PKCE
 	(learning-services#691). Клиент, который читает её, а не метаданные RFC
 	8414, выбрал бы закрытый путь. Адрес сюда переадресует nginx сайта, как и
-	метаданные сервера авторизации.
+	метаданные сервера авторизации; выключены они — нет и её.
 	"""
+	if not oauth2.is_oauth_metadata_enabled("auth_server"):
+		raise NotFound
 	конфигурация = frappe.parse_json(oauth2.get_openid_configuration().get_data(as_text=True))
 	конфигурация.update(
 		response_types_supported=["code"],

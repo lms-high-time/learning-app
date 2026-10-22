@@ -26,6 +26,7 @@ from oauthlib.oauth2 import (
 	OAuth2Error,
 )
 from oauthlib.oauth2.rfc6749.errors import MissingCodeChallengeError, UnsupportedCodeChallengeMethodError
+from werkzeug.exceptions import NotFound
 
 from lms_frappe_app.agent_learning import cimd, oauth_server
 from lms_frappe_app.agent_learning.test_cimd import ДОКУМЕНТ as ДОКУМЕНТ_CLAUDE_CODE
@@ -406,7 +407,11 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		hybrid, которые валидатор отклоняет (learning-services#665, #691)."""
 		self.addCleanup(setattr, frappe.local, "request", getattr(frappe.local, "request", None))
 		set_request(method="GET", path="/")
-		конфигурация = json.loads(oauth_server.openid_configuration().get_data())
+		with mock.patch.object(oauth2, "is_oauth_metadata_enabled", return_value=False):
+			with self.assertRaises(NotFound):
+				oauth_server.openid_configuration()
+		with mock.patch.object(oauth2, "is_oauth_metadata_enabled", return_value=True):
+			конфигурация = json.loads(oauth_server.openid_configuration().get_data())
 		self.assertEqual(конфигурация["response_types_supported"], ["code"])
 		self.assertEqual(конфигурация["grant_types_supported"], ["authorization_code", "refresh_token"])
 		self.assertEqual(конфигурация["code_challenge_methods_supported"], ["S256"])

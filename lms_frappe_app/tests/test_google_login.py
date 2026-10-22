@@ -28,6 +28,7 @@ from lms_frappe_app.google_login import (
 	причина_отказа,
 )
 from lms_frappe_app.install import (
+	БЕЗ_2FA,
 	КЛЮЧ_ID,
 	КЛЮЧ_СЕКРЕТ,
 	выключить_прочих_провайдеров,
@@ -42,9 +43,7 @@ from lms_frappe_app.tests.sample_data import создать_пользовате
 class IntegrationTestGoogleLogin(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(self._вернуть_конфигурацию)
-		self.прежние = {
-			ключ: frappe.conf.get(ключ) for ключ in (КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ)
-		}
+		self.прежние = {ключ: frappe.conf.get(ключ) for ключ in (КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ)}
 		if frappe.db.exists(*ЗАПИСЬ):
 			frappe.delete_doc(*ЗАПИСЬ, force=True, ignore_permissions=True)
 
@@ -206,10 +205,15 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 		админ = создать_пользователя(
 			f"google-sm-{frappe.generate_hash(length=8)}@example.com", "System Manager"
 		)
-		for что, пользователь, впущен in (("ученик", ученик, True), ("System Manager", админ, False)):
+		for что, пользователь, впущен, без_2fa in (
+			("ученик", ученик, True, 0),
+			("System Manager", админ, False, 0),
+			("System Manager, второй фактор выключен на сайте", админ, True, 1),
+		):
 			данные = {"email": пользователь, "verified_email": True, "id": "333"}
 			with (
 				self.subTest(что),
+				patch.dict(frappe.conf, {БЕЗ_2FA: без_2fa}),
 				patch.object(google_login, "get_info_via_oauth", return_value=данные),
 				patch.object(google_login, "login_oauth_user") as вход,
 				patch.object(google_login, "consume_oauth_state") as гашение,

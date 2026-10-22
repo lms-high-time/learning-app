@@ -4,6 +4,7 @@
 """Сессия браузера: только из cookie и не дольше срока (learning-services#666)."""
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -164,6 +165,10 @@ class IntegrationTestSessionEnd(_ЗапросНаВремя, IntegrationTestCase
 	def test_срок_сессии_из_базы(self):
 		"""Сессию, поднятую из базы без кэша, Frappe срока не сверял: истёкшая
 		жила ещё запрос и возвращалась в кэш (learning-services#691)."""
+		# Завершение сессии Frappe коммитит само, и пользователь пережил бы откат.
+		коммит = patch.object(frappe.db, "commit")
+		коммит.start()
+		self.addCleanup(коммит.stop)
 		from frappe.auth import CookieManager, LoginManager
 
 		пользователь = создать_ученика(f"session-{frappe.generate_hash(length=8)}@example.com")
@@ -203,6 +208,10 @@ class IntegrationTestSessionEnd(_ЗапросНаВремя, IntegrationTestCase
 	def test_отключение_завершает_сессии(self):
 		"""Отключение аккаунта сессий браузера Frappe не завершало: `clear_sessions`
 		в `User.on_update` — только при смене типа (learning-services#691)."""
+		# Завершение сессии Frappe коммитит само, и пользователь пережил бы откат.
+		коммит = patch.object(frappe.db, "commit")
+		коммит.start()
+		self.addCleanup(коммит.stop)
 		from frappe.auth import CookieManager, LoginManager
 
 		пользователь = создать_ученика(f"session-{frappe.generate_hash(length=8)}@example.com")

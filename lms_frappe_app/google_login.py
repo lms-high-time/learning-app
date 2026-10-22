@@ -29,9 +29,10 @@ learning-services#664).
 
 import frappe
 from frappe.integrations import oauth2_logins
+from frappe.utils import cint
 from frappe.utils.oauth import consume_oauth_state, get_email, get_info_via_oauth, login_oauth_user
 
-from lms_frappe_app.install import РОЛИ_С_2FA
+from lms_frappe_app.install import БЕЗ_2FA, РОЛИ_С_2FA
 from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
 
 ПРОВАЙДЕР = "google"
@@ -90,7 +91,12 @@ def привязанный_идентификатор(данные: dict) -> str
 
 
 def со_вторым_фактором(данные: dict) -> bool:
-	"""Есть ли у пользователя с адресом из данных Google роль из `РОЛИ_С_2FA`."""
+	"""Есть ли у пользователя с адресом из данных Google роль из `РОЛИ_С_2FA`.
+
+	На сайте с выключенным вторым фактором (`БЕЗ_2FA`, локальная разработка)
+	ни у кого его нет, и закрывать Google незачем."""
+	if cint(frappe.conf.get(БЕЗ_2FA)):
+		return False
 	адрес = (get_email(данные) or "").lower()
 	return bool(
 		адрес
