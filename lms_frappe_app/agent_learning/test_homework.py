@@ -6,7 +6,7 @@ import os
 from datetime import timedelta
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import get_datetime
 
 from lms_frappe_app.agent_learning import homework as домашка
@@ -484,10 +484,17 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
 		self.addCleanup(frappe.clear_document_cache, "Agent Learning Settings", "Agent Learning Settings")
 		self.addCleanup(frappe.db.set_single_value, "Agent Learning Settings", "artifact_file_max_mb", было)
-		большой = b"x" * (16 * 1024 * 1024)
+		большой = b"x" * (10 * 1024 * 1024)
 		with self.assertRaises(домашка.Отказ) as отказ:
 			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", большой), ("b.txt", большой)])
 		self.assertEqual(отказ.exception.код, "answer_too_large")
+
+
+class TestПределСохранения(UnitTestCase):
+	def test_сохранение_в_base64_влезает_в_тело_запроса(self):
+		"""Тело метода Frappe по умолчанию режет до 25 МБ (`frappe/app.py`), а MCP
+		шлёт файлы в base64."""
+		self.assertLess(домашка.ПРЕДЕЛ_СОХРАНЕНИЯ_МБ * 4 / 3, 25)
 
 
 class IntegrationTestHomeworkRequired(IntegrationTestCase):
