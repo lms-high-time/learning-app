@@ -521,6 +521,8 @@ override_whitelisted_methods = {
 		for модуль in ("frappe.integrations.oauth2_logins", "frappe.www.login")
 		for провайдер in ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
 	},
+	# Версии приложений — только пользователю Desk (learning-services#692).
+	"frappe.utils.change_log.get_versions": "lms_frappe_app.versions.get_versions",
 }
 #
 # each overriding function accepts a `data` argument;
