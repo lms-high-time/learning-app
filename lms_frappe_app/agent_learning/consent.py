@@ -31,7 +31,7 @@ import datetime
 from urllib.parse import quote, urlsplit
 
 import frappe
-from frappe.utils import add_days, get_datetime, now_datetime
+from frappe.utils import add_days, add_years, get_datetime, now_datetime
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import redirect
 
@@ -294,6 +294,12 @@ def _отметки_формы() -> bool:
 НЕТ_18 = "Underage"
 #: Аккаунт через Google не дал согласия за `ДНЕЙ_БЕЗ_СОГЛАСИЯ`.
 НЕ_ДАНО = "Not Given"
+#: Аккаунт удалён процедурой удаления данных (`lms_frappe_app.personal_data`).
+УДАЛЁН = "Account Deleted"
+#: Сколько лет запись согласия хранится после удаления аккаунта — политика
+#: конфиденциальности, раздел 3. `Why:` запись доказывает согласие или его
+#: отсутствие, если о нём спорят уже после удаления аккаунта.
+ЛЕТ_ПОСЛЕ_УДАЛЕНИЯ = 3
 #: Сколько дней ждём согласия у аккаунта, созданного через Google.
 ДНЕЙ_БЕЗ_СОГЛАСИЯ = 30
 #: Чистка касается аккаунтов, созданных с этого дня, — когда появилось явное
@@ -365,11 +371,26 @@ def убрать_аккаунт(пользователь: str, причина: s
 			frappe.local.login_manager.logout()
 		return "closed"
 	# Текущую сессию при удалении закрывает сам Frappe (`User.on_trash`).
-	_удалить(пользователь)
+	удалить_пользователя(пользователь)
 	return "deleted"
 
 
-def _удалить(пользователь: str) -> None:
+def отметить_удаление(пользователь: str) -> None:
+	"""Запись «аккаунт удалён»: с неё идёт срок `ЛЕТ_ПОСЛЕ_УДАЛЕНИЯ`."""
+	frappe.get_doc(
+		{
+			"doctype": "Agent Consent",
+			"user": пользователь,
+			"documents_version": редакция_документов(),
+			"accepted_at": now_datetime(),
+			"method": УДАЛЁН,
+		}
+	).insert(ignore_permissions=True)
+
+
+def удалить_пользователя(пользователь: str) -> None:
+	"""Аккаунт вместе с контактом: Frappe контакт только отвязывает, и в нём
+	остались бы почта и имя."""
 	контакты = set(frappe.get_all("Contact", filters={"user": пользователь}, pluck="name"))
 	контакты.update(frappe.get_all("Contact Email", filters={"email_id": пользователь}, pluck="parent"))
 	for контакт in контакты:
@@ -394,7 +415,8 @@ def _сообщить_о_закрытом(пользователь: str, при�
 		message=(
 			f"Пользователь {пользователь} {почему}. У аккаунта есть данные, поэтому он закрыт, "
 			"а не удалён. Прежде чем удалять данные, свяжитесь с пользователем: кнопку могли нажать "
-			"по ошибке. Срок удаления — 30 дней по политике конфиденциальности."
+			"по ошибке. Срок удаления — 30 дней по политике конфиденциальности; удаляет данные "
+			"и аккаунт процедура lms_frappe_app.personal_data.удалить."
 		),
 	)
 
@@ -443,3 +465,36 @@ def удалить_без_согласия() -> int:
 			frappe.db.rollback(save_point="consent_cleanup")
 			frappe.log_error(title=f"Чистка аккаунтов без согласия: {пользователь}")
 	return убрано
+
+
+def удалить_старые_согласия() -> int:
+	"""Ежедневно: записи согласия удалённых аккаунтов старше
+	`ЛЕТ_ПОСЛЕ_УДАЛЕНИЯ` удаляются.
+
+	Запись удалённого аккаунта — с почтой, которой нет среди пользователей, или
+	раньше заведения нынешнего аккаунта с той же почтой (как в
+	`записи_аккаунта`). Срок считается от последней записи прежнего аккаунта:
+	удаление пишет свою (`НЕТ_18`, `НЕ_ДАНО`, `УДАЛЁН`), и это момент
+	удаления. Записи живого аккаунта хранятся, пока он есть.
+	"""
+	if not готово():
+		return 0
+	срок = add_years(now_datetime(), -ЛЕТ_ПОСЛЕ_УДАЛЕНИЯ)
+	прежние = frappe.db.sql(
+		"""
+		select c.user, u.creation as created
+		from `tabAgent Consent` c
+		left join `tabUser` u on u.name = c.user
+		where u.name is null or c.accepted_at < u.creation
+		group by c.user, u.creation
+		having max(c.accepted_at) < %(deadline)s
+		""",
+		{"deadline": срок},
+		as_dict=True,
+	)
+	for запись in прежние:
+		условие = {"user": запись.user}
+		if запись.created:
+			условие["accepted_at"] = ("<", запись.created)
+		frappe.db.delete("Agent Consent", условие)
+	return len(прежние)
