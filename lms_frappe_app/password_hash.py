@@ -34,19 +34,20 @@ pbkdf2_sha256 — устаревшая схема. Хеш Frappe по-прежн
 import frappe.utils.password
 from passlib.hash import argon2
 
-#: argon2id с параметрами второго рекомендованного набора RFC 9106 (§4):
-#: 64 МиБ памяти, 3 прохода, 4 потока — они же умолчания argon2-cffi.
-#: `Why:` набор с запасом над минимумом OWASP (19 МиБ, 2 прохода) при ~70 мс на
-#: проверку (замер на образе bench, learning-services#676). Параметры
-#: записаны явно: смена умолчаний passlib не должна менять хеш молча.
-#: Поменяются здесь — прежние хеши argon2id тоже перезапишутся при входе.
+#: argon2id с набором OWASP Password Storage Cheat Sheet: 19 МиБ памяти,
+#: 2 прохода, 1 поток. `Why:` память берёт каждая проверка, и неверный пароль
+#: тоже, а у backend стенда предел 1 ГБ на два воркера по четыре потока —
+#: набор RFC 9106 с 64 МиБ и 4 потоками перебором входа съедал бы память и
+#: процессор воркеров (learning-services#676). Параметры записаны явно: смена
+#: умолчаний passlib не должна менять хеш молча. Поменяются здесь — прежние
+#: хеши argon2id тоже перезапишутся при входе.
 ARGON2 = {
 	"argon2__type": "ID",
-	"argon2__memory_cost": 65536,
-	"argon2__rounds": 3,
-	"argon2__parallelism": 4,
+	"argon2__memory_cost": 19456,
+	"argon2__rounds": 2,
+	"argon2__parallelism": 1,
 }
-ARGON2_PREFIX = "$argon2id$v=19$m=65536,t=3,p=4$"
+ARGON2_PREFIX = "$argon2id$v=19$m=19456,t=2,p=1$"
 
 #: Раунды pbkdf2_sha256, если argon2 недоступна, — порог OWASP.
 PBKDF2_ROUNDS = 600_000
