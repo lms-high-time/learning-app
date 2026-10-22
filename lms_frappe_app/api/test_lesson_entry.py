@@ -20,13 +20,14 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 from lms_frappe_app.agent_learning.errors import УРОК_НЕ_НАЙДЕН
 from lms_frappe_app.api import public
 from lms_frappe_app.tests.sample_data import (
-	привязать_урок,
 	зачислить,
 	политика_по_умолчанию,
+	привязать_урок,
+	раздел,
 	создать_занятие,
+	создать_куратора,
 	создать_урок,
 	создать_ученика,
-	раздел,
 	схема_документа,
 )
 
@@ -188,9 +189,12 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 	def test_урок_курса_вне_витрины_не_зачисленному_не_найден(self):
 		"""Урок неопубликованного курса или анонса не зачисленному не существует —
 		как курс в `course_map`. Опубликованный курс открыт и не зачисленному:
-		страница урока зовёт вход до записи (learning-services#692)."""
+		страница урока зовёт вход до записи; автору курс открыт всегда — он
+		смотрит черновик в режиме ученика (learning-services#692)."""
 		frappe.set_user("Administrator")
-		урок = создать_урок(f"Вне витрины {frappe.generate_hash(length=6)}")
+		суффикс = frappe.generate_hash(length=6)
+		урок = создать_урок(f"Вне витрины {суффикс}")
+		автор = создать_куратора(f"entry-cc-{суффикс}@example.com", "Moderator")
 		курс = frappe.db.get_value("Course Lesson", урок, "course")
 		витрина = {
 			"неопубликованный": ({"published": 0, "upcoming": 0}, False),
@@ -210,6 +214,9 @@ class IntegrationTestLessonEntry(IntegrationTestCase):
 					else:
 						self.assertFalse(ответ["ok"])
 						self.assertEqual(ответ["error"]["code"], УРОК_НЕ_НАЙДЕН)
+				frappe.set_user(автор)
+				ответ = public.lesson_entry(lesson=урок)
+				self.assertTrue(ответ["ok"], ответ.get("error"))
 
 	def test_курс_без_уроков_и_пустой_вызов_отказываются(self):
 		for параметры in ({"lesson": "нет-такого-урока"}, {"course": "нет-такого-курса"}, {}):

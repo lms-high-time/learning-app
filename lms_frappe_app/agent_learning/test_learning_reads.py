@@ -4,8 +4,6 @@
 """Чтения Learning: состав курса и каталог — по правилу витрины, статистика —
 персоналу (learning-services#692)."""
 
-import sys
-
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
@@ -31,28 +29,10 @@ def вызвать(имя: str, *args):
 
 
 class TestПодменыЧтенийLearning(UnitTestCase):
-	"""Без базы: каждое HTTP-имя подменённой функции Learning уходит в подмену.
+	"""Без базы: состав подменённых чтений Learning. Что их оригиналы не
+	вызываются под другими путями, держит `tests/test_whitelist_guard.py`."""
 
-	`Why:` подмена сверяет строку вызова, а не функцию: имя, под которым
-	Learning импортировал функцию в другой модуль, было бы входом мимо неё.
-	"""
-
-	def test_каждое_имя_подменено(self):
-		# Модули с методами Learning загружены и тогда, когда тест идёт первым.
-		import lms.lms.api
-
-		for исходное, подмена in подмены().items():
-			функция = frappe.get_attr(исходное)
-			имена = {
-				f"{имя_модуля}.{имя}"
-				for имя_модуля, модуль in list(sys.modules.items())
-				if имя_модуля.startswith("lms.")
-				for имя, значение in list(getattr(модуль, "__dict__", {}).items())
-				if значение is функция
-			}
-			for имя in имена:
-				with self.subTest(имя):
-					self.assertEqual(frappe.override_whitelisted_method(имя), подмена)
+	def test_состав_подмен(self):
 		self.assertEqual(
 			set(подмены()),
 			{
@@ -84,9 +64,11 @@ class IntegrationTestЧтенияLearning(IntegrationTestCase):
 		ученик = создать_ученика(f"lr-{суффикс}@example.com")
 		записанный = создать_ученика(f"lr-in-{суффикс}@example.com")
 		модератор = создать_куратора(f"lr-mod-{суффикс}@example.com", "Moderator")
+		инструктор = создать_ученика(f"lr-ins-{суффикс}@example.com")
 		урок = создать_урок(f"Чтения {суффикс}")
 		зачислить(записанный, урок)
 		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		frappe.get_doc("LMS Course", курс).append("instructors", {"instructor": инструктор}).db_insert()
 		frappe.get_doc(
 			{
 				"doctype": "LMS Course Review",
@@ -103,7 +85,7 @@ class IntegrationTestЧтенияLearning(IntegrationTestCase):
 		}
 		for что, (поля, состав_открыт, в_каталоге) in витрина.items():
 			frappe.db.set_value("LMS Course", курс, поля)
-			for кто, свой in ((ученик, False), (записанный, True), (модератор, True)):
+			for кто, свой in ((ученик, False), (записанный, True), (инструктор, True), (модератор, True)):
 				with self.subTest(что, кто=кто):
 					frappe.set_user(кто)
 					try:
@@ -113,6 +95,10 @@ class IntegrationTestЧтенияLearning(IntegrationTestCase):
 						self.assertEqual(bool(вызвать("get_reviews", курс)), открыт)
 						каталог = {к.name for к in вызвать("get_courses", {"name": курс})}
 						self.assertEqual(курс in каталог, в_каталоге or кто == модератор)
+						self.assertEqual(
+							вызвать("get_courses", {"name": курс, "published": 0}) == [],
+							кто != модератор or поля["published"] == 1,
+						)
 						self.assertEqual(вызвать("get_course_count", {"name": курс}), len(каталог))
 						if кто == записанный:
 							свои = {к.name for к in вызвать("get_courses", {"enrolled": 1})}
@@ -189,3 +175,67 @@ class IntegrationTestЧтенияLearning(IntegrationTestCase):
 		frappe.set_user(модератор)
 		self.assertIn("enrollments", вызвать("lms.lms.api.get_chart_details"))
 		self.assertEqual(len(вызвать("get_course_completion_data")), 2)
+
+	def test_ведущий_групп_видит_группы_и_статистику(self):
+		"""`Batch Evaluator` Learning — персонал для групп и статистики."""
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		ведущий = создать_куратора(f"lbe-{суффикс}@example.com", "Batch Evaluator")
+		группа = frappe.get_doc(
+			{
+				"doctype": "LMS Batch",
+				"title": f"Группа {суффикс}",
+				"start_date": "2099-01-01",
+				"end_date": "2099-12-31",
+			}
+		)
+		группа.flags.ignore_validate = True
+		группа.flags.ignore_mandatory = True
+		группа = группа.insert(ignore_permissions=True).name
+		frappe.set_user(ведущий)
+		self.assertIn(группа, {г.name for г in вызвать("get_batches", {"name": группа})})
+		self.assertEqual(len(вызвать("get_course_completion_data")), 2)
+
+	def test_страница_spa_курса_вне_витрины(self):
+		"""Мета-теги страницы курса вне витрины — сайта, а не курса; версия Frappe
+		в загрузке страницы — только пользователю Desk."""
+		from lms.www import _lms
+
+		from lms_frappe_app.agent_learning import learning_reads
+
+		self.assertIn(
+			"lms_frappe_app.agent_learning.learning_reads.страница_learning",
+			frappe.get_hooks("update_website_context"),
+		)
+
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		ученик = создать_ученика(f"lsp-{суффикс}@example.com")
+		урок = создать_урок(f"Страница {суффикс}")
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		название = frappe.db.get_value("LMS Course", курс, "title")
+		прежний = frappe.local.form_dict
+		self.addCleanup(setattr, frappe.local, "form_dict", прежний)
+
+		def страница(кто: str, путь: str) -> frappe._dict:
+			frappe.set_user(кто)
+			frappe.local.form_dict = frappe._dict(app_path=путь)
+			context = frappe._dict(
+				title="Сайт",
+				favicon="/favicon.png",
+				boot=frappe._dict(frappe_version=frappe.__version__),
+				meta=_lms.get_meta(путь, "Сайт", "/favicon.png"),
+			)
+			learning_reads.страница_learning(context)
+			return context
+
+		for опубликован, видно in ((0, False), (1, True)):
+			frappe.db.set_value("LMS Course", курс, "published", опубликован)
+			for кто in ("Guest", ученик):
+				with self.subTest(опубликован=опубликован, кто=кто):
+					for путь in (f"courses/{курс}", f"courses/{курс}/learn/1-1"):
+						self.assertEqual(страница(кто, путь).meta.get("title") == название, видно)
+		frappe.db.set_value("LMS Course", курс, "published", 0)
+		self.assertEqual(страница("Administrator", f"courses/{курс}").meta.get("title"), название)
+		self.assertNotIn("frappe_version", страница(ученик, "courses").boot)
+		self.assertIn("frappe_version", страница("Administrator", "courses").boot)
