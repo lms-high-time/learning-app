@@ -13,6 +13,8 @@
 import json
 import os
 from collections import defaultdict
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -29,7 +31,13 @@ from lms_frappe_app.personal_data import (
 	ХРАНИТЬ,
 	реестр,
 )
-from lms_frappe_app.tests.sample_data import создать_пользователя, создать_ученика
+from lms_frappe_app.tests.sample_data import (
+	добавить_в_организацию,
+	создать_организацию,
+	создать_пользователя,
+	создать_урок,
+	создать_ученика,
+)
 
 РЕЖИМЫ = frozenset({УДАЛИТЬ, ОБЕЗЛИЧИТЬ, ХРАНИТЬ})
 
@@ -69,9 +77,12 @@ class UnitTestPersonalDataRegistry(UnitTestCase):
 		for запись in реестр():
 			with self.subTest(запись=запись):
 				поле = frappe.get_meta(запись["doctype"]).get_field(запись["filter_by"])
+				self.assertIn(запись["mode"], РЕЖИМЫ)
+				if запись["filter_by"] == "owner":
+					self.assertEqual(запись["mode"], УДАЛИТЬ, "владельца не очищают")
+					continue
 				self.assertIsNotNone(поле)
 				self.assertEqual((поле.fieldtype, поле.options), ("Link", "User"))
-				self.assertIn(запись["mode"], РЕЖИМЫ)
 				if запись["mode"] == ОБЕЗЛИЧИТЬ:
 					self.assertFalse(поле.reqd, "обезличенное поле очищается")
 		for (доктайп, имя), (действие, причина) in ВНЕ_РЕЕСТРА.items():
@@ -114,6 +125,9 @@ def вставить(доктайп: str, **поля) -> str:
 	документ.update(поля)
 	документ.name = поля.get("name") or frappe.generate_hash(length=12)
 	документ.db_insert()
+	if "owner" in поля:
+		# Владельца `db_insert` ставит текущего пользователя.
+		frappe.db.set_value(доктайп, документ.name, "owner", поля["owner"], update_modified=False)
 	return документ.name
 
 
@@ -132,24 +146,37 @@ def строка_таблицы(доктайп: str, **поля) -> tuple[str, s
 	return родитель, таблица.parent, строка
 
 
-def наполнить(пользователь: str) -> dict[str, set[str]]:
-	"""По записи на каждую строку реестра и каждую удаляемую зависимость."""
-	записи: dict[str, set[str]] = defaultdict(set)
+def наполнить(пользователь: str) -> tuple[dict, dict[str, set[str]]]:
+	"""По записи на каждую строку реестра и каждую удаляемую зависимость:
+	`({(доктайп, поле, режим): имена}, {доктайп зависимой: имена})`."""
+	по_реестру: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+	все: dict[str, set[str]] = defaultdict(set)
 	for запись in реестр():
 		доктайп, поле = запись["doctype"], запись["filter_by"]
 		if frappe.get_meta(доктайп).istable:
-			записи[доктайп].add(строка_таблицы(доктайп, **{поле: пользователь})[2])
+			имя = строка_таблицы(доктайп, **{поле: пользователь})[2]
 		else:
-			записи[доктайп].add(вставить(доктайп, **{поле: пользователь}))
+			имя = вставить(доктайп, **{поле: пользователь})
+		по_реестру[(доктайп, поле, запись["mode"])].add(имя)
+		все[доктайп].add(имя)
+	зависимые: dict[str, set[str]] = defaultdict(set)
 	for (доктайп, поле), действие in ЗАВИСИМЫЕ.items():
 		if действие == УДАЛИТЬ:
 			цель = frappe.get_meta(доктайп).get_field(поле).options
-			записи[доктайп].add(вставить(доктайп, **{поле: sorted(записи[цель])[0]}))
-	return записи
+			зависимые[доктайп].add(вставить(доктайп, **{поле: sorted(все[цель])[0]}))
+	return по_реестру, зависимые
 
 
 def есть(доктайп: str, имя: str) -> bool:
 	return bool(frappe.db.exists(доктайп, имя))
+
+
+@contextmanager
+def без_коммитов():
+	"""Процедура коммитит — закрытие доступа и итог; в тесте откат класса
+	должен убрать всё."""
+	with patch.object(frappe.db, "commit") as коммит:
+		yield коммит
 
 
 class IntegrationTestPersonalData(IntegrationTestCase):
@@ -177,47 +204,88 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 		self.addCleanup(lambda: os.path.exists(путь) and os.remove(путь))
 		return файл
 
+	def сессия(self) -> str:
+		sid = frappe.generate_hash()
+		frappe.db.sql(
+			"insert into `tabSessions` (user, sid, sessiondata, lastupdate, status) values (%s, %s, %s, now(), 'Active')",
+			(self.ученик, sid, "{}"),
+		)
+		return sid
+
+	def замечание(self, занятие: str, **поля) -> str:
+		урок = создать_урок(f"Замечание {frappe.generate_hash(length=6)}")
+		глава = frappe.db.get_value("Course Lesson", урок, "chapter")
+		курс = frappe.db.get_value("Course Chapter", глава, "course")
+		return вставить(
+			"Agent Course Report",
+			session=занятие,
+			course=курс,
+			lesson=урок,
+			kind="Stuck",
+			status="New",
+			**поля,
+		)
+
 	def test_удаление_не_оставляет_записей_ученика_а_выгрузка_их_отдаёт(self):
-		мои, чужие = наполнить(self.ученик), наполнить(self.другой)
-		заметка = sorted(мои["Agent Student Note"])[0]
-		занятие = sorted(мои["Agent Learning Session"])[0]
-		сдача = sorted(мои["Agent Homework Submission"])[0]
+		(мои, мои_зависимые), (чужие, чужие_зависимые) = наполнить(self.ученик), наполнить(self.другой)
+
+		def одна(доктайп: str, поле: str) -> str:
+			return next(iter(next(имена for (д, п, _), имена in мои.items() if (д, п) == (доктайп, поле))))
+
+		заметка = одна("Agent Student Note", "student")
+		занятие = одна("Agent Learning Session", "student")
+		сдача = одна("Agent Homework Submission", "member")
 		файл = self.файл(сдача)
 		путь = файл.get_full_path()
+		self.сессия()
 		версия = вставить("Version", ref_doctype="Agent Student Note", docname=заметка, data="{}")
 		комментарий = вставить(
 			"Comment", comment_type="Comment", reference_doctype="Agent Student Note", reference_name=заметка
 		)
 
-		# Копии в корзине: удалённая раньше заметка ученика — с историей правок — и чужая.
-		def копия(ученик: str) -> tuple[str, str]:
+		# Копии в корзине: удалённая раньше заметка ученика — с историей правок —,
+		# ответ квиза, где он только владелец, и чужая заметка.
+		def копия(доктайп: str, **поля) -> tuple[str, str]:
 			имя = frappe.generate_hash(length=12)
-			данные = json.dumps(
-				{"doctype": "Agent Student Note", "name": имя, "student": ученик, "text": "x"}
-			)
-			return имя, вставить(
-				"Deleted Document", deleted_doctype="Agent Student Note", deleted_name=имя, data=данные
-			)
+			данные = json.dumps({"doctype": доктайп, "name": имя, **поля})
+			return имя, вставить("Deleted Document", deleted_doctype=доктайп, deleted_name=имя, data=данные)
 
-		удалённая, моя_копия = копия(self.ученик)
+		удалённая, моя_копия = копия("Agent Student Note", student=self.ученик, text="x")
 		версия_удалённой = вставить("Version", ref_doctype="Agent Student Note", docname=удалённая, data="{}")
-		_, чужая_копия = копия(self.другой)
-		# Чужие записи со ссылкой на записи ученика — отвязываются.
-		мой_репорт, чужой_репорт = (
-			sorted(мои["Agent Course Report"])[0],
-			sorted(чужие["Agent Course Report"])[0],
+		_, копия_ответа = копия("Agent Quiz Answer", owner=self.ученик, answer="x")
+		_, чужая_копия = копия("Agent Student Note", student=self.другой, text="x")
+		# Замечание к курсу остаётся автору — без занятия, почты и имени; дубль
+		# чужого замечания сохраняет оригинал.
+		frappe.db.set_value("User", self.ученик, "full_name", "Ученик Удаляемый")
+		моё_замечание = self.замечание(
+			занятие,
+			owner=self.ученик,
+			text=f"{self.ученик} (Ученик Удаляемый) не понял пример",
+			resolution="Ученик Удаляемый, поправили",
 		)
-		frappe.db.set_value("Agent Course Report", мой_репорт, "resolution", "Исправили")
-		frappe.db.set_value("Agent Course Report", чужой_репорт, "duplicate_of", мой_репорт)
+		чужое_занятие = next(
+			iter(next(и for (д, п, _), и in чужие.items() if (д, п) == ("Agent Learning Session", "student")))
+		)
+		дубль = self.замечание(чужое_занятие, text="То же", duplicate_of=моё_замечание)
+		# Чужие записи со ссылкой на записи ученика — отвязываются.
 		чужая_заметка = вставить("Agent Student Note", student=self.другой, source_session=занятие)
 		_, _, чужая_цель = строка_таблицы("Agent Lesson Run Goal", session=занятие)
-		# Записи команды и чужая сдача с ним как куратором — остаются без него.
+		# Записи команды — остаются без него, с ними его правки и комментарии.
 		команда = вставить(
 			"Learning Organization", organization_name=frappe.generate_hash(), created_by=self.ученик
 		)
 		frappe.db.set_value("Learning Organization", команда, "owner", self.ученик)
+		правка_команды = вставить(
+			"Version", ref_doctype="Learning Organization", docname=команда, data="{}", owner=self.ученик
+		)
+		комментарий_команде = вставить(
+			"Comment",
+			comment_type="Comment",
+			reference_doctype="Learning Organization",
+			reference_name=команда,
+			comment_email=self.ученик,
+		)
 		приглашение = вставить("Organization Invite", organization=команда, created_by=self.ученик)
-		_, _, проверка = строка_таблицы("Agent Homework Event", by_user=self.ученик)
 		согласие = вставить(
 			"Agent Consent", user=self.ученик, method=РЕГИСТРАЦИЯ, accepted_at=frappe.utils.now_datetime()
 		)
@@ -225,43 +293,68 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 		выгрузка = personal_data.выгрузить(self.ученик)
 
 		self.assertEqual(выгрузка["account"]["email"], self.ученик)
-		for доктайп, имена in мои.items():
+		выгружаемые = [(д, и) for (д, _, _), и in мои.items()] + list(мои_зависимые.items())
+		for доктайп, имена in выгружаемые:
 			with self.subTest(выгрузка=доктайп):
 				self.assertLessEqual(имена, {з["name"] for з in выгрузка["records"].get(доктайп, [])})
+		self.assertIn(моё_замечание, {з["name"] for з in выгрузка["records"]["Agent Course Report"]})
+		self.assertEqual(
+			set(выгрузка["records"]["Learning Organization"][0]), {"name", "organization_name", "creation"}
+		)
 		self.assertEqual([ф["name"] for ф in выгрузка["files"]], [файл.name])
 
-		итог = personal_data.удалить(self.ученик)
+		with без_коммитов() as коммит:
+			итог = personal_data.удалить(self.ученик)
 
+		self.assertTrue(коммит.called)
 		self.assertEqual(итог["files"], 1)
-		for доктайп, имена in мои.items():
-			режим = {з["mode"] for з in реестр() if з["doctype"] == доктайп}
-			with self.subTest(удаление=доктайп):
-				if ХРАНИТЬ in режим:
-					self.assertTrue(all(есть(доктайп, имя) for имя in имена))
-				elif ОБЕЗЛИЧИТЬ in режим:
-					поле = next(з["filter_by"] for з in реестр() if з["doctype"] == доктайп)
-					self.assertFalse(frappe.db.exists(доктайп, {поле: self.ученик}))
-				else:
+		for (доктайп, поле, режим), имена in мои.items():
+			with self.subTest(удаление=(доктайп, поле)):
+				if режим == УДАЛИТЬ:
 					self.assertEqual([имя for имя in имена if есть(доктайп, имя)], [])
-		for доктайп, имена in чужие.items():
+				else:
+					self.assertTrue(all(есть(доктайп, имя) for имя in имена))
+					if режим == ОБЕЗЛИЧИТЬ:
+						self.assertFalse(frappe.db.exists(доктайп, {поле: self.ученик}))
+		for доктайп, имена in мои_зависимые.items():
+			with self.subTest(зависимые=доктайп):
+				self.assertEqual([имя for имя in имена if есть(доктайп, имя)], [])
+		for доктайп, имена in [*((д, и) for (д, _, _), и in чужие.items()), *чужие_зависимые.items()]:
 			with self.subTest(чужие=доктайп):
 				self.assertTrue(all(есть(доктайп, имя) for имя in имена))
 		self.assertFalse(есть("User", self.ученик))
 		self.assertFalse(frappe.db.exists("Contact", {"email_id": self.ученик}))
+		self.assertFalse(frappe.db.exists("Sessions", {"user": self.ученик}))
 		for доктайп, имя in (
 			("Version", версия),
 			("Comment", комментарий),
 			("Deleted Document", моя_копия),
 			("Version", версия_удалённой),
+			("Deleted Document", копия_ответа),
+			("Version", правка_команды),
+			("Comment", комментарий_команде),
 			("File", файл.name),
 		):
 			self.assertFalse(есть(доктайп, имя), доктайп)
 		self.assertFalse(os.path.exists(путь))
 		self.assertTrue(есть("Deleted Document", чужая_копия))
-		self.assertEqual(
-			frappe.db.get_value("Agent Course Report", чужой_репорт, ["duplicate_of", "resolution"]),
-			(None, "Исправили"),
+		замечание = frappe.db.get_value(
+			"Agent Course Report", моё_замечание, ["session", "owner", "text", "resolution"], as_dict=True
 		)
+		self.assertEqual(
+			замечание,
+			{
+				"session": None,
+				"owner": personal_data.АНОНИМ,
+				"text": f"{personal_data.УБРАНО} ({personal_data.УБРАНО}) не понял пример",
+				"resolution": f"{personal_data.УБРАНО}, поправили",
+			},
+		)
+		self.assertEqual(frappe.db.get_value("Agent Course Report", дубль, "duplicate_of"), моё_замечание)
+		# Автор разбирает обезличенное замечание как обычное.
+		документ = frappe.get_doc("Agent Course Report", моё_замечание)
+		документ.status = "In Progress"
+		документ.save(ignore_permissions=True)
 		self.assertIsNone(frappe.db.get_value("Agent Student Note", чужая_заметка, "source_session"))
 		self.assertIsNone(frappe.db.get_value("Agent Lesson Run Goal", чужая_цель, "session"))
 		self.assertEqual(
@@ -269,36 +362,59 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 			(None, personal_data.АНОНИМ),
 		)
 		self.assertIsNone(frappe.db.get_value("Organization Invite", приглашение, "created_by"))
-		self.assertIsNone(frappe.db.get_value("Agent Homework Event", проверка, "by_user"))
 		self.assertTrue(есть("Agent Consent", согласие))
 		self.assertTrue(frappe.db.exists("Agent Consent", {"user": self.ученик, "method": УДАЛЁН}))
 
-	def test_ссылка_вне_реестра_отменяет_удаление_целиком(self):
+	def test_ссылка_вне_реестра_отменяет_удаление_а_доступ_закрыт(self):
 		заметка = вставить("Agent Student Note", student=self.ученик)
 		сдача = вставить("Agent Homework Submission", member=self.ученик)
 		путь = self.файл(сдача).get_full_path()
 		вставить("Agent Course Release", published_by=self.ученик)
+		self.сессия()
 
-		with self.assertRaises(frappe.LinkExistsError):
+		with без_коммитов(), self.assertRaises(frappe.LinkExistsError):
 			personal_data.удалить(self.ученик)
 
 		self.assertTrue(есть("User", self.ученик))
 		self.assertTrue(есть("Agent Student Note", заметка))
 		self.assertTrue(os.path.exists(путь))
 		self.assertFalse(frappe.db.exists("Agent Consent", {"user": self.ученик, "method": УДАЛЁН}))
+		self.assertFalse(frappe.db.exists("Sessions", {"user": self.ученик}))
 
-	def test_администратора_и_несуществующего_процедура_не_удаляет(self):
-		администратор = создать_пользователя(
-			f"pd-admin-{frappe.generate_hash(length=6)}@example.com", "System Manager"
-		)
+	def test_процедура_удаляет_только_учеников(self):
+		суффикс = frappe.generate_hash(length=6)
+		администратор = создать_пользователя(f"pd-admin-{суффикс}@example.com", "System Manager")
+		служебный = создать_пользователя(f"pd-service-{суффикс}@example.com", "Agent Service")
+		единственный = создать_ученика(f"pd-org-admin-{суффикс}@example.com")
+		добавить_в_организацию(единственный, создать_организацию(f"Команда {суффикс}"), "Org Admin")
 		for пользователь, ошибка in (
 			(администратор, frappe.ValidationError),
+			(служебный, frappe.ValidationError),
+			(единственный, frappe.ValidationError),
 			("Administrator", frappe.DoesNotExistError),
 			("nobody-pd@example.com", frappe.DoesNotExistError),
 		):
-			with self.subTest(пользователь=пользователь), self.assertRaises(ошибка):
+			with self.subTest(пользователь=пользователь), без_коммитов(), self.assertRaises(ошибка):
 				personal_data.удалить(пользователь)
-		self.assertTrue(есть("User", администратор))
+		for пользователь in (администратор, служебный, единственный):
+			self.assertTrue(есть("User", пользователь))
+
+	def test_штатные_запросы_frappe_закрыты(self):
+		frappe.db.set_single_value("Website Settings", "auto_account_deletion", 72)
+		for форма in personal_data.ФОРМЫ_FRAPPE:
+			frappe.db.set_value("Web Form", форма, "published", 1)
+
+		personal_data.закрыть_штатные_запросы()
+
+		self.assertEqual(frappe.db.get_single_value("Website Settings", "auto_account_deletion"), 0)
+		for форма in personal_data.ФОРМЫ_FRAPPE:
+			self.assertEqual(frappe.db.get_value("Web Form", форма, "published"), 0)
+		for запрос in (
+			{"doctype": "Personal Data Deletion Request", "email": self.ученик},
+			{"doctype": "Personal Data Download Request", "user": self.ученик},
+		):
+			with self.subTest(запрос["doctype"]), self.assertRaises(frappe.ValidationError):
+				frappe.get_doc(запрос).insert(ignore_permissions=True)
 
 
 class IntegrationTestLogRetention(IntegrationTestCase):

@@ -414,6 +414,14 @@ doc_events = {
 	"Log Settings": {
 		"validate": "lms_frappe_app.personal_data.закрепить_сроки_журналов",
 	},
+	# Копия данных и удаление аккаунта — по письму, процедурой приложения;
+	# штатные запросы Frappe закрыты (learning-services#689).
+	"Personal Data Deletion Request": {
+		"before_insert": "lms_frappe_app.personal_data.отказать_штатному_запросу",
+	},
+	"Personal Data Download Request": {
+		"before_insert": "lms_frappe_app.personal_data.отказать_штатному_запросу",
+	},
 }
 
 # Scheduled Tasks
@@ -546,7 +554,7 @@ on_session_creation = "lms_frappe_app.session_guard.ограничить_сро�
 # User Data Protection
 # --------------------
 # Реестр данных пользователя (learning-services#689): поля доктайпов
-# приложения и Learning, в которых стоит пользователь. Его читают выгрузка
+# приложения, Learning и Frappe, в которых стоит пользователь. Его читают выгрузка
 # Frappe (`Personal Data Download Request`) и процедура приложения
 # `lms_frappe_app.personal_data` — выгрузка и удаление данных ученика.
 # Ключ `mode` — её: `delete` — запись удаляется (строка дочерней таблицы —
@@ -601,6 +609,12 @@ user_data_fields = [
 	{"doctype": "LMS Quiz Submission", "filter_by": "member", "mode": _удалить},
 	{"doctype": "LMS Lesson Note", "filter_by": "member", "mode": _удалить},
 	{"doctype": "LMS Video Watch Duration", "filter_by": "member", "mode": _удалить},
+	# Frappe: обсуждения уроков, уведомления, запросы на копию данных
+	{"doctype": "Discussion Topic", "filter_by": "owner", "mode": _удалить},
+	{"doctype": "Discussion Reply", "filter_by": "owner", "mode": _удалить},
+	{"doctype": "Notification Log", "filter_by": "for_user", "mode": _удалить},
+	{"doctype": "Notification Log", "filter_by": "from_user", "mode": _обезличить},
+	{"doctype": "Personal Data Download Request", "filter_by": "user", "mode": _удалить},
 ]
 
 # Authentication and authorization
