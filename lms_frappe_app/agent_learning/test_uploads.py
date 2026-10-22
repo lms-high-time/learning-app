@@ -6,6 +6,7 @@
 
 import base64
 import io
+import mimetypes
 import re
 import zipfile
 from pathlib import Path
@@ -100,3 +101,13 @@ class TestТипПринят(UnitTestCase):
 		абзац = re.search(r"Типы — (.+?);", контракт, re.S)
 		self.assertIsNotNone(абзац)
 		self.assertEqual(set(re.findall(r"`(\w+)`", абзац.group(1))), set(uploads.ТИПЫ_ДОМАШКИ))
+
+	def test_типы_домашки_проходят_проверку_frappe(self):
+		"""Каждый тип домашки есть в `allowed_file_extensions` сайта — в той форме,
+		в какой его выводит `File.set_file_type`."""
+		from lms_frappe_app.install import ТИПЫ_ФАЙЛОВ
+
+		for тип in uploads.ТИПЫ_ДОМАШКИ:
+			with self.subTest(тип):
+				mime = mimetypes.guess_type(f"a.{тип}")[0]
+				self.assertIn(mimetypes.guess_extension(mime).lstrip(".").upper(), ТИПЫ_ФАЙЛОВ)
