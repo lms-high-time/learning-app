@@ -783,6 +783,28 @@ def authorization_server_metadata():
 	return ответ
 
 
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def openid_configuration():
+	"""Конфигурация OpenID Connect Frappe с тем, что сервер действительно делает.
+
+	`Why:` Frappe обещает в ней ответы implicit и hybrid (`token`,
+	`id_token token`, …), которые валидатор отклоняет, и не называет PKCE
+	(learning-services#691). Клиент, который читает её, а не метаданные RFC
+	8414, выбрал бы закрытый путь. Адрес сюда переадресует nginx сайта, как и
+	метаданные сервера авторизации.
+	"""
+	конфигурация = frappe.parse_json(oauth2.get_openid_configuration().get_data(as_text=True))
+	конфигурация.update(
+		response_types_supported=["code"],
+		response_modes_supported=["query"],
+		grant_types_supported=["authorization_code", "refresh_token"],
+		code_challenge_methods_supported=["S256"],
+		token_endpoint_auth_methods_supported=["none", "client_secret_post"],
+	)
+	frappe.local.allow_cors = "*"
+	return Response(frappe.as_json(конфигурация), mimetype="application/json")
+
+
 def возврат_подключения() -> dict:
 	"""Куда агент получит доступ — для экрана подтверждения.
 

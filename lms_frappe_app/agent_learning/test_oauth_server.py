@@ -401,6 +401,24 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.assertEqual(метаданные["introspection_endpoint_auth_methods_supported"], ["client_secret_post"])
 		self.assertEqual(метаданные["issuer"], "https://cenda.test")
 
+	def test_конфигурация_openid_обещает_только_код(self):
+		"""Frappe обещал в `/.well-known/openid-configuration` ответы implicit и
+		hybrid, которые валидатор отклоняет (learning-services#665, #691)."""
+		self.addCleanup(setattr, frappe.local, "request", getattr(frappe.local, "request", None))
+		set_request(method="GET", path="/")
+		конфигурация = json.loads(oauth_server.openid_configuration().get_data())
+		self.assertEqual(конфигурация["response_types_supported"], ["code"])
+		self.assertEqual(конфигурация["grant_types_supported"], ["authorization_code", "refresh_token"])
+		self.assertEqual(конфигурация["code_challenge_methods_supported"], ["S256"])
+		self.assertEqual(
+			конфигурация["token_endpoint_auth_methods_supported"], ["none", "client_secret_post"]
+		)
+		self.assertTrue(
+			конфигурация["authorization_endpoint"].endswith(
+				"/api/method/frappe.integrations.oauth2.authorize"
+			)
+		)
+
 	def test_только_код_авторизации_и_обновление(self):
 		"""Frappe разрешал всем клиентам вход по паролю — мимо экрана согласия —
 		и ответы implicit и hybrid (learning-services#665)."""
