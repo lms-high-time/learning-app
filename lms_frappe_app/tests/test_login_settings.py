@@ -1,15 +1,25 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Настройки входа из кода (learning-services#666)."""
+"""Настройки входа и сайта из кода (learning-services#666, #691)."""
 
 from unittest.mock import patch
 
 import frappe
 from frappe.core.doctype.system_settings.system_settings import clear_system_settings_cache
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
-from lms_frappe_app.install import БЕЗ_2FA, НАСТРОЙКИ_ВХОДА, РОЛИ_С_2FA, обеспечить_настройки_входа
+from lms_frappe_app.install import (
+	БЕЗ_2FA,
+	НАСТРОЙКИ_OAUTH,
+	НАСТРОЙКИ_ВХОДА,
+	РОЛИ_С_2FA,
+	САЙТ_РАЗРАБОТКИ,
+	ФЛАГИ_РАЗРАБОТКИ,
+	обеспечить_настройки_oauth,
+	обеспечить_настройки_входа,
+	проверить_флаги_разработки,
+)
 
 НАСТРОЙКИ = "System Settings"
 
@@ -73,3 +83,59 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 		self.assertEqual(frappe.get_system_settings("enable_two_factor_auth"), 0)
 		self.assertEqual(frappe.get_system_settings("allow_error_traceback"), 0)
 		self.assertEqual(frappe.db.get_value("Role", "System Manager", "two_factor_auth"), 0)
+
+
+class IntegrationTestOAuthSettings(IntegrationTestCase):
+	def setUp(self):
+		прежние = {
+			запись: {поле: frappe.db.get_single_value(запись, поле) for поле in поля}
+			for запись, поля in НАСТРОЙКИ_OAUTH.items()
+		}
+		self.addCleanup(self._вернуть, прежние)
+
+	def _вернуть(self, прежние: dict):
+		for запись, поля in прежние.items():
+			frappe.db.set_single_value(запись, поля)
+			frappe.clear_document_cache(запись, запись)
+
+	def test_настройки_oauth_приводятся_и_не_пишутся_зря(self):
+		"""Экран согласия, метаданные и регистрация клиентов — из кода; ручная
+		правка возвращается миграцией (learning-services#691)."""
+		frappe.db.set_single_value(
+			"OAuth Settings", {"skip_authorization": 1, "show_auth_server_metadata": 0}
+		)
+		frappe.db.set_single_value("OAuth Provider Settings", "skip_authorization", "Auto")
+		frappe.clear_document_cache("OAuth Settings", "OAuth Settings")
+
+		обеспечить_настройки_oauth()
+
+		for запись, поля in НАСТРОЙКИ_OAUTH.items():
+			for поле, значение in поля.items():
+				with self.subTest(f"{запись}.{поле}"):
+					self.assertEqual(frappe.get_cached_value(запись, запись, поле), значение)
+		записано = frappe.db.get_singles_dict("OAuth Settings")["modified"]
+		обеспечить_настройки_oauth()
+		self.assertEqual(frappe.db.get_singles_dict("OAuth Settings")["modified"], записано)
+
+
+class UnitTestDevelopmentFlags(UnitTestCase):
+	def test_флаги_разработки_останавливают_миграцию(self):
+		"""Режим разработчика, тесты на сайте и серверные скрипты на стенде —
+		отказ миграции; сайт разработки ключом конфигурации их держит
+		(learning-services#691)."""
+		выключены = dict.fromkeys(ФЛАГИ_РАЗРАБОТКИ, 0)
+		for что, конфигурация, отказ in (
+			("флагов нет", {}, False),
+			*((флаг, {флаг: 1}, True) for флаг in ФЛАГИ_РАЗРАБОТКИ),
+			("флаг строкой", {"developer_mode": "1"}, True),
+			("сайт разработки", {"allow_tests": True, САЙТ_РАЗРАБОТКИ: 1}, False),
+		):
+			with (
+				self.subTest(что),
+				patch.dict(frappe.conf, {**выключены, САЙТ_РАЗРАБОТКИ: 0, **конфигурация}),
+			):
+				if отказ:
+					with self.assertRaises(frappe.ValidationError):
+						проверить_флаги_разработки()
+				else:
+					проверить_флаги_разработки()
