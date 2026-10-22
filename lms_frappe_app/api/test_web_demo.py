@@ -118,8 +118,18 @@ class IntegrationTestWebDemo(IntegrationTestCase):
 			другое = self.начать(self.уроки[1])["data"]["session"]
 			self.assertEqual(student.count_lesson_turn(другое)["data"]["turns"], 1)
 
+		run = frappe.db.get_value("Agent Learning Session", второе, "run")
+		with self.subTest("внутри суток"):
+			frappe.db.set_value(
+				"Agent Lesson Run",
+				run,
+				"web_turns_since",
+				now_datetime() - timedelta(hours=23, minutes=59),
+				update_modified=False,
+			)
+			self.assertEqual(student.count_lesson_turn(второе)["data"]["turns"], 4)
+
 		with self.subTest("через сутки"):
-			run = frappe.db.get_value("Agent Learning Session", второе, "run")
 			frappe.db.set_value(
 				"Agent Lesson Run",
 				run,
