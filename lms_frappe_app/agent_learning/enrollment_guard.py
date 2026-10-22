@@ -23,12 +23,14 @@
   (`fetch_from`).
 - Вставка — только на себя и только изнутри записи в группу Learning: запись
   в группу (`LMS Batch Enrollment`) заводит зачисления на курсы группы от имени
-  ученика, без `ignore_permissions`, уже пройдя проверки группы — права,
-  самозапись, оплату, места. Хук `before_validate` записи в группу
-  (`отметить_группу`) метит запрос парой «группа, ученик», и вставка проходит
-  только с этой группой и этим учеником; остальные поля — по умолчанию.
-  Обычная запись на курс — метод `enroll`: там пространство, анонс и порядок
-  программы.
+  ученика, без `ignore_permissions`, в `validate_course_enrollment` — после
+  проверок группы: прав, самозаписи, оплаты, мест. Класс записи в группу
+  (`ЗаписьВГруппу`, `override_doctype_class`) метит запрос парой «группа,
+  ученик» ровно на время этого шага, и вставка проходит только с этой группой
+  и этим учеником; остальные поля — по умолчанию. Learning переименует шаг —
+  метки не будет, и самозапись в группу откажет, а не откроется: её держит
+  тест. Обычная запись на курс — метод `enroll`: там пространство, анонс и
+  порядок программы.
 
 Чего не делает: чтение и удаление записи не трогает.
 """
@@ -39,6 +41,7 @@ import frappe
 from frappe import _
 from frappe.model import data_fieldtypes, table_fields
 from frappe.utils import cast, cint
+from lms.lms.doctype.lms_batch_enrollment.lms_batch_enrollment import LMSBatchEnrollment
 
 ДОКТАЙП = "LMS Enrollment"
 #: Поля, которые ученик задаёт при вставке по группе Learning.
@@ -65,14 +68,16 @@ def проверить_зачисление(doc, method=None) -> None:
 		_проверить_изменение(doc)
 
 
-def отметить_группу(doc, method=None) -> None:
-	"""Хук `before_validate` у `LMS Batch Enrollment`: дальше по запросу идёт её проверка."""
-	frappe.flags[ГРУППА] = (doc.batch, doc.member)
+class ЗаписьВГруппу(LMSBatchEnrollment):
+	"""`LMS Batch Enrollment`: зачисления на курсы группы заводятся под меткой."""
 
-
-def снять_отметку_группы(doc, method=None) -> None:
-	"""Хук `validate` у `LMS Batch Enrollment`: Learning закончил заводить зачисления."""
-	frappe.flags.pop(ГРУППА, None)
+	def validate_course_enrollment(self):
+		прежняя = frappe.flags.get(ГРУППА)
+		frappe.flags[ГРУППА] = (self.batch, self.member)
+		try:
+			super().validate_course_enrollment()
+		finally:
+			frappe.flags[ГРУППА] = прежняя
 
 
 def только_свои(строки: Iterable, роли: set[str], право: str) -> bool:

@@ -259,6 +259,8 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 		зачислить_на_курс(cls.ученик, cls.свой_курс)
 		cls.зачисление = frappe.db.get_value(ЗАЧИСЛЕНИЕ, {"member": cls.ученик, "course": cls.свой_курс})
 		cls.группа = cls._группа(суффикс, cls.другой_курс)
+		зачислить_на_курс(cls.чужой, cls.свой_курс)
+		cls.чужое_зачисление = frappe.db.get_value(ЗАЧИСЛЕНИЕ, {"member": cls.чужой, "course": cls.свой_курс})
 		cls.оплата = cls._запись("LMS Payment", member=cls.ученик)
 		cls.сертификат = cls._запись("LMS Certificate", member=cls.ученик, course=cls.свой_курс)
 
@@ -270,8 +272,8 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 		return запись.name
 
 	@staticmethod
-	def _группа(суффикс: str, курс: str) -> str:
-		"""Группа Learning с самозаписью и одним курсом.
+	def _группа(суффикс: str, курс: str, самозапись: int = 1) -> str:
+		"""Группа Learning с одним курсом, по умолчанию с самозаписью.
 
 		Проверки группы (даты, преподаватели, расписание) к правилу не
 		относятся, поэтому `validate` её пропускается.
@@ -280,7 +282,7 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 			{
 				"doctype": "LMS Batch",
 				"title": f"Группа {суффикс}",
-				"allow_self_enrollment": 1,
+				"allow_self_enrollment": самозапись,
 				"courses": [{"course": курс}],
 			}
 		)
@@ -344,7 +346,7 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 
 		Запись на курс — метод `enroll`: там пространство, анонс и порядок
 		программы. Вставку по группе пропускает только запись в эту группу
-		(`enrollment_guard.отметить_группу`) — и то без служебных полей.
+		(`enrollment_guard.ЗаписьВГруппу`) — и то без служебных полей.
 		"""
 		по_группе = {"member": self.ученик, "enrollment_from_batch": self.группа}
 		заявки = {
@@ -360,12 +362,12 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 		for что, (поля, в_группе) in заявки.items():
 			with self.subTest(что):
 				if в_группе:
-					enrollment_guard.отметить_группу(frappe._dict(batch=self.группа, member=self.ученик))
+					frappe.flags[enrollment_guard.ГРУППА] = (self.группа, self.ученик)
 				try:
 					with self.assertRaises(frappe.PermissionError):
 						frappe.client.insert({"doctype": ЗАЧИСЛЕНИЕ, "course": self.другой_курс, **поля})
 				finally:
-					enrollment_guard.снять_отметку_группы(None)
+					frappe.flags.pop(enrollment_guard.ГРУППА, None)
 
 		frappe.set_user("Administrator")
 		self.assertFalse(
@@ -373,6 +375,67 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 				ЗАЧИСЛЕНИЕ, {"course": self.другой_курс, "member": ("in", [self.ученик, self.чужой])}
 			)
 		)
+
+	def test_чужое_зачисление_не_присвоить(self):
+		"""Владельца чужой записи на курс ученик не переписывает на себя."""
+		frappe.set_user(self.ученик)
+		with self.assertRaises(frappe.PermissionError):
+			self._изменить(self.чужое_зачисление, {"owner": self.ученик})
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value(ЗАЧИСЛЕНИЕ, self.чужое_зачисление, "owner"), self.чужой)
+
+	def test_отказ_записи_в_группу_не_открывает_вставку(self):
+		"""Запись в закрытую группу падает раньше, чем Learning заводит
+		зачисления, и метки группы после неё нет — ни отдельным вызовом, ни в
+		одном `frappe.client.bulk_update`, который ловит исключения по документам."""
+		суффикс = frappe.generate_hash(length=6)
+		курс = создать_курс(f"Курс закрытой группы {суффикс}")
+		frappe.db.set_value("LMS Course", курс, "published", 1)
+		закрытая = self._группа(суффикс, курс, самозапись=0)
+		открытая = self._группа(f"{суффикс}-o", создать_курс(f"Курс открытой группы {суффикс}"))
+		своя_запись_в_группу = frappe.get_doc(
+			{"doctype": "LMS Batch Enrollment", "batch": открытая, "member": self.ученик}
+		)
+		своя_запись_в_группу.flags.ignore_validate = True
+		своя_запись_в_группу.insert(ignore_permissions=True)
+		зачисление = {
+			"doctype": ЗАЧИСЛЕНИЕ,
+			"course": курс,
+			"member": self.ученик,
+			"enrollment_from_batch": закрытая,
+		}
+
+		frappe.set_user(self.ученик)
+		with self.subTest("отдельными вызовами"):
+			with self.assertRaises(frappe.ValidationError):
+				frappe.client.insert({"doctype": "LMS Batch Enrollment", "batch": закрытая, "member": self.ученик})
+			with self.assertRaises(frappe.PermissionError):
+				frappe.client.insert(dict(зачисление))
+
+		with self.subTest("одним bulk_update"):
+			ответ = frappe.client.bulk_update(
+				json.dumps(
+					[
+						{
+							"doctype": "LMS Batch Enrollment",
+							"docname": своя_запись_в_группу.name,
+							"__islocal": 1,
+							"name": frappe.generate_hash(length=10),
+							"batch": закрытая,
+						},
+						{
+							**зачисление,
+							"docname": self.зачисление,
+							"__islocal": 1,
+							"name": frappe.generate_hash(length=10),
+						},
+					]
+				)
+			)
+			self.assertEqual(len(ответ["failed_docs"]), 2)
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists(ЗАЧИСЛЕНИЕ, {"member": self.ученик, "course": курс}))
 
 	def test_группа_learning_записывает_на_свои_курсы(self):
 		"""Самозапись в группу Learning заводит зачисление на её курс.

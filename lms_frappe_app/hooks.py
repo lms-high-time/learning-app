@@ -387,12 +387,6 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.enrollment_guard.проверить_зачисление",
 		"on_update": "lms_frappe_app.agent_learning.course_progress.сверить",
 	},
-	# Запись в группу Learning заводит зачисления на её курсы от имени ученика —
-	# только внутри своей проверки (learning-services#674).
-	"LMS Batch Enrollment": {
-		"before_validate": "lms_frappe_app.agent_learning.enrollment_guard.отметить_группу",
-		"validate": "lms_frappe_app.agent_learning.enrollment_guard.снять_отметку_группы",
-	},
 	# Отметка урока, один ключ на две ишью:
 	# - learning-services#525: урок курса из релиза закрывает только занятие —
 	#   Learning пишет отметку и прямыми вызовами Python, мимо подмены методов.
@@ -465,6 +459,14 @@ doc_events = {
 
 # Индексация поиска Learning на время тестов выключается — см. testing.py.
 before_tests = "lms_frappe_app.testing.before_tests"
+
+# Override DocType Class
+# ------------------------------
+# Запись в группу Learning заводит зачисления на курсы группы под меткой,
+# только на шаге после проверок группы (learning-services#674).
+override_doctype_class = {
+	"LMS Batch Enrollment": "lms_frappe_app.agent_learning.enrollment_guard.ЗаписьВГруппу",
+}
 
 # Extend DocType Class
 # ------------------------------
