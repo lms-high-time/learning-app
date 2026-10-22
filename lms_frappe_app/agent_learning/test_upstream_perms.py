@@ -195,6 +195,24 @@ class IntegrationTestUpstreamPerms(IntegrationTestCase):
 			):
 				self._report_view(ЭТАЛОН)
 
+	# --- курс и уроки ---
+
+	def test_курс_и_уроки_через_rest_не_читаются(self):
+		"""`LMS Course` и `Course Lesson` ученику через `/api/resource` закрыты —
+		даже курс, на который он записан, и урок этого курса: состав и материал
+		он получает методами (learning-services#692)."""
+		frappe.set_user(self.ученик)
+		for доктайп, имя in (("LMS Course", self.курс), ("Course Lesson", self.урок)):
+			with self.subTest(доктайп):
+				self.assertFalse(
+					frappe.has_permission(доктайп, "read", doc=имя),
+					сигнал(доктайп, "получила право «read»"),
+				)
+				with self.assertRaises(frappe.PermissionError, msg=сигнал(доктайп, "получила список")):
+					frappe.client.get_list(доктайп, fields=["name"])
+				with self.assertRaises(frappe.PermissionError, msg=сигнал(доктайп, "открыла запись по имени")):
+					frappe.client.get(доктайп, имя)
+
 	# --- попытки чужих учеников ---
 
 	def test_чужая_попытка_квиза_недоступна(self):
