@@ -18,16 +18,22 @@
 платформы и Learning сохраняет зачисления с `ignore_permissions` — его хук не
 трогает.
 
-- Изменение существующей записи — отказ по любому полю, кроме тех, что Frappe
-  сам подтягивает из `member` (`fetch_from`).
-- Вставка — только на себя и только по группе Learning
-  (`enrollment_from_batch`): самозапись в группу заводит зачисления на её
-  курсы от имени ученика, без `ignore_permissions`, а допуск к группе и курсу
-  проверяет Learning. Остальные поля — по умолчанию. Обычная запись на курс —
-  метод `enroll`: там пространство, анонс и порядок программы.
+- Изменение существующей записи — отказ по любому полю, включая владельца и
+  дату создания, кроме тех, что Frappe сам подтягивает из `member`
+  (`fetch_from`).
+- Вставка — только на себя и только изнутри записи в группу Learning: запись
+  в группу (`LMS Batch Enrollment`) заводит зачисления на курсы группы от имени
+  ученика, без `ignore_permissions`, уже пройдя проверки группы — права,
+  самозапись, оплату, места. Хук `before_validate` записи в группу
+  (`отметить_группу`) метит запрос парой «группа, ученик», и вставка проходит
+  только с этой группой и этим учеником; остальные поля — по умолчанию.
+  Обычная запись на курс — метод `enroll`: там пространство, анонс и порядок
+  программы.
 
 Чего не делает: чтение и удаление записи не трогает.
 """
+
+from collections.abc import Iterable
 
 import frappe
 from frappe import _
@@ -37,6 +43,13 @@ from frappe.utils import cast, cint
 ДОКТАЙП = "LMS Enrollment"
 #: Поля, которые ученик задаёт при вставке по группе Learning.
 ПОЛЯ_ВСТАВКИ = frozenset({"course", "member", "enrollment_from_batch"})
+#: Поля документа, которые не описаны в схеме, но меняются сохранением.
+СЛУЖЕБНЫЕ = (
+	frappe._dict(fieldname="owner", fieldtype="Data"),
+	frappe._dict(fieldname="creation", fieldtype="Datetime"),
+)
+#: `frappe.flags`: (группа, ученик) записи в группу, которая сейчас сохраняется.
+ГРУППА = "lms_enrollment_batch"
 ОТКАЗ = "Запись на курс меняется только методами платформы"
 
 
@@ -52,33 +65,47 @@ def проверить_зачисление(doc, method=None) -> None:
 		_проверить_изменение(doc)
 
 
-def _только_свои(право: str) -> bool:
-	"""Право `право` на доктайп у пользователя есть, но только на свои записи.
+def отметить_группу(doc, method=None) -> None:
+	"""Хук `before_validate` у `LMS Batch Enrollment`: дальше по запросу идёт её проверка."""
+	frappe.flags[ГРУППА] = (doc.batch, doc.member)
 
-	Повторяет подсчёт `frappe.permissions.get_role_permissions` для одного
-	права: роли пользователя на уровне 0, и у каждой, что даёт право, стоит
-	`if_owner`. Нет права вовсе — не наш случай: сохранение отклонит Frappe.
+
+def снять_отметку_группы(doc, method=None) -> None:
+	"""Хук `validate` у `LMS Batch Enrollment`: Learning закончил заводить зачисления."""
+	frappe.flags.pop(ГРУППА, None)
+
+
+def только_свои(строки: Iterable, роли: set[str], право: str) -> bool:
+	"""Даёт ли `право` хоть одна строка прав ролей `роли` — и только с `if_owner`.
+
+	Подсчёт `frappe.permissions.get_role_permissions` для одного права: строки
+	уровня 0 ролей пользователя. Нет права вовсе — `False`: сохранение
+	отклонит Frappe.
 	"""
-	if frappe.session.user == "Administrator":
-		return False
-	роли = set(frappe.get_roles())
 	дающие = [
 		строка
-		for строка in frappe.get_meta(ДОКТАЙП).permissions
+		for строка in строки
 		if строка.role in роли and not cint(строка.permlevel) and cint(строка.get(право))
 	]
 	return bool(дающие) and all(cint(строка.if_owner) for строка in дающие)
 
 
+def _только_свои(право: str) -> bool:
+	return только_свои(frappe.get_meta(ДОКТАЙП).permissions, set(frappe.get_roles()), право)
+
+
 def _проверить_изменение(doc) -> None:
-	прежняя = doc.get_doc_before_save() or frappe.get_doc(ДОКТАЙП, doc.name)
-	for df in _поля():
+	прежняя = doc.get_doc_before_save()
+	if прежняя is None:
+		_отказать()
+	for df in (*_поля(), *СЛУЖЕБНЫЕ):
 		if _значение(df, doc.get(df.fieldname)) != _значение(df, прежняя.get(df.fieldname)):
 			_отказать()
 
 
 def _проверить_вставку(doc) -> None:
-	if doc.member != frappe.session.user or not doc.enrollment_from_batch:
+	пользователь = frappe.session.user
+	if doc.member != пользователь or frappe.flags.get(ГРУППА) != (doc.enrollment_from_batch, пользователь):
 		_отказать()
 	for df in _поля():
 		if df.fieldname in ПОЛЯ_ВСТАВКИ:
