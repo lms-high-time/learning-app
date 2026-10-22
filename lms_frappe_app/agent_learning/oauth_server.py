@@ -629,20 +629,26 @@ def записать_отказ_в_токене() -> None:
 	"""Отказ эндпоинта токенов — в журнал событий безопасности.
 
 	Выданный токен пишет `save_bearer_token`; здесь — только отказ: код ошибки
-	OAuth, вид гранта и клиент из запроса. Тело ответа с токенами в запись не
-	попадает.
+	OAuth, вид гранта и клиент — из тела или заголовка Basic, как его ищет
+	валидатор. Тело ответа с токенами в запись не попадает. Ответ 401 того же
+	запроса `after_request` второй раз не пишет.
 	"""
-	ответ = frappe.local.response or {}
-	if not ответ.get("error"):
-		return
-	форма = frappe.form_dict or {}
-	security_log.записать(
-		"token_denied",
-		error=ответ.get("error"),
-		grant=форма.get("grant_type"),
-		client=форма.get("client_id"),
-		status=ответ.get("http_status_code"),
-	)
+	try:
+		ответ = frappe.local.response or {}
+		if not ответ.get("error"):
+			return
+		r = frappe.request
+		клиент, _ = учётные_данные(ЗапросOAuth(r.url, r.method, r.form, r.headers))
+		security_log.записать(
+			"token_denied",
+			error=ответ.get("error"),
+			grant=(frappe.form_dict or {}).get("grant_type"),
+			client=клиент,
+			status=ответ.get("http_status_code"),
+		)
+		frappe.flags.lms_security_logged = True
+	except Exception:
+		pass
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -743,6 +749,10 @@ def сведения_о_токене(token: str | None, token_type_hint: str | N
 		"exp": round(срок.replace(tzinfo=ZoneInfo(get_system_timezone())).timestamp()),
 		"scope": token_record.scopes,
 	}
+	# `sub` — всегда: по нему сервис MCP знает, чей это запрос, в своём
+	# журнале. С `openid` — идентификатор из userinfo, как в id_token, иначе
+	# имя пользователя; интроспекцию спрашивает только доверенный клиент.
+	ответ["sub"] = token_record.user
 	if "openid" in cstr(token_record.scopes).split():
 		sub = frappe.db.get_value(
 			"User Social Login", {"provider": "frappe", "parent": token_record.user}, "userid"

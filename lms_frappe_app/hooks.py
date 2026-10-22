@@ -559,8 +559,9 @@ before_request = [
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 # Отказы 401, 403, 429 и неудачный вход — в журнал событий безопасности
-# (learning-services#680). Выход очищает данные сайта в браузере, приватные
-# файлы не кэшируются (learning-services#688).
+# (learning-services#680), первым: сбой следующего хука не должен его съесть.
+# Выход очищает данные сайта в браузере, приватные файлы не кэшируются
+# (learning-services#688).
 after_request = [
 	"lms_frappe_app.security_log.записать_отказ",
 	"lms_frappe_app.session_guard.не_ставить_cookie",
@@ -655,7 +656,7 @@ user_data_fields = [
 # Authentication and authorization
 # --------------------------------
 
-# Запрос с ключом API или токеном в заголовке — в журнал событий безопасности
+# Запрос с ключом API в заголовке — в журнал событий безопасности
 # (learning-services#680). Хук ничего не проверяет и никого не впускает.
 auth_hooks = ["lms_frappe_app.security_log.по_заголовку"]
 

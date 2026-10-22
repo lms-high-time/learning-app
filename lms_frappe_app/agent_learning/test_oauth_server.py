@@ -774,6 +774,8 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			with self.subTest("действующий"):
 				статус, ответ = спросить(token=токен["access_token"], **свой)
 				self.assertEqual((статус, ответ["active"], ответ["client_id"]), (200, True, АДРЕС))
+				# Без `openid` — имя пользователя: по нему сервис знает, чей запрос.
+				self.assertEqual(ответ["sub"], frappe.session.user)
 				self.assertLess(abs(ответ["exp"] - (time.time() + токен["expires_in"])), 60)
 			for что, подсказка, ожидается in (
 				("токен обновления", "refresh_token", True),

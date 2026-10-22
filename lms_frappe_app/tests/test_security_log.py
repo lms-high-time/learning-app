@@ -2,8 +2,10 @@
 # See license.txt
 """Журнал событий безопасности (learning-services#680)."""
 
+import base64
 import json
 from types import SimpleNamespace
+from unittest import mock
 
 import frappe
 from frappe.tests import UnitTestCase
@@ -18,7 +20,16 @@ from lms_frappe_app.session_guard import отклонить_sid_из_запро�
 
 IP = "203.0.113.7"
 #: Значения, которых не бывает в записи ни при каком событии.
-СЕКРЕТЫ = ("BEARER-VALUE", "KEY-VALUE", "SID-VALUE", "PWD-VALUE", "REFRESH-VALUE", "API:SECRET")
+СЕКРЕТЫ = (
+	"BEARER-VALUE",
+	"KEY-VALUE",
+	"SID-VALUE",
+	"PWD-VALUE",
+	"REFRESH-VALUE",
+	"API:SECRET",
+	"RAW-VALUE",
+	"CLIENT-SECRET",
+)
 
 
 class _Запрос(UnitTestCase):
@@ -30,6 +41,7 @@ class _Запрос(UnitTestCase):
 		super().setUp()
 		self.прежнее = {имя: getattr(frappe.local, имя, None) for имя in self.ИМЕНА}
 		self.addCleanup(frappe.set_user, "Administrator")
+		self.addCleanup(frappe.flags.pop, "lms_security_logged", None)
 
 	def tearDown(self):
 		for имя, значение in self.прежнее.items():
@@ -41,6 +53,7 @@ class _Запрос(UnitTestCase):
 		frappe.local.request_ip = IP
 		frappe.local.form_dict = frappe._dict(форма)
 		frappe.local.response = frappe._dict()
+		frappe.flags.pop("lms_security_logged", None)
 
 	def записи(self, действие) -> list[dict]:
 		"""Записи журнала за время действия; ни в одной нет секрета."""
@@ -86,6 +99,19 @@ class UnitTestSecurityLog(_Запрос):
 		self.assertEqual(запись["refresh_token"], "***")
 		self.assertEqual(запись["details"], {"api_key": "***", "session": "s-1"})
 
+	def test_схема_авторизации_по_белому_списку(self):
+		"""Заголовок без схемы — сам ключ: в запись идёт `other`, а не его начало."""
+		for заголовок, ждём in (
+			("Bearer BEARER-VALUE", "bearer"),
+			("token API:SECRET", "token"),
+			("RAW-VALUE", "other"),
+			("Digest RAW-VALUE", "other"),
+		):
+			with self.subTest(заголовок):
+				self.запрос(headers={"Authorization": заголовок})
+				(запись,) = self.записи(lambda: security_log.записать("x"))
+				self.assertEqual(запись["auth"], ждём)
+
 	def test_отказ_контракта_о_доступе(self):
 		"""Пишутся отказы «не ваше»; прочие отказы — ход занятия, их нет."""
 		self.запрос()
@@ -108,27 +134,41 @@ class UnitTestSecurityLog(_Запрос):
 				self.assertTrue(запись["function"].endswith("метод"), запись["function"])
 
 	def test_ответы_с_отказом(self):
-		"""`after_request`: 401, 403, 429, неудачный вход и блокировка; прочее — нет."""
+		"""`after_request`: 401, 403, 429, неудачный вход, блокировка и сбой входа;
+		прочее — нет."""
 		вход = "/api/method/login"
+		пользователь = frappe.session.user
 		случаи = {
 			"403": ("/api/method/x", 403, "PermissionError", {"event": "http_403", "exc": "PermissionError"}),
 			"429": ("/api/method/x", 429, "TooManyRequestsError", {"event": "http_429"}),
 			"401 по токену": ("/api/method/x", 401, "AuthenticationError", {"event": "http_401"}),
-			"неудачный вход": (вход, 401, "AuthenticationError", {"event": "login_failed", "login": "u@x"}),
-			"блокировка входа": (вход, 500, "SecurityException", {"event": "login_locked", "login": "u@x"}),
+			"неудачный вход": (
+				вход,
+				401,
+				"AuthenticationError",
+				{"event": "login_failed", "login": пользователь},
+			),
+			"блокировка входа": (вход, 500, "SecurityException", {"event": "login_locked"}),
+			"блокировка, HTML-ответ": ("/", 500, None, {"event": "login_locked"}),
+			"сбой входа": (вход, 500, "ValueError", {"event": "login_error"}),
 			"200": ("/api/method/x", 200, None, None),
 			"404": ("/api/method/x", 404, "DoesNotExistError", None),
 			"500 не на входе": ("/api/method/x", 500, "SecurityException", None),
 		}
 		for что, (путь, статус, тип, ждём) in случаи.items():
 			with self.subTest(что):
-				self.запрос(
-					path=путь, headers={"Authorization": "Bearer BEARER-VALUE"}, usr="u@x", pwd="PWD-VALUE"
-				)
+				форма = {"usr": пользователь, "pwd": "PWD-VALUE"}
+				if путь == "/":
+					форма["cmd"] = "login"
+				self.запрос(path=путь, headers={"Authorization": "Bearer BEARER-VALUE"}, **форма)
 				frappe.local.response.exc_type = тип
-				записи = self.записи(
-					lambda: security_log.записать_отказ(SimpleNamespace(status_code=статус), frappe.request)
-				)
+				закрыт = что == "блокировка, HTML-ответ"
+				with mock.patch.object(security_log, "_заблокирован", return_value=закрыт):
+					записи = self.записи(
+						lambda: security_log.записать_отказ(
+							SimpleNamespace(status_code=статус), frappe.request
+						)
+					)
 				if ждём is None:
 					self.assertEqual(записи, [])
 					continue
@@ -136,12 +176,36 @@ class UnitTestSecurityLog(_Запрос):
 				self.assertEqual({к: запись.get(к) for к in ждём}, ждём)
 				self.assertEqual((запись["ip"], запись["status"], запись["auth"]), (IP, статус, "bearer"))
 
+	def test_неизвестное_имя_входа_не_пишется(self):
+		"""В поле имени бывает пароль: неизвестное имя — только отпечатком."""
+		self.запрос(path="/api/method/login", usr="RAW-VALUE", pwd="PWD-VALUE")
+		(запись,) = self.записи(
+			lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)
+		)
+		self.assertEqual((запись["event"], запись["login_unknown"]), ("login_failed", True))
+		self.assertEqual(len(запись["login_sha256"]), 12)
+		self.assertNotIn("login", запись)
+
+	def test_записанный_отказ_не_пишется_второй_раз(self):
+		self.запрос()
+		frappe.flags.lms_security_logged = True
+		записи = self.записи(
+			lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)
+		)
+		self.assertEqual(записи, [])
+
 	def test_вход_по_заголовку(self):
-		"""Ключ API или токен — схемой; гость и запрос без заголовка — без записи."""
+		"""Вход ключом API — схемой; Bearer, гость и cookie — без записи."""
 		for что, заголовок, пользователь, ждём in (
 			("ключ API", "token API:SECRET", "Administrator", "token"),
-			("токен", "Bearer BEARER-VALUE", "Administrator", "bearer"),
-			("не вошёл", "Bearer BEARER-VALUE", "Guest", None),
+			(
+				"ключ API в Basic",
+				"Basic " + base64.b64encode(b"API:SECRET").decode(),
+				"Administrator",
+				"basic",
+			),
+			("токен", "Bearer BEARER-VALUE", "Administrator", None),
+			("не вошёл", "token API:SECRET", "Guest", None),
 			("cookie", None, "Administrator", None),
 		):
 			with self.subTest(что):
@@ -151,9 +215,19 @@ class UnitTestSecurityLog(_Запрос):
 				self.assertEqual([(з["event"], з["auth"]) for з in записи], [("auth", ждём)] if ждём else [])
 
 	def test_вход_в_сессию(self):
+		"""Вход — пользователем, который входит; «Войти как» — с `actor`;
+		выход (вход гостя) не пишется."""
 		self.запрос(path="/api/method/login")
+		frappe.set_user("Guest")
 		(запись,) = self.записи(lambda: security_log.при_входе(SimpleNamespace(user="u@x")))
 		self.assertEqual((запись["event"], запись["user"], запись["ip"]), ("login", "u@x", IP))
+		self.assertNotIn("actor", запись)
+
+		frappe.set_user("Administrator")
+		(запись,) = self.записи(lambda: security_log.при_входе(SimpleNamespace(user="u@x")))
+		self.assertEqual((запись["user"], запись["actor"]), ("u@x", "Administrator"))
+
+		self.assertEqual(self.записи(lambda: security_log.при_входе(SimpleNamespace(user="Guest"))), [])
 
 	def test_отказ_sid(self):
 		self.запрос(path="/lms", query_string="sid=SID-VALUE", method="GET")
@@ -166,27 +240,40 @@ class UnitTestSecurityLog(_Запрос):
 		self.assertEqual((запись["event"], запись["path"], запись["ip"]), ("sid_rejected", "/lms", IP))
 
 	def test_отказ_в_токене(self):
-		"""Отказ эндпоинта токенов: код ошибки и клиент, без токена из формы."""
-		self.запрос(
-			path="/api/method/frappe.integrations.oauth2.get_token",
-			grant_type="refresh_token",
-			refresh_token="REFRESH-VALUE",
-			client_id="c-1",
-		)
-		frappe.local.response = frappe._dict(error="invalid_grant", http_status_code=400)
+		"""Отказ эндпоинта токенов: код ошибки и клиент — из тела или Basic, без
+		токена и секрета; 401 того же запроса второй раз не пишется."""
+		basic = "Basic " + base64.b64encode(b"c-basic:CLIENT-SECRET").decode()
+		for что, заголовки, форма, клиент in (
+			("клиент в теле", {}, {"client_id": "c-1", "client_secret": "CLIENT-SECRET"}, "c-1"),
+			("клиент в Basic", {"Authorization": basic}, {}, "c-basic"),
+		):
+			with self.subTest(что):
+				self.запрос(
+					path="/api/method/frappe.integrations.oauth2.get_token",
+					headers=заголовки,
+					grant_type="refresh_token",
+					refresh_token="REFRESH-VALUE",
+					**форма,
+				)
+				frappe.local.request = _форма(frappe.request, frappe.local.form_dict)
+				frappe.local.response = frappe._dict(error="invalid_grant", http_status_code=400)
 
-		(запись,) = self.записи(oauth_server.записать_отказ_в_токене)
+				(запись,) = self.записи(oauth_server.записать_отказ_в_токене)
 
-		self.assertEqual(
-			{к: запись[к] for к in ("event", "error", "grant", "client", "status")},
-			{
-				"event": "token_denied",
-				"error": "invalid_grant",
-				"grant": "refresh_token",
-				"client": "c-1",
-				"status": 400,
-			},
-		)
+				self.assertEqual(
+					{к: запись[к] for к in ("event", "error", "grant", "client", "status")},
+					{
+						"event": "token_denied",
+						"error": "invalid_grant",
+						"grant": "refresh_token",
+						"client": клиент,
+						"status": 400,
+					},
+				)
+				повтор = self.записи(
+					lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)
+				)
+				self.assertEqual(повтор, [])
 
 	def test_сбой_записи_не_роняет_запрос(self):
 		self.запрос()
@@ -202,3 +289,15 @@ class UnitTestSecurityLog(_Запрос):
 class _Сломанный:
 	def __str__(self):
 		raise RuntimeError("сбой")
+
+
+def _форма(запрос, поля: dict):
+	"""Тот же запрос с телом формы — как его видит эндпоинт токенов."""
+	from werkzeug.test import EnvironBuilder
+	from werkzeug.wrappers import Request
+
+	return Request(
+		EnvironBuilder(
+			path=запрос.path, method="POST", headers=dict(запрос.headers), data=dict(поля)
+		).get_environ()
+	)

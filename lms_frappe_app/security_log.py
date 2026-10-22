@@ -11,9 +11,10 @@
 Кто пишет:
 
 - обёртка `контракт` — отказы контракта о доступе (`ОТКАЗЫ_ДОСТУПА`);
-- `after_request` — ответы 401, 403 и 429, неудачный вход и блокировка входа;
+- `after_request` — ответы 401, 403 и 429, неудачный вход, блокировка входа
+  и сбой входа;
 - `on_login` — вход в сессию: паролем, через Google, «Войти как»;
-- `auth_hooks` — запрос с ключом API или токеном в заголовке;
+- `auth_hooks` — запрос с ключом API в заголовке;
 - сервер OAuth — выдача и обновление токенов, отказ в них, повтор кода или
   токена обновления;
 - отклонение `sid` в параметрах запроса.
@@ -29,6 +30,7 @@
 сбой записи проглатывается.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -57,6 +59,13 @@ from lms_frappe_app.agent_learning.errors import НЕТ_ПРАВА, ЧУЖОЕ_�
 
 ИМЯ_ЖУРНАЛА = "lms_frappe_app.security"
 
+#: Схемы `Authorization`, которые пишутся по имени. `Why:` в заголовке без
+#: схемы первое слово — сам ключ или токен; такой пишется как `other`.
+СХЕМЫ = frozenset({"bearer", "token", "basic"})
+#: Схемы входа ключом API: такой запрос пишется каждый. Bearer — токены
+#: агентов; их выдача и обновление пишет сервер OAuth, а не каждый запрос.
+СХЕМЫ_КЛЮЧА = frozenset({"token", "basic"})
+
 
 class _Stderr(logging.StreamHandler):
 	"""stderr на момент записи, а не на момент создания обработчика.
@@ -76,7 +85,12 @@ class _Stderr(logging.StreamHandler):
 
 def _настроить() -> logging.Logger:
 	журнал = logging.getLogger(ИМЯ_ЖУРНАЛА)
+	# Повторный импорт модуля (перезагрузка кода) дал бы второй обработчик и
+	# каждую строку дважды; класс при этом новый — узнаём по метке.
+	if any(getattr(обработчик, "lms_security", False) for обработчик in журнал.handlers):
+		return журнал
 	обработчик = _Stderr()
+	обработчик.lms_security = True
 	обработчик.setFormatter(logging.Formatter("%(message)s"))
 	журнал.addHandler(обработчик)
 	журнал.setLevel(logging.INFO)
@@ -102,10 +116,13 @@ def _значение(имя: str, значение):
 
 
 def схема_авторизации() -> str | None:
-	"""Схема заголовка `Authorization` (`bearer`, `token`, `basic`) — без значения."""
+	"""Схема заголовка `Authorization` из `СХЕМЫ` или `other` — без значения."""
 	заголовок = frappe.get_request_header("Authorization") if getattr(frappe.local, "request", None) else None
-	схема = (заголовок or "").strip().split(" ", 1)[0].lower()
-	return схема[:20] or None
+	заголовок = (заголовок or "").strip()
+	if not заголовок:
+		return None
+	схема = заголовок.split(" ", 1)[0].lower()
+	return схема if схема in СХЕМЫ else "other"
 
 
 def запись(событие: str, **поля) -> dict:
@@ -137,13 +154,16 @@ def записать(событие: str, **поля) -> None:
 
 def отказ_контракта(функция, код: str, подробности: dict) -> None:
 	"""Из обёртки `контракт`: отказ о доступе — в журнал, прочие — нет."""
-	if код in ОТКАЗЫ_ДОСТУПА:
-		записать(
-			"contract_denied",
-			reason=код,
-			function=f"{функция.__module__}.{функция.__qualname__}",
-			details=подробности or None,
-		)
+	try:
+		if код in ОТКАЗЫ_ДОСТУПА:
+			записать(
+				"contract_denied",
+				reason=код,
+				function=f"{функция.__module__}.{функция.__qualname__}",
+				details=подробности or None,
+			)
+	except Exception:
+		pass
 
 
 def _это_вход(request) -> bool:
@@ -163,23 +183,53 @@ def _тип_исключения() -> str | None:
 	return None
 
 
+def _заблокирован(имя: str | None) -> bool:
+	"""Вход закрыт счётчиком неудач — по имени или по адресу (`frappe.auth`)."""
+	from frappe.auth import get_login_attempt_tracker
+
+	ключи = [ключ for ключ in (имя, getattr(frappe.local, "request_ip", None)) if ключ]
+	return any(
+		not get_login_attempt_tracker(ключ, raise_locked_exception=False).is_user_allowed() for ключ in ключи
+	)
+
+
+def _кто_входил(имя: str | None) -> dict:
+	"""Имя входа — как есть, только если такой пользователь есть.
+
+	`Why:` в поле имени по ошибке вводят пароль; несуществующее имя пишется
+	префиксом отпечатка — повторы видны, а само значение нет.
+	"""
+	if not имя:
+		return {}
+	if frappe.db.exists("User", имя):
+		return {"login": имя}
+	return {"login_unknown": True, "login_sha256": hashlib.sha256(str(имя).encode()).hexdigest()[:12]}
+
+
 def записать_отказ(response=None, request=None) -> None:
 	"""`after_request`: отказы 401, 403, 429, неудачный вход и блокировка входа.
 
 	Блокировку после неудачных входов Frappe отдаёт исключением
-	`SecurityException` без своего кода — ответом 500, поэтому она узнаётся
-	по типу исключения, а не по статусу.
+	`SecurityException` без своего кода — ответом 500, а у HTML-ответа (форма
+	входа на `/`) типа исключения в теле нет. Поэтому на пути входа любой ответ
+	500 и выше — `login_locked`, если тип — `SecurityException` или вход закрыт
+	счётчиком, иначе `login_error`. Отказ, который уже записал сам обработчик
+	(`frappe.flags.lms_security_logged`), второй раз не пишется.
 	"""
 	try:
 		статус = getattr(response, "status_code", None)
-		if статус is None:
+		if статус is None or frappe.flags.get("lms_security_logged"):
 			return
 		тип = _тип_исключения()
-		if _это_вход(request or frappe.request) and (статус in СТАТУСЫ_ОТКАЗА or тип == "SecurityException"):
-			событие = "login_locked" if тип == "SecurityException" else "login_failed"
-			# Имя, которым пытались войти: учётной записи с ним может и не быть.
+		if _это_вход(request or frappe.request) and (статус in СТАТУСЫ_ОТКАЗА or статус >= 500):
 			имя = (getattr(frappe.local, "form_dict", None) or {}).get("usr")
-			записать(событие, status=статус, exc=тип, login=имя)
+			if статус < 500:
+				событие = "login_failed"
+			elif тип == "SecurityException" or _заблокирован(имя):
+				событие = "login_locked"
+			else:
+				событие = "login_error"
+			записать(событие, status=статус, exc=тип, **_кто_входил(имя))
 		elif статус in СТАТУСЫ_ОТКАЗА:
 			записать(f"http_{статус}", status=статус, exc=тип)
 	except Exception:
@@ -187,19 +237,31 @@ def записать_отказ(response=None, request=None) -> None:
 
 
 def при_входе(login_manager=None) -> None:
-	"""`on_login`: вход в сессию. Пользователь — тот, кто входит, а не текущий."""
-	записать("login", user=getattr(login_manager, "user", None))
+	"""`on_login`: вход в сессию. Пользователь — тот, кто входит, а не текущий.
+
+	Выход Frappe проводит как вход гостя — он не пишется. «Войти как» несёт
+	`actor` — того, кто входит под чужим именем.
+	"""
+	try:
+		пользователь = getattr(login_manager, "user", None)
+		if not пользователь or пользователь == "Guest":
+			return
+		текущий = getattr(getattr(frappe.local, "session", None), "user", None)
+		actor = текущий if текущий and текущий not in ("Guest", пользователь) else None
+		записать("login", user=пользователь, actor=actor)
+	except Exception:
+		pass
 
 
 def по_заголовку() -> None:
-	"""`auth_hooks`: запрос, вошедший ключом API или токеном из заголовка.
+	"""`auth_hooks`: запрос, вошедший ключом API (`СХЕМЫ_КЛЮЧА`).
 
 	Хук идёт после проверок Frappe (`frappe.auth.validate_auth`): пользователь
 	уже выбран по заголовку. Не вошедший так запрос Frappe тут же отклоняет
 	ответом 401 — его пишет `записать_отказ`.
 	"""
 	try:
-		if not схема_авторизации():
+		if схема_авторизации() not in СХЕМЫ_КЛЮЧА:
 			return
 		if frappe.session.user in (None, "", "Guest"):
 			return
