@@ -199,3 +199,24 @@ class IntegrationTestSessionEnd(_ЗапросНаВремя, IntegrationTestCase
 				self.assertEqual(bool(в_базе), остаётся)
 				if not остаётся:
 					self.assertIsNone(frappe.cache.hget("session", sid))
+
+	def test_отключение_завершает_сессии(self):
+		"""Отключение аккаунта сессий браузера Frappe не завершало: `clear_sessions`
+		в `User.on_update` — только при смене типа (learning-services#691)."""
+		from frappe.auth import CookieManager, LoginManager
+
+		пользователь = создать_ученика(f"session-{frappe.generate_hash(length=8)}@example.com")
+		set_request(method="POST", path="/")
+		frappe.local.cookie_manager = CookieManager()
+		frappe.local.login_manager = LoginManager()
+		frappe.local.login_manager.login_as(пользователь)
+		sid = frappe.session.sid
+		self.addCleanup(frappe.db.delete, "Sessions", {"sid": sid})
+		frappe.set_user("Administrator")
+
+		документ = frappe.get_doc("User", пользователь)
+		документ.enabled = 0
+		документ.save(ignore_permissions=True)
+
+		self.assertEqual(frappe.db.sql("select count(*) from `tabSessions` where sid = %s", sid)[0][0], 0)
+		self.assertIsNone(frappe.cache.hget("session", sid))

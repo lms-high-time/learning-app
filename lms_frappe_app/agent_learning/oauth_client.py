@@ -180,10 +180,19 @@ def заметить_смену_пароля(doc, method=None) -> None:
 
 
 def отозвать_при_смене_доступа(doc, method=None) -> None:
-	"""Хук `on_update` User: пароль сменён в desk или аккаунт отключён."""
+	"""Хук `on_update` User: пароль сменён в desk или аккаунт отключён.
+
+	Отключение завершает и сессии браузера (learning-services#691): Frappe
+	завершает их только при смене типа пользователя, а поднятая сессия
+	отключённого пользователя не проверяется.
+	"""
 	отключён = not doc.enabled and doc.has_value_changed("enabled")
 	if doc.flags.lms_пароль_сменён or отключён:
 		отозвать_токены_пользователя(doc.name)
+	if отключён:
+		from frappe.sessions import clear_sessions
+
+		clear_sessions(user=doc.name, force=True)
 
 
 def удалить_токены(doc, method=None) -> None:
