@@ -7,6 +7,7 @@ import copy
 import json
 from contextlib import contextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import frappe
@@ -60,6 +61,9 @@ from lms_frappe_app.tests.sample_data import (
 ОТВЕТ = "Agent Quiz Answer"
 ПОЯСНЕНИЕ = "Потому что так велит условие."
 С1, С2 = "S1/l-1-D1", "S2/l-1-D1"
+#: Источники порядка попытки вместо `release_quiz._СЛУЧАЙ`: порядок релиза и обратный ему.
+ПОРЯДОК_РЕЛИЗА = SimpleNamespace(shuffle=lambda список: None)
+ОБРАТНЫЙ = SimpleNamespace(shuffle=list.reverse)
 
 
 class IntegrationTestКвизИзРелиза(IntegrationTestCase):
@@ -70,6 +74,9 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		ученика своего теста. Тест, который публикует новую версию курса или правит
 		его строки, публикует свой — с ключом `self.ключ`."""
 		super().setUpClass()
+		# Тесты класса называют вопросы и варианты по местам в релизе; порядок
+		# попытки проверяет `test_старт_квиза`.
+		cls.enterClassContext(patch.object(release_quiz, "_СЛУЧАЙ", ПОРЯДОК_РЕЛИЗА))
 		frappe.set_user("Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		cls.куратор = создать_куратора(f"rq-{суффикс}@example.com")
@@ -135,16 +142,21 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	# --- старт ---
 
 	def test_старт_квиза(self):
-		"""Старт снимает вопросы в попытку без верного варианта и пояснения, отдаёт
-		первый вопрос с ключами вариантов и переводит занятие в ожидание квиза."""
+		"""Старт снимает вопросы в попытку без верного варианта и пояснения, в своём
+		порядке вопросов и вариантов; отдаёт первый вопрос снимка с ключами
+		вариантов и переводит занятие в ожидание квиза. Повторный старт отдаёт ту
+		же попытку в том же порядке, ответ сверяется по ключу, а не по месту."""
 		run, занятие = self.урок(курс=self.общий())
 
-		начало = release_quiz.начать(run, занятие)
+		with patch.object(release_quiz, "_СЛУЧАЙ", ОБРАТНЫЙ):
+			начало = release_quiz.начать(run, занятие)
 
-		with self.subTest("снимок вопросов без верного и пояснения"):
+		with self.subTest("снимок вопросов в порядке попытки, без верного и пояснения"):
 			снимок = self.снимок(начало["attempt"])
-			self.assertEqual(снимок, index.вопросы_урока(run.release, "l-1"))
-			self.assertEqual([в["key"] for в in снимок], [С1, С2])
+			self.assertEqual(
+				снимок, release_quiz.перемешать(index.вопросы_урока(run.release, "l-1"), ОБРАТНЫЙ)
+			)
+			self.assertEqual([в["key"] for в in снимок], [С2, С1])
 			выдано = json.dumps([снимок, начало], ensure_ascii=False)
 			for поле in ("correct", "explanation", ПОЯСНЕНИЕ):
 				self.assertNotIn(поле, выдано)
@@ -156,23 +168,29 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			self.assertEqual(
 				(попытка.session, попытка.student, попытка.attempt_number), (занятие, self.ученик, 1)
 			)
-		with self.subTest("первый вопрос с ключами вариантов"):
+		with self.subTest("первый вопрос снимка с ключами вариантов"):
 			self.assertEqual(
 				начало["question"],
 				{
-					"id": С1,
-					"text": "Ситуация и вопрос 1",
+					"id": С2,
+					"text": "Ситуация и вопрос 2",
 					"kind": "choice",
 					"index": 1,
 					"total": 2,
 					"multiple": False,
-					"options": [{"id": "V1", "text": "Первый"}, {"id": "V2", "text": "Второй"}],
+					"options": [{"id": "V2", "text": "Второй"}, {"id": "V1", "text": "Первый"}],
 				},
 			)
 		with self.subTest("старт переводит занятие в ожидание квиза"):
 			self.assertEqual(
 				frappe.db.get_value("Agent Learning Session", занятие, "status"), ЗАНЯТИЕ_ЖДЁТ_КВИЗ
 			)
+		with self.subTest("повторный старт — тот же порядок"):
+			self.assertEqual(release_quiz.начать(run, занятие), начало)
+		with self.subTest("ответ — по ключу варианта"):
+			ответ = self.ответить(начало["attempt"], С2, "V1")
+			self.assertTrue(ответ["verdict"]["correct"])
+			self.assertEqual(ответ["next_question"]["id"], С1)
 
 	def test_старт_не_меняет_занятие_не_в_работе(self):
 		"""В ожидание квиза переводится только занятие в работе."""
@@ -1209,6 +1227,43 @@ class TestСравнениеКвиза(UnitTestCase):
 		):
 			with self.subTest(что):
 				self.assertEqual(release_quiz.квиз_тот_же(было, стало), тот_же)
+
+
+class TestПеремешать(UnitTestCase):
+	"""Без базы: порядок вопросов и вариантов новой попытки — `перемешать`."""
+
+	def test_порядок_вопросов_и_вариантов(self):
+		"""Вопросы и варианты — в порядке источника случайности, ключи и тексты —
+		как в релизе, вход не меняется; по умолчанию у каждого вызова свой порядок."""
+		вопросы = [
+			{
+				"key": f"S{н}",
+				"objective": "D1",
+				"text": f"Вопрос {н}",
+				"options": [{"key": f"V{в}", "text": f"Вариант {в}"} for в in range(1, 5)],
+			}
+			for н in range(1, 5)
+		]
+		исходные = copy.deepcopy(вопросы)
+
+		def состав(список):
+			return sorted(
+				(в["key"], в["objective"], в["text"], sorted((о["key"], о["text"]) for о in в["options"]))
+				for в in список
+			)
+
+		with self.subTest("порядок — от источника случайности"):
+			итог = release_quiz.перемешать(вопросы, ОБРАТНЫЙ)
+			self.assertEqual([в["key"] for в in итог], ["S4", "S3", "S2", "S1"])
+			for вопрос in итог:
+				self.assertEqual([о["key"] for о in вопрос["options"]], ["V4", "V3", "V2", "V1"])
+			self.assertEqual(состав(итог), состав(вопросы))
+			self.assertEqual(вопросы, исходные)
+		with self.subTest("по умолчанию — свой порядок у каждого вызова"):
+			итоги = [release_quiz.перемешать(вопросы) for _ in range(20)]
+			for итог in итоги:
+				self.assertEqual(состав(итог), состав(вопросы))
+			self.assertGreater(len({json.dumps(итог) for итог in итоги}), 1)
 
 
 class TestВыбранныйВариант(UnitTestCase):

@@ -51,7 +51,6 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		добавить_в_организацию(self.ученик, self.организация)
 
 		зачислить_на_курс(self.ученик, self.курс)
-		self.первый, self.второй = "S1/l-1-D1", "S2/l-1-D1"
 		self.занятие = занятие_релиза(self.ученик, self.курс, "l-1")
 		self.урок = frappe.db.get_value("Agent Learning Session", self.занятие, "lesson")
 		# Занятие в пространстве организации: так попытку читает руководитель,
@@ -64,6 +63,9 @@ class IntegrationTestQuizLog(IntegrationTestCase):
 		начало = student.request_quiz(self.занятие)
 		self.assertTrue(начало["ok"], начало)
 		self.попытка = начало["data"]["attempt"]
+		# Порядок вопросов у попытки свой: первый — тот, что выдан.
+		self.первый = начало["data"]["question"]["id"]
+		[self.второй] = {"S1/l-1-D1", "S2/l-1-D1"} - {self.первый}
 
 	def события(self) -> list:
 		return frappe.get_all(
