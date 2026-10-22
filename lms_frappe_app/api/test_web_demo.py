@@ -6,10 +6,14 @@
 Платформа оплачивает модель только на пробные уроки, поэтому счёт идёт по
 **урокам**, а не по занятиям: занятие закрывается по бездействию, и возврат в
 тот же урок на следующий день не должен тратить второй пробный урок.
+Ходы внутри урока считаются отдельно — по прохождению урока за сутки.
 """
+
+from datetime import timedelta
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import now_datetime
 
 from lms_frappe_app.tests.sample_data import (
 	зачислить,
@@ -91,3 +95,37 @@ class IntegrationTestWebDemo(IntegrationTestCase):
 		ответ = self.начать(self.уроки[2], channel="agent")
 
 		self.assertTrue(ответ["ok"], ответ.get("error"))
+
+	def test_ходы_урока_считаются_по_прохождению_за_сутки(self):
+		"""Счёт идёт по уроку через все его занятия: новое занятие того же урока
+		продолжает счёт, у другого урока он свой, а через сутки начинается
+		заново (learning-services#675)."""
+		первое = self.начать(self.уроки[0])["data"]["session"]
+		with self.subTest("ходы занятия"):
+			self.assertEqual(
+				student.count_lesson_turn(первое)["data"],
+				{"session": первое, "lesson": self.уроки[0], "turns": 1},
+			)
+			self.assertEqual(student.count_lesson_turn(первое)["data"]["turns"], 2)
+
+		frappe.db.set_value("Agent Learning Session", первое, "status", "Abandoned")
+		второе = self.начать(self.уроки[0])["data"]["session"]
+		with self.subTest("новое занятие того же урока"):
+			self.assertNotEqual(второе, первое)
+			self.assertEqual(student.count_lesson_turn(второе)["data"]["turns"], 3)
+
+		with self.subTest("другой урок"):
+			другое = self.начать(self.уроки[1])["data"]["session"]
+			self.assertEqual(student.count_lesson_turn(другое)["data"]["turns"], 1)
+
+		with self.subTest("через сутки"):
+			run = frappe.db.get_value("Agent Learning Session", второе, "run")
+			frappe.db.set_value(
+				"Agent Lesson Run",
+				run,
+				"web_turns_since",
+				now_datetime() - timedelta(days=1, minutes=1),
+				update_modified=False,
+			)
+			self.assertEqual(student.count_lesson_turn(второе)["data"]["turns"], 1)
+			self.assertEqual(student.count_lesson_turn(первое)["data"]["turns"], 2)

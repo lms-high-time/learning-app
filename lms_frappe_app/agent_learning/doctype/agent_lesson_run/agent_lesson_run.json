@@ -16,6 +16,8 @@
   "started_at",
   "passed_at",
   "resume_from",
+  "web_turns",
+  "web_turns_since",
   "sb_goals",
   "objectives",
   "goals",
@@ -111,6 +113,21 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "description": "Сколько ходов веб-чата по этому уроку сделано в текущих сутках счёта: каждый ход — вызов модели за счёт платформы",
+   "fieldname": "web_turns",
+   "fieldtype": "Int",
+   "label": "Ходов веб-чата за сутки",
+   "read_only": 1
+  },
+  {
+   "description": "Когда начались текущие сутки счёта ходов веб-чата",
+   "fieldname": "web_turns_since",
+   "fieldtype": "Datetime",
+   "label": "Сутки счёта ходов с",
+   "read_only": 1
+  },
+  {
    "fieldname": "sb_goals",
    "fieldtype": "Section Break",
    "label": "Цели и пункты"
@@ -153,7 +170,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-10-08 12:00:00",
+ "modified": "2026-10-22 12:00:00",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Lesson Run",

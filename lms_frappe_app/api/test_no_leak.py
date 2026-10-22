@@ -194,6 +194,7 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 			student.save_chat_state(занятие, json.dumps({"messages": []}), "1"),
 		)
 		self.проверить("chat_state", student.chat_state(занятие))
+		self.проверить("count_lesson_turn", student.count_lesson_turn(занятие))
 		self.проверить(
 			"save_scenario_state",
 			student.save_scenario_state("profile", json.dumps({"messages": []}), "1"),
