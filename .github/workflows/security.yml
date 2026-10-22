@@ -2,9 +2,9 @@
 # Дизайн и дом конвенции — learning-services: docs/plans/2026-10-20-release-
 # security-design.md и docs/process/gates.md (lms-high-time/learning-services#629).
 #
-# Без pip-audit и baseline уязвимостей: зависимостей у приложения нет
-# (`dependencies = []`), а Frappe и Learning, которые реально стоят, проверяет
-# trivy по образу стенда. Поэтому и без общего `security/gate.py` — он живёт в
+# Без pip-audit и baseline уязвимостей: своя зависимость у приложения одна —
+# `argon2-cffi`, и в образе стенда она закреплена точной версией; её, Frappe и
+# Learning, которые реально стоят, проверяет trivy по образу стенда. Поэтому и без общего `security/gate.py` — он живёт в
 # приватном learning-services, и публичный CI его без секрета не достанет;
 # порог здесь проще: блокирует ERROR и любой незнакомый уровень, ошибка в
 # отчёте, ненулевой код сканера и любой секрет, WARNING — в сводке. Вместо

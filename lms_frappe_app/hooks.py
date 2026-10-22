@@ -516,8 +516,13 @@ ignore_links_on_delete = ["Agent Consent"]
 #
 # `sid` в параметрах запроса — отказ, и первым: переадресация следующих хуков
 # поставила бы cookie сессии из параметра (learning-services#666).
+#
+# Хеш пароля — argon2id: контекст passlib Frappe настраивается до входа и
+# смены пароля, в вебе и в фоновых задачах, и раньше переадресации на
+# согласие (learning-services#676).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+	"lms_frappe_app.password_hash.настроить",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
@@ -532,7 +537,7 @@ on_session_creation = "lms_frappe_app.session_guard.ограничить_сро�
 
 # Job Events
 # ----------
-# before_job = ["lms_frappe_app.utils.before_job"]
+before_job = ["lms_frappe_app.password_hash.настроить"]
 # after_job = ["lms_frappe_app.utils.after_job"]
 
 # User Data Protection
