@@ -3766,7 +3766,9 @@ HEAD`:
 (`problems` — до 20 `{code, where, …}`: `duplicate_key`, `broken_ref` (и
 ключ пакета агента не из публичной части: `where` — `agent.lessons`,
 `agent.lessons.<урок>.items` или `agent.lessons.<урок>.sections`, `key` —
-лишний ключ), `chapter_order`, `quiz_correct`, `document_key`, `text_too_long`,
+лишний ключ), `chapter_order`, `quiz_correct`, `duplicate_option_text` — тексты
+вариантов вопроса совпадают без учёта регистра и пробелов (`where` —
+`questions[<вопрос>].options`), `document_key`, `text_too_long`,
 `title_forbidden_chars` — `<` или `>` в названии главы, урока, домашки или
 документа (`chars` — какие из них), `agent_leak` — ключ `answers` или `correct` в пакете агента,
 `where` — путь до него, например `agent.lessons.l-1.answers`; схемы уроков
