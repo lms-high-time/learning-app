@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Настройки входа и сайта (learning-services#666, #691) и файлов (learning-services#683) из кода."""
+"""Настройки входа и сайта (learning-services#666, #691), файлов (#683) и часовой пояс (#681) из кода."""
 
 from unittest.mock import patch
 
@@ -14,6 +14,7 @@ from lms_frappe_app.install import (
 	НАСТРОЙКИ_OAUTH,
 	НАСТРОЙКИ_ВХОДА,
 	НАСТРОЙКИ_ФАЙЛОВ,
+	НАСТРОЙКИ_СИСТЕМЫ,
 	РОЛИ_С_2FA,
 	САЙТ_РАЗРАБОТКИ,
 	ФЛАГИ_РАЗРАБОТКИ,
@@ -30,7 +31,7 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 		# Значения возвращаются вручную: откат класса не сбросит кэш настроек,
 		# и соседние тесты читали бы из него включённую 2FA.
 		было = frappe.db.get_singles_dict(НАСТРОЙКИ, cast=True)
-		прежние = {поле: было.get(поле) for поле in {**НАСТРОЙКИ_ВХОДА, **НАСТРОЙКИ_ФАЙЛОВ}}
+		прежние = {поле: было.get(поле) for поле in {**НАСТРОЙКИ_ВХОДА, **НАСТРОЙКИ_ФАЙЛОВ, **НАСТРОЙКИ_СИСТЕМЫ}}
 		роли = {роль: frappe.db.get_value("Role", роль, "two_factor_auth") for роль in (*РОЛИ_С_2FA, "All")}
 		self.addCleanup(self._вернуть, прежние, роли)
 
@@ -55,6 +56,7 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 				"allow_login_after_fail": 60,
 				"enable_two_factor_auth": 0,
 				"allowed_file_extensions": "",
+				"time_zone": "",
 			},
 		)
 		frappe.db.set_value("Role", "System Manager", "two_factor_auth", 0)
@@ -63,9 +65,10 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 
 		обеспечить_настройки_входа()
 
-		for поле, значение in {**НАСТРОЙКИ_ВХОДА, **НАСТРОЙКИ_ФАЙЛОВ}.items():
+		for поле, значение in {**НАСТРОЙКИ_ВХОДА, **НАСТРОЙКИ_ФАЙЛОВ, **НАСТРОЙКИ_СИСТЕМЫ}.items():
 			with self.subTest(поле):
 				self.assertEqual(frappe.get_system_settings(поле), значение)
+		self.assertEqual(frappe.utils.get_system_timezone(), НАСТРОЙКИ_СИСТЕМЫ["time_zone"])
 		self.assertEqual(frappe.db.get_default("enable_two_factor_auth"), "1")
 		self.assertEqual(frappe.db.get_value("Role", "System Manager", "two_factor_auth"), 1)
 		self.assertEqual(frappe.db.get_value("Role", "All", "two_factor_auth"), 0)
