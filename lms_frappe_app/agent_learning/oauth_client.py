@@ -8,6 +8,12 @@
 получал на странице авторизации «Invalid client_id parameter value» —
 то есть не мог подключить агента вообще. Роли платформы добавляются каждому
 клиенту; `Desk User` не отнимается.
+
+Переменные с токенами и кодами авторизации названы латиницей (`*_token`)
+вопреки стилю. `Why:` трассировку с переменными
+(`frappe.get_traceback(with_context=True)` — Error Log и Sentry) Frappe
+чистит по латинским подстрокам имён: `password`, `secret`, `token`, `key`.
+Кириллическое `токен` ушло бы в журнал как есть (learning-services#664).
 """
 
 from urllib.parse import urlparse
@@ -121,7 +127,7 @@ def отозвать_токены_пользователя(пользовате�
 	)
 
 
-def отозвать_подключение(пользователь: str, клиент: str, семья: str) -> None:
+def отозвать_подключение(пользователь: str, клиент: str, family_token: str) -> None:
 	"""Одно подключение пользователя: токены семьи у клиента и его неиспользованные
 	коды этому клиенту (learning-services#669).
 
@@ -130,13 +136,16 @@ def отозвать_подключение(пользователь: str, кл�
 	learning-services#665, без семьи — сам корень своей семьи, как в
 	`oauth_server.Валидатор.revoke_token`. Отзыв — одним `UPDATE` по условию, а
 	не по списку имён: он видит и преемника, которого одновременное обновление
-	записало после выборки.
+	записало после выборки. Сначала корень по имени, потом семья: в том же
+	порядке строки блокирует обновление токена (`validate_refresh_token` —
+	предъявленный токен, `save_bearer_token` — преемник), и встречных
+	блокировок нет.
 	"""
 	_погасить_коды({"user": пользователь, "client": клиент})
-	for поле in (ПОЛЕ_СЕМЬИ, "name"):
+	for поле in ("name", ПОЛЕ_СЕМЬИ):
 		frappe.db.set_value(
 			"OAuth Bearer Token",
-			{"user": пользователь, "client": клиент, поле: семья, "status": "Active"},
+			{"user": пользователь, "client": клиент, поле: family_token, "status": "Active"},
 			"status",
 			"Revoked",
 			update_modified=False,
@@ -148,10 +157,16 @@ def _погасить_коды(фильтры: dict) -> None:
 	# обновление ждёт его, а токен, выданный этим обменом, гасится следом.
 	# По первичному ключу: у `user` кода нет индекса, и обновление по нему
 	# заблокировало бы всю таблицу кодов.
-	коды = frappe.get_all("OAuth Authorization Code", filters={**фильтры, "validity": "Valid"}, pluck="name")
-	if коды:
+	code_tokens = frappe.get_all(
+		"OAuth Authorization Code", filters={**фильтры, "validity": "Valid"}, pluck="name"
+	)
+	if code_tokens:
 		frappe.db.set_value(
-			"OAuth Authorization Code", {"name": ("in", коды)}, "validity", "Invalid", update_modified=False
+			"OAuth Authorization Code",
+			{"name": ("in", code_tokens)},
+			"validity",
+			"Invalid",
+			update_modified=False,
 		)
 
 

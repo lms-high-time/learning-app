@@ -12,6 +12,12 @@
 параметра), и действие ищет запись по отпечатку только среди его записей. Ни
 токенов, ни `sid` наружу не уходит: строка названа отпечатком — началом
 SHA-256, — и сервер сверяет его с отпечатками своих записей.
+
+Переменные с паролем, токенами и `sid` названы латиницей (`password`,
+`*_token`) вопреки стилю. `Why:` трассировку с переменными
+(`frappe.get_traceback(with_context=True)` — Error Log и Sentry) Frappe
+чистит по латинским подстрокам имён: `password`, `secret`, `token`, `key`.
+Кириллическое `пароль` ушло бы в журнал как есть (learning-services#664).
 """
 
 import hashlib
@@ -39,6 +45,8 @@ from lms_frappe_app.install import КЛЮЧ_ЧАТА_ID
 СЕССИЯ_НЕ_НАЙДЕНА = "session_not_found"
 ТЕКУЩАЯ_СЕССИЯ = "session_is_current"
 НУЖЕН_ПАРОЛЬ = "password_required"
+#: У аккаунта нет пароля вовсе: подтверждать нечем, задаётся по ссылке из письма.
+ПАРОЛЯ_НЕТ = "password_not_set"
 НЕВЕРНЫЙ_ПАРОЛЬ = "password_incorrect"
 ПОПЫТКИ_КОНЧИЛИСЬ = "password_attempts_exceeded"
 
@@ -61,7 +69,7 @@ def _тот_же(а: str, б: str) -> bool:
 # --- агенты ---
 
 
-def свести_подключения(токены: list, сейчас: datetime) -> dict[str, dict]:
+def свести_подключения(token_rows: list, сейчас: datetime) -> dict[str, dict]:
 	"""Действующие токены пользователя → подключения по отпечатку.
 
 	Подключение — клиент и семья токенов (`oauth_server`): один вход агента и
@@ -70,31 +78,37 @@ def свести_подключения(токены: list, сейчас: dateti
 	его ещё есть что отзывать. «Подключён» — начало семьи, «последняя активность» —
 	выдача её последнего токена: агент получает новый, пока пользуется доступом.
 	Токен до learning-services#665 без семьи — сам её корень, начало — его выдача.
+	Семья такого корня — имя записи, то есть сам токен доступа: отсюда `family_token`.
 	"""
-	подключения: dict[str, dict] = {}
-	for т in токены:
-		семья = т.get(ПОЛЕ_СЕМЬИ) or т.name
-		начало = get_datetime(т.get(ПОЛЕ_НАЧАЛА) or т.creation)
-		срок_доступа = т.get("expiration_time")
+	connection_tokens: dict[str, dict] = {}
+	for token_row in token_rows:
+		family_token = token_row.get(ПОЛЕ_СЕМЬИ) or token_row.name
+		начало = get_datetime(token_row.get(ПОЛЕ_НАЧАЛА) or token_row.creation)
+		срок_доступа = token_row.get("expiration_time")
 		if сейчас > начало + СРОК_СЕМЬИ and not (срок_доступа and сейчас < срок_доступа):
 			continue
-		ключ = отпечаток(т.client, семья)
-		п = подключения.setdefault(
+		ключ = отпечаток(token_row.client, family_token)
+		connection_token = connection_tokens.setdefault(
 			ключ,
-			{"client": т.client, "family": семья, "connected": начало, "last_active": т.creation},
+			{
+				"client": token_row.client,
+				"family_token": family_token,
+				"connected": начало,
+				"last_active": token_row.creation,
+			},
 		)
-		п["connected"] = min(п["connected"], начало)
-		п["last_active"] = max(п["last_active"], т.creation)
-	return подключения
+		connection_token["connected"] = min(connection_token["connected"], начало)
+		connection_token["last_active"] = max(connection_token["last_active"], token_row.creation)
+	return connection_tokens
 
 
 def _подключения(пользователь: str) -> dict[str, dict]:
-	токены = frappe.get_all(
+	token_rows = frappe.get_all(
 		"OAuth Bearer Token",
 		filters={"user": пользователь, "status": "Active"},
 		fields=["name", "client", "creation", "expiration_time", ПОЛЕ_СЕМЬИ, ПОЛЕ_НАЧАЛА],
 	)
-	return свести_подключения(токены, now_datetime())
+	return свести_подключения(token_rows, now_datetime())
 
 
 def сайт_клиента(клиент: str) -> str | None:
@@ -113,29 +127,31 @@ def подключения(пользователь: str) -> list[dict]:
 
 	`app_name` — имя, которым клиент назвал себя сам: шаблон его экранирует.
 	"""
-	свои = _подключения(пользователь)
+	connection_tokens = _подключения(пользователь)
+	имена_клиентов = {connection_token["client"] for connection_token in connection_tokens.values()}
 	клиенты = {
 		к.name: к
 		for к in frappe.get_all(
 			"OAuth Client",
-			filters={"name": ("in", list({п["client"] for п in свои.values()}) or [""])},
+			filters={"name": ("in", list(имена_клиентов) or [""])},
 			fields=["name", "app_name", "redirect_uris"],
 		)
 	}
 	клиент_чата = frappe.conf.get(КЛЮЧ_ЧАТА_ID)
 	строки = []
-	for ключ, п in свои.items():
-		клиент = клиенты.get(п["client"]) or frappe._dict()
-		агент = агент_клиента(п["client"], клиент.redirect_uris, клиент_чата)
+	for ключ, connection_token in connection_tokens.items():
+		имя_клиента = connection_token["client"]
+		клиент = клиенты.get(имя_клиента) or frappe._dict()
+		агент = агент_клиента(имя_клиента, клиент.redirect_uris, клиент_чата)
 		строки.append(
 			{
 				"id": ключ,
 				"agent": агент,
 				"app_name": клиент.app_name or "",
-				"site": сайт_клиента(п["client"]),
+				"site": сайт_клиента(имя_клиента),
 				"web_chat": агент == ВЕБ_ЧАТ,
-				"connected": п["connected"],
-				"last_active": п["last_active"],
+				"connected": connection_token["connected"],
+				"last_active": connection_token["last_active"],
 			}
 		)
 	return sorted(строки, key=lambda с: с["last_active"], reverse=True)
@@ -147,9 +163,9 @@ def отключить(пользователь: str, подключение: st
 	Отпечаток ищется только среди своих подключений: чужое не находится и не
 	отзывается — тот же отказ, что у уже отключённого.
 	"""
-	for ключ, п in _подключения(пользователь).items():
+	for ключ, connection_token in _подключения(пользователь).items():
 		if _тот_же(ключ, подключение or ""):
-			отозвать_подключение(пользователь, п["client"], п["family"])
+			отозвать_подключение(пользователь, connection_token["client"], connection_token["family_token"])
 			return
 	raise Отказ(ПОДКЛЮЧЕНИЕ_НЕ_НАЙДЕНО, "Это подключение уже отключено")
 
@@ -193,113 +209,142 @@ def устройство(user_agent: str | None) -> str:
 	return ", ".join(ч for ч in (браузер, система) if ч) or "Неизвестное устройство"
 
 
-def _истекла(данные: dict, сейчас: datetime) -> bool:
-	# Абсолютный срок от входа (`session_guard`); Frappe удалит такую сессию,
-	# когда её предъявят.
-	конец = данные.get("session_end")
-	if not конец:
+def _действует(session_token_row, порог, сейчас: datetime) -> bool:
+	"""Можно ли ещё войти по сессии: не вышел простой (`session_expiry`) и
+	абсолютный срок от входа (`session_guard`). Иначе Frappe удалит её, когда
+	её предъявят, а запись уберёт планировщиком."""
+	if get_datetime(session_token_row.lastupdate) <= get_datetime(порог):
 		return False
+	конец = _данные(session_token_row).get("session_end")
+	if not конец:
+		return True
 	try:
 		конец = datetime.fromisoformat(конец)
 	except (TypeError, ValueError):
-		return False
-	return (конец if конец.tzinfo else конец.replace(tzinfo=UTC)) <= сейчас
+		return True
+	return (конец if конец.tzinfo else конец.replace(tzinfo=UTC)) > сейчас
 
 
-def сессии(пользователь: str, текущий_sid: str | None) -> list[dict]:
+def _данные(session_token_row) -> dict:
+	# Данные сессии несут токен CSRF: у переменных с ними в имени `secret`.
+	return frappe.parse_json(session_token_row.sessiondata or "{}") or {}
+
+
+def _сессии_пользователя(пользователь: str) -> list:
+	таблица = frappe.qb.DocType("Sessions")
+	return (
+		frappe.qb.from_(таблица)
+		.select(таблица.sid, таблица.sessiondata, таблица.lastupdate)
+		.where(таблица.user == пользователь)
+		.orderby(таблица.lastupdate, order=Order.desc)
+	).run(as_dict=True)
+
+
+def сессии(пользователь: str, current_session_token: str | None) -> list[dict]:
 	"""Действующие сессии браузера пользователя: текущая первой, дальше — по
 	последней активности.
 
-	Сессии, вышедшие по простою (`session_expiry`) или по абсолютному сроку,
-	не показываются: войти по ним уже нельзя, а запись Frappe убирает
-	планировщиком. «Последняя активность» — из записи в базе: Frappe обновляет
+	Вышедшие по простою или по абсолютному сроку не показываются: войти по
+	ним уже нельзя. «Последняя активность» — из записи в базе: Frappe обновляет
 	её не чаще раза в 10 минут.
 	"""
 	from frappe.sessions import get_expired_threshold
 
-	таблица = frappe.qb.DocType("Sessions")
-	записи = (
-		frappe.qb.from_(таблица)
-		.select(таблица.sid, таблица.sessiondata, таблица.lastupdate)
-		.where(таблица.user == пользователь)
-		.where(таблица.lastupdate > get_expired_threshold())
-		.orderby(таблица.lastupdate, order=Order.desc)
-	).run(as_dict=True)
-	сейчас = datetime.now(tz=UTC)
+	порог, сейчас = get_expired_threshold(), datetime.now(tz=UTC)
 	строки = []
-	for з in записи:
-		данные = frappe.parse_json(з.sessiondata or "{}") or {}
-		if _истекла(данные, сейчас):
+	for session_token_row in _сессии_пользователя(пользователь):
+		if not _действует(session_token_row, порог, сейчас):
 			continue
-		вход = данные.get("creation")
+		session_secrets = _данные(session_token_row)
+		вход = session_secrets.get("creation")
 		строки.append(
 			{
-				"id": отпечаток(з.sid),
-				"current": bool(текущий_sid) and з.sid == текущий_sid,
-				"device": устройство(данные.get("user_agent")),
-				"ip": данные.get("session_ip") or "",
+				"id": отпечаток(session_token_row.sid),
+				"current": bool(current_session_token) and session_token_row.sid == current_session_token,
+				"device": устройство(session_secrets.get("user_agent")),
+				"ip": session_secrets.get("session_ip") or "",
 				"started": get_datetime(вход) if вход else None,
-				"last_active": з.lastupdate,
-				"impersonated": bool(данные.get("impersonated_by")),
+				"last_active": session_token_row.lastupdate,
+				"impersonated": bool(session_secrets.get("impersonated_by")),
 			}
 		)
 	return sorted(строки, key=lambda с: not с["current"])
 
 
-def _sid_пользователя(пользователь: str) -> list[str]:
-	таблица = frappe.qb.DocType("Sessions")
-	return frappe.qb.from_(таблица).select(таблица.sid).where(таблица.user == пользователь).run(pluck=True)
+def есть_пароль(пользователь: str) -> bool:
+	"""Задан ли у пользователя пароль: запись в `__Auth`, как её ищет
+	`check_password` Frappe."""
+	auth = frappe.qb.Table("__Auth")
+	return bool(
+		frappe.qb.from_(auth)
+		.select(auth.name)
+		.where(
+			(auth.doctype == "User")
+			& (auth.name == пользователь)
+			& (auth.fieldname == "password")
+			& (auth.encrypted == 0)
+		)
+		.limit(1)
+		.run()
+	)
 
 
-def подтвердить_паролем(пользователь: str, пароль: str | None) -> None:
+def подтвердить_паролем(пользователь: str, password: str | None) -> None:
 	"""Повторный вход паролем перед завершением сессий (ASVS 7.5.2).
 
 	Неверные попытки идут в тот же счётчик, что вход (`LoginAttemptTracker`
 	Frappe): пароль один, и подбирать его здесь не легче, чем на странице
-	входа. Пока счётчик закрыт — отказ без проверки пароля.
+	входа. Пока счётчик закрыт — отказ без проверки пароля. У аккаунта без
+	пароля — свой отказ и не в счётчик: ошибки ввода тут нет.
 	"""
-	if not пароль:
+	if not есть_пароль(пользователь):
+		raise Отказ(ПАРОЛЯ_НЕТ, "У аккаунта нет пароля. Задайте его по ссылке из письма")
+	if not password:
 		raise Отказ(НУЖЕН_ПАРОЛЬ, "Введите пароль, чтобы подтвердить")
 	счётчик = get_login_attempt_tracker(пользователь, raise_locked_exception=False)
 	if not счётчик.is_user_allowed():
 		raise Отказ(ПОПЫТКИ_КОНЧИЛИСЬ, "Слишком много неверных попыток. Попробуйте через несколько минут")
 	try:
-		if len(пароль) > ПРЕДЕЛ_ПАРОЛЯ:
+		if len(password) > ПРЕДЕЛ_ПАРОЛЯ:
 			raise frappe.AuthenticationError
-		check_password(пользователь, пароль)
+		check_password(пользователь, password)
 	except frappe.AuthenticationError:
 		счётчик.add_failure_attempt()
 		raise Отказ(НЕВЕРНЫЙ_ПАРОЛЬ, "Неверный пароль") from None
 	счётчик.add_success_attempt()
 
 
-def завершить_сессию(пользователь: str, сессия: str, текущий_sid: str | None) -> None:
+def завершить_сессию(пользователь: str, сессия: str, current_session_token: str | None) -> None:
 	"""Завершить одну свою сессию по отпечатку; текущую — нельзя, её завершает
 	«Выйти»: удалённую из-под запроса Frappe записал бы обратно в конце него."""
 	from frappe.sessions import delete_session
 
-	for sid in _sid_пользователя(пользователь):
-		if not _тот_же(отпечаток(sid), сессия or ""):
+	for session_token_row in _сессии_пользователя(пользователь):
+		if not _тот_же(отпечаток(session_token_row.sid), сессия or ""):
 			continue
-		if sid == текущий_sid:
+		if session_token_row.sid == current_session_token:
 			raise Отказ(ТЕКУЩАЯ_СЕССИЯ, "Эту сессию завершает «Выйти»")
-		delete_session(sid, user=пользователь, reason=ПРИЧИНА_ЗАВЕРШЕНИЯ)
+		delete_session(session_token_row.sid, user=пользователь, reason=ПРИЧИНА_ЗАВЕРШЕНИЯ)
 		return
 	raise Отказ(СЕССИЯ_НЕ_НАЙДЕНА, "Эта сессия уже завершена")
 
 
-def завершить_другие(пользователь: str, текущий_sid: str | None) -> int:
-	"""Завершить все свои сессии, кроме текущей; сколько завершено.
+def завершить_другие(пользователь: str, current_session_token: str | None) -> int:
+	"""Завершить все свои сессии, кроме текущей; сколько из них было на
+	странице.
 
-	Свой обход, а не `clear_sessions` Frappe: тот берёт не больше 100 сессий
-	и текущую — из `frappe.session`, а не от вызывающего.
+	Удаляются и вышедшие по сроку — войти по ним нельзя, но и держать их
+	незачем, — а в число не входят: человек их не видел. Свой обход, а не
+	`clear_sessions` Frappe: тот берёт не больше 100 сессий и текущую — из
+	`frappe.session`, а не от вызывающего.
 	"""
-	from frappe.sessions import delete_session
+	from frappe.sessions import delete_session, get_expired_threshold
 
+	порог, сейчас = get_expired_threshold(), datetime.now(tz=UTC)
 	завершено = 0
-	for sid in _sid_пользователя(пользователь):
-		if sid == текущий_sid:
+	for session_token_row in _сессии_пользователя(пользователь):
+		if session_token_row.sid == current_session_token:
 			continue
-		delete_session(sid, user=пользователь, reason=ПРИЧИНА_ЗАВЕРШЕНИЯ)
-		завершено += 1
+		завершено += _действует(session_token_row, порог, сейчас)
+		delete_session(session_token_row.sid, user=пользователь, reason=ПРИЧИНА_ЗАВЕРШЕНИЯ)
 	return завершено

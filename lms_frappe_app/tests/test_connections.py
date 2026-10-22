@@ -5,6 +5,7 @@
 
 from contextlib import contextmanager
 from datetime import timedelta
+from unittest.mock import patch
 
 import frappe
 from frappe.auth import get_login_attempt_tracker
@@ -166,6 +167,26 @@ class UnitTestConnections(UnitTestCase):
 			итог[connections.отпечаток("gpt", "старый")]["connected"], get_datetime("2026-09-01 08:00:00")
 		)
 
+	def test_корень_без_семьи_и_его_преемник_одно_подключение(self):
+		"""Преемник токена до learning-services#665 несёт семью — имя корня."""
+		итог = connections.свести_подключения(
+			[
+				frappe._dict(name="корень", client="gpt", creation=get_datetime("2026-10-01 08:00:00")),
+				frappe._dict(
+					name="преемник",
+					client="gpt",
+					creation=get_datetime("2026-10-02 08:00:00"),
+					**{ПОЛЕ_СЕМЬИ: "корень", ПОЛЕ_НАЧАЛА: get_datetime("2026-10-01 08:00:00")},
+				),
+			],
+			СЕЙЧАС,
+		)
+
+		self.assertEqual(list(итог), [connections.отпечаток("gpt", "корень")])
+		self.assertEqual(
+			итог[connections.отпечаток("gpt", "корень")]["last_active"], get_datetime("2026-10-02 08:00:00")
+		)
+
 	def test_сайт_клиента_только_у_клиента_по_адресу(self):
 		self.assertEqual(
 			connections.сайт_клиента("https://claude.ai/oauth/claude-code-client-metadata"), "claude.ai"
@@ -300,7 +321,8 @@ class IntegrationTestConnections(IntegrationTestCase):
 
 		завершено = connections.завершить_другие(ученик, текущая)
 
-		self.assertEqual(завершено, 3, "третья и обе устаревшие")
+		# Устаревшие удаляются, но в число не входят: на странице их не было.
+		self.assertEqual(завершено, 1, "только третья")
 		self.assertEqual(
 			[есть_сессия(sid) for sid in (текущая, третья, простой, вышел_срок, соседа)],
 			[True, False, False, False, True],
@@ -332,3 +354,36 @@ class IntegrationTestConnections(IntegrationTestCase):
 			self.отказ(connections.ПОПЫТКИ_КОНЧИЛИСЬ),
 		):
 			connections.подтвердить_паролем(ученик, пароль)
+
+	def test_без_пароля_свой_отказ_и_не_в_счётчик(self):
+		ученик = создать_ученика(f"reauth-none-{self.суффикс}@example.com")
+		frappe.db.delete("__Auth", {"doctype": "User", "name": ученик})
+		счётчик = get_login_attempt_tracker(ученик, raise_locked_exception=False)
+		self.addCleanup(счётчик.add_success_attempt)
+
+		with self.отказ(connections.ПАРОЛЯ_НЕТ):
+			connections.подтвердить_паролем(ученик, "что угодно")
+
+		self.assertFalse(счётчик.login_failed_count)
+
+	def test_пароля_нет_в_трассировке_с_переменными(self):
+		"""Регрессия learning-services#664: Frappe пишет в Error Log кадры с
+		переменными и прячет только латинские имена с `password`."""
+		ученик = создать_ученика(f"reauth-tb-{self.суффикс}@example.com")
+		# В кадре самого теста — тоже: трассировка начинается с него.
+		password = f"Секрет-трассировки-{self.суффикс}"
+		update_password(ученик, password)
+
+		# Функцией, а не `side_effect` MagicMock: кадры самого mock держат
+		# аргументы в `args`, и трассировка показала бы их, а не наш код.
+		def сбой(user, pwd):
+			raise RuntimeError("сбой проверки")
+
+		with patch.object(connections, "check_password", сбой):
+			try:
+				connections.подтвердить_паролем(ученик, password)
+			except RuntimeError:
+				трассировка = frappe.get_traceback(with_context=True)
+
+		self.assertIn("подтвердить_паролем", трассировка)
+		self.assertNotIn(password, трассировка)

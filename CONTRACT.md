@@ -479,7 +479,9 @@ Frappe.
 { "ok": false, "error": { "code": "password_incorrect", "message": "Неверный пароль" } }
 ```
 
-**Отказы:** `password_required` — пароль не передан; `password_incorrect`;
+**Отказы:** `password_not_set` — у аккаунта нет пароля (задаётся по ссылке из
+письма), в счётчик неверных попыток не идёт; `password_required` — пароль не
+передан; `password_incorrect`;
 `password_attempts_exceeded` — неверных попыток больше, чем разрешает
 System Settings (без настройки — 3 за 5 минут), пароль не проверяется;
 `session_not_found` — такой сессии у пользователя нет; `session_is_current` —
@@ -497,9 +499,10 @@ System Settings (без настройки — 3 за 5 минут), парол�
 { "ok": true, "data": { "ended": 2 } }
 ```
 
-`ended` — сколько сессий завершено, `0` — других не было.
+`ended` — сколько завершено из сессий, которые видны на странице; `0` —
+других не было. Вышедшие по сроку удаляются тоже, но в число не входят.
 
-**Отказы:** `password_required`, `password_incorrect`,
+**Отказы:** `password_not_set`, `password_required`, `password_incorrect`,
 `password_attempts_exceeded`, `account_by_user_only`.
 
 # Методы ученика

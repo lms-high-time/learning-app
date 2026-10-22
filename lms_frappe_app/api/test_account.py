@@ -77,7 +77,6 @@ class IntegrationTestAccountApi(IntegrationTestCase):
 		self.addCleanup(setattr, frappe.local, "request_ip", адрес)
 		self.addCleanup(frappe.session.data.pop, "impersonated_by", None)
 		self.addCleanup(frappe.session.data.pop, "csrf_token", None)
-		номер = 0
 		for метод, вызвать in вызовы.items():
 			for что, (заголовки, свой_токен, от_имени) in {
 				"токен агента": ({"Authorization": "Bearer x"}, "csrf", None),
@@ -86,9 +85,9 @@ class IntegrationTestAccountApi(IntegrationTestCase):
 				"токена у сессии нет": ({"X-Frappe-CSRF-Token": "csrf"}, None, None),
 				"чужой токен CSRF": ({"X-Frappe-CSRF-Token": "чужой"}, "csrf", None),
 			}.items():
-				номер += 1
-				# Предел частоты считает вызовы по адресу: свой адрес на случай.
-				frappe.local.request_ip = f"198.51.100.{номер}"
+				# Предел частоты считает вызовы по адресу и живёт в кэше час:
+				# свой случайный адрес на случай — и на повторный прогон.
+				frappe.local.request_ip = f"test-{frappe.generate_hash(length=8)}"
 				frappe.session.data.csrf_token = свой_токен
 				frappe.session.data.impersonated_by = от_имени
 				with self.subTest(метод=метод, случай=что), запрос("/api/method/x", "POST", **заголовки):
@@ -115,8 +114,8 @@ class IntegrationTestAccountApi(IntegrationTestCase):
 			"end_session": lambda: account.end_session(session="0" * 16, password="x"),
 			"end_other_sessions": lambda: account.end_other_sessions(password="x"),
 		}
-		for номер, (метод, вызвать) in enumerate(вызовы.items()):
-			frappe.local.request_ip = f"192.0.2.{номер + 1}"
+		for метод, вызвать in вызовы.items():
+			frappe.local.request_ip = f"test-{frappe.generate_hash(length=8)}"
 			with self.subTest(метод), запрос("/api/method/x", "POST"):
 				for _ in range(account.ПОПЫТОК_ЗА_ЧАС):
 					self.assertRaises(frappe.CSRFTokenError, вызвать)

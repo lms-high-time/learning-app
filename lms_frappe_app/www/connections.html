@@ -192,6 +192,7 @@
 			<label for="confirm-password">Пароль</label>
 			<input type="password" id="confirm-password" name="password" autocomplete="current-password" required>
 			<p class="error" id="confirm-error" role="alert"></p>
+			<p class="error" id="confirm-no-password" hidden>У аккаунта нет пароля. <a href="{{ set_password_url | e }}">Задайте его по ссылке из письма</a> — смена пароля сама завершит другие сессии.</p>
 			<div class="confirm-actions">
 				<button type="submit" class="button primary" id="confirm-submit">Завершить</button>
 				<button type="button" class="button" id="confirm-cancel">Отмена</button>
@@ -267,6 +268,7 @@
 	const заголовок = document.getElementById("confirm-title");
 	const пароль = document.getElementById("confirm-password");
 	const ошибка = document.getElementById("confirm-error");
+	const нетПароля = document.getElementById("confirm-no-password");
 	const подтвердить = document.getElementById("confirm-submit");
 	const всеКроме = document.getElementById("end-others");
 	let действие = null;
@@ -275,6 +277,7 @@
 		действие = { ...новое, откуда };
 		заголовок.textContent = текст;
 		ошибка.textContent = "";
+		нетПароля.hidden = true;
 		пароль.value = "";
 		форма.hidden = false;
 		пароль.focus();
@@ -331,6 +334,11 @@
 			форма.hidden = true;
 			пароль.value = "";
 			document.getElementById("sessions-title").focus();
+			return;
+		}
+		if (итог.код === "password_not_set") {
+			ошибка.textContent = "";
+			нетПароля.hidden = false;
 			return;
 		}
 		ошибка.textContent = итог.ошибка;

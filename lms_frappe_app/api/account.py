@@ -51,9 +51,11 @@ def проверить_csrf() -> None:
 	"""
 	if not frappe.request:
 		return
-	свой = (frappe.session.data or {}).get("csrf_token") or ""
-	присланный = frappe.get_request_header("X-Frappe-CSRF-Token") or ""
-	if not свой or not hmac.compare_digest(присланный.encode(), свой.encode()):
+	# Латиница вопреки стилю: трассировку с переменными (Error Log, Sentry)
+	# Frappe чистит по латинским подстрокам имён (learning-services#664).
+	own_token = (frappe.session.data or {}).get("csrf_token") or ""
+	sent_token = frappe.get_request_header("X-Frappe-CSRF-Token") or ""
+	if not own_token or not hmac.compare_digest(sent_token.encode(), own_token.encode()):
 		frappe.throw(_("Invalid Request"), frappe.CSRFTokenError)
 
 
