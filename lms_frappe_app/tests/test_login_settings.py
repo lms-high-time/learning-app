@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Настройки входа и сайта (learning-services#666, #691), файлов (#683) и часовой пояс (#681) из кода."""
+"""Настройки сайта из кода: вход (learning-services#666, #691), файлы (#683) и часовой пояс (#681)."""
 
 from unittest.mock import patch
 
@@ -11,6 +11,7 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.install import (
 	БЕЗ_2FA,
+	КЛЮЧ_ПОЯСА,
 	НАСТРОЙКИ_OAUTH,
 	НАСТРОЙКИ_ВХОДА,
 	НАСТРОЙКИ_ФАЙЛОВ,
@@ -19,7 +20,7 @@ from lms_frappe_app.install import (
 	САЙТ_РАЗРАБОТКИ,
 	ФЛАГИ_РАЗРАБОТКИ,
 	обеспечить_настройки_oauth,
-	обеспечить_настройки_входа,
+	обеспечить_настройки_сайта,
 	проверить_флаги_разработки,
 )
 
@@ -63,7 +64,7 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 		frappe.db.set_value("Role", "All", "two_factor_auth", 1)
 		frappe.local.system_settings = None
 
-		обеспечить_настройки_входа()
+		обеспечить_настройки_сайта()
 
 		for поле, значение in {**НАСТРОЙКИ_ВХОДА, **НАСТРОЙКИ_ФАЙЛОВ, **НАСТРОЙКИ_СИСТЕМЫ}.items():
 			with self.subTest(поле):
@@ -75,7 +76,7 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 
 		записано = frappe.db.get_singles_dict(НАСТРОЙКИ)["modified"]
 		роль = frappe.db.get_value("Role", "System Manager", "modified")
-		обеспечить_настройки_входа()
+		обеспечить_настройки_сайта()
 		self.assertEqual(frappe.db.get_singles_dict(НАСТРОЙКИ)["modified"], записано)
 		self.assertEqual(frappe.db.get_value("Role", "System Manager", "modified"), роль)
 
@@ -87,12 +88,28 @@ class IntegrationTestLoginSettings(IntegrationTestCase):
 		frappe.local.system_settings = None
 
 		with patch.dict(frappe.conf, {БЕЗ_2FA: 1}):
-			обеспечить_настройки_входа()
+			обеспечить_настройки_сайта()
 
 		self.assertEqual(frappe.get_system_settings("enable_two_factor_auth"), 0)
 		self.assertEqual(frappe.get_system_settings("allow_error_traceback"), 0)
 		self.assertEqual(frappe.db.get_value("Role", "System Manager", "two_factor_auth"), 0)
 
+	def test_часовой_пояс_из_конфигурации_сайта(self):
+		"""Ключ конфигурации задаёт пояс; неизвестный пояс не пишется вовсе."""
+		frappe.db.set_single_value(НАСТРОЙКИ, "time_zone", "Asia/Tashkent")
+		frappe.local.system_settings = None
+
+		with patch.dict(frappe.conf, {КЛЮЧ_ПОЯСА: "Europe/Moscow"}):
+			обеспечить_настройки_сайта()
+		self.assertEqual(frappe.get_system_settings("time_zone"), "Europe/Moscow")
+
+		with (
+			patch.dict(frappe.conf, {КЛЮЧ_ПОЯСА: "Mars/Olympus"}),
+			patch.object(frappe, "log_error") as журнал,
+		):
+			обеспечить_настройки_сайта()
+		self.assertEqual(frappe.get_system_settings("time_zone"), "Europe/Moscow")
+		журнал.assert_called_once()
 
 class IntegrationTestOAuthSettings(IntegrationTestCase):
 	def setUp(self):
