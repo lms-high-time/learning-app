@@ -476,7 +476,17 @@ _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 _прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
 _oauth = "lms_frappe_app.agent_learning.oauth_server"
 _чтения = "lms_frappe_app.agent_learning.learning_reads"
-_методы_чтения = ("get_course_outline", "get_lesson", "get_courses", "get_course_count")
+_методы_чтения = (
+	"get_course_outline",
+	"get_lesson",
+	"get_courses",
+	"get_course_count",
+	"get_reviews",
+	"get_batches",
+	"get_batch_count",
+	"get_chart_data",
+	"get_course_completion_data",
+)
 _методы_oauth = ("authorize", "approve", "get_token", "revoke_token", "introspect_token", "register_client")
 
 # Урок закрывает занятие с агентом, а не время на странице урока —
@@ -525,9 +535,10 @@ override_whitelisted_methods = {
 	},
 	# Версии приложений — только пользователю Desk (learning-services#692).
 	"frappe.utils.change_log.get_versions": "lms_frappe_app.versions.get_versions",
-	# Оглавление, урок и каталог Learning — по правилу витрины: обоснование в
-	# модуле (learning-services#692).
+	# Оглавление, урок, отзывы, каталог и группы Learning — по правилу витрины,
+	# статистика — персоналу: обоснование в модуле (learning-services#692).
 	**{f"lms.lms.utils.{метод}": f"{_чтения}.{метод}" for метод in _методы_чтения},
+	"lms.lms.api.get_chart_details": f"{_чтения}.get_chart_details",
 }
 #
 # each overriding function accepts a `data` argument;
