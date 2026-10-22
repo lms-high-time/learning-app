@@ -1,8 +1,8 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Файлы учеников: предел размера, приватный `File` при записи ученика,
-сведения о файлах для ответа, байты из base64.
+"""Файлы учеников: предел размера, допустимые типы, приватный `File` при
+записи ученика, сведения о файлах для ответа, байты из base64.
 
 Файл ученика — приватный `File`, привязанный к его записи (сдаче домашки):
 права на файл Frappe берёт у записи, и видит его тот, кто видит запись.
@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import io
+import zipfile
+from collections.abc import Callable
 
 import frappe
 
@@ -28,6 +31,99 @@ def расширение(имя: str) -> str:
 #: Флаг записи `File`, вставленной сохранением сдачи: другим путём файл к сдаче
 #: не добавить (`file_guard.ФайлПлатформы`).
 ФЛАГ_ФАЙЛА_СДАЧИ = "homework_file"
+
+
+def _начало(*подписи: bytes) -> Callable[[bytes], bool]:
+	return lambda данные: данные.startswith(подписи)
+
+
+def _pdf(данные: bytes) -> bool:
+	# Заголовок PDF читатели ищут в первом килобайте, а не только в начале.
+	return b"%PDF-" in данные[:1024]
+
+
+def _webp(данные: bytes) -> bool:
+	return данные[:4] == b"RIFF" and данные[8:12] == b"WEBP"
+
+
+def _heif(данные: bytes) -> bool:
+	return данные[4:8] == b"ftyp" and данные[8:12] in {
+		b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"
+	}
+
+
+def _архив(данные: bytes) -> zipfile.ZipFile | None:
+	if not данные.startswith(b"PK\x03\x04"):
+		return None
+	try:
+		return zipfile.ZipFile(io.BytesIO(данные))
+	except (zipfile.BadZipFile, ValueError, OSError):
+		return None
+
+
+def _ooxml(папка: str) -> Callable[[bytes], bool]:
+	"""Документ Office: zip с `[Content_Types].xml` и частями своей программы."""
+
+	def проверка(данные: bytes) -> bool:
+		архив = _архив(данные)
+		if архив is None:
+			return False
+		имена = архив.namelist()
+		return "[Content_Types].xml" in имена and any(имя.startswith(папка) for имя in имена)
+
+	return проверка
+
+
+def _odf(тип: str) -> Callable[[bytes], bool]:
+	"""Документ OpenDocument: zip, в котором `mimetype` — тип документа."""
+
+	def проверка(данные: bytes) -> bool:
+		архив = _архив(данные)
+		if архив is None:
+			return False
+		try:
+			return архив.read("mimetype").strip() == тип.encode()
+		except (KeyError, zipfile.BadZipFile, ValueError, OSError):
+			return False
+
+	return проверка
+
+
+def _текст(данные: bytes) -> bool:
+	# Кодировку не угадываем: CSV из Excel бывает и в cp1251. Нулевой байт —
+	# признак двоичного файла, кроме UTF-16 с меткой порядка байтов.
+	return данные.startswith((b"\xff\xfe", b"\xfe\xff")) or b"\x00" not in данные
+
+
+#: Какие файлы принимает сдача домашки и как сверяется содержимое: расширение
+#: из списка, а первые байты — того типа, который расширение обещает. `Why:`
+#: куратор открывает файл ученика у себя (ASVS 5.2.2); исполняемое, разметку,
+#: архивы и форматы Office с макросами платформа не принимает.
+ТИПЫ_ДОМАШКИ: dict[str, Callable[[bytes], bool]] = {
+	"pdf": _pdf,
+	"docx": _ooxml("word/"),
+	"xlsx": _ooxml("xl/"),
+	"pptx": _ooxml("ppt/"),
+	"odt": _odf("application/vnd.oasis.opendocument.text"),
+	"ods": _odf("application/vnd.oasis.opendocument.spreadsheet"),
+	"odp": _odf("application/vnd.oasis.opendocument.presentation"),
+	"txt": _текст,
+	"md": _текст,
+	"csv": _текст,
+	"png": _начало(b"\x89PNG\r\n\x1a\n"),
+	"jpg": _начало(b"\xff\xd8\xff"),
+	"jpeg": _начало(b"\xff\xd8\xff"),
+	"gif": _начало(b"GIF87a", b"GIF89a"),
+	"webp": _webp,
+	"heic": _heif,
+	"heif": _heif,
+}
+
+
+def тип_принят(имя: str, данные: bytes) -> bool:
+	"""Расширение — из `ТИПЫ_ДОМАШКИ`, и содержимое ему соответствует."""
+	проверка = ТИПЫ_ДОМАШКИ.get(расширение(имя))
+	return bool(проверка and проверка(данные))
 
 
 def предел_байт() -> int:
