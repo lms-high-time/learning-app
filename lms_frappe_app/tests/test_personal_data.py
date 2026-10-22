@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""Выгрузка и удаление данных ученика и реестр данных пользователя
-(lms-high-time/learning-services#689).
+"""Выгрузка и удаление данных ученика, реестр данных пользователя и сроки
+журналов (lms-high-time/learning-services#689).
 
 Ворота — `UnitTestPersonalDataRegistry`: новое поле со ссылкой на
 пользователя или на удаляемую запись без строки в реестре валит прогон.
@@ -24,6 +24,7 @@ from lms_frappe_app.personal_data import (
 	ЗАВИСИМЫЕ,
 	ОБЕЗЛИЧИТЬ,
 	ОТВЯЗАТЬ,
+	СРОКИ_ЖУРНАЛОВ,
 	УДАЛИТЬ,
 	ХРАНИТЬ,
 	реестр,
@@ -299,3 +300,19 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 				personal_data.удалить(пользователь)
 		self.assertTrue(есть("User", администратор))
 
+
+class IntegrationTestLogRetention(IntegrationTestCase):
+	def test_сроки_журналов_держатся_политики(self):
+		настройки = frappe.get_single("Log Settings")
+		настройки.logs_to_clear = [
+			строка for строка in настройки.logs_to_clear if строка.ref_doctype != "Error Log"
+		]
+		for строка in настройки.logs_to_clear:
+			if строка.ref_doctype == "Activity Log":
+				строка.days = 365
+		настройки.save(ignore_permissions=True)
+
+		сроки = {
+			строка.ref_doctype: строка.days for строка in frappe.get_single("Log Settings").logs_to_clear
+		}
+		self.assertEqual({доктайп: сроки.get(доктайп) for доктайп in СРОКИ_ЖУРНАЛОВ}, СРОКИ_ЖУРНАЛОВ)

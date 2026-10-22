@@ -408,6 +408,12 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 	},
+	# Сроки журналов — из политики конфиденциальности, правкой в Desk не
+	# меняются; ежедневная чистка Frappe сохраняет настройки перед удалением
+	# старых записей и тоже проходит через этот хук (learning-services#689).
+	"Log Settings": {
+		"validate": "lms_frappe_app.personal_data.закрепить_сроки_журналов",
+	},
 }
 
 # Scheduled Tasks

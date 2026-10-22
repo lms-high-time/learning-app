@@ -9,6 +9,7 @@ from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learnin
 	НАСТРОЙКИ,
 )
 from lms_frappe_app.agent_learning.releases import projection
+from lms_frappe_app.personal_data import обеспечить_сроки_журналов
 
 #: Пункты сайдбара Frappe Learning — в том порядке, в каком их видит ученик:
 #: сначала способы заниматься, документы последними (lms-platform#311).
@@ -607,3 +608,4 @@ def after_migrate() -> None:
 	обеспечить_клиента_веб_чата()
 	обеспечить_значения_настроек()
 	обеспечить_настройки_входа()
+	обеспечить_сроки_журналов()
