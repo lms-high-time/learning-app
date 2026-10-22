@@ -749,14 +749,15 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			self.assertEqual(статус, 401)
 			журнал.assert_called_once()
 
-		with self.subTest("без списка — любому конфиденциальному, предупреждение раз"):
+		with self.subTest("без списка — отказ всем, запись в журнал раз"):
 			frappe.cache.delete_value(oauth_server.КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ)
-			with mock.patch.object(frappe, "log_error") as журнал:
+			with (
+				mock.patch.dict(frappe.conf, {oauth_server.КЛЮЧ_ИНТРОСПЕКЦИИ: None}),
+				mock.patch.object(frappe, "log_error") as журнал,
+			):
 				for _ in range(2):
-					статус = спросить(
-						token=токен["access_token"], client_id=другой.name, client_secret=другой.client_secret
-					)[0]
-					self.assertEqual(статус, 200)
+					статус = спросить(token=токен["access_token"], **свой)[0]
+					self.assertEqual(статус, 401)
 			журнал.assert_called_once()
 
 		frappe.db.set_value(
