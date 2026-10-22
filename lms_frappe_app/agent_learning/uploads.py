@@ -25,6 +25,11 @@ def расширение(имя: str) -> str:
 	return имя.rsplit(".", 1)[-1].lower() if "." in имя else ""
 
 
+#: Флаг записи `File`, вставленной сохранением сдачи: другим путём файл к сдаче
+#: не добавить (`file_guard.ФайлПлатформы`).
+ФЛАГ_ФАЙЛА_СДАЧИ = "homework_file"
+
+
 def предел_байт() -> int:
 	"""Предел размера одного файла — `artifact_file_max_mb` из настроек, в байтах."""
 	return int(настройка("artifact_file_max_mb", 10)) * 1024 * 1024
@@ -44,7 +49,7 @@ def из_base64(содержимое: str | None) -> bytes:
 
 def новый_файл(документ, имя: str, данные: bytes):
 	"""Приватный `File`, привязанный к записи ученика, — ещё не вставленный."""
-	return frappe.get_doc(
+	файл = frappe.get_doc(
 		{
 			"doctype": "File",
 			"file_name": имя,
@@ -54,6 +59,8 @@ def новый_файл(документ, имя: str, данные: bytes):
 			"attached_to_name": документ.name,
 		}
 	)
+	файл.flags[ФЛАГ_ФАЙЛА_СДАЧИ] = True
+	return файл
 
 
 def сведения_о_файлах(имена: list[str]) -> dict[str, dict]:

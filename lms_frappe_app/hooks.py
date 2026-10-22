@@ -462,9 +462,12 @@ before_tests = "lms_frappe_app.testing.before_tests"
 # ------------------------------
 #
 # Specify custom mixins to extend the standard doctype controller.
-# extend_doctype_class = {
-# 	"Task": "lms_frappe_app.custom.task.CustomTaskMixin"
-# }
+# Адрес файла и файлы сдачи домашки меняет только System Manager
+# (learning-services#683). Примесь, а не `doc_events`: проверка обязана идти до
+# метода контроллера `File`, который сразу трогает диск, — см. модуль.
+extend_doctype_class = {
+	"File": "lms_frappe_app.agent_learning.file_guard.ФайлПлатформы",
+}
 
 # Overriding Methods
 # ------------------------------
