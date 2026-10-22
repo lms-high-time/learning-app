@@ -61,11 +61,12 @@ from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТ�
 	("Agent Learning Session", "run"): УДАЛИТЬ,
 	("Homework Notice", "submission"): УДАЛИТЬ,
 	("LMS Quiz Violation Log", "quiz_submission"): УДАЛИТЬ,
-	("Discussion Reply", "topic"): УДАЛИТЬ,
 	("Personal Data Download Request", "amended_from"): УДАЛИТЬ,
 	("Agent Course Report", "session"): ОТВЯЗАТЬ,
 	("Agent Student Note", "source_session"): ОТВЯЗАТЬ,
 	("Agent Lesson Run Goal", "session"): ОТВЯЗАТЬ,
+	# Чужие ответы в его теме обсуждения остаются — без темы.
+	("Discussion Reply", "topic"): ОТВЯЗАТЬ,
 }
 
 #: Поля пользователя в доктайпах приложения, которых нет в реестре:
@@ -86,17 +87,21 @@ from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТ�
 #: записи вне `удаляемых` выгружаются именем, датой и полем пользователя.
 ПОЛЯ_ВЫГРУЗКИ = {
 	"Homework Notice": ["name", "kind", "creation"],
-	"Agent Homework Event": ["name", "event", "at", "creation"],
+	"Agent Homework Event": ["name", "parent", "parenttype", "event", "at", "creation"],
 	"Learning Organization": ["name", "organization_name", "creation"],
 	"Agent Course Report": ["name", "course", "lesson", "kind", "text", "status", "resolution", "creation"],
 }
 
 #: Кем становится владелец записи, которая остаётся после удаления.
 АНОНИМ = "Guest"
-#: Чей аккаунт удаляет процедура. `Why:` служебные учётки (Agent Service,
-#: публикатор) и сотрудники держат чужие записи и доступ платформы; ошибка
-#: в адресе стоила бы их работы.
+#: Чей аккаунт удаляет процедура — ученика: тип `Website User` и ни одной роли
+#: сотрудника. `Why:` служебные учётки (Agent Service, публикатор), авторы и
+#: кураторы держат чужие записи и работу платформы; ошибка в адресе стоила бы
+#: её. Роли авторов Learning — без доступа в Desk, и тип их не отличает.
 УДАЛЯЕМЫЙ_ТИП = "Website User"
+РОЛИ_СОТРУДНИКОВ = frozenset(
+	{"System Manager", "Agent Service", "Course Creator", "Moderator", "Batch Evaluator", "Release Publisher"}
+)
 #: Администратор команды. У команды он должен остаться (`api.team`).
 АДМИН_КОМАНДЫ = "Org Admin"
 #: Чем заменяются почта и имя в тексте замечания.
@@ -152,7 +157,8 @@ def выгрузить(пользователь: str) -> dict:
 		доктайп, поле = запись["doctype"], запись["filter_by"]
 		if запись["mode"] == УДАЛИТЬ and not _дочерний(доктайп):
 			continue
-		поля = ["*"] if запись["mode"] == ХРАНИТЬ else ПОЛЯ_ВЫГРУЗКИ.get(доктайп, ["name", "creation", поле])
+		свои = ["name", "creation", поле] + (["parent", "parenttype"] if _дочерний(доктайп) else [])
+		поля = ["*"] if запись["mode"] == ХРАНИТЬ else ПОЛЯ_ВЫГРУЗКИ.get(доктайп, свои)
 		строки = frappe.get_all(доктайп, filters={поле: пользователь}, fields=поля)
 		if строки:
 			записи.setdefault(доктайп, []).extend(строки)
@@ -194,7 +200,9 @@ def удалить(пользователь: str) -> dict:
 	удаляются после коммита: удаление с диска не откатить.
 	"""
 	_проверить(пользователь)
-	if frappe.db.get_value("User", пользователь, "user_type") != УДАЛЯЕМЫЙ_ТИП:
+	if frappe.db.get_value("User", пользователь, "user_type") != УДАЛЯЕМЫЙ_ТИП or (
+		РОЛИ_СОТРУДНИКОВ & set(frappe.get_roles(пользователь))
+	):
 		frappe.throw(
 			frappe._("Процедура удаляет только аккаунты учеников; служебные учётки и сотрудники — вручную"),
 			frappe.ValidationError,
@@ -231,8 +239,15 @@ def удалить(пользователь: str) -> dict:
 		raise
 	frappe.db.commit()
 	for файл in файлы:
-		frappe.delete_doc("File", файл, ignore_permissions=True, delete_permanently=True, ignore_missing=True)
-	frappe.db.commit()
+		# Каждый файл — своим коммитом: сбой на одном не оставляет остальные.
+		try:
+			frappe.delete_doc(
+				"File", файл, ignore_permissions=True, delete_permanently=True, ignore_missing=True
+			)
+			frappe.db.commit()
+		except Exception:
+			frappe.db.rollback()
+			frappe.log_error(title=f"Удаление данных ученика: файл {файл}")
 	return {
 		"user": пользователь,
 		"deleted": {доктайп: len(имена) for доктайп, имена in sorted(найдено.items())},
@@ -310,6 +325,12 @@ def _образец(пользователь: str) -> str:
 	return "%" + пользователь.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+def _адрес(пользователь: str) -> re.Pattern:
+	"""Почта целиком, а не частью другой: `an@gmail.com` не найдётся в
+	`ivan@gmail.com`."""
+	return re.compile(r"(?<![\w.+-])" + re.escape(пользователь) + r"(?![\w.-])")
+
+
 def _удаляемые(пользователь: str) -> dict[str, set[str]]:
 	"""Удаляемые записи по доктайпам: по полям реестра, затем зависимые — пока
 	находятся новые (ответы попыток, найденных через занятия)."""
@@ -369,9 +390,12 @@ def _обезличить_замечания(пользователь: str, на
 	обезличивание).
 	"""
 	имя = frappe.db.get_value("User", пользователь, "full_name") or ""
-	# Короткое имя заменило бы и слова текста.
-	подстроки = [пользователь] + ([имя] if len(имя) >= 4 else [])
-	шаблон = re.compile("|".join(re.escape(подстрока) for подстрока in подстроки), re.IGNORECASE)
+	# Имя — целым словом и как записано: короткое или частью слова заменило бы
+	# и текст. Имя в другом падеже или без фамилии так не найти.
+	шаблоны = [_адрес(пользователь).pattern]
+	if len(имя) >= 4:
+		шаблоны.append(r"(?<!\w)" + re.escape(имя) + r"(?!\w)")
+	шаблон = re.compile("|".join(шаблоны))
 	поля = ["text", "objective", "resolution"]
 	for часть in _части(_замечания(найдено)):
 		for замечание in frappe.get_all(
@@ -465,7 +489,10 @@ def _очистить_корзину(пользователь: str) -> int:
 	for копия in копии:
 		if not _упоминает(frappe.parse_json(копия.data) or {}, пользователь):
 			continue
-		delete_dynamic_links(копия.deleted_doctype, копия.deleted_name)
+		# Следы — только если имя не занято живой записью: у команды имя —
+		# её название, и новая команда с тем же названием потеряла бы свои.
+		if not frappe.db.exists(копия.deleted_doctype, копия.deleted_name):
+			delete_dynamic_links(копия.deleted_doctype, копия.deleted_name)
 		frappe.db.delete("Deleted Document", {"name": копия.name})
 		удалено += 1
 	return удалено
@@ -473,15 +500,29 @@ def _очистить_корзину(пользователь: str) -> int:
 
 def _стереть_следы(пользователь: str) -> None:
 	"""История правок и комментарии на оставшихся записях приложения — его
-	правки и правки, где он упомянут (создатель команды, член назначения).
-	Записи согласия хранятся как есть."""
+	правки и правки, где стоит его почта (создатель команды, член назначения).
+	Правка удаляется целиком, с тем, что в ней поменяли другие поля. Записи
+	согласия хранятся как есть."""
 	хранить = {з["doctype"] for з in реестр() if з["mode"] == ХРАНИТЬ}
 	доктайпы = sorted(set(_доктайпы_приложения()) - хранить)
-	for доктайп, поле, условия in (
-		("Version", "ref_doctype", {"owner": пользователь, "data": ("like", _образец(пользователь))}),
-		("Comment", "reference_doctype", {"owner": пользователь, "comment_email": пользователь}),
-	):
-		имена = frappe.get_all(доктайп, filters={поле: ("in", доктайпы)}, or_filters=условия, pluck="name")
+	адрес = _адрес(пользователь)
+	правки = [
+		правка.name
+		for правка in frappe.get_all(
+			"Version",
+			filters={"ref_doctype": ("in", доктайпы)},
+			or_filters={"owner": пользователь, "data": ("like", _образец(пользователь))},
+			fields=["name", "owner", "data"],
+		)
+		if правка.owner == пользователь or адрес.search(правка.data or "")
+	]
+	комментарии = frappe.get_all(
+		"Comment",
+		filters={"reference_doctype": ("in", доктайпы)},
+		or_filters={"owner": пользователь, "comment_email": пользователь},
+		pluck="name",
+	)
+	for доктайп, имена in (("Version", правки), ("Comment", комментарии)):
 		for часть in _части(имена):
 			frappe.db.delete(доктайп, {"name": ("in", часть)})
 

@@ -245,8 +245,8 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 
 		# Копии в корзине: удалённая раньше заметка ученика — с историей правок —,
 		# ответ квиза, где он только владелец, и чужая заметка.
-		def копия(доктайп: str, **поля) -> tuple[str, str]:
-			имя = frappe.generate_hash(length=12)
+		def копия(доктайп: str, имя: str | None = None, **поля) -> tuple[str, str]:
+			имя = имя or frappe.generate_hash(length=12)
 			данные = json.dumps({"doctype": доктайп, "name": имя, **поля})
 			return имя, вставить("Deleted Document", deleted_doctype=доктайп, deleted_name=имя, data=данные)
 
@@ -286,6 +286,22 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 			comment_email=self.ученик,
 		)
 		приглашение = вставить("Organization Invite", organization=команда, created_by=self.ученик)
+		# Чужая правка, где его почта — только часть другого адреса, остаётся.
+		правка_с_похожей_почтой = вставить(
+			"Version",
+			ref_doctype="Learning Organization",
+			docname=команда,
+			data=json.dumps({"by": "z" + self.ученик}),
+		)
+		# Копия удалённой когда-то команды с тем же названием, что у живой: следы
+		# живой команды остаются.
+		_, копия_команды = копия("Learning Organization", имя=команда, created_by=self.ученик)
+		чужая_правка_команды = вставить(
+			"Version", ref_doctype="Learning Organization", docname=команда, data="{}", owner=self.другой
+		)
+		# Его тема обсуждения удаляется, чужой ответ в ней остаётся без темы.
+		моя_тема = вставить("Discussion Topic", owner=self.ученик, title="Вопрос")
+		чужой_ответ = вставить("Discussion Reply", owner=self.другой, topic=моя_тема, reply="Ответ")
 		согласие = вставить(
 			"Agent Consent", user=self.ученик, method=РЕГИСТРАЦИЯ, accepted_at=frappe.utils.now_datetime()
 		)
@@ -302,6 +318,7 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 			set(выгрузка["records"]["Learning Organization"][0]), {"name", "organization_name", "creation"}
 		)
 		self.assertEqual([ф["name"] for ф in выгрузка["files"]], [файл.name])
+		self.assertNotIn(чужой_ответ, {з["name"] for з in выгрузка["records"].get("Discussion Reply", [])})
 
 		with без_коммитов() as коммит:
 			итог = personal_data.удалить(self.ученик)
@@ -338,6 +355,11 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 			self.assertFalse(есть(доктайп, имя), доктайп)
 		self.assertFalse(os.path.exists(путь))
 		self.assertTrue(есть("Deleted Document", чужая_копия))
+		self.assertFalse(есть("Deleted Document", копия_команды))
+		self.assertTrue(есть("Version", чужая_правка_команды))
+		self.assertTrue(есть("Version", правка_с_похожей_почтой))
+		self.assertFalse(есть("Discussion Topic", моя_тема))
+		self.assertIsNone(frappe.db.get_value("Discussion Reply", чужой_ответ, "topic"))
 		замечание = frappe.db.get_value(
 			"Agent Course Report", моё_замечание, ["session", "owner", "text", "resolution"], as_dict=True
 		)
@@ -386,17 +408,20 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 		администратор = создать_пользователя(f"pd-admin-{суффикс}@example.com", "System Manager")
 		служебный = создать_пользователя(f"pd-service-{суффикс}@example.com", "Agent Service")
 		единственный = создать_ученика(f"pd-org-admin-{суффикс}@example.com")
+		модератор = создать_пользователя(f"pd-moderator-{суффикс}@example.com", "Moderator")
 		добавить_в_организацию(единственный, создать_организацию(f"Команда {суффикс}"), "Org Admin")
 		for пользователь, ошибка in (
 			(администратор, frappe.ValidationError),
 			(служебный, frappe.ValidationError),
 			(единственный, frappe.ValidationError),
+			(модератор, frappe.ValidationError),
 			("Administrator", frappe.DoesNotExistError),
 			("nobody-pd@example.com", frappe.DoesNotExistError),
 		):
 			with self.subTest(пользователь=пользователь), без_коммитов(), self.assertRaises(ошибка):
 				personal_data.удалить(пользователь)
-		for пользователь in (администратор, служебный, единственный):
+		self.assertEqual(frappe.db.get_value("User", модератор, "user_type"), "Website User")
+		for пользователь in (администратор, служебный, единственный, модератор):
 			self.assertTrue(есть("User", пользователь))
 
 	def test_штатные_запросы_frappe_закрыты(self):
