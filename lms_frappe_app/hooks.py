@@ -487,6 +487,15 @@ override_whitelisted_methods = {
 	"frappe.integrations.oauth2_logins.login_via_google": "lms_frappe_app.google_login.login_via_google",
 	"frappe.www.login.login_via_google": "lms_frappe_app.google_login.login_via_google",
 	"frappe.integrations.oauth2_logins.custom": "lms_frappe_app.google_login.custom",
+	# Прочие провайдеры входа — отказ: вход через внешний провайдер только
+	# Google (learning-services#691) — обоснование в модуле. Список — копия
+	# `google_login.ПРОВАЙДЕРЫ_FRAPPE`: импорт модулей приложения в hooks
+	# тянул бы Frappe при чтении хуков; расхождение ловит тест.
+	**{
+		f"{модуль}.login_via_{провайдер}": "lms_frappe_app.google_login.отклонить_провайдера"
+		for модуль in ("frappe.integrations.oauth2_logins", "frappe.www.login")
+		for провайдер in ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
+	},
 }
 #
 # each overriding function accepts a `data` argument;
