@@ -19,6 +19,7 @@ class _ЗапросНаВремя:
 		super().setUp()
 		self.прежнее = {имя: getattr(frappe.local, имя, None) for имя in self.ИМЕНА}
 		self.addCleanup(frappe.local.flags.pop, "выход_из", None)
+		self.addCleanup(frappe.local.response.pop, "session_expired", None)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -51,6 +52,22 @@ class UnitTestBrowserData(_ЗапросНаВремя, UnitTestCase):
 				заголовки_ответа(ответ, frappe.request)
 
 				self.assertEqual(ответ.headers.get("Clear-Site-Data"), CLEAR_SITE_DATA if очистка else None)
+
+	def test_очистка_когда_сессия_истекла(self):
+		"""Пришёл `sid`, которого уже нет: Frappe отвечает гостю с
+		`session_expired`, и браузер стирает данные сайта."""
+		for что, истекла in (("истекла", True), ("жива", False)):
+			with self.subTest(что):
+				set_request(path="/lms/courses")
+				frappe.local.flags.pop("выход_из", None)
+				frappe.local.response.pop("session_expired", None)
+				if истекла:
+					frappe.local.response["session_expired"] = 1
+				ответ = Response()
+
+				заголовки_ответа(ответ, frappe.request)
+
+				self.assertEqual(ответ.headers.get("Clear-Site-Data"), CLEAR_SITE_DATA if истекла else None)
 
 	def test_приватные_файлы_не_кэшируются(self):
 		"""`no-store` вместо `private,max-age=3600` Frappe; прочие ответы — как были."""
@@ -88,6 +105,22 @@ class IntegrationTestLogoutClearsSiteData(_ЗапросНаВремя, Integrati
 		ответ = Response()
 
 		frappe.local.login_manager.logout()
+		заголовки_ответа(ответ, frappe.request)
+
+		self.assertEqual(ответ.headers.get("Clear-Site-Data"), CLEAR_SITE_DATA)
+
+	def test_пришедший_sid_без_сессии_очищает_данные_сайта(self):
+		"""Сквозь `Session`: сессию удалили (истекла, завершена с другого
+		устройства), а браузер пришёл с её `sid`."""
+		from frappe.auth import CookieManager
+		from frappe.sessions import Session
+
+		set_request(path="/lms/courses", headers={"Cookie": "sid=deleted-session-sid"})
+		frappe.local.cookie_manager = CookieManager()
+		frappe.local.response.pop("session_expired", None)
+		Session(user=None, resume=True)
+		ответ = Response()
+
 		заголовки_ответа(ответ, frappe.request)
 
 		self.assertEqual(ответ.headers.get("Clear-Site-Data"), CLEAR_SITE_DATA)
