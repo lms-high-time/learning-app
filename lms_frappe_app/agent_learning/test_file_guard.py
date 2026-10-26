@@ -129,6 +129,84 @@ class IntegrationTestFileGuard(IntegrationTestCase):
 			frappe.set_user("Administrator")
 		self.assertNotEqual(frappe.db.get_value("File", свой.name, "file_url"), адрес)
 
+	def _от_соседа(self, действие):
+		frappe.set_user(self.сосед)
+		try:
+			return действие()
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_адрес_чужого_файла_не_вставить(self):
+		адрес = frappe.db.get_value("File", self.файл, "file_url")
+		имя = адрес.rsplit("/", 1)[-1]
+		варианты = {
+			"как есть": адрес,
+			"с точкой": f"/private/files/./{имя}",
+			"двойной слэш": f"/private//files/{имя}",
+			"закодированная точка": f"/private/files/%2e/{имя}",
+		}
+		for что, вариант in варианты.items():
+			with self.subTest(что):
+				with self.assertRaises(frappe.PermissionError):
+					self._от_соседа(
+						lambda: frappe.get_doc(
+							{"doctype": "File", "file_name": имя, "file_url": вариант, "is_private": 1}
+						).insert()
+					)
+		self.assertEqual(frappe.db.count("File", {"owner": self.сосед}), 0)
+
+	def test_свой_файл_вставляется_по_своему_адресу(self):
+		свой = self._от_соседа(
+			lambda: frappe.get_doc(
+				{"doctype": "File", "file_name": "свой.txt", "content": "мой".encode(), "is_private": 1}
+			).insert()
+		)
+		копия = self._от_соседа(
+			lambda: frappe.get_doc(
+				{"doctype": "File", "file_name": "свой.txt", "file_url": свой.file_url, "is_private": 1}
+			).insert()
+		)
+		self.assertEqual(копия.file_url, свой.file_url)
+
+	def test_миниатюра_и_отпечаток_не_задаются_и_не_меняются(self):
+		адрес = frappe.db.get_value("File", self.файл, "file_url")
+		with self.subTest("при вставке"):
+			with self.assertRaises(frappe.PermissionError):
+				self._от_соседа(
+					lambda: frappe.get_doc(
+						{"doctype": "File", "file_name": "к.txt", "content": b"x", "thumbnail_url": адрес}
+					).insert()
+				)
+		свой = self._от_соседа(
+			lambda: frappe.get_doc({"doctype": "File", "file_name": "к.txt", "content": b"x"}).insert()
+		)
+		for поле, значение in {"thumbnail_url": адрес, "content_hash": "0" * 32, "is_private": 1}.items():
+			with self.subTest(поле):
+
+				def изменить():
+					файл = frappe.get_doc("File", свой.name)
+					файл.set(поле, значение)
+					файл.save()
+
+				with self.assertRaises(frappe.PermissionError):
+					self._от_соседа(изменить)
+		self._от_соседа(lambda: frappe.delete_doc("File", свой.name))
+		self.assertTrue(frappe.get_doc("File", self.файл).exists_on_disk())
+
+	def test_тип_без_выведенного_расширения_сверяется_со_списком(self):
+		from unittest.mock import patch
+
+		from lms_frappe_app.agent_learning import file_guard
+
+		with patch.object(file_guard, "_по_запросу", return_value=True), self.assertRaises(
+			frappe.PermissionError
+		):
+			self._от_соседа(
+				lambda: frappe.get_doc(
+					{"doctype": "File", "file_name": "макрос.docm", "content": b"PK\x03\x04"}
+				).insert()
+			)
+
 	def test_system_manager_правит_файл_сдачи(self):
 		файл = frappe.get_doc("File", self.файл)
 		файл.file_name = "переименован.txt"
