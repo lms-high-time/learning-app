@@ -3,6 +3,7 @@
 
 """Записи `File`, которые меняет только System Manager (learning-services#683)."""
 
+import base64
 import io
 import zipfile
 
@@ -27,6 +28,11 @@ def _архив() -> bytes:
 	with zipfile.ZipFile(буфер, "w") as архив:
 		архив.writestr("внутри.txt", frappe.generate_hash())
 	return буфер.getvalue()
+
+#: PNG 1×1 — публичный файл, который ученику разрешён.
+ПИКСЕЛЬ = base64.b64decode(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
 
 
 class IntegrationTestFileGuard(IntegrationTestCase):
@@ -177,8 +183,9 @@ class IntegrationTestFileGuard(IntegrationTestCase):
 						{"doctype": "File", "file_name": "к.txt", "content": b"x", "thumbnail_url": адрес}
 					).insert()
 				)
+		# Публичный файл ученика — только изображение (learning-services#684).
 		свой = self._от_соседа(
-			lambda: frappe.get_doc({"doctype": "File", "file_name": "к.txt", "content": b"x"}).insert()
+			lambda: frappe.get_doc({"doctype": "File", "file_name": "к.png", "content": ПИКСЕЛЬ}).insert()
 		)
 		for поле, значение in {"thumbnail_url": адрес, "content_hash": "0" * 32, "is_private": 1}.items():
 			with self.subTest(поле):
