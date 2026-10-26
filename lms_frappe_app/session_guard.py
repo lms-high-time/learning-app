@@ -107,13 +107,46 @@ def конец_сессии(прежний: str | None, сейчас: datetime) 
 	return наш.isoformat()
 
 
+def истекла(конец: str | None, сейчас: datetime) -> bool:
+	"""Прошёл ли абсолютный срок `session_end`; без пояса — UTC, как в `конец_сессии`."""
+	if not конец:
+		return False
+	срок = datetime.fromisoformat(конец)
+	return сейчас > (срок if срок.tzinfo else срок.replace(tzinfo=UTC))
+
+
+def завершить_истёкшую() -> None:
+	"""`before_request`: сессия с прошедшим `session_end` завершается, и запрос
+	идёт гостем.
+
+	`Why:` Frappe сверяет `session_end` только при чтении сессии из кэша
+	(`Session.get_session_data_from_cache`). Когда кэша нет — redis
+	перезапущен или очищен, — сессия читается из базы без этой проверки и
+	возвращается в кэш, то есть живёт после срока (learning-services#691).
+	Сессию к хукам Frappe уже поднял (`init_request` → `HTTPRequest`), поэтому
+	здесь она удаляется, а вход поднимается заново — так же, как Frappe
+	поступает с истёкшей сессией из кэша: гость, `session_expired` в ответе,
+	cookie сняты. Хук — сразу после отказа `sid` из параметров, раньше
+	хуков, которые читают пользователя.
+	"""
+	from frappe.auth import LoginManager
+	from frappe.sessions import delete_session
+
+	сессия = getattr(frappe.local, "session_obj", None)
+	if not сессия or сессия.user == "Guest":
+		return
+	if not истекла(сессия.data.data.get("session_end"), datetime.now(tz=UTC)):
+		return
+	delete_session(сессия.sid, user=сессия.user, reason="Session Expired")
+	frappe.local.login_manager = LoginManager()
+
+
 def ограничить_срок_сессии(login_manager=None) -> None:
 	"""`on_session_creation`: у новой сессии — абсолютный срок `session_end`.
 
 	Frappe проверяет `session_end` при чтении сессии из кэша и удаляет
-	истёкшую (`Session.get_session_data_from_cache`). Чтение из базы, когда
-	кэш потерян, срока не проверяет, но возвращает сессию в кэш — истёкшая
-	проживёт на один запрос дольше.
+	истёкшую (`Session.get_session_data_from_cache`); при чтении из базы
+	срок сверяет `завершить_истёкшую`.
 
 	Сессия к этому хуку уже записана (`Session.start`), поэтому срок
 	дописывается в запись в базе и в кэше. Коммит — запроса входа: POST

@@ -19,10 +19,23 @@ from frappe.utils import set_request
 from frappe.utils.password import get_decrypted_password
 
 from lms_frappe_app import google_login
-from lms_frappe_app.google_login import ДРУГОЙ_АККАУНТ, НЕ_ПОДТВЕРЖДЁН, причина_отказа
-from lms_frappe_app.install import КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ, обеспечить_вход_через_google
+from lms_frappe_app.google_login import (
+	ДРУГОЙ_АККАУНТ,
+	ДРУГОЙ_ПРОВАЙДЕР,
+	НЕ_ПОДТВЕРЖДЁН,
+	ПРОВАЙДЕРЫ_FRAPPE,
+	СО_ВТОРЫМ_ФАКТОРОМ,
+	причина_отказа,
+)
+from lms_frappe_app.install import (
+	БЕЗ_2FA,
+	КЛЮЧ_ID,
+	КЛЮЧ_СЕКРЕТ,
+	выключить_прочих_провайдеров,
+	обеспечить_вход_через_google,
+)
 from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
-from lms_frappe_app.tests.sample_data import создать_ученика
+from lms_frappe_app.tests.sample_data import создать_пользователя, создать_ученика
 
 ЗАПИСЬ = ("Social Login Key", "google")
 
@@ -30,9 +43,7 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 class IntegrationTestGoogleLogin(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(self._вернуть_конфигурацию)
-		self.прежние = {
-			ключ: frappe.conf.get(ключ) for ключ in (КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ)
-		}
+		self.прежние = {ключ: frappe.conf.get(ключ) for ключ in (КЛЮЧ_ID, КЛЮЧ_СЕКРЕТ)}
 		if frappe.db.exists(*ЗАПИСЬ):
 			frappe.delete_doc(*ЗАПИСЬ, force=True, ignore_permissions=True)
 
@@ -106,6 +117,27 @@ class IntegrationTestGoogleLogin(IntegrationTestCase):
 
 		self.assertTrue(frappe.db.get_value(*ЗАПИСЬ, "enable_social_login"))
 
+	def test_прочие_провайдеры_выключаются(self):
+		"""Включённым остаётся только ключ Google (learning-services#691)."""
+		# Мимо проверок документа: включённому ключу они требуют адресов провайдера.
+		ключ = frappe.get_doc(
+			{
+				"doctype": "Social Login Key",
+				"name": f"other-{frappe.generate_hash(length=6)}",
+				"social_login_provider": "Custom",
+				"provider_name": "Other",
+				"enable_social_login": 1,
+			}
+		)
+		ключ.db_insert()
+		self._задать("id-1", "secret-1")
+		обеспечить_вход_через_google()
+
+		выключить_прочих_провайдеров()
+
+		self.assertEqual(frappe.db.get_value("Social Login Key", ключ.name, "enable_social_login"), 0)
+		self.assertEqual(frappe.db.get_value(*ЗАПИСЬ, "enable_social_login"), 1)
+
 
 class UnitTestGoogleAccount(UnitTestCase):
 	def test_причина_отказа(self):
@@ -166,10 +198,56 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 		self.assertEqual(флаги, [True])
 		self.assertIsNone(frappe.flags.get(ВХОД_ЧЕРЕЗ_GOOGLE))
 
+	def test_роли_со_вторым_фактором_входят_паролем(self):
+		"""Вход через Google кода второго фактора не спрашивает, поэтому ролям
+		со вторым фактором он закрыт (learning-services#691)."""
+		ученик = создать_ученика(f"google-{frappe.generate_hash(length=8)}@example.com")
+		админ = создать_пользователя(
+			f"google-sm-{frappe.generate_hash(length=8)}@example.com", "System Manager"
+		)
+		for что, пользователь, впущен, без_2fa in (
+			("ученик", ученик, True, 0),
+			("System Manager", админ, False, 0),
+			("System Manager, второй фактор выключен на сайте", админ, True, 1),
+		):
+			данные = {"email": пользователь, "verified_email": True, "id": "333"}
+			with (
+				self.subTest(что),
+				patch.dict(frappe.conf, {БЕЗ_2FA: без_2fa}),
+				patch.object(google_login, "get_info_via_oauth", return_value=данные),
+				patch.object(google_login, "login_oauth_user") as вход,
+				patch.object(google_login, "consume_oauth_state") as гашение,
+				patch("frappe.respond_as_web_page") as страница,
+			):
+				google_login.login_via_google(code="код", state="состояние")
+
+				self.assertEqual(вход.called, впущен)
+				self.assertEqual(гашение.called, not впущен)
+				if not впущен:
+					self.assertEqual(страница.call_args.args[1], СО_ВТОРЫМ_ФАКТОРОМ)
+
+	def test_другие_провайдеры_отклоняются(self):
+		"""Вход — только Google: у прочих провайдеров Frappe подтверждения
+		адреса не проверяет (learning-services#691). Подменены оба имени
+		каждого метода входа."""
+		подмены = frappe.get_hooks("override_whitelisted_methods")
+		for провайдер in ПРОВАЙДЕРЫ_FRAPPE:
+			for модуль in ("frappe.integrations.oauth2_logins", "frappe.www.login"):
+				with self.subTest(f"{модуль}.login_via_{провайдер}"):
+					self.assertEqual(
+						подмены[f"{модуль}.login_via_{провайдер}"][-1],
+						"lms_frappe_app.google_login.отклонить_провайдера",
+					)
+		with patch("frappe.respond_as_web_page") as страница:
+			google_login.отклонить_провайдера(code="код", state="состояние")
+		self.assertEqual(страница.call_args.args[1], ДРУГОЙ_ПРОВАЙДЕР)
+		self.assertEqual(страница.call_args.kwargs["http_status_code"], 403)
+
 	def test_custom_google_идёт_через_проверку(self):
 		"""`custom/google` вёл во вход Frappe мимо подмены `login_via_google`
 		(learning-services#666). Имя провайдера — без регистра и пробелов, как
-		его находит MariaDB; прочие провайдеры — во Frappe."""
+		его находит MariaDB; прочие провайдеры отклоняются
+		(learning-services#691)."""
 		подмены = frappe.get_hooks("override_whitelisted_methods")
 		for метод, наш in (
 			("frappe.www.login.login_via_google", "login_via_google"),
@@ -180,14 +258,16 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 
 		прежний = getattr(frappe.local, "request", None)
 		self.addCleanup(setattr, frappe.local, "request", прежний)
-		for провайдер, наш in (("google", True), ("Google%20", True), ("github", False)):
+		for провайдер, наш in (("google", True), ("Google%20", True), ("github", False), ("", False)):
 			set_request(path=f"/api/method/frappe.integrations.oauth2_logins.custom/{провайдер}")
 			with (
 				self.subTest(провайдер),
 				patch.object(google_login, "login_via_google") as проверка,
+				patch.object(google_login, "отклонить_провайдера") as отказ,
 				patch.object(oauth2_logins, "custom") as frappe_custom,
 			):
 				google_login.custom(code="код", state="состояние")
 
 				self.assertEqual(проверка.called, наш)
-				self.assertEqual(frappe_custom.called, not наш)
+				self.assertEqual(отказ.called, not наш)
+				frappe_custom.assert_not_called()

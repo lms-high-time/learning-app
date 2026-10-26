@@ -111,6 +111,15 @@ docker compose exec backend bench --site lms.localhost run-tests --app lms_frapp
 docker compose exec backend bench --site lms.localhost set-config -p lms_disable_2fa_enforcement 1
 ```
 
+Тесты на сайте (`allow_tests`), режим разработчика и серверные скрипты
+миграция пускает только на сайте разработки (learning-services#691): без
+ключа она останавливается с отказом — так стенд не поднимется с флагом,
+поставленным для отладки. Локальный сайт помечается один раз:
+
+```bash
+docker compose exec backend bench --site lms.localhost set-config -p lms_development_site 1
+```
+
 ### Вывод в HTML
 
 Значение, пришедшее снаружи или из базы, выводится в HTML только
