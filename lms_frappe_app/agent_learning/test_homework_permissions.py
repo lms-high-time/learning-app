@@ -5,6 +5,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import homework as домашка
+from lms_frappe_app.api.authoring import РОЛЬ_ПУБЛИКАТОРА
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
@@ -12,6 +13,7 @@ from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
+	создать_пользователя,
 	создать_ученика,
 	создать_урок,
 )
@@ -36,6 +38,7 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 		self.методист = создать_куратора(f"hwc-{с}@example.com", роль="Course Creator")
 		self.модератор = создать_куратора(f"hwmod-{с}@example.com", роль="Moderator")
 		self.сосед = создать_ученика(f"hwn-{с}@example.com")
+		self.публикатор = создать_пользователя(f"hwpub-{с}@example.com", РОЛЬ_ПУБЛИКАТОРА)
 		self.личная = домашка.сохранить(self.ученик, self.урок, None, answer="лично")
 		self.рабочая = домашка.сохранить(self.ученик, self.урок, self.организация, answer="в компании")
 		self.чужая = домашка.сохранить(self.ученик, self.урок, чужая, answer="в другой компании")
@@ -61,9 +64,11 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 		with self.subTest("ученик видит свои"):
 			self.assertEqual(self.видит(self.ученик), все)
 
-		with self.subTest("чужой ученик не видит ничего"):
-			self.assertEqual(self.видит(self.сосед), set())
-			self.assertFalse(self.читает(self.сосед, self.личная))
+		for кто, user in (("чужой ученик", self.сосед), ("публикатор релизов", self.публикатор)):
+			with self.subTest(f"{кто} не видит ничего"):
+				self.assertEqual(self.видит(user), set())
+				self.assertFalse(self.читает(user, self.личная))
+				self.assertFalse(self.читает(user, self.рабочая))
 
 		with self.subTest("руководитель видит только пространство своей организации"):
 			self.assertEqual(self.видит(self.менеджер), {self.рабочая.name})

@@ -169,12 +169,17 @@ has_permission = {
 }
 
 # Роли ставятся вместе с приложением: без них права на DocType ссылались бы
-# на несуществующие роли, и Frappe молча отдал бы доступ никому.
+# на несуществующие роли, и Frappe молча отдал бы доступ никому. Release
+# Publisher — служебная учётка конвейера курсов (learning-services#685).
 fixtures = [
 	{
 		"dt": "Role",
 		"filters": [
-			["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]
+			[
+				"name",
+				"in",
+				["Organization Manager", "Organization Admin", "Agent Service", "Release Publisher"],
+			]
 		],
 	},
 	# Зачин урока и обещание курса адресованы ученику, а директивы — агенту,
