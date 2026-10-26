@@ -138,7 +138,7 @@ class IntegrationTestWriteLimits(IntegrationTestCase):
 
 		with self.assertRaises(пределы.КвотаИсчерпана):
 			frappe.get_doc(
-				{"doctype": "File", "file_name": "c.txt", "content": полмегабайта, "is_private": 0}
+				{"doctype": "File", "file_name": "c.txt", "content": полмегабайта, "is_private": 1}
 			).insert()
 
 	def test_размер_файла_по_байтам_а_не_из_запроса(self):
@@ -146,12 +146,40 @@ class IntegrationTestWriteLimits(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		self.addCleanup(frappe.form_dict.pop, "file_size", None)
 		frappe.form_dict.file_size = 1
-		файл = frappe.get_doc({"doctype": "File", "file_name": "а.txt", "content": данные}).insert()
+		файл = frappe.get_doc({"doctype": "File", "file_name": "а.txt", "content": данные, "is_private": 1}).insert()
 		self.assertEqual(frappe.db.get_value("File", файл.name, "file_size"), len(данные))
 		файл.file_size = 1
 		файл.save()
 		self.assertEqual(frappe.db.get_value("File", файл.name, "file_size"), len(данные))
 		self.assertGreaterEqual(пределы.занято_байт(self.ученик), len(данные))
+
+	def test_отметка_папки_не_освобождает_место(self):
+		данные = b"f" * 5000
+		frappe.set_user(self.ученик)
+		файл = frappe.get_doc({"doctype": "File", "file_name": "f.txt", "content": данные, "is_private": 1}).insert()
+		занято = пределы.занято_байт(self.ученик)
+		файл.reload()
+		файл.is_folder = 1
+		try:
+			файл.save()
+		except frappe.ValidationError:
+			pass
+		self.assertEqual(пределы.занято_байт(self.ученик), занято)
+
+	def test_публично_только_изображения(self):
+		"""Публичный файл ученика — только растровое изображение; приватный — любой."""
+		frappe.set_user(self.ученик)
+		for имя in ("a.txt", "a.svg", "a.html", "без-расширения"):
+			with self.subTest(имя), self.assertRaises(frappe.ValidationError):
+				frappe.get_doc({"doctype": "File", "file_name": имя, "content": b"<b>x</b>", "is_private": 0}).insert()
+		self.assertTrue(
+			frappe.get_doc({"doctype": "File", "file_name": "a.png", "content": _картинка(), "is_private": 0})
+			.insert()
+			.name
+		)
+		self.assertTrue(
+			frappe.get_doc({"doctype": "File", "file_name": "a.txt", "content": b"x", "is_private": 1}).insert().name
+		)
 
 	def test_квота_за_тридцать_дней(self):
 		"""Файлы старше окна квоты места не занимают: свои файлы сдачи ученик не удаляет."""

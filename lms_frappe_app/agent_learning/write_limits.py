@@ -16,13 +16,15 @@ HTTP 429 с заголовком `Retry-After` (секунды до конца �
 Флаг System Settings `only_allow_system_managers_to_upload_public_files` не
 включается. `Why:` фото профиля и картинки курса Learning загружает
 публичными файлами (`Uploader.vue`, `private: false`), и с флагом их загрузка
-у всех, кроме System Manager, ломается. Загрузки мимо методов платформы
-ограничивает квота (`проверить_файл`).
+у всех, кроме System Manager, ломается. Вместо флага у пользователя под квотой
+публичный файл — только растровое изображение, а загрузки мимо методов
+платформы ограничивает квота (`проверить_файл`).
 """
 
 from __future__ import annotations
 
 import functools
+import mimetypes
 from collections.abc import Callable
 
 import frappe
@@ -57,6 +59,10 @@ from lms_frappe_app.agent_learning.permissions import АДМИНИСТРАТИВ
 #: Флаг записи `File`, квоту которой уже проверил вызывающий (`homework.сохранить`):
 #: хук квоты её не пересчитывает.
 КВОТА_ПРОВЕРЕНА = "quota_checked"
+#: Публичный файл пользователя под квотой — только растровое изображение.
+#: `Why:` публично ученик загружает лишь фото профиля и обложку (Learning,
+#: `image/*`); SVG — разметка, и его нет в списке.
+ПУБЛИЧНЫЕ_ТИПЫ = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"})
 
 
 def частота(группа: str) -> Callable:
@@ -126,12 +132,14 @@ def занято_байт(пользователь: str) -> int:
 
 	Убранные из ответа файлы домашки тоже: они не удаляются (`CONTRACT.md`,
 	`submit_homework`). Одинаковое содержимое Frappe хранит одним файлом, но
-	считается каждая запись: иначе квота зависела бы от чужих файлов. Запрос
-	идёт по индексу `(owner, creation)` (`install.обеспечить_индекс_файлов`).
+	считается каждая запись: иначе квота зависела бы от чужих файлов. Папки
+	считаются вместе с файлами: размер папки пользователя — ноль
+	(`закрепить_размер`), а отметка папки у записи меняется. Запрос идёт по
+	индексу `(owner, creation)` (`install.обеспечить_индекс_файлов`).
 	"""
 	[(байт,)] = frappe.db.sql(
 		"select coalesce(sum(greatest(file_size, 0)), 0) from `tabFile`"
-		" where owner = %s and creation >= %s and is_folder = 0",
+		" where owner = %s and creation >= %s",
 		(пользователь, add_days(now_datetime(), -ОКНО_КВОТЫ_ДНЕЙ)),
 	)
 	return cint(байт)
@@ -140,11 +148,12 @@ def занято_байт(пользователь: str) -> int:
 def проверить_квоту(пользователь: str, новых_байт: int) -> None:
 	"""Отказ `storage_quota_exceeded`, если новые файлы не помещаются в квоту.
 
-	Параллельные сохранения одного ученика не видят незафиксированные файлы
-	друг друга и могут превысить квоту не больше чем на одно сохранение.
+	Место считается под блокировкой строки пользователя до конца транзакции:
+	сохранения одного пользователя идут по очереди, как заметки (`remember`).
 	"""
 	if not новых_байт or not под_квотой(пользователь):
 		return
+	frappe.db.get_value("User", пользователь, "name", for_update=True)
 	квота = квота_байт()
 	занято = занято_байт(пользователь)
 	if занято + новых_байт > квота:
@@ -164,7 +173,11 @@ def проверить_файл(файл, method=None) -> None:
 	Хук идёт после `File.before_insert`, который уже записал байты на диск:
 	отказ откатывает запрос, и Frappe убирает их сам (`File.on_rollback`).
 	"""
-	if файл.is_folder or файл.flags.get(КВОТА_ПРОВЕРЕНА) or not под_квотой(файл.owner):
+	if файл.is_folder or not под_квотой(файл.owner):
+		return
+	if not cint(файл.is_private) and not _внешний(файл) and _тип(файл) not in ПУБЛИЧНЫЕ_ТИПЫ:
+		frappe.throw(frappe._("Публично загружаются только изображения PNG, JPEG, GIF, WebP и AVIF"))
+	if файл.flags.get(КВОТА_ПРОВЕРЕНА):
 		return
 	try:
 		проверить_квоту(файл.owner, cint(файл.file_size))
@@ -190,3 +203,12 @@ def закрепить_размер(файл, method=None) -> None:
 		файл.file_size = len(содержимое) if содержимое is not None else 0
 	else:
 		файл.file_size = cint(frappe.db.get_value("File", файл.name, "file_size"))
+
+
+def _внешний(файл) -> bool:
+	"""Ссылка на файл вне сайта: байтов на диске нет."""
+	return (файл.file_url or "").startswith(("http://", "https://"))
+
+
+def _тип(файл) -> str | None:
+	return mimetypes.guess_type(файл.file_name or файл.file_url or "")[0]
