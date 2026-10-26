@@ -21,7 +21,7 @@ from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
 from frappe.website.utils import is_signup_disabled
 
-from lms_frappe_app.agent_learning.notices import почта_есть
+from lms_frappe_app.agent_learning.notices import почта_есть, ссылка
 from lms_frappe_app.passwords import проверить_пароль, сведения_пользователя
 from lms_frappe_app.agent_learning.oauth_client import отозвать_токены_пользователя
 
@@ -138,7 +138,7 @@ def _письмо_пароль_изменён(пользователь: str) -> 
 		subject="Пароль изменён",
 		message=(
 			f"<p>Пароль от вашего аккаунта на {escape_html(_название())} изменён.</p>"
-			f'<p>Если это сделали не вы, <a href="{get_url("/login#forgot")}">задайте новый пароль</a>: '
+			f"<p>Если это сделали не вы, {ссылка(get_url('/login#forgot'), 'задайте новый пароль')}: "
 			"ссылка придёт на этот адрес.</p>"
 		),
 	)
@@ -247,7 +247,7 @@ def _письмо_аккаунт_есть(пользователь: str) -> None
 		message=(
 			"<p>На этот адрес пытались зарегистрироваться, но аккаунт с ним уже есть.</p>"
 			"<p>Если вы входили через Google — войдите так же. Или "
-			f'<a href="{reset_key_link}">задайте пароль</a> и входите по почте.</p>'
+			f"{ссылка(reset_key_link, 'задайте пароль')} и входите по почте.</p>"
 			"<p>Если регистрировались не вы, ничего делать не нужно: без этой ссылки "
 			"пароль не поменять.</p>"
 		),
