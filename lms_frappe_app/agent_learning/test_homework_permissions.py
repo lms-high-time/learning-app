@@ -2,7 +2,9 @@
 # See license.txt
 
 import frappe
+import frappe.client
 from frappe.tests import IntegrationTestCase
+from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.api.authoring import РОЛЬ_ПУБЛИКАТОРА
@@ -14,8 +16,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_менеджера,
 	создать_организацию,
 	создать_пользователя,
-	создать_ученика,
 	создать_урок,
+	создать_ученика,
 )
 
 
@@ -123,3 +125,33 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 					self.assertEqual(bool(frappe.has_permission("File", "read", doc=файл)), видит, user)
 				finally:
 					frappe.set_user("Administrator")
+
+	def test_журнал_через_rest_без_проверяющего(self):
+		"""Кто проверял сдачу, через `/api/resource` видят только методисты —
+		ученику и руководителю журнал отдаётся без `by_user`, как без него
+		отдают его методы контракта (learning-services#692).
+
+		Два пути: документ сдачи с журналом и список строк журнала.
+		"""
+		документ = frappe.get_doc("Agent Homework Submission", self.рабочая.name)
+		документ.append(
+			"history", {"event": "returned", "by_user": self.методист, "at": now_datetime(), "comment": "Доделай"}
+		)
+		документ.save(ignore_permissions=True)
+		for user, видит in ((self.ученик, False), (self.менеджер, False), (self.методист, True)):
+			with self.subTest(user):
+				frappe.set_user(user)
+				try:
+					сдача = frappe.client.get("Agent Homework Submission", self.рабочая.name)
+					строки = frappe.client.get_list(
+						"Agent Homework Event",
+						parent="Agent Homework Submission",
+						filters={"parent": self.рабочая.name},
+						fields=["name", "by_user"],
+					)
+				finally:
+					frappe.set_user("Administrator")
+				self.assertEqual(self.методист in {с.get("by_user") for с in сдача.get("history")}, видит)
+				# Список строк журнала `by_user` не отдаёт никому: строки дочерние,
+				# и Frappe проверяет их правом `select` сдачи — у уровня 1 его нет.
+				self.assertNotIn(self.методист, {с.get("by_user") for с in строки})

@@ -2,6 +2,7 @@
 # See license.txt
 
 import frappe
+import frappe.client
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.tests.sample_data import (
@@ -10,8 +11,8 @@ from lms_frappe_app.tests.sample_data import (
 	создать_менеджера,
 	создать_организацию,
 	создать_пользователя,
-	создать_ученика,
 	создать_урок,
+	создать_ученика,
 )
 
 
@@ -148,3 +149,44 @@ class IntegrationTestOrganizationIsolation(IntegrationTestCase):
 
 			self.assertIn(self.занятие_а.name, видимые)
 			self.assertIn(self.занятие_б.name, видимые)
+
+	def test_адресаты_назначения_через_rest_только_персоналу(self):
+		"""Адресатов назначения через `/api/resource` читает только персонал
+		платформы, руководителю их отдают методы команды (learning-services#692).
+
+		Два пути: документ назначения и его список с полем адресатов.
+		"""
+		назначение = frappe.get_doc(
+			{
+				"doctype": "Course Allocation",
+				"organization": self.компания_а,
+				"course": создать_курс(f"Курс {frappe.generate_hash(length=6)}"),
+				"audience": "Selected Members",
+				"members": [{"user": self.ученик_а}],
+			}
+		).insert(ignore_permissions=True)
+		руководитель_б = создать_менеджера(f"m-b-{frappe.generate_hash(length=6)}@example.com", self.компания_б)
+		добавить_в_организацию(руководитель_б, self.компания_а)
+		администратор = создать_пользователя(f"sm-{frappe.generate_hash(length=6)}@example.com", "System Manager")
+		for кто, видит in (
+			(self.ученик_а, False),
+			(self.менеджер_а, False),
+			(руководитель_б, False),
+			(администратор, True),
+		):
+			with self.subTest(кто):
+				frappe.set_user(кто)
+				try:
+					документ = frappe.client.get("Course Allocation", назначение.name)
+					строки = frappe.client.get_list(
+						"Course Allocation Member",
+						parent="Course Allocation",
+						filters={"parent": назначение.name},
+						fields=["name", "user"],
+					)
+				finally:
+					frappe.set_user("Administrator")
+				self.assertEqual(self.ученик_а in {с.get("user") for с in документ.get("members") or []}, видит)
+				# Список дочерних строк Frappe проверяет правом `select` назначения —
+				# у уровня 1 его нет ни у кого: адресатов список не отдаёт никому.
+				self.assertNotIn(self.ученик_а, {с.get("user") for с in строки})

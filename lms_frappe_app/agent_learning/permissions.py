@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import frappe
 
+from lms_frappe_app.agent_learning import announcements
 from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТВУЕТ
 
 ВСЕВИДЯЩИЕ_РОЛИ = frozenset({"System Manager", "Administrator", "Agent Service"})
@@ -452,6 +453,55 @@ def доступна_сдача(doc, ptype: str = "read", user: str | None = Non
 	if not doc.organization or doc.organization not in организации_менеджера(user):
 		return False
 	return bool(doc.member) and действует_в(doc.member, doc.organization)
+
+
+# --- курс вне витрины: главы и чтения Learning ---
+#
+# Состав курса — главы, уроки, зачины — открыт курсу на витрине
+# (`announcements.на_витрине`), тому, кто на него записан, и инструктору курса;
+# персонал (`АДМИНИСТРАТИВНЫЕ_РОЛИ`) видит всё: курсы правят и читают авторы.
+# Это правило карты курса и входа в урок, и его же держат главы Learning через
+# `/api/resource`, подменённые чтения Learning и страницы SPA Learning
+# (`learning_reads.py`, learning-services#692).
+
+
+def курсы_без_ограничений(user: str) -> bool:
+	return user == "Administrator" or bool(set(frappe.get_roles(user)) & АДМИНИСТРАТИВНЫЕ_РОЛИ)
+
+
+def курс_открыт(course: str, user: str | None = None) -> bool:
+	"""Открыт ли пользователю состав курса: роль персонала, курс на витрине,
+	запись на курс или инструктор курса."""
+	user = user or frappe.session.user
+	if курсы_без_ограничений(user) or announcements.на_витрине(course):
+		return True
+	if user == "Guest":
+		return False
+	return bool(
+		frappe.db.exists("LMS Enrollment", {"member": user, "course": course})
+		or frappe.db.exists(
+			"Course Instructor", {"parenttype": "LMS Course", "parent": course, "instructor": user}
+		)
+	)
+
+
+def условие_главы(user: str | None = None) -> str:
+	"""`Course Chapter`: главы курсов на витрине и курсов, на которые записан."""
+	user = user or frappe.session.user
+	if курсы_без_ограничений(user):
+		return ""
+	колонка = "`tabCourse Chapter`.`course`"
+	кто = frappe.db.escape(user)
+	записан = f"select `course` from `tabLMS Enrollment` where `member` = {кто}"
+	ведёт = (
+		"select `parent` from `tabCourse Instructor`"
+		f" where `parenttype` = 'LMS Course' and `instructor` = {кто}"
+	)
+	return f"({announcements.условие_витрины(колонка)} or {колонка} in ({записан}) or {колонка} in ({ведёт}))"
+
+
+def доступна_глава(doc, ptype: str = "read", user: str | None = None) -> bool:
+	return курс_открыт(doc.course, user)
 
 
 def может_проверять(doc, user: str) -> bool:

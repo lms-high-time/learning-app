@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import frappe
 
-from lms_frappe_app.agent_learning import announcements, testers
+from lms_frappe_app.agent_learning import announcements, permissions, testers
 from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
@@ -24,8 +24,8 @@ from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
 	адрес_сервиса,
-	пробных_уроков,
 	веб_уроки_ученика,
+	пробных_уроков,
 )
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, УРОК_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import index
@@ -66,11 +66,12 @@ def course_map(course: str, space: str | None = None) -> dict:
 	главы, как у `course_outline` (learning-services#547).
 	"""
 	зачислен = _зачислен(course)
-	if not зачислен and not frappe.db.get_value("LMS Course", course, "published"):
+	открыт = зачислен or permissions.курс_открыт(course)
+	if not открыт and not frappe.db.get_value("LMS Course", course, "published"):
 		# Непубликованный курс для постороннего не существует. Отказ доменный,
 		# а не 404: тем же кодом отвечают методы авторинга на чужой курс.
 		raise Отказ(КУРС_НЕ_НАЙДЕН, "Курс не найден", id=course)
-	if not зачислен and announcements.анонсирован(course):
+	if not открыт and announcements.анонсирован(course):
 		return _анонс(course)
 
 	структура = уроки_по_главам(course)
@@ -157,6 +158,10 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	Материал и директива сюда не выходят: материал написан для агента, а зачин
 	(`lesson_hook`) — единственное в уроке, что обращено к ученику. Цели урока
 	— как у урока в `course_map` (learning-services#547).
+
+	Урок курса вне витрины — неопубликованного или анонса — существует только
+	для того, кому курс открыт (`permissions.курс_открыт`), как курс в
+	`course_map` (learning-services#692).
 	"""
 	ученик = текущий_пользователь()
 	if not lesson and course:
@@ -164,13 +169,13 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	урок = lesson and frappe.db.get_value(
 		"Course Lesson", lesson, ["name", "title", "course", "lesson_hook"], as_dict=True
 	)
-	if not урок:
+	зачислен = bool(урок) and _зачислен(урок.course)
+	if not урок or not (зачислен or permissions.курс_открыт(урок.course)):
 		raise Отказ(УРОК_НЕ_НАЙДЕН, "Урок не найден", id=lesson or course)
 
 	пройден = frappe.db.exists(
 		"LMS Course Progress", {"member": ученик, "lesson": lesson, "status": ПРОЙДЕН}
 	)
-	зачислен = _зачислен(урок.course)
 	return {
 		"lesson": урок.name,
 		"course": урок.course,
