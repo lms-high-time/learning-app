@@ -524,7 +524,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить_отказ(
 			"student.submit_answer",
 			student.submit_answer(
-				attempt=прежняя, question=попытка["question"]["id"], answer="V1", student_words="Первый"
+				attempt=прежняя, question=попытка["question"]["id"], answer="Первый", student_words="Первый"
 			),
 			"quiz_attempt_cancelled",
 		)
@@ -533,7 +533,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			ответ = self.сверить(
 				"student.submit_answer",
 				student.submit_answer(
-					attempt=попытка["attempt"], question=вопрос["id"], answer="V1", student_words="Первый вариант"
+					attempt=попытка["attempt"], question=вопрос["id"], answer="Первый", student_words="Первый вариант"
 				),
 			)
 			вопрос = ответ["next_question"]

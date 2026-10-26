@@ -191,8 +191,13 @@ class IntegrationTestТекстыРелиза(IntegrationTestCase):
 
 		квиз = self.данные(student.request_quiz(старт["session"]))
 		self.assertEqual(квиз["question"]["text"], вопрос["text"])
-		self.assertEqual(квиз["question"]["options"][0]["text"], вопрос["options"][0]["text"])
-		ответ = self.данные(student.submit_answer(квиз["attempt"], вопрос["key"], "V1", "Первый"))
+		self.assertEqual(
+			sorted(в["text"] for в in квиз["question"]["options"]),
+			sorted(в["text"] for в in вопрос["options"]),
+		)
+		ответ = self.данные(
+			student.submit_answer(квиз["attempt"], вопрос["key"], вопрос["options"][0]["text"], "Первый")
+		)
 		self.assertEqual(ответ["verdict"]["explanation"], у["quiz"]["answers"][вопрос["key"]]["explanation"])
 
 	def test_автор_получает_тексты_как_есть(self):

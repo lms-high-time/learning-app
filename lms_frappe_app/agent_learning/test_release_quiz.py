@@ -7,6 +7,7 @@ import copy
 import json
 from contextlib import contextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import frappe
@@ -60,6 +61,12 @@ from lms_frappe_app.tests.sample_data import (
 ОТВЕТ = "Agent Quiz Answer"
 ПОЯСНЕНИЕ = "Потому что так велит условие."
 С1, С2 = "S1/l-1-D1", "S2/l-1-D1"
+#: Источники порядка попытки вместо `release_quiz._СЛУЧАЙ`: порядок релиза и обратный ему.
+ПОРЯДОК_РЕЛИЗА = SimpleNamespace(shuffle=lambda список: None)
+ОБРАТНЫЙ = SimpleNamespace(shuffle=list.reverse)
+#: `id` вариантов попытки: настоящие и равные ключам релиза.
+ID_ВАРИАНТА = release_quiz._id_варианта
+ID_КАК_КЛЮЧ = lambda вариант: вариант["key"]  # noqa: E731
 
 
 class IntegrationTestКвизИзРелиза(IntegrationTestCase):
@@ -70,6 +77,11 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 		ученика своего теста. Тест, который публикует новую версию курса или правит
 		его строки, публикует свой — с ключом `self.ключ`."""
 		super().setUpClass()
+		# Тесты класса называют вопросы по местам в релизе, а варианты — ключами
+		# релиза; порядок и `id` попытки проверяют `test_старт_квиза` и
+		# `test_открытая_попытка_занятия_переиспользуется`.
+		cls.enterClassContext(patch.object(release_quiz, "_СЛУЧАЙ", ПОРЯДОК_РЕЛИЗА))
+		cls.enterClassContext(patch.object(release_quiz, "_id_варианта", ID_КАК_КЛЮЧ))
 		frappe.set_user("Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		cls.куратор = создать_куратора(f"rq-{суффикс}@example.com")
@@ -135,18 +147,31 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 	# --- старт ---
 
 	def test_старт_квиза(self):
-		"""Старт снимает вопросы в попытку без верного варианта и пояснения, отдаёт
-		первый вопрос с ключами вариантов и переводит занятие в ожидание квиза."""
+		"""Старт снимает вопросы в попытку без верного варианта и пояснения, в своём
+		порядке и со своими `id` вариантов без ключей релиза; отдаёт первый вопрос
+		снимка и переводит занятие в ожидание квиза. Ответ `id` попытки сверяется
+		по ключу релиза, и ключ ложится в ответ попытки."""
 		run, занятие = self.урок(курс=self.общий())
 
-		начало = release_quiz.начать(run, занятие)
+		with (
+			patch.object(release_quiz, "_СЛУЧАЙ", ОБРАТНЫЙ),
+			patch.object(release_quiz, "_id_варианта", ID_ВАРИАНТА),
+		):
+			начало = release_quiz.начать(run, занятие)
 
-		with self.subTest("снимок вопросов без верного и пояснения"):
-			снимок = self.снимок(начало["attempt"])
-			self.assertEqual(снимок, index.вопросы_урока(run.release, "l-1"))
-			self.assertEqual([в["key"] for в in снимок], [С1, С2])
+		снимок = self.снимок(начало["attempt"])
+		with self.subTest("снимок вопросов в порядке попытки, без ключей вариантов, верного и пояснения"):
+			self.assertEqual([в["key"] for в in снимок], [С2, С1])
+			релиз = {в["key"]: в for в in index.вопросы_урока(run.release, "l-1")}
+			for вопрос in снимок:
+				варианты = вопрос.pop("options")
+				self.assertEqual({**вопрос, "options": релиз[вопрос["key"]]["options"]}, релиз[вопрос["key"]])
+				self.assertEqual([в["text"] for в in варианты], ["Второй", "Первый"])
+				self.assertEqual({tuple(в) for в in варианты}, {("id", "text")})
+				self.assertEqual(len({в["id"] for в in варианты}), 2)
+				вопрос["options"] = варианты
 			выдано = json.dumps([снимок, начало], ensure_ascii=False)
-			for поле in ("correct", "explanation", ПОЯСНЕНИЕ):
+			for поле in ("correct", "explanation", ПОЯСНЕНИЕ, '"V1"', '"V2"'):
 				self.assertNotIn(поле, выдано)
 			попытка = frappe.get_doc(ПОПЫТКА, начало["attempt"])
 			self.assertEqual(
@@ -156,22 +181,29 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 			self.assertEqual(
 				(попытка.session, попытка.student, попытка.attempt_number), (занятие, self.ученик, 1)
 			)
-		with self.subTest("первый вопрос с ключами вариантов"):
+		with self.subTest("первый вопрос снимка с id вариантов попытки"):
 			self.assertEqual(
 				начало["question"],
 				{
-					"id": С1,
-					"text": "Ситуация и вопрос 1",
+					"id": С2,
+					"text": "Ситуация и вопрос 2",
 					"kind": "choice",
 					"index": 1,
 					"total": 2,
 					"multiple": False,
-					"options": [{"id": "V1", "text": "Первый"}, {"id": "V2", "text": "Второй"}],
+					"options": снимок[0]["options"],
 				},
 			)
 		with self.subTest("старт переводит занятие в ожидание квиза"):
 			self.assertEqual(
 				frappe.db.get_value("Agent Learning Session", занятие, "status"), ЗАНЯТИЕ_ЖДЁТ_КВИЗ
+			)
+		with self.subTest("ответ — id попытки, в ответ попытки — ключ релиза"):
+			[первый] = [в["id"] for в in начало["question"]["options"] if в["text"] == "Первый"]
+			ответ = self.ответить(начало["attempt"], С2, первый)
+			self.assertTrue(ответ["verdict"]["correct"])
+			self.assertEqual(
+				frappe.db.get_value(ОТВЕТ, {"attempt": начало["attempt"], "question_key": С2}, "answer"), "V1"
 			)
 
 	def test_старт_не_меняет_занятие_не_в_работе(self):
@@ -191,24 +223,47 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 				self.assertEqual(frappe.db.get_value("Agent Learning Session", занятие, "status"), статус)
 
 	def test_открытая_попытка_занятия_переиспользуется(self):
+		"""Повторный старт отдаёт ту же попытку и следующий вопрос её снимка — в её
+		порядке и с её `id` вариантов, а не заново перемешанный."""
 		run, занятие = self.урок(курс=self.общий())
-		первая = release_quiz.начать(run, занятие)["attempt"]
-		self.ответить(первая, С1)
+		with (
+			patch.object(release_quiz, "_СЛУЧАЙ", ОБРАТНЫЙ),
+			patch.object(release_quiz, "_id_варианта", ID_ВАРИАНТА),
+		):
+			первая = release_quiz.начать(run, занятие)["attempt"]
+		self.ответить(первая, С2, "Первый")
 
 		повтор = release_quiz.начать(run, занятие)
 
 		self.assertEqual(повтор["attempt"], первая)
-		self.assertEqual(повтор["question"]["id"], С2)
+		self.assertEqual(повтор["question"]["id"], С1)
+		self.assertEqual(повтор["question"]["options"], self.снимок(первая)[1]["options"])
+		self.assertEqual([в["text"] for в in повтор["question"]["options"]], ["Второй", "Первый"])
 		self.assertEqual(frappe.db.count(ПОПЫТКА, {"student": self.ученик}), 1)
 		self.assertEqual(
 			self.журнал(первая),
 			[
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С2),
 				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
-				(ПРОВЕРКА_ОТВЕТ_ПРИНЯТ, С1),
-				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
-				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С2),
+				(ПРОВЕРКА_ВОПРОС_ВЫДАН, С1),
 			],
 		)
+
+	def test_снимок_с_ключами_вариантов_без_id(self):
+		"""Вариант снимка `{key, text}` без `id`: агенту уходит `id`, равный ключу
+		релиза, ответ этим `id` засчитывается и ложится ключом."""
+		run, занятие = self.урок(курс=self.общий())
+		попытка = release_quiz.начать(run, занятие)["attempt"]
+		снимок = index.вопросы_урока(run.release, "l-1")
+		frappe.db.set_value(ПОПЫТКА, попытка, "questions", json.dumps(снимок, ensure_ascii=False))
+
+		вопрос = release_quiz.начать(run, занятие)["question"]
+		ответ = self.ответить(попытка, вопрос["id"], "V1")
+
+		self.assertEqual(вопрос["options"], [{"id": "V1", "text": "Первый"}, {"id": "V2", "text": "Второй"}])
+		self.assertTrue(ответ["verdict"]["correct"])
+		self.assertEqual(frappe.db.get_value(ОТВЕТ, {"attempt": попытка, "question_key": С1}, "answer"), "V1")
 
 	def test_отказы_старта(self):
 		"""Урок снят из релиза; нет доступа к курсу; занятие другого ученика; урок
@@ -779,10 +834,8 @@ class IntegrationTestКвизИзРелиза(IntegrationTestCase):
 				к["answers"][С2].update(correct="V1"),
 			),
 			"новый вариант": lambda к: вопрос(к, 1)["options"].append({"key": "V3", "text": "Третий"}),
-			"порядок вариантов": lambda к: вопрос(к, 1)["options"].reverse(),
 			"верный вариант": lambda к: к["answers"][С2].update(correct="V2"),
 			"цель вопроса": lambda к: вопрос(к, 1).update(objective="l-1-D2"),
-			"порядок вопросов": lambda к: к["questions"].insert(1, к["questions"].pop(2)),
 			"вопрос убран": убрать_третий,
 			"вопрос добавлен": добавить_вопрос,
 		}
@@ -1193,7 +1246,8 @@ class TestСравнениеКвиза(UnitTestCase):
 	"""Без базы: сравнение квиза — чистая функция."""
 
 	def test_сравнение_квиза_без_пояснений(self):
-		"""Пояснение не в счёт, остальное — в счёт, пустой квиз ни с чем не совпадает."""
+		"""Пояснение и порядок вопросов и вариантов не в счёт, остальное — в счёт,
+		пустой квиз ни с чем не совпадает."""
 		вопрос = {
 			"key": С1,
 			"objective": "l-1-D1",
@@ -1202,8 +1256,11 @@ class TestСравнениеКвиза(UnitTestCase):
 			"correct": "V1",
 			"explanation": "П",
 		}
+		второй = {**вопрос, "key": С2}
 		for что, было, стало, тот_же in (
 			("другое пояснение", [вопрос], [{**вопрос, "explanation": "Другое"}], True),
+			("порядок вариантов", [вопрос], [{**вопрос, "options": вопрос["options"][::-1]}], True),
+			("порядок вопросов", [вопрос, второй], [второй, вопрос], True),
 			("другой верный вариант", [вопрос], [{**вопрос, "correct": "V2"}], False),
 			("пустой квиз", [], [], False),
 		):
@@ -1211,30 +1268,95 @@ class TestСравнениеКвиза(UnitTestCase):
 				self.assertEqual(release_quiz.квиз_тот_же(было, стало), тот_же)
 
 
+class TestСнятьВопросы(UnitTestCase):
+	"""Без базы: снимок вопросов новой попытки — `снять_вопросы` — и ключи вариантов на ответе."""
+
+	def test_порядок_и_id_вариантов(self):
+		"""Вопросы и варианты — в порядке источника случайности, тексты — как в
+		релизе, ключей вариантов нет, вход не меняется; ключ на ответе находится
+		по тексту; по умолчанию у каждого вызова свои порядок и `id`."""
+		вопросы = [
+			{
+				"key": f"S{н}",
+				"objective": "D1",
+				"text": f"Вопрос {н}",
+				"options": [{"key": f"V{в}", "text": f"Вариант {в}"} for в in range(1, 5)],
+			}
+			for н in range(1, 5)
+		]
+		исходные = copy.deepcopy(вопросы)
+
+		def тексты(список):
+			return sorted((в["key"], в["text"], sorted(о["text"] for о in в["options"])) for в in список)
+
+		with self.subTest("порядок — от источника случайности, без ключей вариантов"):
+			снимок = release_quiz.снять_вопросы(вопросы, ОБРАТНЫЙ)
+			self.assertEqual([в["key"] for в in снимок], ["S4", "S3", "S2", "S1"])
+			for вопрос in снимок:
+				self.assertEqual(
+					[о["text"] for о in вопрос["options"]],
+					["Вариант 4", "Вариант 3", "Вариант 2", "Вариант 1"],
+				)
+				self.assertEqual({tuple(о) for о in вопрос["options"]}, {("id", "text")})
+				self.assertEqual(len({о["id"] for о in вопрос["options"]}), 4)
+			self.assertEqual(тексты(снимок), тексты(вопросы))
+			self.assertNotIn('"V1"', json.dumps(снимок))
+			self.assertEqual(вопросы, исходные)
+		with self.subTest("повтор id в вопросе перевыпускается"):
+			выпуск = iter(["a", "a", "b", "a", "b", "c", "d"])
+			with patch.object(release_quiz, "_id_варианта", lambda вариант: next(выпуск)):
+				[вопрос] = release_quiz.снять_вопросы(вопросы[:1], ПОРЯДОК_РЕЛИЗА)
+			self.assertEqual([о["id"] for о in вопрос["options"]], ["a", "b", "c", "d"])
+		with self.subTest("ключ на ответе — по тексту варианта, в порядке снимка"):
+			вопрос = снимок[0]
+			варианты = release_quiz.варианты_попытки(вопрос, исходные[3]["options"])
+			self.assertEqual(
+				варианты,
+				[{**о, "key": f"V{о['text'][-1]}"} for о in вопрос["options"]],
+			)
+		with self.subTest("вариант снимка с ключом и без id — id это ключ"):
+			варианты = release_quiz.варианты_попытки(исходные[0], исходные[0]["options"])
+			self.assertEqual(
+				[(в["id"], в["key"]) for в in варианты], [(f"V{н}", f"V{н}") for н in range(1, 5)]
+			)
+		with self.subTest("по умолчанию — свои порядок и id у каждого вызова"):
+			снимки = [release_quiz.снять_вопросы(вопросы) for _ in range(20)]
+			for снимок in снимки:
+				self.assertEqual(тексты(снимок), тексты(вопросы))
+			self.assertGreater(len({json.dumps([в["key"] for в in с]) for с in снимки}), 1)
+			self.assertEqual(len({с[0]["options"][0]["id"] for с in снимки}), 20)
+
+
 class TestВыбранныйВариант(UnitTestCase):
 	"""Без базы: сравнение ответа с вариантами вопроса — `_выбранный`."""
 
 	def test_ответ_и_варианты(self):
-		"""Ключ, затем текст варианта, без учёта регистра и пробелов; список — только из одного."""
-		варианты = [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "Второй"}]
-		# Текст варианта `V2` совпадает с ключом `V1`.
-		спорные = [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "V1"}]
+		"""`id` варианта в попытке, затем текст, без учёта регистра и пробелов;
+		ключ релиза ответом не служит; список — только из одного."""
+		варианты = [{"id": "a1", "key": "V1", "text": "Первый"}, {"id": "b2", "key": "V2", "text": "Второй"}]
+		# Текст варианта `V2` совпадает с `id` варианта `V1`.
+		спорные = [{"id": "a1", "key": "V1", "text": "Первый"}, {"id": "b2", "key": "V2", "text": "a1"}]
 		случаи = {
-			"ключ": ("V1", варианты, "V1"),
-			"ключ без учёта регистра и пробелов": (" v1 ", варианты, "V1"),
+			"id": ("a1", варианты, "V1"),
+			"id без учёта регистра и пробелов": (" A1 ", варианты, "V1"),
+			"ключ релиза — не id": ("V1", варианты, None),
 			"текст варианта": ("Второй", варианты, "V2"),
 			"текст без учёта регистра и пробелов": ("  пеРвый ", варианты, "V1"),
-			"пробелы внутри текста сводятся": ("Пер вый", [{"key": "V1", "text": "Пер   вый"}], "V1"),
-			"ключ важнее текста": ("V1", спорные, "V1"),
-			"список из одного": (["V1"], варианты, "V1"),
+			"пробелы внутри текста сводятся": (
+				"Пер вый",
+				[{"id": "a1", "key": "V1", "text": "Пер   вый"}],
+				"V1",
+			),
+			"id важнее текста": ("a1", спорные, "V1"),
+			"список из одного": (["a1"], варианты, "V1"),
 			"кортеж из одного текстом": (("второй",), варианты, "V2"),
-			"список из двух": (["V1", "V2"], варианты, None),
+			"список из двух": (["a1", "b2"], варианты, None),
 			"пустой список": ([], варианты, None),
 			"неизвестный ответ": ("Третий", варианты, None),
 			"пустой ответ": ("", варианты, None),
 			"нет ответа": (None, варианты, None),
-			"число — по строке": (1, [{"key": "1", "text": "Один"}], "1"),
-			"нет вариантов": ("V1", [], None),
+			"число — по строке": (1, [{"id": "1", "key": "K", "text": "Один"}], "K"),
+			"нет вариантов": ("a1", [], None),
 		}
 		for что, (ответ, список, ожидаемо) in случаи.items():
 			with self.subTest(что):
