@@ -352,6 +352,7 @@ doc_events = {
 	# (`upload_file` Frappe), learning-services#684.
 	"File": {
 		"before_insert": "lms_frappe_app.agent_learning.write_limits.проверить_файл",
+		"validate": "lms_frappe_app.agent_learning.write_limits.закрепить_размер",
 	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).

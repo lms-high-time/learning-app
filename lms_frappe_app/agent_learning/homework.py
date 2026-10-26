@@ -29,12 +29,7 @@ from lms_frappe_app.agent_learning.constants import (
 )
 from lms_frappe_app.agent_learning.errors import ЗАНЯТО, Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
-from lms_frappe_app.agent_learning.write_limits import (
-	КВОТА_ИСЧЕРПАНА,
-	КВОТА_ПРОВЕРЕНА,
-	КвотаИсчерпана,
-	проверить_квоту,
-)
+from lms_frappe_app.agent_learning.write_limits import КВОТА_ПРОВЕРЕНА, проверить_квоту
 
 ЗАДАНИЕ = "Agent Lesson Homework"
 СДАЧА = "Agent Homework Submission"
@@ -503,10 +498,6 @@ def сохранить(
 			file=имя_файла,
 			limit_mb=get_max_file_size() // (1024 * 1024),
 		) from ошибка
-	except КвотаИсчерпана as ошибка:
-		_откатить(вложенные)
-		# Why: квоту проверяет и хук `File`; дойдёт до него — тот же код, что у проверки выше.
-		raise Отказ(КВОТА_ИСЧЕРПАНА, str(ошибка), file=имя_файла) from ошибка
 	except frappe.ValidationError as ошибка:
 		_откатить(вложенные)
 		# Why: запрещённый тип Frappe отдаёт 417 без кода — агенту нужен код контракта.

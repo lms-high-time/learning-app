@@ -130,7 +130,7 @@ def занято_байт(пользователь: str) -> int:
 	идёт по индексу `(owner, creation)` (`install.обеспечить_индекс_файлов`).
 	"""
 	[(байт,)] = frappe.db.sql(
-		"select coalesce(sum(file_size), 0) from `tabFile`"
+		"select coalesce(sum(greatest(file_size, 0)), 0) from `tabFile`"
 		" where owner = %s and creation >= %s and is_folder = 0",
 		(пользователь, add_days(now_datetime(), -ОКНО_КВОТЫ_ДНЕЙ)),
 	)
@@ -138,7 +138,11 @@ def занято_байт(пользователь: str) -> int:
 
 
 def проверить_квоту(пользователь: str, новых_байт: int) -> None:
-	"""Отказ `storage_quota_exceeded`, если новые файлы не помещаются в квоту."""
+	"""Отказ `storage_quota_exceeded`, если новые файлы не помещаются в квоту.
+
+	Параллельные сохранения одного ученика не видят незафиксированные файлы
+	друг друга и могут превысить квоту не больше чем на одно сохранение.
+	"""
 	if not новых_байт or not под_квотой(пользователь):
 		return
 	квота = квота_байт()
@@ -146,7 +150,7 @@ def проверить_квоту(пользователь: str, новых_ба
 	if занято + новых_байт > квота:
 		raise Отказ(
 			КВОТА_ИСЧЕРПАНА,
-			"Место под файлы на этот месяц закончилось — напиши в поддержку",
+			"Место под файлы за последние 30 дней закончилось — напишите в поддержку",
 			limit_mb=квота // МБ,
 			used_mb=round(занято / МБ, 1),
 			days=ОКНО_КВОТЫ_ДНЕЙ,
@@ -166,3 +170,23 @@ def проверить_файл(файл, method=None) -> None:
 		проверить_квоту(файл.owner, cint(файл.file_size))
 	except Отказ as отказ:
 		frappe.throw(отказ.сообщение, КвотаИсчерпана)
+
+
+def закрепить_размер(файл, method=None) -> None:
+	"""`doc_events` `File.validate`: размер файла пользователя под квотой — по
+	байтам, а не из запроса.
+
+	`Why:` `File.validate` берёт `file_size` из формы запроса, а квота
+	считается по этому полю. Хук идёт после контроллера: новой записи с
+	содержимым — длина байтов, без новых байтов — ноль, сохранённой — прежний
+	размер.
+	"""
+	if frappe.session.user == "Administrator" or "System Manager" in frappe.get_roles():
+		return
+	if not под_квотой(frappe.session.user):
+		return
+	if файл.is_new():
+		содержимое = getattr(файл, "_content", None)
+		файл.file_size = len(содержимое) if содержимое is not None else 0
+	else:
+		файл.file_size = cint(frappe.db.get_value("File", файл.name, "file_size"))

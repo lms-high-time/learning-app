@@ -851,7 +851,6 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 	return ответ
 
 
-
 def _заблокировать_ученика(ученик: str) -> None:
 	"""Блокировка строки ученика до конца транзакции: записи одного ученика,
 	которые считают перед вставкой, идут по одной."""
@@ -877,6 +876,7 @@ def _заметок_набора(ученик: str, курс: str, вид: str) 
 		значения,
 	)
 	return сколько
+
 
 @frappe.whitelist(methods=["POST"])
 @частота("запись")
@@ -1595,10 +1595,8 @@ def lesson_session(lesson: str) -> dict:
 
 def _проверить_состояние(state, version, **где) -> None:
 	"""Состояние разговора — строка JSON в пределе размера, версия — короткая строка."""
-	try:
-		json.loads(state)
-	except (TypeError, ValueError) as сбой:
-		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", **где) from сбой
+	if not isinstance(state, str):
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", **где)
 	размер = len(state.encode())
 	if размер > ДЛИНА_СОСТОЯНИЯ:
 		raise Отказ(
@@ -1608,6 +1606,10 @@ def _проверить_состояние(state, version, **где) -> None:
 			length=размер,
 			**где,
 		)
+	try:
+		json.loads(state)
+	except ValueError as сбой:
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", **где) from сбой
 	if not isinstance(version, str) or len(version) > ДЛИНА_ВЕРСИИ:
 		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, f"Версия состояния — строка до {ДЛИНА_ВЕРСИИ} знаков", **где)
 

@@ -45,7 +45,7 @@ def _картинка() -> bytes:
 
 class TestМетодыПодПределом(UnitTestCase):
 	def test_post_методы_ученика_под_пределом_или_в_исключениях(self):
-		"""Ворота: каждый POST-метод `api/student.py` и `api/consent.py` — под
+		"""Ворота: каждый метод записи (без GET) `api/student.py` и `api/consent.py` — под
 		пределом частоты или в `БЕЗ_ПРЕДЕЛА` с причиной. Новый метод без
 		предела валит тест поимённо."""
 		from lms_frappe_app.api import consent
@@ -55,7 +55,10 @@ class TestМетодыПодПределом(UnitTestCase):
 			for имя, функция in vars(модуль).items():
 				if not callable(функция):
 					continue
-				if frappe.allowed_http_methods_for_whitelisted_func.get(функция) != ["POST"]:
+				# Метод записи — без GET. `Why:` `@frappe.whitelist()` без `methods`
+				# разрешает и GET, и POST: так объявлены методы чтения.
+				методы = frappe.allowed_http_methods_for_whitelisted_func.get(функция) or []
+				if "GET" in методы or not set(методы) & {"POST", "PUT", "DELETE"}:
 					continue
 				полное = f"{модуль.__name__}.{имя}"
 				if getattr(функция, "предел_частоты", None) not in пределы.ГРУППЫ and полное not in БЕЗ_ПРЕДЕЛА:
@@ -65,6 +68,11 @@ class TestМетодыПодПределом(UnitTestCase):
 			(student.remember.предел_частоты, student.save_chat_state.предел_частоты, student.submit_homework.предел_частоты),
 			("запись", "состояние", "домашка"),
 		)
+		# Из методов записи `api/team.py` любому вошедшему доступны только эти два,
+		# остальные — администратору организации.
+		from lms_frappe_app.api import team
+
+		self.assertEqual((team.accept_invite.предел_частоты, team.create_organization.предел_частоты), ("запись", "запись"))
 
 
 class IntegrationTestWriteLimits(IntegrationTestCase):
@@ -94,6 +102,7 @@ class IntegrationTestWriteLimits(IntegrationTestCase):
 				self.assertTrue(student.remember(kind="fact", key=f"k{номер}", text="да")["ok"])
 			with self.assertRaises(frappe.RateLimitExceededError):
 				student.remember(kind="fact", key="k3", text="да")
+			self.assertFalse(frappe.db.exists("Agent Student Note", {"student": self.ученик, "note_key": "k3"}))
 			# Сколько ждать — заголовком: MCP-сервис передаёт его агенту.
 			self.assertTrue(1 <= int(frappe.local.response_headers.get("Retry-After")) <= 60)
 			# Тот же адрес, другой ученик — свой счёт.
@@ -131,6 +140,18 @@ class IntegrationTestWriteLimits(IntegrationTestCase):
 			frappe.get_doc(
 				{"doctype": "File", "file_name": "c.txt", "content": полмегабайта, "is_private": 0}
 			).insert()
+
+	def test_размер_файла_по_байтам_а_не_из_запроса(self):
+		данные = b"x" * 5000
+		frappe.set_user(self.ученик)
+		self.addCleanup(frappe.form_dict.pop, "file_size", None)
+		frappe.form_dict.file_size = 1
+		файл = frappe.get_doc({"doctype": "File", "file_name": "а.txt", "content": данные}).insert()
+		self.assertEqual(frappe.db.get_value("File", файл.name, "file_size"), len(данные))
+		файл.file_size = 1
+		файл.save()
+		self.assertEqual(frappe.db.get_value("File", файл.name, "file_size"), len(данные))
+		self.assertGreaterEqual(пределы.занято_байт(self.ученик), len(данные))
 
 	def test_квота_за_тридцать_дней(self):
 		"""Файлы старше окна квоты места не занимают: свои файлы сдачи ученик не удаляет."""
