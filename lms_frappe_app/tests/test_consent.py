@@ -495,6 +495,47 @@ class IntegrationTestUnderage(IntegrationTestCase):
 		self.assertFalse(frappe.db.exists("User", вернулся_давно), "отметка прежнего аккаунта не спасает")
 
 
+class IntegrationTestConsentRetention(IntegrationTestCase):
+	"""Записи согласия удалённого аккаунта хранятся три года после удаления
+	(learning-services#689)."""
+
+	def запись(self, почта: str, когда, метод: str = РЕГИСТРАЦИЯ) -> str:
+		документ = frappe.new_doc("Agent Consent")
+		документ.update({"user": почта, "documents_version": "2026", "accepted_at": когда, "method": метод})
+		документ.name = frappe.generate_hash(length=12)
+		документ.db_insert()
+		return документ.name
+
+	def test_записи_удалённого_аккаунта_живут_три_года_после_удаления(self):
+		сейчас = now_datetime()
+		четыре_года, два_года = add_days(сейчас, -4 * 365), add_days(сейчас, -2 * 365)
+		удалён_давно, удалён_недавно = почта(), почта()
+		удаляются = [
+			self.запись(удалён_давно, четыре_года),
+			self.запись(удалён_давно, add_days(сейчас, -3 * 365 - 2), consent.УДАЛЁН),
+		]
+		хранятся = [
+			self.запись(удалён_недавно, четыре_года),
+			self.запись(удалён_недавно, два_года, consent.УДАЛЁН),
+		]
+		живой = зарегистрировать(почта())
+		frappe.db.set_value("User", живой, "creation", add_days(сейчас, -5 * 365), update_modified=False)
+		хранятся.append(self.запись(живой, четыре_года))
+		# Тот же адрес завёл новый аккаунт: записи прежнего судятся по прежнему.
+		пересоздан = зарегистрировать(почта())
+		хранятся += frappe.get_all(
+			"Agent Consent", filters={"user": ("in", [живой, пересоздан])}, pluck="name"
+		)
+		удаляются.append(self.запись(пересоздан, четыре_года, consent.УДАЛЁН))
+
+		consent.удалить_старые_согласия()
+
+		for имя in удаляются:
+			self.assertFalse(frappe.db.exists("Agent Consent", имя), имя)
+		for имя in хранятся:
+			self.assertTrue(frappe.db.exists("Agent Consent", имя), имя)
+
+
 class UnitTestПутиСогласия(UnitTestCase):
 	def test_какие_страницы_ведут_на_экран_согласия(self):
 		for путь, метод, ведёт in (
