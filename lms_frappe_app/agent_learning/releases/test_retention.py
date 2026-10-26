@@ -200,7 +200,7 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 		run = frappe.db.get_value("Agent Learning Session", первое, "run")
 		отметить_все_пункты(run, первое)
 		начало = release_quiz.начать(прохождения.прохождение(self.ученик, курс, "l-1"), первое)
-		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "V1", "Первый")
+		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "Первый", "Первый")
 		self.assertEqual(frappe.db.get_value(ПОПЫТКА, начало["attempt"], "status"), ПОПЫТКА_ЗАЧТЕНА)
 		второе = занятие_релиза(self.ученик, курс, "l-2")
 		прохождения.отметить(

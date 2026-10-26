@@ -12,6 +12,7 @@ import frappe
 
 from lms_frappe_app.agent_learning import consent
 from lms_frappe_app.agent_learning.errors import Отказ
+from lms_frappe_app.agent_learning.write_limits import частота
 from lms_frappe_app.api import контракт, текущий_пользователь
 
 #: Не отмечено «мне есть 18 лет» или «принимаю документы».
@@ -28,6 +29,7 @@ def _да(значение) -> bool:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def accept(age_confirmed=False, documents_accepted=False) -> dict:
 	"""Записывает явное согласие: пользователю есть 18 лет, документы он принимает."""
@@ -46,6 +48,7 @@ def accept(age_confirmed=False, documents_accepted=False) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def decline_underage() -> dict:
 	"""Пользователь сообщил, что ему нет 18 лет: аккаунт удаляется или закрывается.

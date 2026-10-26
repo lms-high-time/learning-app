@@ -27,6 +27,7 @@ from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation i
 from lms_frappe_app.agent_learning.errors import НЕТ_ПРАВА, Отказ
 from lms_frappe_app.agent_learning.permissions import доступ_к_команде
 from lms_frappe_app.agent_learning.structure import уроки_курсов
+from lms_frappe_app.agent_learning.write_limits import частота
 from lms_frappe_app.api import контракт, текущий_пользователь
 
 КОМАНДА_НЕДОСТУПНА = "team_not_available"
@@ -340,6 +341,7 @@ def invite_info(token: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def accept_invite(token: str) -> dict:
 	"""Вступает в организацию по ссылке и выбирает её пространство.
@@ -725,6 +727,7 @@ def organization_terms() -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def create_organization(title: str) -> dict:
 	"""Создаёт организацию: создатель — её администратор, её пространство выбрано.

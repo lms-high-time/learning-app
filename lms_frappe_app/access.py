@@ -9,7 +9,7 @@
 """
 
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import frappe
 from frappe import _
@@ -21,7 +21,7 @@ from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
 from frappe.website.utils import is_signup_disabled
 
-from lms_frappe_app.agent_learning.notices import почта_есть
+from lms_frappe_app.agent_learning.notices import почта_есть, ссылка
 from lms_frappe_app.passwords import проверить_пароль, сведения_пользователя
 from lms_frappe_app.agent_learning.oauth_client import отозвать_токены_пользователя
 
@@ -130,6 +130,30 @@ def _на_вход_со_вторым_фактором(куда: str | None) -> s
 	return f"/login?{urlencode({'redirect-to': куда})}" if куда else "/login"
 
 
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def accept_invitation(key: str) -> None:
+	"""Подмена `frappe.core.api.user_invitation.accept_invitation`: приглашение
+	принимается, а входит человек обычным входом (learning-services#691).
+
+	`Why:` Frappe, приняв приглашение пользователя, у которого уже есть
+	пароль, входит под ним сам (`login_as`), а вход на платформе — только
+	страницей входа или Google, с их проверками (`docs/process/auth-security.md`
+	в learning-services). Здесь принимает приглашение тот же код Frappe, но
+	без входа: флаг `in_test` у `_accept_invitation` ровно это и отключает. Без пароля человек идёт его задать (ссылка Frappe, дальше —
+	`update_password` выше), с паролем — на `/login` с возвратом туда, куда
+	вело приглашение.
+	"""
+	from frappe.core.api.user_invitation import _accept_invitation
+
+	_accept_invitation(key, True)
+	куда = frappe.local.response.get("location") or ""
+	if "/update-password?" in куда:
+		return
+	адрес = urlsplit(куда)
+	путь = адрес.path + (f"?{адрес.query}" if адрес.query else "")
+	frappe.local.response["location"] = f"/login?{urlencode({'redirect-to': путь or '/'})}"
+
+
 def _письмо_пароль_изменён(пользователь: str) -> None:
 	if not почта_есть():
 		return
@@ -138,7 +162,7 @@ def _письмо_пароль_изменён(пользователь: str) -> 
 		subject="Пароль изменён",
 		message=(
 			f"<p>Пароль от вашего аккаунта на {escape_html(_название())} изменён.</p>"
-			f'<p>Если это сделали не вы, <a href="{get_url("/login#forgot")}">задайте новый пароль</a>: '
+			f"<p>Если это сделали не вы, {ссылка(get_url('/login#forgot'), 'задайте новый пароль')}: "
 			"ссылка придёт на этот адрес.</p>"
 		),
 	)
@@ -247,7 +271,7 @@ def _письмо_аккаунт_есть(пользователь: str) -> None
 		message=(
 			"<p>На этот адрес пытались зарегистрироваться, но аккаунт с ним уже есть.</p>"
 			"<p>Если вы входили через Google — войдите так же. Или "
-			f'<a href="{reset_key_link}">задайте пароль</a> и входите по почте.</p>'
+			f"{ссылка(reset_key_link, 'задайте пароль')} и входите по почте.</p>"
 			"<p>Если регистрировались не вы, ничего делать не нужно: без этой ссылки "
 			"пароль не поменять.</p>"
 		),

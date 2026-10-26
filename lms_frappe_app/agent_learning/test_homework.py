@@ -6,7 +6,7 @@ import os
 from datetime import timedelta
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import get_datetime
 
 from lms_frappe_app.agent_learning import homework as домашка
@@ -380,7 +380,7 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		создать_домашку(self.урок)
 		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ):
 			домашка.сохранить(
-				self.ученик, self.урок, None, новые=[("a.txt", frappe.generate_hash().encode()), ("b.exe", b"two")]
+				self.ученик, self.урок, None, новые=[("a.txt", frappe.generate_hash().encode()), ("b.txt", b"two")]
 			)
 		[принятый] = self.принятые
 		self.assertFalse(self._на_диске(принятый))
@@ -393,7 +393,7 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		первая = домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", содержимое)])
 		прежний = frappe.get_doc("File", первая.files[0].file)
 		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ):
-			домашка.сохранить(self.ученик, self.урок, None, новые=[("copy.txt", содержимое), ("b.exe", b"two")])
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("copy.txt", содержимое), ("b.txt", b"two")])
 		self.assertTrue(self._на_диске(прежний))
 
 	def test_наш_отказ_при_вложении_не_становится_file_rejected(self):
@@ -421,13 +421,24 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		self.assertEqual(отказ.exception.подробности["file"], "a.txt")
 		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
 
+	def test_тип_файла_проверяется_до_записи(self):
+		создать_домашку(self.урок)
+		файлов = frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"})
+		with self.assertRaises(домашка.Отказ) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one"), ("b.pdf", b"MZ")])
+		self.assertEqual(отказ.exception.код, "file_type_not_allowed")
+		self.assertEqual(отказ.exception.подробности["file"], "b.pdf")
+		self.assertIn("pdf", отказ.exception.подробности["allowed"])
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
+		self.assertEqual(frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"}), файлов)
+
 	def test_отклонённый_файл_не_оставляет_новой_сдачи(self):
 		создать_домашку(self.урок)
 		файлов = frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"})
 		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one"), ("b.exe", b"two")])
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", b"one"), ("b.txt", b"two")])
 		self.assertEqual(отказ.exception.код, "file_rejected")
-		self.assertEqual(отказ.exception.подробности["file"], "b.exe")
+		self.assertEqual(отказ.exception.подробности["file"], "b.txt")
 		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
 		self.assertEqual(frappe.db.count("File", {"attached_to_doctype": "Agent Homework Submission"}), файлов)
 
@@ -436,7 +447,7 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		было = домашка.сохранить(self.ученик, self.урок, None, answer="первая", новые=[("a.txt", b"one")])
 		файлы_было = set(frappe.get_all("File", filters={"attached_to_name": было.name}, pluck="name"))
 		with self._отклонить_второй_файл(), self.assertRaises(домашка.Отказ):
-			домашка.сохранить(self.ученик, self.урок, None, answer="вторая", новые=[("b.txt", b"two"), ("c.exe", b"x")])
+			домашка.сохранить(self.ученик, self.урок, None, answer="вторая", новые=[("b.txt", b"two"), ("c.txt", b"x")])
 		стало = frappe.get_doc("Agent Homework Submission", было.name)
 		self.assertEqual((стало.version, стало.answer, len(стало.versions)), (1, "первая", 1))
 		self.assertEqual([с.file for с in стало.files], [с.file for с in было.files])
@@ -465,6 +476,16 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		])
 		self.assertEqual([ф["name"] for ф in описание["files"]], ["0.txt", "1.txt", "2.txt"])
 
+	def test_длина_текста_ответа(self):
+		создать_домашку(self.урок)
+		with self.assertRaises(домашка.Отказ) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, answer="я" * (домашка.ДЛИНА_ОТВЕТА + 1))
+		self.assertEqual(
+			(отказ.exception.код, отказ.exception.подробности["limit"]),
+			(домашка.ДЛИННЫЙ_ОТВЕТ, домашка.ДЛИНА_ОТВЕТА),
+		)
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
+
 	def test_предел_объёма_сохранения(self):
 		создать_домашку(self.урок)
 		# Размер файла пропускает оба, сумма — нет: отказ именно за объём сохранения.
@@ -473,10 +494,17 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		frappe.clear_document_cache("Agent Learning Settings", "Agent Learning Settings")
 		self.addCleanup(frappe.clear_document_cache, "Agent Learning Settings", "Agent Learning Settings")
 		self.addCleanup(frappe.db.set_single_value, "Agent Learning Settings", "artifact_file_max_mb", было)
-		большой = b"x" * (16 * 1024 * 1024)
+		большой = b"x" * (10 * 1024 * 1024)
 		with self.assertRaises(домашка.Отказ) as отказ:
-			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.bin", большой), ("b.bin", большой)])
+			домашка.сохранить(self.ученик, self.урок, None, новые=[("a.txt", большой), ("b.txt", большой)])
 		self.assertEqual(отказ.exception.код, "answer_too_large")
+
+
+class TestПределСохранения(UnitTestCase):
+	def test_сохранение_в_base64_влезает_в_тело_запроса(self):
+		"""Тело метода Frappe по умолчанию режет до 25 МБ (`frappe/app.py`), а MCP
+		шлёт файлы в base64."""
+		self.assertLess(домашка.ПРЕДЕЛ_СОХРАНЕНИЯ_МБ * 4 / 3, 25)
 
 
 class IntegrationTestHomeworkRequired(IntegrationTestCase):

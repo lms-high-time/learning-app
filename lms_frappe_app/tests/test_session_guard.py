@@ -4,6 +4,7 @@
 """Сессия браузера: только из cookie и не дольше срока (learning-services#666)."""
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -13,6 +14,8 @@ from werkzeug.exceptions import HTTPException
 from lms_frappe_app.session_guard import (
 	СРОК_СЕССИИ,
 	sid_в_параметрах,
+	завершить_истёкшую,
+	истекла,
 	конец_сессии,
 	не_ставить_cookie,
 	отклонить_sid_из_запроса,
@@ -94,7 +97,13 @@ class UnitTestSidInRequest(_ЗапросНаВремя, UnitTestCase):
 		до которых `before_request` не дошёл."""
 		перед = frappe.get_hooks("before_request")
 		свои = [хук for хук in перед if хук.startswith("lms_frappe_app.")]
-		self.assertEqual(свои[0], "lms_frappe_app.session_guard.отклонить_sid_из_запроса")
+		self.assertEqual(
+			свои[:2],
+			[
+				"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+				"lms_frappe_app.session_guard.завершить_истёкшую",
+			],
+		)
 		self.assertIn("lms_frappe_app.session_guard.не_ставить_cookie", frappe.get_hooks("after_request"))
 		self.assertIn(
 			"lms_frappe_app.session_guard.ограничить_срок_сессии", frappe.get_hooks("on_session_creation")
@@ -115,6 +124,17 @@ class UnitTestSessionEnd(UnitTestCase):
 		for что, (прежний, итог) in случаи.items():
 			with self.subTest(что):
 				self.assertEqual(datetime.fromisoformat(конец_сессии(прежний, СЕЙЧАС)), итог)
+
+	def test_истекла(self):
+		случаи = {
+			"срока нет": (None, False),
+			"срок впереди": ((СЕЙЧАС + СРОК_СЕССИИ).isoformat(), False),
+			"срок прошёл": (datetime(2026, 10, 1, tzinfo=UTC).isoformat(), True),
+			"без пояса — UTC": ("2026-10-22T11:59:00", True),
+		}
+		for что, (конец, итог) in случаи.items():
+			with self.subTest(что):
+				self.assertIs(истекла(конец, СЕЙЧАС), итог)
 
 
 class IntegrationTestSessionEnd(_ЗапросНаВремя, IntegrationTestCase):
@@ -141,3 +161,71 @@ class IntegrationTestSessionEnd(_ЗапросНаВремя, IntegrationTestCase
 		конец = datetime.fromisoformat(в_кэше)
 		self.assertLessEqual(до + СРОК_СЕССИИ, конец)
 		self.assertLessEqual(конец, datetime.now(tz=UTC) + СРОК_СЕССИИ)
+
+	def test_срок_сессии_из_базы(self):
+		"""Сессию, поднятую из базы без кэша, Frappe срока не сверял: истёкшая
+		жила ещё запрос и возвращалась в кэш (learning-services#691)."""
+		# Завершение сессии Frappe коммитит само, и пользователь пережил бы откат.
+		коммит = patch.object(frappe.db, "commit")
+		коммит.start()
+		self.addCleanup(коммит.stop)
+		from frappe.auth import CookieManager, LoginManager
+
+		пользователь = создать_ученика(f"session-{frappe.generate_hash(length=8)}@example.com")
+		set_request(method="POST", path="/")
+		frappe.local.cookie_manager = CookieManager()
+		frappe.local.login_manager = LoginManager()
+		frappe.local.login_manager.login_as(пользователь)
+		sid = frappe.session.sid
+		self.addCleanup(frappe.db.delete, "Sessions", {"sid": sid})
+
+		for что, конец, остаётся in (
+			("срок впереди", datetime.now(tz=UTC) + СРОК_СЕССИИ, True),
+			("срок прошёл", datetime(2026, 10, 1, tzinfo=UTC), False),
+		):
+			with self.subTest(что):
+				данные = frappe.parse_json(
+					frappe.db.get_value("Sessions", {"sid": sid}, "sessiondata", order_by=None)
+				)
+				данные.session_end = конец.isoformat()
+				frappe.db.set_value(
+					"Sessions", {"sid": sid}, "sessiondata", frappe.as_json(данные), update_modified=False
+				)
+				frappe.cache.hdel("session", sid)
+				set_request(method="GET", path="/", headers={"Cookie": f"sid={sid}"})
+				frappe.local.cookie_manager = CookieManager()
+				frappe.local.login_manager = LoginManager()
+				self.assertEqual(frappe.session.user, пользователь)
+
+				завершить_истёкшую()
+
+				self.assertEqual(frappe.session.user, пользователь if остаётся else "Guest")
+				в_базе = frappe.db.sql("select count(*) from `tabSessions` where sid = %s", sid)[0][0]
+				self.assertEqual(bool(в_базе), остаётся)
+				if not остаётся:
+					self.assertIsNone(frappe.cache.hget("session", sid))
+
+	def test_отключение_завершает_сессии(self):
+		"""Отключение аккаунта сессий браузера Frappe не завершало: `clear_sessions`
+		в `User.on_update` — только при смене типа (learning-services#691)."""
+		# Завершение сессии Frappe коммитит само, и пользователь пережил бы откат.
+		коммит = patch.object(frappe.db, "commit")
+		коммит.start()
+		self.addCleanup(коммит.stop)
+		from frappe.auth import CookieManager, LoginManager
+
+		пользователь = создать_ученика(f"session-{frappe.generate_hash(length=8)}@example.com")
+		set_request(method="POST", path="/")
+		frappe.local.cookie_manager = CookieManager()
+		frappe.local.login_manager = LoginManager()
+		frappe.local.login_manager.login_as(пользователь)
+		sid = frappe.session.sid
+		self.addCleanup(frappe.db.delete, "Sessions", {"sid": sid})
+		frappe.set_user("Administrator")
+
+		документ = frappe.get_doc("User", пользователь)
+		документ.enabled = 0
+		документ.save(ignore_permissions=True)
+
+		self.assertEqual(frappe.db.sql("select count(*) from `tabSessions` where sid = %s", sid)[0][0], 0)
+		self.assertIsNone(frappe.cache.hget("session", sid))

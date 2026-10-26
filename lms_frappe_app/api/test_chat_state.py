@@ -71,6 +71,7 @@ class IntegrationTestChatState(IntegrationTestCase):
 		for что, вызов in {
 			"читать": lambda: student.chat_state(чужое_занятие),
 			"писать": lambda: student.save_chat_state(чужое_занятие, СОСТОЯНИЕ, "1"),
+			"засчитать ход": lambda: student.count_lesson_turn(чужое_занятие),
 		}.items():
 			with self.subTest(что):
 				ответ = вызов()
@@ -83,6 +84,25 @@ class IntegrationTestChatState(IntegrationTestCase):
 
 		self.assertFalse(ответ["ok"])
 		self.assertEqual(ответ["error"]["code"], student.НЕВЕРНОЕ_СОСТОЯНИЕ)
+
+	def test_размер_состояния_и_длина_версии(self):
+		import json
+		from unittest.mock import patch
+
+		with patch.object(student, "ДЛИНА_СОСТОЯНИЯ", len(СОСТОЯНИЕ.encode()) - 1):
+			ответ = student.save_chat_state(self.занятие, СОСТОЯНИЕ, "1")
+		self.assertEqual(
+			(ответ["error"]["code"], ответ["error"]["limit"]),
+			(student.ДЛИННОЕ_СОСТОЯНИЕ, len(СОСТОЯНИЕ.encode()) - 1),
+		)
+		# Предел — в байтах: кириллица в пределе по знакам, но не по байтам.
+		кириллица = json.dumps({"текст": "я" * 50}, ensure_ascii=False)
+		with patch.object(student, "ДЛИНА_СОСТОЯНИЯ", len(кириллица) + 10):
+			ответ = student.save_chat_state(self.занятие, кириллица, "1")
+		self.assertEqual(ответ["error"]["code"], student.ДЛИННОЕ_СОСТОЯНИЕ)
+		ответ = student.save_chat_state(self.занятие, СОСТОЯНИЕ, "v" * (student.ДЛИНА_ВЕРСИИ + 1))
+		self.assertEqual(ответ["error"]["code"], student.НЕВЕРНОЕ_СОСТОЯНИЕ)
+		self.assertIsNone(student.chat_state(self.занятие)["data"]["state"])
 
 	def test_закрытое_занятие_принимает_состояние(self):
 		# Квиз закрывает занятие посреди хода, а состояние пишется после хода:

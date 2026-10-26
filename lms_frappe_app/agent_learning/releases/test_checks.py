@@ -86,6 +86,11 @@ class TestПроверкиРелиза(unittest.TestCase):
 				"quiz_correct",
 			),
 			("вопрос без ответа", lambda р: р["lessons"][0]["quiz"].update(answers={}), "quiz_correct"),
+			(
+				"тексты вариантов вопроса совпадают без регистра и пробелов",
+				lambda р: р["lessons"][0]["quiz"]["questions"][0]["options"][1].update(text=" первый "),
+				"duplicate_option_text",
+			),
 			("ключ раздела не ложится на документ", lambda р: _раздел_с_ключом(р, "Log-1"), "document_key"),
 			(
 				"поле раздела one совпадает с колонкой",

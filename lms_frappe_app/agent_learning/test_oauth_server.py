@@ -26,7 +26,9 @@ from oauthlib.oauth2 import (
 	OAuth2Error,
 )
 from oauthlib.oauth2.rfc6749.errors import MissingCodeChallengeError, UnsupportedCodeChallengeMethodError
+from werkzeug.exceptions import NotFound
 
+from lms_frappe_app import security_log
 from lms_frappe_app.agent_learning import cimd, oauth_server
 from lms_frappe_app.agent_learning.test_cimd import ДОКУМЕНТ as ДОКУМЕНТ_CLAUDE_CODE
 from lms_frappe_app.tests.sample_data import создать_ученика
@@ -200,9 +202,10 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.assertEqual(статус, 400)
 		self.assertNotIn("access_token", ответ)
 
-	def test_pkce_только_s256_и_обязателен_публичным(self):
-		"""Публичному клиенту вход держит только PKCE: прежде он был обязателен
-		лишь клиентам по адресу, а `plain` принимался (learning-services#665)."""
+	def test_pkce_только_s256_и_обязателен_всем(self):
+		"""PKCE прежде был обязателен лишь клиентам по адресу, а `plain`
+		принимался (learning-services#665); конфиденциальному клиенту он был
+		необязателен (learning-services#691, ASVS 10.4.6)."""
 		self._войти()
 		публичный = self._клиент()
 		конфиденциальный = self._клиент("Client Secret Post")
@@ -211,6 +214,11 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		for что, поправки, ошибка in (
 			("клиент по адресу без PKCE", {**без_pkce}, MissingCodeChallengeError),
 			("публичный без PKCE", {"client_id": публичный.name, **без_pkce}, MissingCodeChallengeError),
+			(
+				"конфиденциальный без PKCE",
+				{"client_id": конфиденциальный.name, **без_pkce},
+				MissingCodeChallengeError,
+			),
 			(
 				"plain у публичного",
 				{"client_id": публичный.name, **plain},
@@ -231,7 +239,7 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 				возврат = ЛОКАЛЬНЫЙ if "client_id" not in поправки else ВОЗВРАТ_АГЕНТА
 				self._авторизовать(возврат=возврат, **поправки)
 
-		with self.subTest("код с plain, выданный до learning-services#665"):
+		with self.subTest("код с plain в базе"):
 			код = self._авторизовать()
 			frappe.db.set_value(
 				"OAuth Authorization Code",
@@ -395,6 +403,28 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		self.assertEqual(метаданные["introspection_endpoint_auth_methods_supported"], ["client_secret_post"])
 		self.assertEqual(метаданные["issuer"], "https://cenda.test")
 
+	def test_конфигурация_openid_обещает_только_код(self):
+		"""Frappe обещал в `/.well-known/openid-configuration` ответы implicit и
+		hybrid, которые валидатор отклоняет (learning-services#665, #691)."""
+		self.addCleanup(setattr, frappe.local, "request", getattr(frappe.local, "request", None))
+		set_request(method="GET", path="/")
+		with mock.patch.object(oauth2, "is_oauth_metadata_enabled", return_value=False):
+			with self.assertRaises(NotFound):
+				oauth_server.openid_configuration()
+		with mock.patch.object(oauth2, "is_oauth_metadata_enabled", return_value=True):
+			конфигурация = json.loads(oauth_server.openid_configuration().get_data())
+		self.assertEqual(конфигурация["response_types_supported"], ["code"])
+		self.assertEqual(конфигурация["grant_types_supported"], ["authorization_code", "refresh_token"])
+		self.assertEqual(конфигурация["code_challenge_methods_supported"], ["S256"])
+		self.assertEqual(
+			конфигурация["token_endpoint_auth_methods_supported"], ["none", "client_secret_post"]
+		)
+		self.assertTrue(
+			конфигурация["authorization_endpoint"].endswith(
+				"/api/method/frappe.integrations.oauth2.authorize"
+			)
+		)
+
 	def test_только_код_авторизации_и_обновление(self):
 		"""Frappe разрешал всем клиентам вход по паролю — мимо экрана согласия —
 		и ответы implicit и hybrid (learning-services#665)."""
@@ -450,14 +480,9 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			),
 		):
 			with self.subTest(что):
-				код = self._авторизовать(
-					client_id=клиент.name,
-					возврат=ВОЗВРАТ_АГЕНТА,
-					code_challenge=None,
-					code_challenge_method=None,
-				)
+				код = self._авторизовать(client_id=клиент.name, возврат=ВОЗВРАТ_АГЕНТА)
 				статус, ответ = self._обменять(
-					код, **{"возврат": ВОЗВРАТ_АГЕНТА, "проверка": None, "client_id": клиент.name, **поля}
+					код, **{"возврат": ВОЗВРАТ_АГЕНТА, "client_id": клиент.name, **поля}
 				)
 				self.assertEqual(статус, ожидается, ответ)
 				if ожидается == 401:
@@ -529,9 +554,21 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			)
 
 		with self.subTest("ротация переносит семью"):
-			код, первый = self._вход_клиента(клиент)
-			статус, второй = обновить(первый)
+			with self.assertLogs(security_log.ИМЯ_ЖУРНАЛА, "INFO") as события:
+				код, первый = self._вход_клиента(клиент)
+				статус, второй = обновить(первый)
 			self.assertEqual(статус, 200, второй)
+			# Выдача и обновление — в журнале событий безопасности, без токенов и кода.
+			записи = [json.loads(з.getMessage()) for з in события.records]
+			self.assertEqual(
+				[(з["event"], з["user"], з["client"], з["grant"]) for з in записи],
+				[
+					("token_issued", frappe.session.user, клиент.name, "authorization_code"),
+					("token_refreshed", frappe.session.user, клиент.name, "refresh_token"),
+				],
+			)
+			for значение in (*первый.values(), *второй.values(), код):
+				self.assertNotIn(str(значение), " ".join(з.getMessage() for з in события.records))
 			self.assertEqual(self._статус(первый), "Revoked")
 			семья = frappe.db.get_value(
 				"OAuth Bearer Token",
@@ -561,7 +598,10 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			постарить(второй, minutes=-3)
 			постарить(третий, minutes=-2)
 			frappe.db.delete("OAuth Bearer Token", {"name": первый["access_token"]})
-			with mock.patch.object(frappe, "log_error") as журнал:
+			with (
+				mock.patch.object(frappe, "log_error") as журнал,
+				self.assertLogs(security_log.ИМЯ_ЖУРНАЛА, "INFO") as события,
+			):
 				статус, ответ = обновить(первый)
 			self.assertEqual((статус, ответ.get("error")), (400, "invalid_grant"))
 			self.assertEqual(self._статус(третий), "Revoked")
@@ -569,8 +609,11 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			self.assertEqual(запись["title"], "Повтор токена обновления — семья отозвана")
 			self.assertIn(клиент.name, запись["message"])
 			self.assertIn("после замены", запись["message"])
+			(событие,) = [json.loads(з.getMessage()) for з in события.records]
+			self.assertEqual((событие["event"], событие["client"]), ("token_reuse", клиент.name))
 			for значение in (*первый.values(), *третий.values(), код):
 				self.assertNotIn(str(значение), запись["message"])
+				self.assertNotIn(str(значение), события.records[0].getMessage())
 
 		with self.subTest("семья старше предельного срока"):
 			_, токен = self._вход_клиента(клиент)
@@ -731,6 +774,8 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			with self.subTest("действующий"):
 				статус, ответ = спросить(token=токен["access_token"], **свой)
 				self.assertEqual((статус, ответ["active"], ответ["client_id"]), (200, True, АДРЕС))
+				# Без `openid` — имя пользователя: по нему сервис знает, чей запрос.
+				self.assertEqual(ответ["sub"], frappe.session.user)
 				self.assertLess(abs(ответ["exp"] - (time.time() + токен["expires_in"])), 60)
 			for что, подсказка, ожидается in (
 				("токен обновления", "refresh_token", True),
@@ -749,14 +794,15 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 			self.assertEqual(статус, 401)
 			журнал.assert_called_once()
 
-		with self.subTest("без списка — любому конфиденциальному, предупреждение раз"):
+		with self.subTest("без списка — отказ всем, запись в журнал раз"):
 			frappe.cache.delete_value(oauth_server.КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ)
-			with mock.patch.object(frappe, "log_error") as журнал:
+			with (
+				mock.patch.dict(frappe.conf, {oauth_server.КЛЮЧ_ИНТРОСПЕКЦИИ: None}),
+				mock.patch.object(frappe, "log_error") as журнал,
+			):
 				for _ in range(2):
-					статус = спросить(
-						token=токен["access_token"], client_id=другой.name, client_secret=другой.client_secret
-					)[0]
-					self.assertEqual(статус, 200)
+					статус = спросить(token=токен["access_token"], **свой)[0]
+					self.assertEqual(статус, 401)
 			журнал.assert_called_once()
 
 		frappe.db.set_value(

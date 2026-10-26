@@ -92,7 +92,11 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 	def test_эталон_вопроса(self):
 		self.assertEqual(
 			dict(index.эталон(self.релиз, "l-1", "S1/l-1-D1")),
-			{"correct": "V1", "explanation": "Потому что так велит условие."},
+			{
+				"options": [{"key": "V1", "text": "Первый"}, {"key": "V2", "text": "Второй"}],
+				"correct": "V1",
+				"explanation": "Потому что так велит условие.",
+			},
 		)
 		self.assertIsNone(index.эталон(self.релиз, "l-2", "S1/l-1-D1"))
 		self.assertIsNone(index.эталон(self.релиз, "l-1", "S9/l-1-D1"))

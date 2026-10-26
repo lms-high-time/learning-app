@@ -194,6 +194,7 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 			student.save_chat_state(занятие, json.dumps({"messages": []}), "1"),
 		)
 		self.проверить("chat_state", student.chat_state(занятие))
+		self.проверить("count_lesson_turn", student.count_lesson_turn(занятие))
 		self.проверить(
 			"save_scenario_state",
 			student.save_scenario_state("profile", json.dumps({"messages": []}), "1"),
@@ -391,10 +392,10 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		квиз = student.request_quiz(занятие)
 		self.assertNotIn("correct", self.проверить("request_quiz", квиз))
 		попытка = квиз["data"]["attempt"]
-		первый = student.submit_answer(попытка, ВОПРОС_1, "V2", СЛОВА_УЧЕНИКА)
+		первый = student.submit_answer(попытка, ВОПРОС_1, "Второй", СЛОВА_УЧЕНИКА)
 		self.assertEqual(первый["data"]["verdict"], {"correct": False})
 		self.проверить("submit_answer", первый, СЛОВА_УЧЕНИКА)
-		итог = student.submit_answer(попытка, ВОПРОС_2, "V1", СЛОВА_УЧЕНИКА)
+		итог = student.submit_answer(попытка, ВОПРОС_2, "Первый", СЛОВА_УЧЕНИКА)
 		self.assertFalse(итог["data"]["result"]["passed"])
 		self.проверить("submit_answer", итог, СЛОВА_УЧЕНИКА)
 		self.проверить(
@@ -445,12 +446,12 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		выдано = self.проверить("начало попытки", начало)
 		self.assertNotIn("correct", выдано)
 
-		первый = self.ответить(попытка, ВОПРОС_1, "V2")
+		первый = self.ответить(попытка, ВОПРОС_1, "Второй")
 		self.assertEqual(первый["verdict"], {"correct": False})
 		self.assertNotIn("correct", json.dumps(первый["next_question"], ensure_ascii=False))
 		self.проверить("ответ на вопрос", первый)
 
-		второй = self.ответить(попытка, ВОПРОС_2, "V1")
+		второй = self.ответить(попытка, ВОПРОС_2, "Первый")
 		self.assertEqual(второй["verdict"], {"correct": False})
 		self.assertFalse(второй["result"]["passed"])
 		self.assertNotIn("explanations", второй["result"])
@@ -460,11 +461,11 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		"""F2: к верному ответу — сразу, к неверному — только в итоге сданной попытки."""
 		попытка = self.попытка()["attempt"]
 
-		неверный = self.ответить(попытка, ВОПРОС_1, "V2")
+		неверный = self.ответить(попытка, ВОПРОС_1, "Второй")
 		self.assertEqual(неверный["verdict"], {"correct": False})
 		self.проверить("неверный ответ", неверный)
 
-		верный = self.ответить(попытка, ВОПРОС_2, "V2")
+		верный = self.ответить(попытка, ВОПРОС_2, "Второй")
 		self.assertEqual(верный["verdict"], {"correct": True, "explanation": ПОЯСНЕНИЕ_ВТОРОГО})
 		итог = верный["result"]
 		self.assertTrue(итог["passed"])
@@ -486,7 +487,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		попытка не закончена, итога и `explanations` нет."""
 		попытка = self.попытка()["attempt"]
 
-		верный = self.ответить(попытка, ВОПРОС_1, "V1")
+		верный = self.ответить(попытка, ВОПРОС_1, "Первый")
 
 		self.assertEqual(верный["verdict"], {"correct": True, "explanation": ПОЯСНЕНИЕ_РЕЛИЗА})
 		self.assertFalse(верный["attempt_finished"])
@@ -515,7 +516,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 
 		новая = student.request_quiz(занятие)
-		отказ = student.submit_answer(прежняя, ВОПРОС_1, "V1", СЛОВА_УЧЕНИКА)
+		отказ = student.submit_answer(прежняя, ВОПРОС_1, "Первый", СЛОВА_УЧЕНИКА)
 
 		self.assertEqual(новая["data"]["previous_attempt_cancelled"]["attempt"], прежняя)
 		self.assertNotIn("correct", self.проверить("request_quiz после гонки", новая))
@@ -535,7 +536,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 	def test_ответы_попытки_по_релизу_не_читает_руководитель(self):
 		"""Итог попытки руководителю виден, ответы — нет: в записи ответа лежит эталон."""
 		попытка = self.попытка()["attempt"]
-		self.ответить(попытка, ВОПРОС_1, "V1")
+		self.ответить(попытка, ВОПРОС_1, "Первый")
 		[ответ] = frappe.get_all(ОТВЕТ, filters={"attempt": попытка}, pluck="name")
 
 		frappe.set_user(self.менеджер)

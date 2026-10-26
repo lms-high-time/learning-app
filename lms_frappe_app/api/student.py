@@ -39,6 +39,7 @@ from lms_frappe_app.agent_learning.artifacts.document import (
 from lms_frappe_app.agent_learning.artifacts.write import записать_блок
 # Функцией, а не модулем: параметр `files` в `submit_homework` затеняет имя.
 from lms_frappe_app.agent_learning.uploads import из_base64
+from lms_frappe_app.agent_learning.write_limits import частота
 from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.constants import (
@@ -124,6 +125,16 @@ def лимит_заметок() -> int:
 	return настройка("student_notes_limit", ЛИМИТ_ЗАМЕТОК)
 
 
+ДЛИННАЯ_ЗАМЕТКА = "note_too_long"
+ДЛИННЫЙ_КЛЮЧ = "note_key_too_long"
+#: Длина текста заметки. `Why:` заметки приходят агенту в каждом `start_lesson`
+#: (`history.notes`) — это память о человеке, а не конспект занятия; страница
+#: текста вмещает любой факт или наблюдение.
+ДЛИНА_ЗАМЕТКИ = 2000
+#: Длина ключа заметки — длина поля `Data` в базе.
+ДЛИНА_КЛЮЧА = 140
+
+
 ПУСТОЙ_РЕПОРТ = "report_text_required"
 
 
@@ -201,6 +212,7 @@ def list_catalog(space: str | None = None) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def enroll(course: str, space: str | None = None) -> dict:
 	"""Записывает ученика на курс из каталога пространства.
@@ -227,6 +239,7 @@ def enroll(course: str, space: str | None = None) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def notify_when_released(course: str, notify: bool | int | str = True) -> dict:
 	"""Подписывает ученика на письмо о выходе анонсированного курса — или,
@@ -316,6 +329,7 @@ def course_outline(course: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def start_lesson(
 	lesson: str | None = None,
@@ -618,6 +632,7 @@ def lesson_diagram(session: str, key: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def mark_goal(
 	session: str,
@@ -725,6 +740,7 @@ def _требовать_закрытые_пункты(run) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def remember(kind: str, key: str, text: str, session: str | None = None, new_only: bool = False) -> dict:
 	"""Записывает об ученике то, что пригодится на следующих занятиях.
@@ -762,6 +778,10 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		# и агент, ветвящийся по коду, стал бы подставлять другой вид вместо
 		# того, чтобы дать ключ (lms-platform#209).
 		raise Отказ(ПУСТОЙ_КЛЮЧ, "Ключ заметки обязателен", key=key)
+	if len(ключ) > ДЛИНА_КЛЮЧА:
+		raise Отказ(ДЛИННЫЙ_КЛЮЧ, "Ключ заметки слишком длинный", limit=ДЛИНА_КЛЮЧА, length=len(ключ))
+	if len(text or "") > ДЛИНА_ЗАМЕТКИ:
+		raise Отказ(ДЛИННАЯ_ЗАМЕТКА, "Заметка слишком длинная", limit=ДЛИНА_ЗАМЕТКИ, length=len(text))
 
 	существующая = frappe.db.exists(
 		"Agent Student Note", {"student": ученик, "course": курс, "note_key": ключ}
@@ -785,10 +805,12 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 	# конечным: прочие плюс ключи профиля.
 	профильный = вид == ЗАМЕТКА_ФАКТ and ключ in КЛЮЧИ_ПРОФИЛЯ
 	if not существующая and not профильный:
-		отбор = {"student": ученик, "course": курс, "kind": вид}
-		if вид == ЗАМЕТКА_ФАКТ:
-			отбор["note_key"] = ("not in", tuple(КЛЮЧИ_ПРОФИЛЯ))
-		сколько = frappe.db.count("Agent Student Note", отбор)
+		try:
+			_заблокировать_ученика(ученик)
+			сколько = _заметок_набора(ученик, курс, вид)
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			raise Отказ(ЗАНЯТО, "Заметки сейчас пишет другой запрос — повторите", key=ключ)
 		предел = лимит_заметок()
 		if сколько >= предел:
 			raise Отказ(
@@ -807,15 +829,19 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		запись.update(значения)
 		запись.save(ignore_permissions=True)
 	else:
-		запись = frappe.get_doc(
-			{
-				"doctype": "Agent Student Note",
-				"student": ученик,
-				"course": курс,
-				"note_key": ключ,
-				**значения,
-			}
-		).insert(ignore_permissions=True)
+		try:
+			запись = frappe.get_doc(
+				{
+					"doctype": "Agent Student Note",
+					"student": ученик,
+					"course": курс,
+					"note_key": ключ,
+					**значения,
+				}
+			).insert(ignore_permissions=True)
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			raise Отказ(ЗАНЯТО, "Заметки сейчас пишет другой запрос — повторите", key=ключ)
 
 	ответ = {"key": запись.note_key, "kind": kind}
 	# Запоминают посреди занятия — там же напоминание, где урок по целям (#409).
@@ -825,7 +851,35 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 	return ответ
 
 
+def _заблокировать_ученика(ученик: str) -> None:
+	"""Блокировка строки ученика до конца транзакции: записи одного ученика,
+	которые считают перед вставкой, идут по одной."""
+	frappe.db.get_value("User", ученик, "name", for_update=True)
+
+
+def _заметок_набора(ученик: str, курс: str, вид: str) -> int:
+	"""Сколько заметок в наборе — блокирующим чтением, после `_заблокировать_ученика`.
+
+	`Why:` предел считается по последнему зафиксированному, а не по снимку
+	начала транзакции — вызовы одного ученика друг за другом видят записи
+	друг друга. Гонку, которую ловит снимочная изоляция MariaDB, `remember`
+	отдаёт как `busy`.
+	"""
+	профильные = ""
+	значения: list = [ученик, курс, вид]
+	if вид == ЗАМЕТКА_ФАКТ:
+		профильные = " and note_key not in %s"
+		значения.append(tuple(КЛЮЧИ_ПРОФИЛЯ))
+	[(сколько,)] = frappe.db.sql(
+		"select count(*) from `tabAgent Student Note`"
+		f" where student = %s and course = %s and kind = %s{профильные} for update",
+		значения,
+	)
+	return сколько
+
+
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def forget(key: str, course: str | None = None) -> dict:
 	"""Удаляет заметку об ученике по ключу.
@@ -881,6 +935,7 @@ def my_spaces() -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def set_space(space: str) -> dict:
 	"""Выбирает пространство: организацию, в которой ученик состоит, или `personal`."""
@@ -1007,6 +1062,7 @@ def artifact(course: str, artifact: str | None = None, space: str | None = None)
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def update_artifact(
 	course: str,
@@ -1175,6 +1231,7 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("домашка")
 @контракт
 def submit_homework(
 	lesson: str,
@@ -1287,6 +1344,7 @@ def _сигналы_отметки(занятие, отметка: dict, ста�
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def report_issue(
 	session: str,
@@ -1349,6 +1407,7 @@ def report_issue(
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def complete_lesson(session: str) -> dict:
 	"""Закрывает урок курса из релиза, где квиз не обязателен: вопросов нет или политика его не требует.
@@ -1409,6 +1468,7 @@ def _после_закрытия(ученик: str, курс: str, lesson: str, 
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def request_quiz(session: str) -> dict:
 	"""Квиз урока курса из релиза по занятию: попытка и её первый неотвеченный вопрос (`release_quiz.начать`).
@@ -1431,6 +1491,7 @@ def request_quiz(session: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def submit_answer(
 	attempt: str, question: str, answer: str, student_words: str | None = None
@@ -1521,6 +1582,38 @@ def lesson_session(lesson: str) -> dict:
 	}
 
 
+ДЛИННОЕ_СОСТОЯНИЕ = "state_too_long"
+#: Предел состояния разговора, байт UTF-8. `Why:` состояние — весь разговор
+#: занятия с ответами инструментов, и сотня ходов урока укладывается в сотни
+#: килобайт; предел держит запись в разумных размерах и вчетверо ниже
+#: `max_allowed_packet` базы (16 МиБ), а не отрезает живой урок. Байты, а не
+#: знаки: кириллица — два байта на знак.
+ДЛИНА_СОСТОЯНИЯ = 4 * 1024 * 1024
+#: Длина версии состояния — длина поля `Data` в базе.
+ДЛИНА_ВЕРСИИ = 140
+
+
+def _проверить_состояние(state, version, **где) -> None:
+	"""Состояние разговора — строка JSON в пределе размера, версия — короткая строка."""
+	if not isinstance(state, str):
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", **где)
+	размер = len(state.encode())
+	if размер > ДЛИНА_СОСТОЯНИЯ:
+		raise Отказ(
+			ДЛИННОЕ_СОСТОЯНИЕ,
+			"Состояние разговора слишком большое",
+			limit=ДЛИНА_СОСТОЯНИЯ,
+			length=размер,
+			**где,
+		)
+	try:
+		json.loads(state)
+	except ValueError as сбой:
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", **где) from сбой
+	if not isinstance(version, str) or len(version) > ДЛИНА_ВЕРСИИ:
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, f"Версия состояния — строка до {ДЛИНА_ВЕРСИИ} знаков", **где)
+
+
 @frappe.whitelist()
 @контракт
 def chat_state(session: str) -> dict:
@@ -1541,6 +1634,7 @@ def chat_state(session: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("состояние")
 @контракт
 def save_chat_state(session: str, state: str, version: str) -> dict:
 	"""Замещает состояние разговора веб-чата по своему занятию.
@@ -1549,12 +1643,7 @@ def save_chat_state(session: str, state: str, version: str) -> dict:
 	состояние пишется после хода — отказ терял бы последний ответ агента.
 	"""
 	занятие = _своё_занятие(session)
-	try:
-		json.loads(state)
-	except (TypeError, ValueError) as сбой:
-		raise Отказ(
-			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", session=session
-		) from сбой
+	_проверить_состояние(state, version, session=session)
 
 	if frappe.db.exists("Agent Chat State", занятие.name):
 		frappe.db.set_value(
@@ -1575,9 +1664,10 @@ def save_chat_state(session: str, state: str, version: str) -> dict:
 #: Ключ сценария боковой панели: `profile`, позже `onboarding`. Короткое имя
 #: латиницей — им же сценарий называется в адресе панели.
 КЛЮЧ_СЦЕНАРИЯ = re.compile(r"[a-z][a-z0-9_-]{0,31}")
-#: Окно счёта ходов сценария — 24 часа от первого хода окна. `Why:` окно, а не
-#: счёт навсегда: лимит навсегда закрыл бы профиль ученику, который вернётся к
-#: нему через полгода.
+#: Окно счёта ходов — 24 часа от первого хода окна; общее для сценариев
+#: (`count_scenario_turn`) и уроков веб-чата (`count_lesson_turn`). `Why:` окно,
+#: а не счёт навсегда: лимит навсегда закрыл бы профиль или урок ученику,
+#: который вернётся к нему через полгода.
 ОКНО_ХОДОВ = timedelta(days=1)
 СЦЕНАРИЙ = "Agent Scenario State"
 
@@ -1605,22 +1695,21 @@ def scenario_state(key: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("состояние")
 @контракт
 def save_scenario_state(key: str, state: str, version: str) -> dict:
 	"""Замещает разговор сценария. Счётчик ходов не трогает — он свой."""
 	ключ = _ключ_сценария(key)
-	try:
-		json.loads(state)
-	except (TypeError, ValueError) as сбой:
-		raise Отказ(
-			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", key=key
-		) from сбой
+	_проверить_состояние(state, version, key=key)
 
-	_с_повтором_при_гонке(ключ, _сохранить_разговор, текущий_пользователь(), ключ, state, version)
+	_с_повтором_при_гонке(
+		_разговор_занят(ключ), _сохранить_разговор, текущий_пользователь(), ключ, state, version
+	)
 	return {"key": ключ, "version": version}
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def reset_scenario_state(key: str) -> dict:
 	"""Начинает разговор сценария заново.
@@ -1629,11 +1718,12 @@ def reset_scenario_state(key: str) -> dict:
 	кнопкой «начать заново».
 	"""
 	ключ = _ключ_сценария(key)
-	_с_повтором_при_гонке(ключ, _сбросить_разговор, текущий_пользователь(), ключ)
+	_с_повтором_при_гонке(_разговор_занят(ключ), _сбросить_разговор, текущий_пользователь(), ключ)
 	return {"key": ключ}
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def count_scenario_turn(key: str) -> dict:
 	"""Засчитывает ход сценария и отвечает, сколько их в текущем окне.
@@ -1644,7 +1734,7 @@ def count_scenario_turn(key: str) -> dict:
 	рестарт сервиса его не обнуляет.
 	"""
 	ключ = _ключ_сценария(key)
-	ходов = _с_повтором_при_гонке(ключ, _засчитать_ход, текущий_пользователь(), ключ)
+	ходов = _с_повтором_при_гонке(_разговор_занят(ключ), _засчитать_ход, текущий_пользователь(), ключ)
 	return {"key": ключ, "turns": ходов}
 
 
@@ -1658,8 +1748,57 @@ def _ключ_сценария(key) -> str:
 	return key
 
 
-def _с_повтором_при_гонке(ключ: str, действие, *args):
-	"""Запись разговора сценария — с одним повтором на новом снимке.
+@frappe.whitelist(methods=["POST"])
+@частота("запись")
+@контракт
+def count_lesson_turn(session: str) -> dict:
+	"""Засчитывает ход веб-чата по уроку своего занятия и отвечает, сколько их в текущем окне.
+
+	Лимит сверяет сервис чата, как у `count_scenario_turn`. Счёт — по
+	прохождению урока, а не по записи занятия. `Why:` занятий у урока бывает
+	несколько — новое заводится после квиза, закрытия без квиза и бездействия,
+	— а предел ходов даётся на урок. Окно — те же сутки, что у сценария.
+	"""
+	занятие = _своё_занятие(session)
+	ходов = _с_повтором_при_гонке(
+		Отказ(ЗАНЯТО, "Урок сейчас меняет другой запрос — повторите", session=session),
+		_засчитать_ход_урока,
+		занятие,
+	)
+	return {"session": занятие.name, "lesson": занятие.lesson, "turns": ходов}
+
+
+def _засчитать_ход_урока(занятие) -> int:
+	"""Ход в счёт прохождения урока занятия — одним `UPDATE`, без чтения перед записью.
+
+	`Why:` одна инструкция не теряет ход, засчитанный параллельно, и не
+	держит прохождение заблокированным дольше самой записи: его же
+	блокируют отметки пунктов и квиз.
+	"""
+	имя = занятие.run or _прохождение_занятия(занятие, _урок_занятия(занятие)[1]).name
+	сейчас = now_datetime()
+	# Порядок присваиваний важен: MariaDB вычисляет `SET` слева направо, и
+	# `web_turns` должен сверяться с прежним `web_turns_since`, а не с новым.
+	frappe.db.sql(
+		"""
+		UPDATE `tabAgent Lesson Run`
+		SET web_turns = IF(web_turns_since IS NULL OR web_turns_since <= %(граница)s, 1, web_turns + 1),
+			web_turns_since = IF(
+				web_turns_since IS NULL OR web_turns_since <= %(граница)s, %(сейчас)s, web_turns_since
+			)
+		WHERE name = %(имя)s
+		""",
+		{"имя": имя, "сейчас": сейчас, "граница": сейчас - ОКНО_ХОДОВ},
+	)
+	return frappe.db.get_value(прохождения.ПРОХОЖДЕНИЕ, имя, "web_turns")
+
+
+def _разговор_занят(ключ: str) -> Отказ:
+	return Отказ(ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ)
+
+
+def _с_повтором_при_гонке(отказ: Отказ, действие, *args):
+	"""Запись счёта или разговора — с одним повтором на новом снимке; не вышло — `отказ`.
 
 	`Why:` MariaDB стенда работает со снимочной изоляцией
 	(`innodb_snapshot_isolation`): два хода разом отдают второму
@@ -1680,9 +1819,7 @@ def _с_повтором_при_гонке(ключ: str, действие, *arg
 			frappe.db.rollback()
 			frappe.local.message_log = frappe.local.message_log[:сообщений]
 			if попытка:
-				raise Отказ(
-					ЗАНЯТО, "Разговор сценария сейчас меняет другой запрос — повторите", key=ключ
-				)
+				raise отказ
 
 
 def _засчитать_ход(ученик: str, ключ: str) -> int:

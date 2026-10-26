@@ -489,6 +489,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			student.save_chat_state(session=занятие, state=json.dumps({"messages": []}), version="1"),
 		)
 		self.сверить("student.chat_state", student.chat_state(session=занятие))
+		self.сверить("student.count_lesson_turn", student.count_lesson_turn(session=занятие))
 		self.сверить(
 			"student.save_scenario_state",
 			student.save_scenario_state(key="profile", state=json.dumps({"messages": []}), version="1"),
@@ -523,7 +524,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.сверить_отказ(
 			"student.submit_answer",
 			student.submit_answer(
-				attempt=прежняя, question=попытка["question"]["id"], answer="V1", student_words="Первый"
+				attempt=прежняя, question=попытка["question"]["id"], answer="Первый", student_words="Первый"
 			),
 			"quiz_attempt_cancelled",
 		)
@@ -532,7 +533,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			ответ = self.сверить(
 				"student.submit_answer",
 				student.submit_answer(
-					attempt=попытка["attempt"], question=вопрос["id"], answer="V1", student_words="Первый вариант"
+					attempt=попытка["attempt"], question=вопрос["id"], answer="Первый", student_words="Первый вариант"
 				),
 			)
 			вопрос = ответ["next_question"]

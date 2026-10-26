@@ -289,10 +289,10 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
-		student.submit_answer(попытка, "S1/l-1-D1", "V1", "слова ученика")
+		student.submit_answer(попытка, "S1/l-1-D1", "Первый", "слова ученика")
 		self._ворота(
 			"submit_answer",
-			lambda: student.submit_answer(попытка, "S2/l-1-D1", "V1", "слова ученика"),
+			lambda: student.submit_answer(попытка, "S2/l-1-D1", "Первый", "слова ученика"),
 			прогреть=False,
 		)
 
@@ -302,13 +302,13 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		ответ посреди попытки не касается."""
 		прогрев = self._попытка()
 		for номер in range(1, 5):
-			student.submit_answer(прогрев, f"S{номер}/l-1-D1", "V1", "слова ученика")
+			student.submit_answer(прогрев, f"S{номер}/l-1-D1", "Первый", "слова ученика")
 		попытка = self._попытка()
 		for номер in range(1, 4):
-			student.submit_answer(попытка, f"S{номер}/l-1-D1", "V1", "слова ученика")
+			student.submit_answer(попытка, f"S{номер}/l-1-D1", "Первый", "слова ученика")
 
 		def последний():
-			ответ = student.submit_answer(попытка, "S4/l-1-D1", "V1", "слова ученика")
+			ответ = student.submit_answer(попытка, "S4/l-1-D1", "Первый", "слова ученика")
 			self.assertTrue(ответ["data"]["result"]["passed"], ответ)
 
 		self._ворота("submit_answer_closing", последний, прогреть=False)
@@ -318,13 +318,13 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		обязательное задание. Прогрев — как у закрытия без задания."""
 		прогрев = self._попытка(с_домашкой=True)
 		for номер in range(1, 5):
-			student.submit_answer(прогрев, f"S{номер}/l-1-D1", "V1", "слова ученика")
+			student.submit_answer(прогрев, f"S{номер}/l-1-D1", "Первый", "слова ученика")
 		попытка = self._попытка(с_домашкой=True)
 		for номер in range(1, 4):
-			student.submit_answer(попытка, f"S{номер}/l-1-D1", "V1", "слова ученика")
+			student.submit_answer(попытка, f"S{номер}/l-1-D1", "Первый", "слова ученика")
 
 		def последний():
-			итог = student.submit_answer(попытка, "S4/l-1-D1", "V1", "слова ученика")["data"]["result"]
+			итог = student.submit_answer(попытка, "S4/l-1-D1", "Первый", "слова ученика")["data"]["result"]
 			self.assertTrue(итог["passed"], итог)
 			self.assertTrue(итог["homework"]["required"], итог["homework"])
 

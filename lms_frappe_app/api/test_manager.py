@@ -200,7 +200,7 @@ class IntegrationTestManagerAPI(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		зачислить_на_курс(self.ученик_а, курс)
 		начало = release_quiz.начать(run, создать_занятие(self.ученик_а, run.lesson, run=run.name))
-		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "V1", "слова ученика")
+		release_quiz.ответить(начало["attempt"], начало["question"]["id"], "Первый", "слова ученика")
 		with self.subTest("итог попытки квиза из релиза"):
 			frappe.set_user(self.менеджер)
 			данные = manager.student_detail(self.ученик_а)["data"]

@@ -354,7 +354,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.assertEqual(set(квиз), {"attempt", "question"})
 		вопрос = квиз["question"]
 		while вопрос:
-			ответ = self.данные(student.submit_answer(квиз["attempt"], вопрос["id"], "V1", "Первый"))
+			ответ = self.данные(student.submit_answer(квиз["attempt"], вопрос["id"], "Первый", "Первый"))
 			вопрос = ответ["next_question"]
 
 		self.assertTrue(ответ["attempt_finished"])
@@ -374,7 +374,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		старт = self.старт()
 		self.отметить_обязательные(старт["session"], старт["lesson_map"])
 		попытка = self.данные(student.request_quiz(старт["session"]))["attempt"]
-		провал = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "V2", "Второй"))["result"]
+		провал = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "Второй", "Второй"))["result"]
 		self.assertFalse(провал["passed"])
 		for ключ in ("next_lesson", "empty_blocks", "homework"):
 			self.assertNotIn(ключ, провал)
@@ -382,7 +382,7 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		frappe.db.set_value("Agent Quiz Attempt", попытка, "finished_at", "2000-01-01 00:00:00")
 		старт = self.старт()
 		попытка = self.данные(student.request_quiz(старт["session"]))["attempt"]
-		итог = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "V1", "Первый"))["result"]
+		итог = self.данные(student.submit_answer(попытка, "S1/l-1-D1", "Первый", "Первый"))["result"]
 
 		self.assertTrue(итог["passed"])
 		self.assertIsNone(итог["homework"], "у урока нет задания")
@@ -484,6 +484,6 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		квиз = self.данные(student.request_quiz(старт["session"]))
 		frappe.db.delete("LMS Enrollment", {"member": self.ученик, "course": self.курс})
 
-		self.отказ(student.submit_answer(квиз["attempt"], квиз["question"]["id"], "V1", "Первый"), "not_enrolled")
+		self.отказ(student.submit_answer(квиз["attempt"], квиз["question"]["id"], "Первый", "Первый"), "not_enrolled")
 
 		self.assertFalse(frappe.db.exists("Agent Quiz Answer", {"attempt": квиз["attempt"]}))
