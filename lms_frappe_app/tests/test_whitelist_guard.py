@@ -44,10 +44,10 @@ class TestСнятиеПодменённых(UnitTestCase):
 				self.assertNotIn(функция, frappe.guest_methods)
 		for исходное in frappe.get_hooks("override_whitelisted_methods"):
 			with self.subTest(подмена=исходное):
-				try:
-					цель = frappe.get_attr(frappe.override_whitelisted_method(исходное))
-				except Exception:
-					continue
+				путь = frappe.override_whitelisted_method(исходное)
+				цель = whitelist_guard._функция(путь)
+				if цель is None and not путь.startswith("lms_frappe_app."):
+					continue  # подмена другого приложения, которой нет в установке
 				self.assertIn(цель, frappe.whitelisted)
 
 	def test_недоступная_подмена_не_роняет_запрос(self):

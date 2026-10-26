@@ -16,8 +16,10 @@
 
 Чего не делает: не разделяет сайты. Реестр общий на процесс, и на bench с
 несколькими сайтами, где у части приложение не стоит, снятие задело бы и их:
-там исходный метод перестал бы отвечать. На стенде сайт один.
+там исходный метод перестал бы отвечать. На стенде cenda.app сайт один.
 """
+
+from collections.abc import Callable
 
 import frappe
 
@@ -43,12 +45,19 @@ def снять_подменённые(*args, **kwargs) -> None:
 		frappe.allowed_http_methods_for_whitelisted_func.pop(функция, None)
 
 
-def _функция(путь: str):
+def _функция(путь: str) -> Callable | None:
 	"""Функция по пути или `None`, если её в установке нет.
+
+	Путь без точки Frappe ищет в `frappe.handler` (`handler.get_attr`), так же
+	ищется и здесь.
 
 	`frappe.get_attr` отказывает через `frappe.throw`, и сообщение осталось бы в
 	ответе запроса — его убираем.
 	"""
+	if "." not in путь:
+		from frappe import handler
+
+		return getattr(handler, путь, None)
 	журнал = getattr(frappe.local, "message_log", None)
 	было = len(журнал) if журнал is not None else 0
 	try:
