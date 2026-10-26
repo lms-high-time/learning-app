@@ -154,6 +154,7 @@ permission_query_conditions = {
 	"Agent Student Note": f"{_права}.условие_заметки",
 	"Agent Student Artifact": f"{_права}.условие_артефакта",
 	"Agent Homework Submission": f"{_права}.условие_сдачи",
+	"Course Chapter": f"{_права}.условие_главы",
 }
 
 has_permission = {
@@ -166,6 +167,7 @@ has_permission = {
 	"Agent Student Note": f"{_права}.доступна_заметка",
 	"Agent Student Artifact": f"{_права}.доступен_артефакт",
 	"Agent Homework Submission": f"{_права}.доступна_сдача",
+	"Course Chapter": f"{_права}.доступна_глава",
 }
 
 # Роли ставятся вместе с приложением: без них права на DocType ссылались бы
@@ -465,9 +467,13 @@ before_tests = "lms_frappe_app.testing.before_tests"
 #
 # Specify custom mixins to extend the standard doctype controller.
 # Запись в группу Learning заводит зачисления на курсы группы под меткой,
-# только на шаге после проверок группы (learning-services#674).
+# только на шаге после проверок группы (learning-services#674). Адрес файла и
+# файлы сдачи домашки меняет только System Manager (learning-services#683).
+# Примесь, а не `doc_events`: проверка обязана идти до метода контроллера
+# `File`, который сразу трогает диск, — см. модуль.
 extend_doctype_class = {
 	"LMS Batch Enrollment": "lms_frappe_app.agent_learning.enrollment_guard.ЗаписьВГруппу",
+	"File": "lms_frappe_app.agent_learning.file_guard.ФайлПлатформы",
 }
 
 # Overriding Methods
@@ -477,6 +483,18 @@ _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 
 _прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
 _oauth = "lms_frappe_app.agent_learning.oauth_server"
+_чтения = "lms_frappe_app.agent_learning.learning_reads"
+_методы_чтения = (
+	"get_course_outline",
+	"get_lesson",
+	"get_courses",
+	"get_course_count",
+	"get_reviews",
+	"get_batches",
+	"get_batch_count",
+	"get_chart_data",
+	"get_course_completion_data",
+)
 _методы_oauth = ("authorize", "approve", "get_token", "revoke_token", "introspect_token", "register_client")
 
 # Урок закрывает занятие с агентом, а не время на странице урока —
@@ -523,6 +541,12 @@ override_whitelisted_methods = {
 		for модуль in ("frappe.integrations.oauth2_logins", "frappe.www.login")
 		for провайдер in ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
 	},
+	# Версии приложений — только пользователю Desk (learning-services#692).
+	"frappe.utils.change_log.get_versions": "lms_frappe_app.versions.get_versions",
+	# Оглавление, урок, отзывы, каталог и группы Learning — по правилу витрины,
+	# статистика — персоналу: обоснование в модуле (learning-services#692).
+	**{f"lms.lms.utils.{метод}": f"{_чтения}.{метод}" for метод in _методы_чтения},
+	"lms.lms.api.get_chart_details": f"{_чтения}.get_chart_details",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -546,6 +570,10 @@ override_whitelisted_methods = {
 # анонимное имя.
 ignore_links_on_delete = ["Agent Consent"]
 
+# Страница SPA Learning: мета-теги курса и группы вне витрины и версия Frappe —
+# по правилу витрины (learning-services#692).
+update_website_context = ["lms_frappe_app.agent_learning.learning_reads.страница_learning"]
+
 # Request Events
 # ----------------
 # Без явного согласия с документами страницы платформы ведут на экран
@@ -557,9 +585,14 @@ ignore_links_on_delete = ["Agent Consent"]
 #
 # Абсолютный срок сессии, поднятой из базы, — следом: Frappe сверяет его
 # только у сессии из кэша (learning-services#691).
+#
+# Оригиналы подменённых методов снимаются из реестра whitelisted на каждом
+# запросе и задаче: иначе до них доходят под другим путём модуля
+# (learning-services#692).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
 	"lms_frappe_app.session_guard.завершить_истёкшую",
+	"lms_frappe_app.whitelist_guard.снять_подменённые",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 # Выход очищает данные сайта в браузере, приватные файлы не кэшируются
@@ -583,7 +616,7 @@ on_session_creation = "lms_frappe_app.session_guard.ограничить_сро�
 
 # Job Events
 # ----------
-# before_job = ["lms_frappe_app.utils.before_job"]
+before_job = ["lms_frappe_app.whitelist_guard.снять_подменённые"]
 # after_job = ["lms_frappe_app.utils.after_job"]
 
 # User Data Protection

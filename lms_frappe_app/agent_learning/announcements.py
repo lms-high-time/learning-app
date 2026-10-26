@@ -31,6 +31,21 @@ def анонсирован(course: str) -> bool:
 	return bool(сведения and сведения.published and сведения.upcoming)
 
 
+def на_витрине(course: str) -> bool:
+	"""Опубликован и не анонс: состав курса — главы, уроки, зачины — открыт и
+	тому, кто на него не записан. Тому, кто записан, курс открыт всегда."""
+	сведения = frappe.db.get_value("LMS Course", course, ["published", "upcoming"], as_dict=True)
+	return bool(сведения and сведения.published and not сведения.upcoming)
+
+
+def условие_витрины(колонка_курса: str) -> str:
+	"""`на_витрине` условием SQL на колонку со ссылкой на курс — для списков."""
+	return (
+		f"{колонка_курса} in (select `name` from `tabLMS Course`"
+		" where `published` = 1 and ifnull(`upcoming`, 0) = 0)"
+	)
+
+
 def анонсы(courses: list[str]) -> set[str]:
 	"""Какие из курсов — анонсы, одним запросом на весь список."""
 	if not courses:
