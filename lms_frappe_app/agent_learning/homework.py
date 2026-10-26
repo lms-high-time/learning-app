@@ -29,6 +29,7 @@ from lms_frappe_app.agent_learning.constants import (
 )
 from lms_frappe_app.agent_learning.errors import ЗАНЯТО, Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса, уроки_по_главам
+from lms_frappe_app.agent_learning.write_limits import КВОТА_ПРОВЕРЕНА, проверить_квоту
 
 ЗАДАНИЕ = "Agent Lesson Homework"
 СДАЧА = "Agent Homework Submission"
@@ -41,12 +42,18 @@ from lms_frappe_app.agent_learning.structure import уроки_курса, ур�
 #: 18 МБ файлов — около 24 МБ тела. Больше — 413 до метода вместо отказа.
 ПРЕДЕЛ_СОХРАНЕНИЯ_МБ = 18
 
+#: Длина текста ответа, знаков. `Why:` каждое сохранение кладёт текст ещё и в
+#: версию, а длинный отчёт сдают файлом; два десятка тысяч знаков — около
+#: десяти страниц.
+ДЛИНА_ОТВЕТА = 20000
+
 ЗАДАНИЯ_НЕТ = "no_homework"
 ПУСТОЙ_ОТВЕТ = "empty_answer"
 НЕ_ТОТ_ВИД_ОТВЕТА = "answer_mode"
 СЛИШКОМ_МНОГО_ФАЙЛОВ = "too_many_files"
 ФАЙЛ_ВЕЛИК = "file_too_large"
 ОТВЕТ_ВЕЛИК = "answer_too_large"
+ДЛИННЫЙ_ОТВЕТ = "answer_text_too_long"
 ФАЙЛ_ОТКЛОНЁН = "file_rejected"
 ТИП_НЕ_ПРИНЯТ = "file_type_not_allowed"
 ФАЙЛ_ПУСТ = "file_missing"
@@ -420,6 +427,10 @@ def сохранить(
 		raise Отказ(НЕ_ТОТ_ВИД_ОТВЕТА, "Это задание сдаётся файлами", answer_mode=задание.answer_mode)
 	if новые and not файлы_можно:
 		raise Отказ(НЕ_ТОТ_ВИД_ОТВЕТА, "Это задание сдаётся текстом", answer_mode=задание.answer_mode)
+	if answer and len(answer) > ДЛИНА_ОТВЕТА:
+		raise Отказ(
+			ДЛИННЫЙ_ОТВЕТ, "Текст ответа слишком длинный", limit=ДЛИНА_ОТВЕТА, length=len(answer)
+		)
 	предел = файлы_платформы.предел_байт()
 	for имя_файла, данные in новые:
 		# Why: пустой или битый base64 приходит пустыми байтами — выброшенный
@@ -443,6 +454,7 @@ def сохранить(
 			f"За одно сохранение — не больше {ПРЕДЕЛ_СОХРАНЕНИЯ_МБ} МБ файлов",
 			limit_mb=ПРЕДЕЛ_СОХРАНЕНИЯ_МБ,
 		)
+	проверить_квоту(ученик, sum(len(данные) for _, данные in новые))
 
 	сейчас = now_datetime()
 	if имя:
@@ -518,6 +530,8 @@ def _вложить_файл(документ, имя: str, данные: bytes,
 	диск раньше, чем вставка может упасть.
 	"""
 	файл = файлы_платформы.новый_файл(документ, имя or "file", данные)
+	# Квоту всего сохранения `сохранить` проверил до первой записи.
+	файл.flags[КВОТА_ПРОВЕРЕНА] = True
 	вложенные.append(файл)
 	return файл.insert(ignore_permissions=True)
 

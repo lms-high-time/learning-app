@@ -348,6 +348,12 @@ doc_events = {
 		"on_update": "lms_frappe_app.agent_learning.oauth_client.отозвать_при_смене_доступа",
 		"on_trash": "lms_frappe_app.agent_learning.oauth_client.удалить_токены",
 	},
+	# Квота места под файлы ученика — и на загрузки мимо методов платформы
+	# (`upload_file` Frappe), learning-services#684.
+	"File": {
+		"before_insert": "lms_frappe_app.agent_learning.write_limits.проверить_файл",
+		"validate": "lms_frappe_app.agent_learning.write_limits.закрепить_размер",
+	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
 	"LMS Course": {
