@@ -146,13 +146,13 @@ class IntegrationTestFileGuard(IntegrationTestCase):
 			"закодированная точка": f"/private/files/%2e/{имя}",
 		}
 		for что, вариант in варианты.items():
-			with self.subTest(что):
-				with self.assertRaises(frappe.PermissionError):
-					self._от_соседа(
-						lambda: frappe.get_doc(
-							{"doctype": "File", "file_name": имя, "file_url": вариант, "is_private": 1}
-						).insert()
-					)
+			for с_содержимым in (False, True):
+				with self.subTest(что, с_содержимым=с_содержимым):
+					запись = {"doctype": "File", "file_name": имя, "file_url": вариант, "is_private": 1}
+					if с_содержимым:
+						запись["content"] = frappe.generate_hash().encode()
+					with self.assertRaises(frappe.PermissionError):
+						self._от_соседа(lambda: frappe.get_doc(запись).insert())
 		self.assertEqual(frappe.db.count("File", {"owner": self.сосед}), 0)
 
 	def test_свой_файл_вставляется_по_своему_адресу(self):

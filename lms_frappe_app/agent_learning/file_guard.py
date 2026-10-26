@@ -27,6 +27,7 @@ from __future__ import annotations
 import frappe
 import mimetypes
 import posixpath
+import re
 from urllib.parse import unquote
 
 from frappe import _
@@ -49,10 +50,24 @@ def _отказать(сообщение: str) -> None:
 НЕИЗМЕННЫЕ = ("file_url", "thumbnail_url", "content_hash", "is_private")
 
 
+#: Закодированные `.`, `/` и `%` — части пути, которых в имени файла не бывает.
+_ЗАКОДИРОВАННЫЙ_ПУТЬ = re.compile(r"%(2e|2f|25|5c)", re.IGNORECASE)
+
+
 def _адрес_канонический(адрес: str) -> bool:
-	"""Локальный адрес без `.`/`..`, двойных `/` и закодированных символов пути."""
+	"""Локальный адрес без `.`/`..`, двойных `/` и закодированных частей пути."""
+	if _ЗАКОДИРОВАННЫЙ_ПУТЬ.search(адрес):
+		return False
 	раскрытый = unquote(адрес)
-	return раскрытый == адрес and "//" not in адрес and posixpath.normpath(адрес) == адрес
+	return "//" not in раскрытый and posixpath.normpath(раскрытый) == раскрытый
+
+
+def _изменены_неизменные(файл, прежний) -> bool:
+	if frappe.utils.cint(файл.is_private) != frappe.utils.cint(прежний.is_private):
+		return True
+	return any(
+		(файл.get(поле) or "") != (прежний.get(поле) or "") for поле in НЕИЗМЕННЫЕ if поле != "is_private"
+	)
 
 
 def _проверить_адрес(файл) -> None:
@@ -94,7 +109,7 @@ def _проверить_расширение(файл) -> None:
 	тип = mimetypes.guess_type(имя)[0]
 	if тип and mimetypes.guess_extension(тип):
 		return
-	if расширение(имя) not in {р.lower() for р in разрешённые}:
+	if расширение(имя) and расширение(имя) not in {р.lower() for р in разрешённые}:
 		_отказать(_("Такой тип файла загрузить нельзя"))
 
 
@@ -107,8 +122,8 @@ class ФайлПлатформы:
 				_отказать(_("Файлы сдачи домашки добавляет только её сохранение"))
 			if self.thumbnail_url or self.content_hash:
 				_отказать(_("Миниатюру и отпечаток файла задаёт платформа"))
-			if not self.content:
-				_проверить_адрес(self)
+			# И с содержимым: дедупликация Frappe оставляет адрес из запроса.
+			_проверить_адрес(self)
 			_проверить_расширение(self)
 		super().before_insert()
 
@@ -116,7 +131,7 @@ class ФайлПлатформы:
 		# Вставку проверяет `before_insert`; `in_insert` Frappe ставит до проверок.
 		прежний = None if self.flags.in_insert else self.get_doc_before_save()
 		if прежний is not None and _без_роли():
-			if any(str(self.get(поле) or "") != str(прежний.get(поле) or "") for поле in НЕИЗМЕННЫЕ):
+			if _изменены_неизменные(self, прежний):
 				_отказать(_("Адрес, миниатюра и приватность файла не меняются"))
 			if СДАЧА in (self.attached_to_doctype, прежний.attached_to_doctype):
 				_отказать(_("Файлы сдачи домашки не правятся"))
