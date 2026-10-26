@@ -46,10 +46,17 @@ def _webp(данные: bytes) -> bool:
 	return данные[:4] == b"RIFF" and данные[8:12] == b"WEBP"
 
 
+#: Бренды контейнера HEIF. `Why:` основной бренд у снимков разных камер разный
+#: (`MiHE` и др.), а совместимые бренды в `ftyp` называют HEIF явно.
+БРЕНДЫ_HEIF = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"}
+
+
 def _heif(данные: bytes) -> bool:
-	return данные[4:8] == b"ftyp" and данные[8:12] in {
-		b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"
-	}
+	if данные[4:8] != b"ftyp":
+		return False
+	размер = int.from_bytes(данные[:4], "big")
+	бренды = [данные[8:12]] + [данные[i : i + 4] for i in range(16, min(размер, 64), 4)]
+	return any(бренд in БРЕНДЫ_HEIF for бренд in бренды)
 
 
 def _архив(данные: bytes) -> zipfile.ZipFile | None:
@@ -57,7 +64,8 @@ def _архив(данные: bytes) -> zipfile.ZipFile | None:
 		return None
 	try:
 		return zipfile.ZipFile(io.BytesIO(данные))
-	except (zipfile.BadZipFile, ValueError, OSError):
+	except Exception:
+		# Битый, зашифрованный или с неизвестным сжатием архив — не тот тип.
 		return None
 
 
@@ -69,7 +77,10 @@ def _ooxml(папка: str) -> Callable[[bytes], bool]:
 		if архив is None:
 			return False
 		имена = архив.namelist()
-		return "[Content_Types].xml" in имена and any(имя.startswith(папка) for имя in имена)
+		if "[Content_Types].xml" not in имена or not any(имя.startswith(папка) for имя in имена):
+			return False
+		# Документ с макросами не принимается и под расширением без «m».
+		return not any(имя.lower().endswith("vbaproject.bin") for имя in имена)
 
 	return проверка
 
@@ -82,8 +93,11 @@ def _odf(тип: str) -> Callable[[bytes], bool]:
 		if архив is None:
 			return False
 		try:
-			return архив.read("mimetype").strip() == тип.encode()
-		except (KeyError, zipfile.BadZipFile, ValueError, OSError):
+			# Только начало: заявленный размер члена архива не проверяется
+			# до чтения, а `read` распаковал бы его целиком.
+			with архив.open("mimetype") as член:
+				return член.read(128).strip() == тип.encode()
+		except Exception:
 			return False
 
 	return проверка
@@ -92,7 +106,13 @@ def _odf(тип: str) -> Callable[[bytes], bool]:
 def _текст(данные: bytes) -> bool:
 	# Кодировку не угадываем: CSV из Excel бывает и в cp1251. Нулевой байт —
 	# признак двоичного файла, кроме UTF-16 с меткой порядка байтов.
-	return данные.startswith((b"\xff\xfe", b"\xfe\xff")) or b"\x00" not in данные
+	if данные.startswith((b"\xff\xfe", b"\xfe\xff")):
+		try:
+			данные.decode("utf-16")
+		except UnicodeDecodeError:
+			return False
+		return True
+	return b"\x00" not in данные
 
 
 #: Какие файлы принимает сдача домашки и как сверяется содержимое: расширение
