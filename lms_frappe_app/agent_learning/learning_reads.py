@@ -159,8 +159,8 @@ def страница_learning(context) -> None:
 		context.meta = frappe._dict(
 			title=context.get("title"),
 			image=context.get("favicon"),
-			description=frappe.db.get_single_value("LMS Settings", "meta_description"),
-			keywords=frappe.db.get_single_value("LMS Settings", "meta_keywords"),
+			description=frappe.db.get_single_value("LMS Settings", "meta_description") or "",
+			keywords=frappe.db.get_single_value("LMS Settings", "meta_keywords") or "",
 		)
 
 
