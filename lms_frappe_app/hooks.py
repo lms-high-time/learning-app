@@ -169,12 +169,17 @@ has_permission = {
 }
 
 # Роли ставятся вместе с приложением: без них права на DocType ссылались бы
-# на несуществующие роли, и Frappe молча отдал бы доступ никому.
+# на несуществующие роли, и Frappe молча отдал бы доступ никому. Release
+# Publisher — служебная учётка конвейера курсов (learning-services#685).
 fixtures = [
 	{
 		"dt": "Role",
 		"filters": [
-			["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]
+			[
+				"name",
+				"in",
+				["Organization Manager", "Organization Admin", "Agent Service", "Release Publisher"],
+			]
 		],
 	},
 	# Зачин урока и обещание курса адресованы ученику, а директивы — агенту,
@@ -238,6 +243,8 @@ scheduler_events = {
 		"lms_frappe_app.agent_learning.notices.напомнить_о_сроках",
 		# Новые аккаунты без согласия за 30 дней — удаляются (learning-services#624).
 		"lms_frappe_app.agent_learning.consent.удалить_без_согласия",
+		# Записи согласия удалённых аккаунтов — через 3 года (learning-services#689).
+		"lms_frappe_app.agent_learning.consent.удалить_старые_согласия",
 	],
 }
 
@@ -408,6 +415,20 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 	},
+	# Сроки журналов — из политики конфиденциальности, правкой в Desk не
+	# меняются; ежедневная чистка Frappe сохраняет настройки перед удалением
+	# старых записей и тоже проходит через этот хук (learning-services#689).
+	"Log Settings": {
+		"validate": "lms_frappe_app.personal_data.закрепить_сроки_журналов",
+	},
+	# Копия данных и удаление аккаунта — по письму, процедурой приложения;
+	# штатные запросы Frappe закрыты (learning-services#689).
+	"Personal Data Deletion Request": {
+		"before_insert": "lms_frappe_app.personal_data.отказать_штатному_запросу",
+	},
+	"Personal Data Download Request": {
+		"before_insert": "lms_frappe_app.personal_data.отказать_штатному_запросу",
+	},
 }
 
 # Scheduled Tasks
@@ -537,13 +558,22 @@ before_request = [
 	"lms_frappe_app.session_guard.завершить_истёкшую",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
-after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
+# Выход очищает данные сайта в браузере, приватные файлы не кэшируются
+# (learning-services#688).
+after_request = [
+	"lms_frappe_app.session_guard.не_ставить_cookie",
+	"lms_frappe_app.browser_data.заголовки_ответа",
+]
 
 # Session Events
 # --------------
 # Выход из Cenda отзывает токены веб-чата: у чата свой вход, и без этого он
-# переживал «Выйти» (learning-services#656).
-on_logout = "lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе"
+# переживал «Выйти» (learning-services#656). Второй хук запоминает, кто
+# вышел, — для очистки данных сайта в браузере (learning-services#688).
+on_logout = [
+	"lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе",
+	"lms_frappe_app.browser_data.запомнить_выход",
+]
 # Абсолютный срок сессии от входа (learning-services#666).
 on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
 
@@ -554,27 +584,69 @@ on_session_creation = "lms_frappe_app.session_guard.ограничить_сро�
 
 # User Data Protection
 # --------------------
+# Реестр данных пользователя (learning-services#689): поля доктайпов
+# приложения, Learning и Frappe, в которых стоит пользователь. Его читают выгрузка
+# Frappe (`Personal Data Download Request`) и процедура приложения
+# `lms_frappe_app.personal_data` — выгрузка и удаление данных ученика.
+# Ключ `mode` — её: `delete` — запись удаляется (строка дочерней таблицы —
+# из своей таблицы), `anonymize` — поле очищается, запись остаётся,
+# `keep` — запись хранится своим сроком. Записи, которые держатся за запись
+# ученика ссылкой, а не полем пользователя, — `personal_data.ЗАВИСИМЫЕ`.
+# Классификация данных и сроки — `docs/process/data-classification.md` в
+# learning-services.
+#
+# Новое поле со ссылкой на пользователя — строка здесь или в
+# `personal_data.НЕ_ДАННЫЕ_УЧЕНИКА`: иначе ворота
+# `tests/test_personal_data.py` красные. `Why:` поле вне реестра процедура не
+# видит — запись осталась бы после удаления, а удаление аккаунта отказало бы
+# по ссылке.
 
-# user_data_fields = [
-# 	{
-# 		"doctype": "{doctype_1}",
-# 		"filter_by": "{filter_by}",
-# 		"redact_fields": ["{field_1}", "{field_2}"],
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_2}",
-# 		"filter_by": "{filter_by}",
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_3}",
-# 		"strict": False,
-# 	},
-# 	{
-# 		"doctype": "{doctype_4}"
-# 	}
-# ]
+_удалить = "delete"
+_обезличить = "anonymize"
+
+user_data_fields = [
+	# Учебные данные ученика
+	{"doctype": "Agent Chat State", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Scenario State", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Student Note", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Student Note", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Student Artifact", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Student Artifact", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Learning Session", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Learning Session", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Lesson Run", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Lesson Run", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Quiz Attempt", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Quiz Attempt", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Quiz Event", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Quiz Event", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Homework Submission", "filter_by": "member", "mode": _удалить},
+	{"doctype": "Agent Homework Submission", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Homework Notice", "filter_by": "recipient", "mode": _удалить},
+	# Команда: членство и назначения — данные человека, сама команда остаётся
+	{"doctype": "Organization Membership", "filter_by": "user", "mode": _удалить},
+	{"doctype": "Allocation Notice", "filter_by": "user", "mode": _удалить},
+	{"doctype": "Course Allocation Member", "filter_by": "user", "mode": _удалить},
+	{"doctype": "Learning Organization", "filter_by": "created_by", "mode": _обезличить},
+	# Кто вернул или принял чужую домашку — куратор; след проверки остаётся без имени
+	{"doctype": "Agent Homework Event", "filter_by": "by_user", "mode": _обезличить},
+	# Доказательство согласия — 3 года после удаления аккаунта (`consent.удалить_старые_согласия`)
+	{"doctype": "Agent Consent", "filter_by": "user", "mode": "keep"},
+	# Learning: запись на курс, прогресс, программы и то, что пишут его страницы урока
+	{"doctype": "LMS Enrollment", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Course Progress", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Course Interest", "filter_by": "user", "mode": _удалить},
+	{"doctype": "LMS Program Member", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Quiz Submission", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Lesson Note", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Video Watch Duration", "filter_by": "member", "mode": _удалить},
+	# Frappe: обсуждения уроков, уведомления, запросы на копию данных
+	{"doctype": "Discussion Topic", "filter_by": "owner", "mode": _удалить},
+	{"doctype": "Discussion Reply", "filter_by": "owner", "mode": _удалить},
+	{"doctype": "Notification Log", "filter_by": "for_user", "mode": _удалить},
+	{"doctype": "Notification Log", "filter_by": "from_user", "mode": _обезличить},
+	{"doctype": "Personal Data Download Request", "filter_by": "user", "mode": _удалить},
+]
 
 # Authentication and authorization
 # --------------------------------

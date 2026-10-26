@@ -1,5 +1,7 @@
 {% extends "templates/web.html" %}
 
+{% block title %}{{ title | e }}{% endblock %}
+
 {% block page_content %}
 {# Сюда не доходят: get_context переводит в SPA. Шаблон нужен Frappe, чтобы маршрут существовал. #}
 <p><a href="/lms/documents">Мои документы</a></p>

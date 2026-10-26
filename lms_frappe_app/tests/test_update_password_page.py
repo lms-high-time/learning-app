@@ -3,6 +3,8 @@
 
 """Страница «Задайте пароль» вместо страницы Frappe (learning-services#460)."""
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import get_html_for_route
@@ -65,3 +67,14 @@ class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
 		self.assertIn("Ссылка уже использована или недействительна", html)
 		self.assertIn("frappe.core.doctype.user.user.reset_password", html)
 		self.assertNotIn("выдуманный", html)
+
+	def test_логотип_выводится_экранированным(self):
+		"""Адрес логотипа задаётся в настройках сайта и выводится через `| e`."""
+		frappe.form_dict.key = "выдуманный"
+		адрес = '/files/logo.png" data-x="1'
+
+		with patch("lms_frappe_app.www.update_password.get_app_logo", return_value=адрес):
+			html = get_html_for_route("update-password")
+
+		self.assertIn('src="/files/logo.png&#34; data-x=&#34;1"', html)
+		self.assertNotIn(адрес, html)
