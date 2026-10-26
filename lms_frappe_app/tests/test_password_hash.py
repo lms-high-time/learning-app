@@ -4,6 +4,8 @@
 """Хеш пароля — argon2id, прежний pbkdf2 перехешируется при входе
 (learning-services#676)."""
 
+from unittest.mock import patch
+
 import frappe
 import frappe.utils.password
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -41,6 +43,15 @@ class UnitTestPasswordHashSettings(UnitTestCase):
 		self.assertTrue(контекст.verify(PASSWORD, PBKDF2_FRAPPE))
 		self.assertTrue(контекст.needs_update(PBKDF2_FRAPPE))
 
+	def test_сбой_проверки_argon2_как_её_отсутствие(self):
+		"""Исключение из проверки backend не роняет запрос: работает pbkdf2."""
+		with (
+			patch.object(password_hash.argon2, "has_backend", side_effect=AttributeError("__version__")),
+			patch.object(frappe, "log_error") as журнал,
+		):
+			self.assertFalse(password_hash._есть_argon2())
+		журнал.assert_called_once()
+
 	def test_хуки(self):
 		"""Контекст настраивается до проверки пароля при входе, до смены пароля в
 		веб-запросе и до фоновой задачи."""
@@ -70,13 +81,7 @@ class IntegrationTestPasswordRehash(IntegrationTestCase):
 		сохранённый до перехода, и пишет argon2id; новый пароль — тоже argon2id."""
 		from frappe.auth import CookieManager, LoginManager
 
-		ученик = создать_ученика(f"password-hash-{frappe.generate_hash(length=6)}@example.com")
-		frappe.db.sql(
-			"""insert into `__Auth` (doctype, name, fieldname, password, encrypted)
-			values ('User', %s, 'password', %s, 0)
-			on duplicate key update password = values(password)""",
-			(ученик, PBKDF2_FRAPPE),
-		)
+		ученик = self._ученик_с_прежним_хешем()
 		set_request(method="POST", path="/api/method/login")
 		# Адрес клиента Frappe ставит при разборе запроса; счётчик входов — по нему.
 		frappe.local.request_ip = "127.0.0.1"
@@ -91,6 +96,30 @@ class IntegrationTestPasswordRehash(IntegrationTestCase):
 		frappe.utils.password.update_password(ученик, PASSWORD + "-2")
 		self.assertTrue(self._хеш(ученик).startswith(ARGON2_PREFIX))
 		self.assertEqual(frappe.utils.password.check_password(ученик, PASSWORD + "-2"), ученик)
+
+	def test_неверный_пароль_хеш_не_меняет(self):
+		ученик = self._ученик_с_прежним_хешем()
+		password_hash.настроить()
+		with self.assertRaises(frappe.AuthenticationError):
+			frappe.utils.password.check_password(ученик, PASSWORD + "-неверный")
+		self.assertEqual(self._хеш(ученик), PBKDF2_FRAPPE)
+
+	def test_без_argon2_вход_пишет_pbkdf2_с_порогом(self):
+		ученик = self._ученик_с_прежним_хешем()
+		with patch.object(password_hash.argon2, "has_backend", return_value=False):
+			password_hash.настроить()
+		self.assertEqual(frappe.utils.password.check_password(ученик, PASSWORD), ученик)
+		self.assertTrue(self._хеш(ученик).startswith(f"$pbkdf2-sha256${PBKDF2_ROUNDS}$"))
+
+	def _ученик_с_прежним_хешем(self) -> str:
+		ученик = создать_ученика(f"password-hash-{frappe.generate_hash(length=6)}@example.com")
+		frappe.db.sql(
+			"""insert into `__Auth` (doctype, name, fieldname, password, encrypted)
+			values ('User', %s, 'password', %s, 0)
+			on duplicate key update password = values(password)""",
+			(ученик, PBKDF2_FRAPPE),
+		)
+		return ученик
 
 	@staticmethod
 	def _хеш(пользователь: str) -> str:
