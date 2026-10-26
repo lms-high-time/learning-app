@@ -158,7 +158,7 @@ def страница_learning(context) -> None:
 	if _страница_закрыта(путь.split("/")):
 		context.meta = frappe._dict(
 			title=context.get("title"),
-			image=context.get("favicon"),
+			image=frappe.db.get_single_value("LMS Settings", "meta_image") or context.get("favicon"),
 			description=frappe.db.get_single_value("LMS Settings", "meta_description") or "",
 			keywords=frappe.db.get_single_value("LMS Settings", "meta_keywords") or "",
 		)

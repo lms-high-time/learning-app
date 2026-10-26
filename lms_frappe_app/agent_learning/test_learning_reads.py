@@ -236,6 +236,11 @@ class IntegrationTestЧтенияLearning(IntegrationTestCase):
 					for путь in (f"courses/{курс}", f"courses/{курс}/learn/1-1"):
 						self.assertEqual(страница(кто, путь).meta.get("title") == название, видно)
 		frappe.db.set_value("LMS Course", курс, "published", 0)
+		# Картинка закрытой страницы — как у Learning по умолчанию: сайта, иначе значок.
+		frappe.db.set_single_value("LMS Settings", "meta_image", "/files/site.png")
+		self.assertEqual(страница("Guest", f"courses/{курс}").meta.image, "/files/site.png")
+		frappe.db.set_single_value("LMS Settings", "meta_image", None)
+		self.assertEqual(страница("Guest", f"courses/{курс}").meta.image, "/favicon.png")
 		self.assertEqual(страница("Administrator", f"courses/{курс}").meta.get("title"), название)
 		self.assertNotIn("frappe_version", страница(ученик, "courses").boot)
 		self.assertIn("frappe_version", страница("Administrator", "courses").boot)
