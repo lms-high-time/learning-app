@@ -458,6 +458,22 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 			группа,
 		)
 
+	def test_ученик_не_записывает_другого_в_группу(self):
+		"""Записать в группу другого Learning пускает только `Moderator` и
+		`Batch Evaluator` (`validate_owner`): на этом держится сверка метки с
+		учеником записи."""
+		суффикс = frappe.generate_hash(length=6)
+		курс = создать_курс(f"Курс чужой записи {суффикс}")
+		frappe.db.set_value("LMS Course", курс, "published", 1)
+		группа = self._группа(суффикс, курс)
+
+		frappe.set_user(self.ученик)
+		with self.assertRaises(frappe.ValidationError):
+			frappe.client.insert({"doctype": "LMS Batch Enrollment", "batch": группа, "member": self.чужой})
+
+		frappe.set_user("Administrator")
+		self.assertFalse(frappe.db.exists(ЗАЧИСЛЕНИЕ, {"member": self.чужой, "course": курс}))
+
 	def test_группа_learning_записывает_на_свои_курсы(self):
 		"""Самозапись в группу Learning заводит зачисление на её курс.
 
