@@ -476,6 +476,16 @@ class IntegrationTestHomeworkSave(IntegrationTestCase):
 		])
 		self.assertEqual([ф["name"] for ф in описание["files"]], ["0.txt", "1.txt", "2.txt"])
 
+	def test_длина_текста_ответа(self):
+		создать_домашку(self.урок)
+		with self.assertRaises(домашка.Отказ) as отказ:
+			домашка.сохранить(self.ученик, self.урок, None, answer="я" * (домашка.ДЛИНА_ОТВЕТА + 1))
+		self.assertEqual(
+			(отказ.exception.код, отказ.exception.подробности["limit"]),
+			(домашка.ДЛИННЫЙ_ОТВЕТ, домашка.ДЛИНА_ОТВЕТА),
+		)
+		self.assertFalse(frappe.db.exists("Agent Homework Submission", {"member": self.ученик}))
+
 	def test_предел_объёма_сохранения(self):
 		создать_домашку(self.урок)
 		# Размер файла пропускает оба, сумма — нет: отказ именно за объём сохранения.

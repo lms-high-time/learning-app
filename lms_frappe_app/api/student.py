@@ -125,6 +125,16 @@ def лимит_заметок() -> int:
 	return настройка("student_notes_limit", ЛИМИТ_ЗАМЕТОК)
 
 
+ДЛИННАЯ_ЗАМЕТКА = "note_too_long"
+ДЛИННЫЙ_КЛЮЧ = "note_key_too_long"
+#: Длина текста заметки. `Why:` заметки приходят агенту в каждом `start_lesson`
+#: (`history.notes`) — это память о человеке, а не конспект занятия; страница
+#: текста вмещает любой факт или наблюдение.
+ДЛИНА_ЗАМЕТКИ = 2000
+#: Длина ключа заметки — длина поля `Data` в базе.
+ДЛИНА_КЛЮЧА = 140
+
+
 ПУСТОЙ_РЕПОРТ = "report_text_required"
 
 
@@ -768,6 +778,10 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		# и агент, ветвящийся по коду, стал бы подставлять другой вид вместо
 		# того, чтобы дать ключ (lms-platform#209).
 		raise Отказ(ПУСТОЙ_КЛЮЧ, "Ключ заметки обязателен", key=key)
+	if len(ключ) > ДЛИНА_КЛЮЧА:
+		raise Отказ(ДЛИННЫЙ_КЛЮЧ, "Ключ заметки слишком длинный", limit=ДЛИНА_КЛЮЧА, length=len(ключ))
+	if len(text or "") > ДЛИНА_ЗАМЕТКИ:
+		raise Отказ(ДЛИННАЯ_ЗАМЕТКА, "Заметка слишком длинная", limit=ДЛИНА_ЗАМЕТКИ, length=len(text))
 
 	существующая = frappe.db.exists(
 		"Agent Student Note", {"student": ученик, "course": курс, "note_key": ключ}
@@ -1535,6 +1549,36 @@ def lesson_session(lesson: str) -> dict:
 	}
 
 
+ДЛИННОЕ_СОСТОЯНИЕ = "state_too_long"
+#: Предел состояния разговора, байт UTF-8. `Why:` состояние — весь разговор
+#: занятия с ответами инструментов, и сотня ходов урока укладывается в сотни
+#: килобайт; предел держит запись в разумных размерах и вчетверо ниже
+#: `max_allowed_packet` базы (16 МиБ), а не отрезает живой урок. Байты, а не
+#: знаки: кириллица — два байта на знак.
+ДЛИНА_СОСТОЯНИЯ = 4 * 1024 * 1024
+#: Длина версии состояния — длина поля `Data` в базе.
+ДЛИНА_ВЕРСИИ = 140
+
+
+def _проверить_состояние(state, version, **где) -> None:
+	"""Состояние разговора — строка JSON в пределе размера, версия — короткая строка."""
+	try:
+		json.loads(state)
+	except (TypeError, ValueError) as сбой:
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", **где) from сбой
+	размер = len(state.encode())
+	if размер > ДЛИНА_СОСТОЯНИЯ:
+		raise Отказ(
+			ДЛИННОЕ_СОСТОЯНИЕ,
+			"Состояние разговора слишком большое",
+			limit=ДЛИНА_СОСТОЯНИЯ,
+			length=размер,
+			**где,
+		)
+	if not isinstance(version, str) or len(version) > ДЛИНА_ВЕРСИИ:
+		raise Отказ(НЕВЕРНОЕ_СОСТОЯНИЕ, f"Версия состояния — строка до {ДЛИНА_ВЕРСИИ} знаков", **где)
+
+
 @frappe.whitelist()
 @контракт
 def chat_state(session: str) -> dict:
@@ -1564,12 +1608,7 @@ def save_chat_state(session: str, state: str, version: str) -> dict:
 	состояние пишется после хода — отказ терял бы последний ответ агента.
 	"""
 	занятие = _своё_занятие(session)
-	try:
-		json.loads(state)
-	except (TypeError, ValueError) as сбой:
-		raise Отказ(
-			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", session=session
-		) from сбой
+	_проверить_состояние(state, version, session=session)
 
 	if frappe.db.exists("Agent Chat State", занятие.name):
 		frappe.db.set_value(
@@ -1626,12 +1665,7 @@ def scenario_state(key: str) -> dict:
 def save_scenario_state(key: str, state: str, version: str) -> dict:
 	"""Замещает разговор сценария. Счётчик ходов не трогает — он свой."""
 	ключ = _ключ_сценария(key)
-	try:
-		json.loads(state)
-	except (TypeError, ValueError) as сбой:
-		raise Отказ(
-			НЕВЕРНОЕ_СОСТОЯНИЕ, "Состояние разговора — строка JSON", key=key
-		) from сбой
+	_проверить_состояние(state, version, key=key)
 
 	_с_повтором_при_гонке(
 		_разговор_занят(ключ), _сохранить_разговор, текущий_пользователь(), ключ, state, version

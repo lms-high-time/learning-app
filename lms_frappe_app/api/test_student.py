@@ -297,6 +297,25 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 
 		self.assertTrue(ответ["ok"], ответ)
 
+	def test_длина_заметки_и_ключа(self):
+		отказы = {
+			"текст": (
+				{"key": "role", "text": "я" * (student.ДЛИНА_ЗАМЕТКИ + 1)},
+				student.ДЛИННАЯ_ЗАМЕТКА,
+				student.ДЛИНА_ЗАМЕТКИ,
+			),
+			"ключ": (
+				{"key": "к" * (student.ДЛИНА_КЛЮЧА + 1), "text": "да"},
+				student.ДЛИННЫЙ_КЛЮЧ,
+				student.ДЛИНА_КЛЮЧА,
+			),
+		}
+		for что, (параметры, код, предел) in отказы.items():
+			with self.subTest(что):
+				ответ = student.remember(kind="fact", **параметры)
+				self.assertEqual((ответ["error"]["code"], ответ["error"]["limit"]), (код, предел))
+		self.assertTrue(student.remember(kind="fact", key="role", text="я" * student.ДЛИНА_ЗАМЕТКИ)["ok"])
+
 	def test_замена_по_ключу_проходит_и_на_пределе(self):
 		"""Иначе упор в лимит становится тупиком: заменить тоже нельзя."""
 		for номер in range(student.ЛИМИТ_ЗАМЕТОК):
