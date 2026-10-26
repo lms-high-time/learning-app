@@ -21,13 +21,15 @@
 - Изменение существующей записи — отказ по любому полю, включая владельца и
   дату создания, кроме тех, что Frappe сам подтягивает из `member`
   (`fetch_from`).
-- Вставка — только на себя и только изнутри записи в группу Learning: запись
-  в группу (`LMS Batch Enrollment`) заводит зачисления на курсы группы от имени
-  ученика, без `ignore_permissions`, в `validate_course_enrollment` — после
-  проверок группы: прав, самозаписи, оплаты, мест. Класс записи в группу
-  (`ЗаписьВГруппу`, `override_doctype_class`) метит запрос парой «группа,
+- Вставка — только изнутри записи в группу Learning: запись в группу
+  (`LMS Batch Enrollment`) заводит зачисления на курсы группы от имени того, кто
+  записывает, без `ignore_permissions`, в `validate_course_enrollment` — после
+  проверок группы: кто записывает (сам себя, `Moderator` или
+  `Batch Evaluator`), самозаписи, оплаты, мест. Примесь записи в группу
+  (`ЗаписьВГруппу`, `extend_doctype_class`) метит запрос парой «группа,
   ученик» ровно на время этого шага, и вставка проходит только с этой группой
-  и этим учеником; остальные поля — по умолчанию. Learning переименует шаг —
+  и этим учеником; остальные поля — по умолчанию. Метка сверяется с учеником
+  записи, а не с сессией: `Batch Evaluator` записывает в группу других. Learning переименует шаг —
   метки не будет, и самозапись в группу откажет, а не откроется: её держит
   тест. Обычная запись на курс — метод `enroll`: там пространство, анонс и
   порядок программы.
@@ -41,7 +43,6 @@ import frappe
 from frappe import _
 from frappe.model import data_fieldtypes, table_fields
 from frappe.utils import cast, cint
-from lms.lms.doctype.lms_batch_enrollment.lms_batch_enrollment import LMSBatchEnrollment
 
 ДОКТАЙП = "LMS Enrollment"
 #: Поля, которые ученик задаёт при вставке по группе Learning.
@@ -52,7 +53,7 @@ from lms.lms.doctype.lms_batch_enrollment.lms_batch_enrollment import LMSBatchEn
 	frappe._dict(fieldname="creation", fieldtype="Datetime"),
 )
 #: `frappe.flags`: (группа, ученик) записи в группу, которая сейчас сохраняется.
-ГРУППА = "lms_enrollment_batch"
+ГРУППА = "lms_frappe_app_enrollment_batch"
 ОТКАЗ = "Запись на курс меняется только методами платформы"
 
 
@@ -68,8 +69,13 @@ def проверить_зачисление(doc, method=None) -> None:
 		_проверить_изменение(doc)
 
 
-class ЗаписьВГруппу(LMSBatchEnrollment):
-	"""`LMS Batch Enrollment`: зачисления на курсы группы заводятся под меткой."""
+class ЗаписьВГруппу:
+	"""Примесь к `LMS Batch Enrollment`: зачисления на курсы группы заводятся под
+	меткой.
+
+	`Why:` примесь, а не подмена класса: Frappe берёт последнюю подмену молча,
+	и подмена платформы выкинула бы подмену Learning, если та появится.
+	"""
 
 	def validate_course_enrollment(self):
 		прежняя = frappe.flags.get(ГРУППА)
@@ -109,8 +115,7 @@ def _проверить_изменение(doc) -> None:
 
 
 def _проверить_вставку(doc) -> None:
-	пользователь = frappe.session.user
-	if doc.member != пользователь or frappe.flags.get(ГРУППА) != (doc.enrollment_from_batch, пользователь):
+	if not doc.member or frappe.flags.get(ГРУППА) != (doc.enrollment_from_batch, doc.member):
 		_отказать()
 	for df in _поля():
 		if df.fieldname in ПОЛЯ_ВСТАВКИ:

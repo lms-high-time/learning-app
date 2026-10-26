@@ -37,6 +37,7 @@ from lms_frappe_app.tests.sample_data import (
 	зачислить_на_курс,
 	создать_куратора,
 	создать_курс,
+	создать_пользователя,
 	создать_урок,
 	создать_ученика,
 )
@@ -433,9 +434,29 @@ class IntegrationTestEnrollmentWrites(IntegrationTestCase):
 				)
 			)
 			self.assertEqual(len(ответ["failed_docs"]), 2)
+			# Вставка упала на правиле, а не по посторонней причине.
+			self.assertIn(enrollment_guard.ОТКАЗ, ответ["failed_docs"][1]["exc"])
 
 		frappe.set_user("Administrator")
 		self.assertFalse(frappe.db.exists(ЗАЧИСЛЕНИЕ, {"member": self.ученик, "course": курс}))
+
+	def test_оценщик_группы_записывает_ученика(self):
+		"""`Batch Evaluator` записывает в группу другого — Learning это пускает
+		(`validate_owner`), и зачисление на курс группы заводится на ученика."""
+		суффикс = frappe.generate_hash(length=6)
+		оценщик = создать_пользователя(f"enr-eval-{суффикс}@example.com", "Batch Evaluator")
+		курс = создать_курс(f"Курс оценщика {суффикс}")
+		frappe.db.set_value("LMS Course", курс, "published", 1)
+		группа = self._группа(суффикс, курс, самозапись=0)
+
+		frappe.set_user(оценщик)
+		frappe.client.insert({"doctype": "LMS Batch Enrollment", "batch": группа, "member": self.ученик})
+
+		frappe.set_user("Administrator")
+		self.assertEqual(
+			frappe.db.get_value(ЗАЧИСЛЕНИЕ, {"member": self.ученик, "course": курс}, "enrollment_from_batch"),
+			группа,
+		)
 
 	def test_группа_learning_записывает_на_свои_курсы(self):
 		"""Самозапись в группу Learning заводит зачисление на её курс.

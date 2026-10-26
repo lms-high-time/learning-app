@@ -460,21 +460,15 @@ doc_events = {
 # Индексация поиска Learning на время тестов выключается — см. testing.py.
 before_tests = "lms_frappe_app.testing.before_tests"
 
-# Override DocType Class
-# ------------------------------
-# Запись в группу Learning заводит зачисления на курсы группы под меткой,
-# только на шаге после проверок группы (learning-services#674).
-override_doctype_class = {
-	"LMS Batch Enrollment": "lms_frappe_app.agent_learning.enrollment_guard.ЗаписьВГруппу",
-}
-
 # Extend DocType Class
 # ------------------------------
 #
 # Specify custom mixins to extend the standard doctype controller.
-# extend_doctype_class = {
-# 	"Task": "lms_frappe_app.custom.task.CustomTaskMixin"
-# }
+# Запись в группу Learning заводит зачисления на курсы группы под меткой,
+# только на шаге после проверок группы (learning-services#674).
+extend_doctype_class = {
+	"LMS Batch Enrollment": "lms_frappe_app.agent_learning.enrollment_guard.ЗаписьВГруппу",
+}
 
 # Overriding Methods
 # ------------------------------
