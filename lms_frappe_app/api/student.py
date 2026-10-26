@@ -39,6 +39,7 @@ from lms_frappe_app.agent_learning.artifacts.document import (
 from lms_frappe_app.agent_learning.artifacts.write import записать_блок
 # Функцией, а не модулем: параметр `files` в `submit_homework` затеняет имя.
 from lms_frappe_app.agent_learning.uploads import из_base64
+from lms_frappe_app.agent_learning.write_limits import частота
 from lms_frappe_app.agent_learning import programs as программы
 from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.constants import (
@@ -201,6 +202,7 @@ def list_catalog(space: str | None = None) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def enroll(course: str, space: str | None = None) -> dict:
 	"""Записывает ученика на курс из каталога пространства.
@@ -227,6 +229,7 @@ def enroll(course: str, space: str | None = None) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def notify_when_released(course: str, notify: bool | int | str = True) -> dict:
 	"""Подписывает ученика на письмо о выходе анонсированного курса — или,
@@ -316,6 +319,7 @@ def course_outline(course: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def start_lesson(
 	lesson: str | None = None,
@@ -618,6 +622,7 @@ def lesson_diagram(session: str, key: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def mark_goal(
 	session: str,
@@ -725,6 +730,7 @@ def _требовать_закрытые_пункты(run) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def remember(kind: str, key: str, text: str, session: str | None = None, new_only: bool = False) -> dict:
 	"""Записывает об ученике то, что пригодится на следующих занятиях.
@@ -826,6 +832,7 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def forget(key: str, course: str | None = None) -> dict:
 	"""Удаляет заметку об ученике по ключу.
@@ -881,6 +888,7 @@ def my_spaces() -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def set_space(space: str) -> dict:
 	"""Выбирает пространство: организацию, в которой ученик состоит, или `personal`."""
@@ -1007,6 +1015,7 @@ def artifact(course: str, artifact: str | None = None, space: str | None = None)
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def update_artifact(
 	course: str,
@@ -1175,6 +1184,7 @@ def my_homework(course: str | None = None, lesson: str | None = None, space: str
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("домашка")
 @контракт
 def submit_homework(
 	lesson: str,
@@ -1287,6 +1297,7 @@ def _сигналы_отметки(занятие, отметка: dict, ста�
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def report_issue(
 	session: str,
@@ -1349,6 +1360,7 @@ def report_issue(
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def complete_lesson(session: str) -> dict:
 	"""Закрывает урок курса из релиза, где квиз не обязателен: вопросов нет или политика его не требует.
@@ -1409,6 +1421,7 @@ def _после_закрытия(ученик: str, курс: str, lesson: str, 
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def request_quiz(session: str) -> dict:
 	"""Квиз урока курса из релиза по занятию: попытка и её первый неотвеченный вопрос (`release_quiz.начать`).
@@ -1431,6 +1444,7 @@ def request_quiz(session: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def submit_answer(
 	attempt: str, question: str, answer: str, student_words: str | None = None
@@ -1541,6 +1555,7 @@ def chat_state(session: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("состояние")
 @контракт
 def save_chat_state(session: str, state: str, version: str) -> dict:
 	"""Замещает состояние разговора веб-чата по своему занятию.
@@ -1606,6 +1621,7 @@ def scenario_state(key: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("состояние")
 @контракт
 def save_scenario_state(key: str, state: str, version: str) -> dict:
 	"""Замещает разговор сценария. Счётчик ходов не трогает — он свой."""
@@ -1624,6 +1640,7 @@ def save_scenario_state(key: str, state: str, version: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def reset_scenario_state(key: str) -> dict:
 	"""Начинает разговор сценария заново.
@@ -1637,6 +1654,7 @@ def reset_scenario_state(key: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@частота("запись")
 @контракт
 def count_scenario_turn(key: str) -> dict:
 	"""Засчитывает ход сценария и отвечает, сколько их в текущем окне.

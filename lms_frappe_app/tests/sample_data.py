@@ -351,6 +351,10 @@ def политика_по_умолчанию() -> None:
 			"carry_over_depth": 3,
 			"bridge_after_hours": 24,
 			"student_notes_limit": 20,
+			"student_writes_per_minute": 60,
+			"state_saves_per_minute": 600,
+			"homework_saves_per_hour": 30,
+			"student_files_quota_mb": 200,
 			"web_demo_lessons": 2,
 			"agent_service_url": get_url().rstrip("/"),
 		}
