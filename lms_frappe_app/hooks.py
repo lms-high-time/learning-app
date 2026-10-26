@@ -595,10 +595,15 @@ update_website_context = ["lms_frappe_app.agent_learning.learning_reads.стра
 # Оригиналы подменённых методов снимаются из реестра whitelisted на каждом
 # запросе и задаче: иначе до них доходят под другим путём модуля
 # (learning-services#692).
+#
+# Хеш пароля — argon2id: контекст passlib Frappe настраивается до смены
+# пароля в вебе, раньше переадресации на согласие; до входа — `before_login`
+# ниже, в фоновых задачах — `before_job` (learning-services#676).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
 	"lms_frappe_app.session_guard.завершить_истёкшую",
 	"lms_frappe_app.whitelist_guard.снять_подменённые",
+	"lms_frappe_app.password_hash.настроить",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 # Отказы 401, 403, 429 и неудачный вход — в журнал событий безопасности
@@ -623,12 +628,18 @@ on_logout = [
 ]
 # Абсолютный срок сессии от входа (learning-services#666).
 on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
+# Вход паролем Frappe проверяет при разборе запроса, раньше `before_request`:
+# контекст хеша пароля настраивается до проверки (learning-services#676).
+before_login = ["lms_frappe_app.password_hash.настроить"]
 # Вход в сессию — в журнал событий безопасности (learning-services#680).
 on_login = "lms_frappe_app.security_log.при_входе"
 
 # Job Events
 # ----------
-before_job = ["lms_frappe_app.whitelist_guard.снять_подменённые"]
+before_job = [
+	"lms_frappe_app.whitelist_guard.снять_подменённые",
+	"lms_frappe_app.password_hash.настроить",
+]
 # after_job = ["lms_frappe_app.utils.after_job"]
 
 # User Data Protection
