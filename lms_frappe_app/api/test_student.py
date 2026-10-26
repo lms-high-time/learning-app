@@ -316,6 +316,33 @@ class IntegrationTestStudentAPI(IntegrationTestCase):
 				self.assertEqual((ответ["error"]["code"], ответ["error"]["limit"]), (код, предел))
 		self.assertTrue(student.remember(kind="fact", key="role", text="я" * student.ДЛИНА_ЗАМЕТКИ)["ok"])
 
+	def test_предел_заметок_считается_под_блокировкой(self):
+		"""Запись, сделанная другим вызовом, пока этот ждал блокировки, входит в
+		счёт предела."""
+		from unittest.mock import patch
+
+		self._предел_заметок(1)
+		настоящая = student._заблокировать_ученика
+
+		def с_соседним_вызовом(ученик):
+			настоящая(ученик)
+			frappe.get_doc(
+				{"doctype": "Agent Student Note", "student": ученик, "course": "", "note_key": "чужой",
+				 "kind": "Fact", "text": "успел первым"}
+			).insert(ignore_permissions=True)
+
+		with patch.object(student, "_заблокировать_ученика", side_effect=с_соседним_вызовом):
+			ответ = student.remember(kind="fact", key="language", text="Python")
+
+		self.assertEqual(ответ["error"]["code"], student.ПЕРЕПОЛНЕНО)
+
+	def test_взаимоблокировка_при_записи_заметки_это_busy(self):
+		from unittest.mock import patch
+
+		with patch.object(student, "_заметок_набора", side_effect=frappe.QueryDeadlockError):
+			ответ = student.remember(kind="fact", key="language", text="Python")
+		self.assertEqual(ответ["error"]["code"], student.ЗАНЯТО)
+
 	def test_замена_по_ключу_проходит_и_на_пределе(self):
 		"""Иначе упор в лимит становится тупиком: заменить тоже нельзя."""
 		for номер in range(student.ЛИМИТ_ЗАМЕТОК):

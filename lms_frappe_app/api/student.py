@@ -805,10 +805,12 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 	# конечным: прочие плюс ключи профиля.
 	профильный = вид == ЗАМЕТКА_ФАКТ and ключ in КЛЮЧИ_ПРОФИЛЯ
 	if not существующая and not профильный:
-		отбор = {"student": ученик, "course": курс, "kind": вид}
-		if вид == ЗАМЕТКА_ФАКТ:
-			отбор["note_key"] = ("not in", tuple(КЛЮЧИ_ПРОФИЛЯ))
-		сколько = frappe.db.count("Agent Student Note", отбор)
+		try:
+			_заблокировать_ученика(ученик)
+			сколько = _заметок_набора(ученик, курс, вид)
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			raise Отказ(ЗАНЯТО, "Заметки сейчас пишет другой запрос — повторите", key=ключ)
 		предел = лимит_заметок()
 		if сколько >= предел:
 			raise Отказ(
@@ -827,15 +829,19 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		запись.update(значения)
 		запись.save(ignore_permissions=True)
 	else:
-		запись = frappe.get_doc(
-			{
-				"doctype": "Agent Student Note",
-				"student": ученик,
-				"course": курс,
-				"note_key": ключ,
-				**значения,
-			}
-		).insert(ignore_permissions=True)
+		try:
+			запись = frappe.get_doc(
+				{
+					"doctype": "Agent Student Note",
+					"student": ученик,
+					"course": курс,
+					"note_key": ключ,
+					**значения,
+				}
+			).insert(ignore_permissions=True)
+		except frappe.QueryDeadlockError:
+			frappe.db.rollback()
+			raise Отказ(ЗАНЯТО, "Заметки сейчас пишет другой запрос — повторите", key=ключ)
 
 	ответ = {"key": запись.note_key, "kind": kind}
 	# Запоминают посреди занятия — там же напоминание, где урок по целям (#409).
@@ -844,6 +850,33 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 			ответ["objectives_progress"] = прогресс
 	return ответ
 
+
+
+def _заблокировать_ученика(ученик: str) -> None:
+	"""Блокировка строки ученика до конца транзакции: записи одного ученика,
+	которые считают перед вставкой, идут по одной."""
+	frappe.db.get_value("User", ученик, "name", for_update=True)
+
+
+def _заметок_набора(ученик: str, курс: str, вид: str) -> int:
+	"""Сколько заметок в наборе — блокирующим чтением, после `_заблокировать_ученика`.
+
+	`Why:` предел считается по последнему зафиксированному, а не по снимку
+	начала транзакции — вызовы одного ученика друг за другом видят записи
+	друг друга. Гонку, которую ловит снимочная изоляция MariaDB, `remember`
+	отдаёт как `busy`.
+	"""
+	профильные = ""
+	значения: list = [ученик, курс, вид]
+	if вид == ЗАМЕТКА_ФАКТ:
+		профильные = " and note_key not in %s"
+		значения.append(tuple(КЛЮЧИ_ПРОФИЛЯ))
+	[(сколько,)] = frappe.db.sql(
+		"select count(*) from `tabAgent Student Note`"
+		f" where student = %s and course = %s and kind = %s{профильные} for update",
+		значения,
+	)
+	return сколько
 
 @frappe.whitelist(methods=["POST"])
 @частота("запись")
