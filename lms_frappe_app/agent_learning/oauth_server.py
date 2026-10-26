@@ -88,6 +88,7 @@ from oauthlib.openid.connect.core.endpoints.pre_configured import Server
 from werkzeug import Response
 from werkzeug.exceptions import NotFound
 
+from lms_frappe_app import security_log
 from lms_frappe_app.agent_learning import cimd
 
 #: Срок кода авторизации, секунд: предел, который рекомендует RFC 6749 §4.1.2.
@@ -424,6 +425,12 @@ class Валидатор(OAuthWebRequestValidator):
 			}
 		).insert(ignore_permissions=True)
 		frappe.db.commit()
+		security_log.записать(
+			"token_refreshed" if previous_token else "token_issued",
+			user=request.user,
+			client=клиент,
+			grant=request.grant_type,
+		)
 		return frappe.db.get_value("OAuth Client", клиент, "default_redirect_uri")
 
 	def revoke_token(self, token, token_type_hint, request, *args, **kwargs):
@@ -562,6 +569,13 @@ def _в_журнал_повтор(заголовок: str, клиент, пол�
 			+ (f", {подробность}" if подробность else "")
 		),
 	)
+	security_log.записать(
+		"token_reuse",
+		user=пользователь,
+		client=клиент,
+		family=отпечаток(family_token or "")[:16],
+		note=f"{заголовок}{f', {подробность}' if подробность else ''}",
+	)
 
 
 def _клиент_по_токену(request) -> str | None:
@@ -606,7 +620,35 @@ def approve(*args, **kwargs):
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def get_token(*args, **kwargs):
 	_свой_сервер()
-	return oauth2.get_token(*args, **kwargs)
+	результат = oauth2.get_token(*args, **kwargs)
+	записать_отказ_в_токене()
+	return результат
+
+
+def записать_отказ_в_токене() -> None:
+	"""Отказ эндпоинта токенов — в журнал событий безопасности.
+
+	Выданный токен пишет `save_bearer_token`; здесь — только отказ: код ошибки
+	OAuth, вид гранта и клиент — из тела или заголовка Basic, как его ищет
+	валидатор. Тело ответа с токенами в запись не попадает. Ответ 401 того же
+	запроса `after_request` второй раз не пишет.
+	"""
+	try:
+		ответ = frappe.local.response or {}
+		if not ответ.get("error"):
+			return
+		r = frappe.request
+		клиент, _ = учётные_данные(ЗапросOAuth(r.url, r.method, r.form, r.headers))
+		security_log.записать(
+			"token_denied",
+			error=ответ.get("error"),
+			grant=(frappe.form_dict or {}).get("grant_type"),
+			client=клиент,
+			status=ответ.get("http_status_code"),
+		)
+		frappe.flags.lms_security_logged = True
+	except Exception:
+		pass
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -707,6 +749,10 @@ def сведения_о_токене(token: str | None, token_type_hint: str | N
 		"exp": round(срок.replace(tzinfo=ZoneInfo(get_system_timezone())).timestamp()),
 		"scope": token_record.scopes,
 	}
+	# `sub` — всегда: по нему сервис MCP знает, чей это запрос, в своём
+	# журнале. С `openid` — идентификатор из userinfo, как в id_token, иначе
+	# имя пользователя; интроспекцию спрашивает только доверенный клиент.
+	ответ["sub"] = token_record.user
 	if "openid" in cstr(token_record.scopes).split():
 		sub = frappe.db.get_value(
 			"User Social Login", {"provider": "frappe", "parent": token_record.user}, "userid"
