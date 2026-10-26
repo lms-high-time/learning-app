@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import set_request
 from werkzeug.exceptions import HTTPException
 
@@ -183,8 +183,27 @@ class UnitTestSecurityLog(_Запрос):
 			lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)
 		)
 		self.assertEqual((запись["event"], запись["login_unknown"]), ("login_failed", True))
-		self.assertEqual(len(запись["login_sha256"]), 12)
+		self.assertEqual(len(запись["login_hmac"]), 12)
 		self.assertNotIn("login", запись)
+
+	def test_отпечаток_имени_с_ключом_сайта(self):
+		"""Отпечаток — не голый sha256: словарём его не подобрать; одно имя — один отпечаток."""
+		import hashlib
+
+		self.запрос(path="/api/method/login", usr="RAW-VALUE", pwd="PWD-VALUE")
+		отказ = lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)  # noqa: E731
+		(первая,) = self.записи(отказ)
+		(вторая,) = self.записи(отказ)
+		self.assertEqual(первая["login_hmac"], вторая["login_hmac"])
+		self.assertNotEqual(первая["login_hmac"], hashlib.sha256(b"RAW-VALUE").hexdigest()[:12])
+
+	def test_имя_входа_не_строкой(self):
+		self.запрос(path="/api/method/login", usr={"name": ["like", "%"]}, pwd="PWD-VALUE")
+		(запись,) = self.записи(
+			lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)
+		)
+		self.assertEqual(запись["login_unknown"], True)
+		self.assertNotIn("login_hmac", запись)
 
 	def test_записанный_отказ_не_пишется_второй_раз(self):
 		self.запрос()
@@ -301,3 +320,38 @@ def _форма(запрос, поля: dict):
 			path=запрос.path, method="POST", headers=dict(запрос.headers), data=dict(поля)
 		).get_environ()
 	)
+
+
+class IntegrationTestОтказАвторскогоМетода(_Запрос, IntegrationTestCase):
+	"""Ученик вызвал авторский метод: ответ Frappe на отказ — тот, что строит
+	`frappe.app.handle_exception`, и в записи — ученик и его адрес."""
+
+	def test_ученик_вызвал_авторский_метод(self):
+		from frappe.app import handle_exception
+
+		from lms_frappe_app.api import authoring
+		from lms_frappe_app.tests.sample_data import создать_ученика
+
+		ученик = создать_ученика(f"sl-{frappe.generate_hash(length=6)}@example.com")
+		self.запрос(
+			path="/api/method/lms_frappe_app.api.authoring.create_course",
+			headers={"Accept": "application/json"},
+		)
+		frappe.set_user(ученик)
+		# `frappe.app.init_request` ставит признак запроса API до обработчика.
+		прежний = getattr(frappe.local, "is_ajax", None)
+		self.addCleanup(setattr, frappe.local, "is_ajax", прежний)
+		frappe.local.is_ajax = True
+
+		def вызов():
+			try:
+				authoring.create_course(title="Курс", summary="Кратко")
+			except frappe.PermissionError as отказ:
+				ответ = handle_exception(отказ)
+				security_log.записать_отказ(ответ, frappe.request)
+			else:
+				self.fail("авторский метод ученику открыт")
+
+		записи = [з for з in self.записи(вызов) if з["event"] == "http_403"]
+		self.assertEqual(len(записи), 1, записи)
+		self.assertEqual((записи[0]["user"], записи[0]["ip"], записи[0]["status"]), (ученик, IP, 403))

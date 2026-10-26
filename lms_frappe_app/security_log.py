@@ -31,6 +31,7 @@
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import re
@@ -38,6 +39,7 @@ import sys
 from datetime import UTC, datetime
 
 import frappe
+from frappe.utils.password import get_encryption_key
 
 from lms_frappe_app.agent_learning.errors import НЕТ_ПРАВА, ЧУЖОЕ_ЗАНЯТИЕ
 
@@ -197,13 +199,16 @@ def _кто_входил(имя: str | None) -> dict:
 	"""Имя входа — как есть, только если такой пользователь есть.
 
 	`Why:` в поле имени по ошибке вводят пароль; несуществующее имя пишется
-	префиксом отпечатка — повторы видны, а само значение нет.
+	префиксом HMAC ключом сайта — повторы видны, а значение по словарю не
+	подобрать, не зная ключа. Имя — только строка: тело запроса JSON может
+	прислать что угодно.
 	"""
-	if not имя:
-		return {}
+	if not имя or not isinstance(имя, str):
+		return {"login_unknown": True} if имя else {}
 	if frappe.db.exists("User", имя):
 		return {"login": имя}
-	return {"login_unknown": True, "login_sha256": hashlib.sha256(str(имя).encode()).hexdigest()[:12]}
+	ключ = get_encryption_key().encode()
+	return {"login_unknown": True, "login_hmac": hmac.new(ключ, имя.encode(), hashlib.sha256).hexdigest()[:12]}
 
 
 def записать_отказ(response=None, request=None) -> None:
