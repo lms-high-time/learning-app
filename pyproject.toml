@@ -9,6 +9,10 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     # "frappe~=16.0.0" # Installed and managed by bench.
+    # Хеш пароля argon2id — `lms_frappe_app/password_hash.py`. Frappe знает
+    # схему argon2, но библиотеку не ставит; в образе стенда она закреплена
+    # точной версией (deploy/bench.Dockerfile в learning-services).
+    "argon2-cffi~=25.1",
 ]
 
 [build-system]

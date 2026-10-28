@@ -2,9 +2,12 @@
 # See license.txt
 
 import frappe
+import frappe.client
 from frappe.tests import IntegrationTestCase
+from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import homework as домашка
+from lms_frappe_app.api.authoring import РОЛЬ_ПУБЛИКАТОРА
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
@@ -12,8 +15,9 @@ from lms_frappe_app.tests.sample_data import (
 	создать_куратора,
 	создать_менеджера,
 	создать_организацию,
-	создать_ученика,
+	создать_пользователя,
 	создать_урок,
+	создать_ученика,
 )
 
 
@@ -36,6 +40,7 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 		self.методист = создать_куратора(f"hwc-{с}@example.com", роль="Course Creator")
 		self.модератор = создать_куратора(f"hwmod-{с}@example.com", роль="Moderator")
 		self.сосед = создать_ученика(f"hwn-{с}@example.com")
+		self.публикатор = создать_пользователя(f"hwpub-{с}@example.com", РОЛЬ_ПУБЛИКАТОРА)
 		self.личная = домашка.сохранить(self.ученик, self.урок, None, answer="лично")
 		self.рабочая = домашка.сохранить(self.ученик, self.урок, self.организация, answer="в компании")
 		self.чужая = домашка.сохранить(self.ученик, self.урок, чужая, answer="в другой компании")
@@ -61,9 +66,11 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 		with self.subTest("ученик видит свои"):
 			self.assertEqual(self.видит(self.ученик), все)
 
-		with self.subTest("чужой ученик не видит ничего"):
-			self.assertEqual(self.видит(self.сосед), set())
-			self.assertFalse(self.читает(self.сосед, self.личная))
+		for кто, user in (("чужой ученик", self.сосед), ("публикатор релизов", self.публикатор)):
+			with self.subTest(f"{кто} не видит ничего"):
+				self.assertEqual(self.видит(user), set())
+				self.assertFalse(self.читает(user, self.личная))
+				self.assertFalse(self.читает(user, self.рабочая))
 
 		with self.subTest("руководитель видит только пространство своей организации"):
 			self.assertEqual(self.видит(self.менеджер), {self.рабочая.name})
@@ -118,3 +125,33 @@ class IntegrationTestHomeworkPermissions(IntegrationTestCase):
 					self.assertEqual(bool(frappe.has_permission("File", "read", doc=файл)), видит, user)
 				finally:
 					frappe.set_user("Administrator")
+
+	def test_журнал_через_rest_без_проверяющего(self):
+		"""Кто проверял сдачу, через `/api/resource` видят только методисты —
+		ученику и руководителю журнал отдаётся без `by_user`, как без него
+		отдают его методы контракта (learning-services#692).
+
+		Два пути: документ сдачи с журналом и список строк журнала.
+		"""
+		документ = frappe.get_doc("Agent Homework Submission", self.рабочая.name)
+		документ.append(
+			"history", {"event": "returned", "by_user": self.методист, "at": now_datetime(), "comment": "Доделай"}
+		)
+		документ.save(ignore_permissions=True)
+		for user, видит in ((self.ученик, False), (self.менеджер, False), (self.методист, True)):
+			with self.subTest(user):
+				frappe.set_user(user)
+				try:
+					сдача = frappe.client.get("Agent Homework Submission", self.рабочая.name)
+					строки = frappe.client.get_list(
+						"Agent Homework Event",
+						parent="Agent Homework Submission",
+						filters={"parent": self.рабочая.name},
+						fields=["name", "by_user"],
+					)
+				finally:
+					frappe.set_user("Administrator")
+				self.assertEqual(self.методист in {с.get("by_user") for с in сдача.get("history")}, видит)
+				# Список строк журнала `by_user` не отдаёт никому: строки дочерние,
+				# и Frappe проверяет их правом `select` сдачи — у уровня 1 его нет.
+				self.assertNotIn(self.методист, {с.get("by_user") for с in строки})

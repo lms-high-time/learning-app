@@ -31,8 +31,9 @@
   него не доходит: Frappe принимает Basic за вход по API-ключу и отвечает 401
   раньше OAuth, поэтому метаданные обещают только `client_secret_post`.
   Публичный (`None`) — без секрета, и вход ему держит PKCE;
-- PKCE — только S256: обязателен публичным клиентам, у конфиденциальных
-  проверяется, если прислан. `plain` не принимается: метаданные обещают S256;
+- PKCE — только S256 и обязателен всем клиентам, конфиденциальным тоже
+  (ASVS 10.4.6, RFC 9700 §2.1.1). `plain` не принимается: метаданные
+  обещают S256;
 - код авторизации живёт `СРОК_КОДА` и обменивается один раз под блокировкой
   своей строки. Повторное предъявление кода отзывает токены, выданные по нему
   (RFC 6749 §4.1.2);
@@ -47,7 +48,7 @@
 - отзыв токена (RFC 7009) снимает токен только своему клиенту и вместе с его
   семьёй; чужой или неизвестный токен — тот же ответ 200;
 - интроспекция — только конфиденциальному клиенту с секретом из списка в
-  конфигурации сайта; динамическая регистрация — с областью `all`,
+  конфигурации сайта, без списка — никому; динамическая регистрация — с областью `all`,
   конфиденциальным — `client_secret_post` и длинный секрет, с пределом частоты.
 
 Семья хранится в полях токена, а не ссылкой на первый: Frappe каждый час
@@ -87,6 +88,7 @@ from oauthlib.openid.connect.core.endpoints.pre_configured import Server
 from werkzeug import Response
 from werkzeug.exceptions import NotFound
 
+from lms_frappe_app import security_log
 from lms_frappe_app.agent_learning import cimd
 
 #: Срок кода авторизации, секунд: предел, который рекомендует RFC 6749 §4.1.2.
@@ -116,7 +118,7 @@ from lms_frappe_app.agent_learning import cimd
 ПУБЛИЧНЫЙ = "None"
 #: Ключ конфигурации сайта: `client_id`, которым можно спрашивать интроспекцию.
 КЛЮЧ_ИНТРОСПЕКЦИИ = "lms_introspection_clients"
-КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ = "lms_introspection_open_warned"
+КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ = "lms_introspection_unset_warned"
 ПОЛЕ_СЕМЬИ = "lms_token_family"
 ПОЛЕ_НАЧАЛА = "lms_family_started"
 ПОЛЕ_ПРЕЖНЕГО = "lms_previous_refresh"
@@ -197,17 +199,6 @@ def _клиент(имя) -> dict | None:
 	return клиент if клиент and клиент.name == имя else None
 
 
-def публичный(client_id) -> bool:
-	"""Клиент без секрета: клиент по адресу или записанный с `None`.
-
-	Неизвестный клиент — тоже: проверка PKCE строже, а не мягче.
-	"""
-	if cimd.это_адрес_клиента(client_id):
-		return True
-	клиент = _клиент(client_id)
-	return not клиент or клиент.token_endpoint_auth_method == ПУБЛИЧНЫЙ
-
-
 class Валидатор(OAuthWebRequestValidator):
 	def validate_client_id(self, client_id, request, *args, **kwargs):
 		if cimd.это_адрес_клиента(client_id) and not cimd.обеспечить_клиента(client_id):
@@ -275,7 +266,7 @@ class Валидатор(OAuthWebRequestValidator):
 	# здесь; Frappe этих методов не задаёт и сверял в `validate_code`.
 
 	def is_pkce_required(self, client_id, request):
-		return публичный(client_id)
+		return True
 
 	def get_code_challenge(self, code_token, request):
 		return frappe.db.get_value("OAuth Authorization Code", code_token, "code_challenge") or None
@@ -333,9 +324,9 @@ class Валидатор(OAuthWebRequestValidator):
 			return False
 		if not запись.expiration_time or now_datetime() > запись.expiration_time:
 			return False
-		# Метаданные обещают только S256; `plain` остаётся у кодов, выданных до
-		# learning-services#665.
-		if запись.code_challenge and запись.code_challenge_method != "s256":
+		# Вызов с проверкой oauthlib сверяет сам; метод — только S256, как
+		# обещают метаданные.
+		if not запись.code_challenge or запись.code_challenge_method != "s256":
 			return False
 		# Смена пароля и отключение гасят коды, но отключение мимо `save`
 		# (`db.set_value`) хуков не зовёт.
@@ -434,6 +425,12 @@ class Валидатор(OAuthWebRequestValidator):
 			}
 		).insert(ignore_permissions=True)
 		frappe.db.commit()
+		security_log.записать(
+			"token_refreshed" if previous_token else "token_issued",
+			user=request.user,
+			client=клиент,
+			grant=request.grant_type,
+		)
 		return frappe.db.get_value("OAuth Client", клиент, "default_redirect_uri")
 
 	def revoke_token(self, token, token_type_hint, request, *args, **kwargs):
@@ -572,6 +569,13 @@ def _в_журнал_повтор(заголовок: str, клиент, пол�
 			+ (f", {подробность}" if подробность else "")
 		),
 	)
+	security_log.записать(
+		"token_reuse",
+		user=пользователь,
+		client=клиент,
+		family=отпечаток(family_token or "")[:16],
+		note=f"{заголовок}{f', {подробность}' if подробность else ''}",
+	)
 
 
 def _клиент_по_токену(request) -> str | None:
@@ -616,7 +620,35 @@ def approve(*args, **kwargs):
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def get_token(*args, **kwargs):
 	_свой_сервер()
-	return oauth2.get_token(*args, **kwargs)
+	результат = oauth2.get_token(*args, **kwargs)
+	записать_отказ_в_токене()
+	return результат
+
+
+def записать_отказ_в_токене() -> None:
+	"""Отказ эндпоинта токенов — в журнал событий безопасности.
+
+	Выданный токен пишет `save_bearer_token`; здесь — только отказ: код ошибки
+	OAuth, вид гранта и клиент — из тела или заголовка Basic, как его ищет
+	валидатор. Тело ответа с токенами в запись не попадает. Ответ 401 того же
+	запроса `after_request` второй раз не пишет.
+	"""
+	try:
+		ответ = frappe.local.response or {}
+		if not ответ.get("error"):
+			return
+		r = frappe.request
+		клиент, _ = учётные_данные(ЗапросOAuth(r.url, r.method, r.form, r.headers))
+		security_log.записать(
+			"token_denied",
+			error=ответ.get("error"),
+			grant=(frappe.form_dict or {}).get("grant_type"),
+			client=клиент,
+			status=ответ.get("http_status_code"),
+		)
+		frappe.flags.lms_security_logged = True
+	except Exception:
+		pass
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -634,8 +666,9 @@ def introspect_token(token: str | None = None, token_type_hint: str | None = Non
 	`exp` уходил на 5 часов вперёд), и истёкший токен не активен.
 
 	Каким клиентам можно спрашивать — список `client_id` в `КЛЮЧ_ИНТРОСПЕКЦИИ`
-	конфигурации сайта (на стенде — клиент сервиса MCP). Без ключа — любому
-	конфиденциальному, как до learning-services#665, с предупреждением в журнале.
+	конфигурации сайта (на стенде — клиент сервиса MCP; ключ пишет
+	`create-site` из `MCP_OAUTH_CLIENT_ID`). Без ключа — никому, с записью в
+	журнал (learning-services#691): допуск к интроспекции даёт только список.
 	"""
 	r = frappe.request
 	статус, тело = ответ_интроспекции(ЗапросOAuth(r.url, r.method, r.form, r.headers), token, token_type_hint)
@@ -664,14 +697,15 @@ def _можно_спрашивать(клиент: str) -> bool:
 			message=f"{КЛЮЧ_ИНТРОСПЕКЦИИ} в конфигурации сайта — {type(разрешённые).__name__}, нужен список client_id.",
 		)
 		return False
-	# Предупреждение — раз, а не на каждый вызов инструмента агента.
+	# Запись — раз, а не на каждый вызов инструмента агента.
 	if not frappe.cache.get_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ):
-		frappe.cache.set_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ, 1)
+		# Раз в сутки: ключ, пропавший однажды, не теряется в журнале навсегда.
+		frappe.cache.set_value(КЛЮЧ_ПРЕДУПРЕЖДЕНИЯ, 1, expires_in_sec=24 * 60 * 60)
 		frappe.log_error(
-			title="Интроспекция открыта любому конфиденциальному клиенту",
+			title="Интроспекция закрыта: список клиентов не задан",
 			message=f"В конфигурации сайта нет {КЛЮЧ_ИНТРОСПЕКЦИИ}: список client_id, которым можно спрашивать.",
 		)
-	return True
+	return False
 
 
 def сведения_о_токене(token: str | None, token_type_hint: str | None) -> dict:
@@ -715,6 +749,10 @@ def сведения_о_токене(token: str | None, token_type_hint: str | N
 		"exp": round(срок.replace(tzinfo=ZoneInfo(get_system_timezone())).timestamp()),
 		"scope": token_record.scopes,
 	}
+	# `sub` — всегда: по нему сервис MCP знает, чей это запрос, в своём
+	# журнале. С `openid` — идентификатор из userinfo, как в id_token, иначе
+	# имя пользователя; интроспекцию спрашивает только доверенный клиент.
+	ответ["sub"] = token_record.user
 	if "openid" in cstr(token_record.scopes).split():
 		sub = frappe.db.get_value(
 			"User Social Login", {"provider": "frappe", "parent": token_record.user}, "userid"
@@ -790,6 +828,30 @@ def authorization_server_metadata():
 	ответ = Response(frappe.as_json(метаданные), mimetype="application/json")
 	frappe.local.allow_cors = "*"
 	return ответ
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def openid_configuration():
+	"""Конфигурация OpenID Connect Frappe с тем, что сервер действительно делает.
+
+	`Why:` Frappe обещает в ней ответы implicit и hybrid (`token`,
+	`id_token token`, …), которые валидатор отклоняет, и не называет PKCE
+	(learning-services#691). Клиент, который читает её, а не метаданные RFC
+	8414, выбрал бы закрытый путь. Адрес сюда переадресует nginx сайта, как и
+	метаданные сервера авторизации; выключены они — нет и её.
+	"""
+	if not oauth2.is_oauth_metadata_enabled("auth_server"):
+		raise NotFound
+	конфигурация = frappe.parse_json(oauth2.get_openid_configuration().get_data(as_text=True))
+	конфигурация.update(
+		response_types_supported=["code"],
+		response_modes_supported=["query"],
+		grant_types_supported=["authorization_code", "refresh_token"],
+		code_challenge_methods_supported=["S256"],
+		token_endpoint_auth_methods_supported=["none", "client_secret_post"],
+	)
+	frappe.local.allow_cors = "*"
+	return Response(frappe.as_json(конфигурация), mimetype="application/json")
 
 
 def возврат_подключения() -> dict:

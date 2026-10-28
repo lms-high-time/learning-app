@@ -204,6 +204,14 @@ class IntegrationTestScenarioState(IntegrationTestCase):
 			self.assertFalse(ответ["ok"])
 			self.assertEqual(ответ["error"]["code"], student.НЕВЕРНОЕ_СОСТОЯНИЕ)
 			self.assertIsNone(self.запись())
+
+		with self.subTest("состояние больше предела"):
+			from unittest.mock import patch
+
+			with patch.object(student, "ДЛИНА_СОСТОЯНИЯ", len(СОСТОЯНИЕ.encode()) - 1):
+				ответ = student.save_scenario_state(КЛЮЧ, СОСТОЯНИЕ, "1")
+			self.assertEqual(ответ["error"]["code"], student.ДЛИННОЕ_СОСТОЯНИЕ)
+			self.assertIsNone(self.запись())
 		self.assertFalse(frappe.db.exists("Agent Scenario State", {"student": self.ученик}))
 
 	def test_ученики_с_одним_ключом_не_смешиваются(self):

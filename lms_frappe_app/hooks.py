@@ -154,6 +154,7 @@ permission_query_conditions = {
 	"Agent Student Note": f"{_права}.условие_заметки",
 	"Agent Student Artifact": f"{_права}.условие_артефакта",
 	"Agent Homework Submission": f"{_права}.условие_сдачи",
+	"Course Chapter": f"{_права}.условие_главы",
 }
 
 has_permission = {
@@ -166,15 +167,21 @@ has_permission = {
 	"Agent Student Note": f"{_права}.доступна_заметка",
 	"Agent Student Artifact": f"{_права}.доступен_артефакт",
 	"Agent Homework Submission": f"{_права}.доступна_сдача",
+	"Course Chapter": f"{_права}.доступна_глава",
 }
 
 # Роли ставятся вместе с приложением: без них права на DocType ссылались бы
-# на несуществующие роли, и Frappe молча отдал бы доступ никому.
+# на несуществующие роли, и Frappe молча отдал бы доступ никому. Release
+# Publisher — служебная учётка конвейера курсов (learning-services#685).
 fixtures = [
 	{
 		"dt": "Role",
 		"filters": [
-			["name", "in", ["Organization Manager", "Organization Admin", "Agent Service"]]
+			[
+				"name",
+				"in",
+				["Organization Manager", "Organization Admin", "Agent Service", "Release Publisher"],
+			]
 		],
 	},
 	# Зачин урока и обещание курса адресованы ученику, а директивы — агенту,
@@ -238,6 +245,8 @@ scheduler_events = {
 		"lms_frappe_app.agent_learning.notices.напомнить_о_сроках",
 		# Новые аккаунты без согласия за 30 дней — удаляются (learning-services#624).
 		"lms_frappe_app.agent_learning.consent.удалить_без_согласия",
+		# Записи согласия удалённых аккаунтов — через 3 года (learning-services#689).
+		"lms_frappe_app.agent_learning.consent.удалить_старые_согласия",
 	],
 }
 
@@ -251,6 +260,8 @@ after_install = "lms_frappe_app.install.after_install"
 # Индексы по полям фикстур: при установке фикстуры синхронизируются после
 # `after_install`, а `after_sync` — следом за ними.
 after_sync = "lms_frappe_app.install.after_sync"
+# Сайт с флагом разработки не мигрирует — до схемы и патчей (learning-services#691).
+before_migrate = ["lms_frappe_app.install.проверить_флаги_разработки"]
 after_migrate = ["lms_frappe_app.install.after_migrate"]
 
 # Uninstallation
@@ -337,6 +348,12 @@ doc_events = {
 		"on_update": "lms_frappe_app.agent_learning.oauth_client.отозвать_при_смене_доступа",
 		"on_trash": "lms_frappe_app.agent_learning.oauth_client.удалить_токены",
 	},
+	# Квота места под файлы ученика — и на загрузки мимо методов платформы
+	# (`upload_file` Frappe), learning-services#684.
+	"File": {
+		"before_insert": "lms_frappe_app.agent_learning.write_limits.проверить_файл",
+		"validate": "lms_frappe_app.agent_learning.write_limits.закрепить_размер",
+	},
 	# Ключ курса, действующий релиз и порядок глав курса из релиза ставит только
 	# публикация релиза (learning-services#500, #512).
 	"LMS Course": {
@@ -371,9 +388,11 @@ doc_events = {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_ссылку",
 	},
-	# Прогресс курса из релиза — по урокам программы: пройденный урок, снятый
-	# из релиза, Learning засчитывал бы (learning-services#522).
+	# Поля зачисления пишет код платформы (learning-services#674). Прогресс
+	# курса из релиза — по урокам программы: пройденный урок, снятый из релиза,
+	# Learning засчитывал бы (learning-services#522).
 	"LMS Enrollment": {
+		"validate": "lms_frappe_app.agent_learning.enrollment_guard.проверить_зачисление",
 		"on_update": "lms_frappe_app.agent_learning.course_progress.сверить",
 	},
 	# Отметка урока, один ключ на две ишью:
@@ -405,6 +424,20 @@ doc_events = {
 	"Agent Artifact Block": {
 		"validate": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
 		"on_trash": "lms_frappe_app.agent_learning.releases.course_guard.проверить_блок",
+	},
+	# Сроки журналов — из политики конфиденциальности, правкой в Desk не
+	# меняются; ежедневная чистка Frappe сохраняет настройки перед удалением
+	# старых записей и тоже проходит через этот хук (learning-services#689).
+	"Log Settings": {
+		"validate": "lms_frappe_app.personal_data.закрепить_сроки_журналов",
+	},
+	# Копия данных и удаление аккаунта — по письму, процедурой приложения;
+	# штатные запросы Frappe закрыты (learning-services#689).
+	"Personal Data Deletion Request": {
+		"before_insert": "lms_frappe_app.personal_data.отказать_штатному_запросу",
+	},
+	"Personal Data Download Request": {
+		"before_insert": "lms_frappe_app.personal_data.отказать_штатному_запросу",
 	},
 }
 
@@ -439,9 +472,18 @@ before_tests = "lms_frappe_app.testing.before_tests"
 # ------------------------------
 #
 # Specify custom mixins to extend the standard doctype controller.
-# extend_doctype_class = {
-# 	"Task": "lms_frappe_app.custom.task.CustomTaskMixin"
-# }
+# Запись в группу Learning заводит зачисления на курсы группы под меткой,
+# только на шаге после проверок группы (learning-services#674). Адрес файла и
+# файлы сдачи домашки меняет только System Manager (learning-services#683).
+# Примесь, а не `doc_events`: проверка обязана идти до метода контроллера
+# `File`, который сразу трогает диск, — см. модуль.
+extend_doctype_class = {
+	"LMS Batch Enrollment": "lms_frappe_app.agent_learning.enrollment_guard.ЗаписьВГруппу",
+	"File": "lms_frappe_app.agent_learning.file_guard.ФайлПлатформы",
+}
+
+# Страницы шлюзов оплаты приложения payments — 404 (learning-services#679).
+page_renderer = ["lms_frappe_app.whitelist_guard.СтраницаPayments"]
 
 # Overriding Methods
 # ------------------------------
@@ -450,6 +492,18 @@ _редактор = "lms_frappe_app.agent_learning.releases.learning_editor"
 
 _прогресс = "lms_frappe_app.agent_learning.browser_progress.save_progress"
 _oauth = "lms_frappe_app.agent_learning.oauth_server"
+_чтения = "lms_frappe_app.agent_learning.learning_reads"
+_методы_чтения = (
+	"get_course_outline",
+	"get_lesson",
+	"get_courses",
+	"get_course_count",
+	"get_reviews",
+	"get_batches",
+	"get_batch_count",
+	"get_chart_data",
+	"get_course_completion_data",
+)
 _методы_oauth = ("authorize", "approve", "get_token", "revoke_token", "introspect_token", "register_client")
 
 # Урок закрывает занятие с агентом, а не время на странице урока —
@@ -465,6 +519,8 @@ override_whitelisted_methods = {
 	"frappe.core.doctype.user.user.sign_up": "lms_frappe_app.access.sign_up",
 	"lms.lms.user.sign_up": "lms_frappe_app.access.sign_up_learning",
 	"frappe.core.doctype.user.user.update_password": "lms_frappe_app.access.update_password",
+	# Приглашение Frappe принимается без входа под приглашённым (learning-services#691).
+	"frappe.core.api.user_invitation.accept_invitation": "lms_frappe_app.access.accept_invitation",
 	# Редактор Learning не правит главы и уроки курса из релиза: порядок он пишет
 	# мимо `validate` — обоснование в модуле (learning-services#512).
 	"lms.lms.api.delete_chapter": f"{_редактор}.delete_chapter",
@@ -485,6 +541,26 @@ override_whitelisted_methods = {
 	"frappe.integrations.oauth2_logins.login_via_google": "lms_frappe_app.google_login.login_via_google",
 	"frappe.www.login.login_via_google": "lms_frappe_app.google_login.login_via_google",
 	"frappe.integrations.oauth2_logins.custom": "lms_frappe_app.google_login.custom",
+	# Прочие провайдеры входа — отказ: вход через внешний провайдер только
+	# Google (learning-services#691) — обоснование в модуле. Список — копия
+	# `google_login.ПРОВАЙДЕРЫ_FRAPPE`: импорт модулей приложения в hooks
+	# тянул бы Frappe при чтении хуков; расхождение ловит тест.
+	**{
+		f"{модуль}.login_via_{провайдер}": "lms_frappe_app.google_login.отклонить_провайдера"
+		for модуль in ("frappe.integrations.oauth2_logins", "frappe.www.login")
+		for провайдер in ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
+	},
+	# Версии приложений — только пользователю Desk (learning-services#692).
+	"frappe.utils.change_log.get_versions": "lms_frappe_app.versions.get_versions",
+	# Оглавление, урок, отзывы, каталог и группы Learning — по правилу витрины,
+	# статистика — персоналу: обоснование в модуле (learning-services#692).
+	**{f"lms.lms.utils.{метод}": f"{_чтения}.{метод}" for метод in _методы_чтения},
+	"lms.lms.api.get_chart_details": f"{_чтения}.get_chart_details",
+	# Отправка веб-формы — штатным методом Frappe, а не подменой из payments:
+	# её копия отстала от проверок Frappe 16, а оплаты через веб-форму на
+	# платформе нет (learning-services#679). Приложение ставится после
+	# payments, его подмена — последняя и действует.
+	"frappe.website.doctype.web_form.web_form.accept": "frappe.website.doctype.web_form.web_form.accept",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -508,6 +584,10 @@ override_whitelisted_methods = {
 # анонимное имя.
 ignore_links_on_delete = ["Agent Consent"]
 
+# Страница SPA Learning: мета-теги курса и группы вне витрины и версия Frappe —
+# по правилу витрины (learning-services#692).
+update_website_context = ["lms_frappe_app.agent_learning.learning_reads.страница_learning"]
+
 # Request Events
 # ----------------
 # Без явного согласия с документами страницы платформы ведут на экран
@@ -516,55 +596,135 @@ ignore_links_on_delete = ["Agent Consent"]
 #
 # `sid` в параметрах запроса — отказ, и первым: переадресация следующих хуков
 # поставила бы cookie сессии из параметра (learning-services#666).
+#
+# Абсолютный срок сессии, поднятой из базы, — следом: Frappe сверяет его
+# только у сессии из кэша (learning-services#691).
+#
+# Оригиналы подменённых методов снимаются из реестра whitelisted на каждом
+# запросе и задаче: иначе до них доходят под другим путём модуля
+# (learning-services#692). Методы приложения payments — целиком и только на
+# запросе: оплаты через его шлюзы на платформе нет, а HTTP в задачах нет
+# (learning-services#679); его страницы отвечают 404 — `page_renderer` ниже.
+#
+# Хеш пароля — argon2id: контекст passlib Frappe настраивается до смены
+# пароля в вебе, раньше переадресации на согласие; до входа — `before_login`
+# ниже, в фоновых задачах — `before_job` (learning-services#676).
 before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
+	"lms_frappe_app.session_guard.завершить_истёкшую",
+	"lms_frappe_app.whitelist_guard.снять_подменённые",
+	"lms_frappe_app.whitelist_guard.снять_методы_payments",
+	"lms_frappe_app.password_hash.настроить",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
-after_request = ["lms_frappe_app.session_guard.не_ставить_cookie"]
+# Отказы 401, 403, 429 и неудачный вход — в журнал событий безопасности
+# (learning-services#680), первым из хуков приложения: сбой следующего не
+# должен его съесть. Хуки Frappe (`frappe.monitor`) идут раньше. Выход
+# очищает данные сайта в браузере, приватные файлы не кэшируются
+# (learning-services#688).
+after_request = [
+	"lms_frappe_app.security_log.записать_отказ",
+	"lms_frappe_app.session_guard.не_ставить_cookie",
+	"lms_frappe_app.browser_data.заголовки_ответа",
+]
 
 # Session Events
 # --------------
 # Выход из Cenda отзывает токены веб-чата: у чата свой вход, и без этого он
-# переживал «Выйти» (learning-services#656).
-on_logout = "lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе"
+# переживал «Выйти» (learning-services#656). Второй хук запоминает, кто
+# вышел, — для очистки данных сайта в браузере (learning-services#688).
+on_logout = [
+	"lms_frappe_app.agent_learning.oauth_client.отозвать_чат_при_выходе",
+	"lms_frappe_app.browser_data.запомнить_выход",
+]
 # Абсолютный срок сессии от входа (learning-services#666).
 on_session_creation = "lms_frappe_app.session_guard.ограничить_срок_сессии"
+# Вход паролем Frappe проверяет при разборе запроса, раньше `before_request`:
+# контекст хеша пароля настраивается до проверки (learning-services#676).
+before_login = ["lms_frappe_app.password_hash.настроить"]
+# Вход в сессию — в журнал событий безопасности (learning-services#680).
+on_login = "lms_frappe_app.security_log.при_входе"
 
 # Job Events
 # ----------
-# before_job = ["lms_frappe_app.utils.before_job"]
+before_job = [
+	"lms_frappe_app.whitelist_guard.снять_подменённые",
+	"lms_frappe_app.password_hash.настроить",
+]
 # after_job = ["lms_frappe_app.utils.after_job"]
 
 # User Data Protection
 # --------------------
+# Реестр данных пользователя (learning-services#689): поля доктайпов
+# приложения, Learning и Frappe, в которых стоит пользователь. Его читают выгрузка
+# Frappe (`Personal Data Download Request`) и процедура приложения
+# `lms_frappe_app.personal_data` — выгрузка и удаление данных ученика.
+# Ключ `mode` — её: `delete` — запись удаляется (строка дочерней таблицы —
+# из своей таблицы), `anonymize` — поле очищается, запись остаётся,
+# `keep` — запись хранится своим сроком. Записи, которые держатся за запись
+# ученика ссылкой, а не полем пользователя, — `personal_data.ЗАВИСИМЫЕ`.
+# Классификация данных и сроки — `docs/process/data-classification.md` в
+# learning-services.
+#
+# Новое поле со ссылкой на пользователя — строка здесь или в
+# `personal_data.НЕ_ДАННЫЕ_УЧЕНИКА`: иначе ворота
+# `tests/test_personal_data.py` красные. `Why:` поле вне реестра процедура не
+# видит — запись осталась бы после удаления, а удаление аккаунта отказало бы
+# по ссылке.
 
-# user_data_fields = [
-# 	{
-# 		"doctype": "{doctype_1}",
-# 		"filter_by": "{filter_by}",
-# 		"redact_fields": ["{field_1}", "{field_2}"],
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_2}",
-# 		"filter_by": "{filter_by}",
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_3}",
-# 		"strict": False,
-# 	},
-# 	{
-# 		"doctype": "{doctype_4}"
-# 	}
-# ]
+_удалить = "delete"
+_обезличить = "anonymize"
+
+user_data_fields = [
+	# Учебные данные ученика
+	{"doctype": "Agent Chat State", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Scenario State", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Student Note", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Student Note", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Student Artifact", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Student Artifact", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Learning Session", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Learning Session", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Lesson Run", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Lesson Run", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Quiz Attempt", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Quiz Attempt", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Quiz Event", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Quiz Event", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Homework Submission", "filter_by": "member", "mode": _удалить},
+	{"doctype": "Agent Homework Submission", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Homework Notice", "filter_by": "recipient", "mode": _удалить},
+	# Команда: членство и назначения — данные человека, сама команда остаётся
+	{"doctype": "Organization Membership", "filter_by": "user", "mode": _удалить},
+	{"doctype": "Allocation Notice", "filter_by": "user", "mode": _удалить},
+	{"doctype": "Course Allocation Member", "filter_by": "user", "mode": _удалить},
+	{"doctype": "Learning Organization", "filter_by": "created_by", "mode": _обезличить},
+	# Кто вернул или принял чужую домашку — куратор; след проверки остаётся без имени
+	{"doctype": "Agent Homework Event", "filter_by": "by_user", "mode": _обезличить},
+	# Доказательство согласия — 3 года после удаления аккаунта (`consent.удалить_старые_согласия`)
+	{"doctype": "Agent Consent", "filter_by": "user", "mode": "keep"},
+	# Learning: запись на курс, прогресс, программы и то, что пишут его страницы урока
+	{"doctype": "LMS Enrollment", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Course Progress", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Course Interest", "filter_by": "user", "mode": _удалить},
+	{"doctype": "LMS Program Member", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Quiz Submission", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Lesson Note", "filter_by": "member", "mode": _удалить},
+	{"doctype": "LMS Video Watch Duration", "filter_by": "member", "mode": _удалить},
+	# Frappe: обсуждения уроков, уведомления, запросы на копию данных
+	{"doctype": "Discussion Topic", "filter_by": "owner", "mode": _удалить},
+	{"doctype": "Discussion Reply", "filter_by": "owner", "mode": _удалить},
+	{"doctype": "Notification Log", "filter_by": "for_user", "mode": _удалить},
+	{"doctype": "Notification Log", "filter_by": "from_user", "mode": _обезличить},
+	{"doctype": "Personal Data Download Request", "filter_by": "user", "mode": _удалить},
+]
 
 # Authentication and authorization
 # --------------------------------
 
-# auth_hooks = [
-# 	"lms_frappe_app.auth.validate"
-# ]
+# Запрос с ключом API в заголовке — в журнал событий безопасности
+# (learning-services#680). Хук ничего не проверяет и никого не впускает.
+auth_hooks = ["lms_frappe_app.security_log.по_заголовку"]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True

@@ -18,15 +18,27 @@ learning-services#664).
 `oauth2_logins.login_via_google`, его старое имя `frappe.www.login.login_via_google`
 (подмена самого Frappe, её перекрывает наша) и `oauth2_logins.custom` с
 провайдером в пути — `/api/method/frappe.integrations.oauth2_logins.custom/google`.
+
+Вход через внешний провайдер — только Google (learning-services#691): методы
+входа прочих провайдеров Frappe и `custom` с другим провайдером отвечают
+отказом. `Why:` подтверждён ли адрес почты, Frappe не проверяет ни у одного
+провайдера, а проверка выше написана под ответ Google. Ролям со вторым
+фактором (`РОЛИ_С_2FA`) вход через Google закрыт: кода второго фактора он не
+спрашивает, и эти роли входят паролем и кодом.
 """
 
 import frappe
 from frappe.integrations import oauth2_logins
+from frappe.utils import cint
 from frappe.utils.oauth import consume_oauth_state, get_email, get_info_via_oauth, login_oauth_user
 
+from lms_frappe_app.install import БЕЗ_2FA, РОЛИ_С_2FA
 from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
 
 ПРОВАЙДЕР = "google"
+#: Провайдеры, у которых во Frappe свой метод входа `login_via_<провайдер>`,
+#: кроме Google. Оба имени каждого метода подменены отказом (hooks.py).
+ПРОВАЙДЕРЫ_FRAPPE = ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
 
 ЗАГОЛОВОК = "Не удалось войти через Google"
 НЕ_ПОДТВЕРЖДЁН = (
@@ -36,6 +48,13 @@ from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
 ДРУГОЙ_АККАУНТ = (
 	"Этот адрес почты на платформе привязан к другому аккаунту Google. Войдите тем аккаунтом "
 	"Google, которым входили раньше, или по почте с паролем."
+)
+СО_ВТОРЫМ_ФАКТОРОМ = (
+	"Для этой учётной записи вход через Google закрыт: войдите по почте с паролем и кодом "
+	"из приложения-генератора."
+)
+ДРУГОЙ_ПРОВАЙДЕР = (
+	"Этот способ входа на платформе не используется. Войдите через Google или по почте с паролем."
 )
 
 
@@ -71,6 +90,20 @@ def привязанный_идентификатор(данные: dict) -> str
 	)
 
 
+def со_вторым_фактором(данные: dict) -> bool:
+	"""Есть ли у пользователя с адресом из данных Google роль из `РОЛИ_С_2FA`.
+
+	На сайте с выключенным вторым фактором (`БЕЗ_2FA`, локальная разработка)
+	ни у кого его нет, и закрывать Google незачем."""
+	if cint(frappe.conf.get(БЕЗ_2FA)):
+		return False
+	адрес = (get_email(данные) or "").lower()
+	return bool(
+		адрес
+		and frappe.db.exists("Has Role", {"parenttype": "User", "parent": адрес, "role": ["in", РОЛИ_С_2FA]})
+	)
+
+
 @frappe.whitelist(allow_guest=True)
 def login_via_google(code: str, state: str):
 	"""Подмена `frappe.integrations.oauth2_logins.login_via_google`.
@@ -78,7 +111,10 @@ def login_via_google(code: str, state: str):
 	Отказ гасит `state`: попытка входа одноразовая, как и при успешном входе.
 	"""
 	данные = get_info_via_oauth(ПРОВАЙДЕР, code, decoder=oauth2_logins.decoder_compat)
-	if отказ := причина_отказа(данные, привязанный_идентификатор(данные)):
+	отказ = причина_отказа(данные, привязанный_идентификатор(данные))
+	if not отказ and со_вторым_фактором(данные):
+		отказ = СО_ВТОРЫМ_ФАКТОРОМ
+	if отказ:
 		consume_oauth_state(state)
 		frappe.logger("lms_frappe_app.google_login").warning(
 			f"Вход через Google отклонён: {отказ} ({get_email(данные)})"
@@ -102,16 +138,27 @@ def провайдер_из_пути(путь: str) -> str | None:
 
 @frappe.whitelist(allow_guest=True)
 def custom(code: str, state: str):
-	"""Подмена `frappe.integrations.oauth2_logins.custom`: Google — через проверку.
+	"""Подмена `frappe.integrations.oauth2_logins.custom`: Google — через
+	проверку, остальные — отказ.
 
 	`Why:` `custom` впускает любого провайдера из `Social Login Key` по имени
 	из пути, и `custom/google` шёл в `login_via_oauth2("google", …)` мимо
 	подмены `login_via_google`: адрес возврата у Google тот же, и обмен кода
 	проходит (learning-services#666). Имя сравнивается без регистра и пробелов
-	по краям: MariaDB находит запись `google` и по `Google `, и такой путь
-	не должен уходить во Frappe. Остальные провайдеры — во Frappe как есть.
+	по краям: MariaDB находит запись `google` и по `Google `.
 	"""
 	провайдер = провайдер_из_пути(frappe.request.path) if frappe.request else None
 	if провайдер and провайдер.strip().lower() == ПРОВАЙДЕР:
 		return login_via_google(code, state)
-	return oauth2_logins.custom(code, state)
+	return отклонить_провайдера(code, state)
+
+
+@frappe.whitelist(allow_guest=True)
+def отклонить_провайдера(code: str | None = None, state: str | None = None):
+	"""Подмена методов входа провайдеров, кроме Google: отказ страницей.
+
+	`state` гасится, как и при отказе Google: попытка входа одноразовая.
+	"""
+	if state:
+		consume_oauth_state(state)
+	frappe.respond_as_web_page(ЗАГОЛОВОК, ДРУГОЙ_ПРОВАЙДЕР, http_status_code=403, indicator_color="red")
