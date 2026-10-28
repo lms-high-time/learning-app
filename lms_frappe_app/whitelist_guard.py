@@ -18,19 +18,26 @@
 несколькими сайтами, где у части приложение не стоит, снятие задело бы и их:
 там исходный метод перестал бы отвечать. На стенде cenda.app сайт один.
 
-Методы приложения payments снимаются из реестров целиком
-(`снять_методы_payments`, learning-services#679): его требует Learning
-(`required_apps`), а оплаты через его шлюзы на платформе нет.
+Методы приложения payments снимаются из реестров целиком, его страницы
+отвечают 404 (`снять_методы_payments`, `СтраницаPayments`,
+learning-services#679): его требует Learning (`required_apps`), а оплаты
+через его шлюзы на платформе нет. Оговорка про несколько сайтов — та же.
+Включат платные курсы — снимать: ссылка на оплату Learning
+(`get_payment_link`) ведёт на страницу шлюза.
 """
 
-import importlib
+import pkgutil
+import threading
 from collections.abc import Callable
-from pathlib import Path
+from importlib import import_module
 
 import frappe
+from frappe.website.page_renderers.not_found_page import NotFoundPage
+from frappe.website.page_renderers.template_page import TemplatePage
 
-# Модули payments с whitelisted-функциями, импортированные в этом процессе.
+# Модули payments, импортированные в этом процессе; `None` — ещё нет.
 _модули_payments: list[str] | None = None
+_импорт_payments = threading.Lock()
 
 
 def снять_подменённые(*args, **kwargs) -> None:
@@ -55,24 +62,19 @@ def снять_подменённые(*args, **kwargs) -> None:
 
 
 def снять_методы_payments(*args, **kwargs) -> None:
-	"""Убирает из реестров whitelisted-методов функции приложения payments.
+	"""Убирает из реестров whitelisted-методов все функции приложения payments.
 
-	Оставляет цели подмен: payments подменяет `web_form.accept`, и без цели
-	перестали бы отправляться веб-формы. Из питона методы по-прежнему
-	вызываются — реестр нужен только HTTP.
+	Из питона они по-прежнему вызываются — реестр нужен только HTTP. Отправка
+	веб-формы, которую payments подменял, идёт штатным методом Frappe
+	(подмена в `hooks.py`).
 
 	Реестр заполняется при импорте модуля, поэтому сначала импортируются все
-	модули payments с `frappe.whitelist`: модуль, импортированный уже после
-	снятия, зарегистрировал бы свои методы заново.
+	модули payments: модуль, импортированный уже после снятия, зарегистрировал
+	бы свои методы заново.
 	"""
 	_импортировать_payments()
-	цели = {
-		цель
-		for подмены in frappe.get_hooks("override_whitelisted_methods").values()
-		if подмены and (цель := _функция(подмены[-1])) is not None
-	}
 	for функция in list(frappe.whitelisted):
-		if функция in цели or not getattr(функция, "__module__", "").startswith("payments."):
+		if not _из_payments(функция):
 			continue
 		frappe.whitelisted.discard(функция)
 		frappe.guest_methods.discard(функция)
@@ -80,28 +82,54 @@ def снять_методы_payments(*args, **kwargs) -> None:
 		frappe.allowed_http_methods_for_whitelisted_func.pop(функция, None)
 
 
+class СтраницаPayments(NotFoundPage):
+	"""Страница сайта из приложения payments (шлюзы, итог оплаты) — 404: её
+	`get_context` исполнял бы код шлюза по запросу без входа."""
+
+	def __init__(self, path, http_status_code=None):
+		# Frappe передаёт рендерерам статус 200, а `NotFoundPage` оставляет
+		# переданный: страница «не найдено» ушла бы с кодом 200.
+		super().__init__(path, 404)
+
+	def can_render(self):
+		страница = TemplatePage(self.request_path)
+		return bool(страница.can_render()) and getattr(страница, "app", None) == "payments"
+
+
+def _из_payments(функция) -> bool:
+	return (getattr(функция, "__module__", None) or "").split(".")[0] == "payments"
+
+
 def _импортировать_payments() -> None:
-	"""Импортирует модули payments, где есть `frappe.whitelist`, — один раз
-	на процесс. Модуль, который не импортируется (нет библиотеки шлюза), не
-	вызывается и по HTTP — его пропускаем."""
+	"""Импортирует все модули payments, кроме тестов, — один раз на процесс.
+
+	Под замком: в потоковом воркере второй запрос иначе прошёл бы мимо
+	незаконченного импорта и снял бы методы с неполного реестра. Модуль,
+	который не импортируется (нет библиотеки шлюза), не вызывается и по HTTP —
+	его пропускаем.
+	"""
 	global _модули_payments
 	if _модули_payments is not None:
 		return
-	_модули_payments = []
-	try:
-		корень = Path(importlib.import_module("payments").__file__).parent
-	except ImportError:
-		return
-	for файл in sorted(корень.rglob("*.py")):
-		if "frappe.whitelist" not in файл.read_text(encoding="utf-8", errors="ignore"):
-			continue
-		части = файл.relative_to(корень.parent).with_suffix("").parts
-		имя = ".".join(части[:-1] if части[-1] == "__init__" else части)
+	with _импорт_payments:
+		if _модули_payments is not None:
+			return
+		модули = []
 		try:
-			importlib.import_module(имя)
-		except Exception:
-			continue
-		_модули_payments.append(имя)
+			payments = import_module("payments")
+		except ImportError:
+			_модули_payments = модули
+			return
+		for модуль in pkgutil.walk_packages(payments.__path__, "payments.", onerror=lambda имя: None):
+			части = модуль.name.split(".")
+			if "tests" in части or части[-1].startswith("test_"):
+				continue
+			try:
+				import_module(модуль.name)
+			except Exception:
+				continue
+			модули.append(модуль.name)
+		_модули_payments = модули
 
 
 def _функция(путь: str) -> Callable | None:

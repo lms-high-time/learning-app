@@ -482,6 +482,9 @@ extend_doctype_class = {
 	"File": "lms_frappe_app.agent_learning.file_guard.ФайлПлатформы",
 }
 
+# Страницы шлюзов оплаты приложения payments — 404 (learning-services#679).
+page_renderer = ["lms_frappe_app.whitelist_guard.СтраницаPayments"]
+
 # Overriding Methods
 # ------------------------------
 
@@ -553,6 +556,11 @@ override_whitelisted_methods = {
 	# статистика — персоналу: обоснование в модуле (learning-services#692).
 	**{f"lms.lms.utils.{метод}": f"{_чтения}.{метод}" for метод in _методы_чтения},
 	"lms.lms.api.get_chart_details": f"{_чтения}.get_chart_details",
+	# Отправка веб-формы — штатным методом Frappe, а не подменой из payments:
+	# её копия отстала от проверок Frappe 16, а оплаты через веб-форму на
+	# платформе нет (learning-services#679). Приложение ставится после
+	# payments, его подмена — последняя и действует.
+	"frappe.website.doctype.web_form.web_form.accept": "frappe.website.doctype.web_form.web_form.accept",
 }
 #
 # each overriding function accepts a `data` argument;
@@ -595,7 +603,8 @@ update_website_context = ["lms_frappe_app.agent_learning.learning_reads.стра
 # Оригиналы подменённых методов снимаются из реестра whitelisted на каждом
 # запросе и задаче: иначе до них доходят под другим путём модуля
 # (learning-services#692). Методы приложения payments — так же, целиком:
-# оплаты через его шлюзы на платформе нет (learning-services#679).
+# оплаты через его шлюзы на платформе нет (learning-services#679); его
+# страницы отвечают 404 — `page_renderer` ниже.
 #
 # Хеш пароля — argon2id: контекст passlib Frappe настраивается до смены
 # пароля в вебе, раньше переадресации на согласие; до входа — `before_login`
@@ -640,6 +649,7 @@ on_login = "lms_frappe_app.security_log.при_входе"
 # ----------
 before_job = [
 	"lms_frappe_app.whitelist_guard.снять_подменённые",
+	"lms_frappe_app.whitelist_guard.снять_методы_payments",
 	"lms_frappe_app.password_hash.настроить",
 ]
 # after_job = ["lms_frappe_app.utils.after_job"]
