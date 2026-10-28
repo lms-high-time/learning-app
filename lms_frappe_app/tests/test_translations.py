@@ -37,7 +37,7 @@ from frappe.translate import get_translations_from_csv
 	"templates/includes/oauth_confirmation.html",
 )
 КОММЕНТАРИЙ = re.compile(r"\{#.*?#\}|<!--.*?-->", re.S)
-СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script\s*>", re.S | re.I)
+СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script\b[^>]*>", re.S | re.I)
 ВЫРАЖЕНИЕ = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
 #: Строковый литерал — в выражениях Jinja и в коде скриптов.
 ЛИТЕРАЛ = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\])*)\1""", re.S)
