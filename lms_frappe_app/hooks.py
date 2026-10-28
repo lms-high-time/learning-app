@@ -337,10 +337,14 @@ doc_events = {
 	# записывает согласие с документами (learning-services#577).
 	# Смена пароля в desk, отключение и удаление аккаунта отзывают его токены
 	# OAuth (learning-services#631, #665); смену по ссылке — `access.update_password`.
-	# Самостоятельная регистрация получает язык, выбранный на сайте (learning-services#737).
+	# Самостоятельная регистрация получает язык, выбранный на сайте (learning-services#737),
+	# и письмо о получателях данных (ЗРУ-547, ст. 23; learning-services#747).
 	"User": {
 		"before_insert": "lms_frappe_app.access.язык_нового_пользователя",
-		"after_insert": "lms_frappe_app.agent_learning.consent.записать_согласие",
+		"after_insert": [
+			"lms_frappe_app.agent_learning.consent.записать_согласие",
+			"lms_frappe_app.agent_learning.recipients.сообщить_о_получателях",
+		],
 		# Длина, контекстные слова и утечки пароля из desk и REST (learning-services#666);
 		# смена пароля замечается для отзыва токенов (learning-services#665).
 		"before_validate": [
