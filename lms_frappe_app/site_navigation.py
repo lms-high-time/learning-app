@@ -40,10 +40,14 @@ import frappe
 
 #: Подвал вместо «Built on Frappe»: исходники приложения платформы открыты под
 #: AGPL-3.0, и ссылка на них — то, что этим страницам положено по лицензии.
+#: Знак «12+» — возрастная категория: страницы платформы — информационная
+#: продукция, без знака её оборот не допускается (ЗРУ-444, ПКМ № 848,
+#: learning-services#746).
 ИСХОДНЫЙ_КОД = "https://github.com/lms-high-time/learning-app"
 ПОДВАЛ = (
 	f'Учебное приложение платформы открыто под AGPL-3.0 — '
 	f'<a href="{ИСХОДНЫЙ_КОД}" class="text-muted">исходный код</a>'
+	f' · <span title="Возрастная категория">12+</span>'
 )
 
 
@@ -61,4 +65,11 @@ def шапка_платформы(context) -> None:
 	context.top_bar_items = [frappe._dict(label=подпись, url=адрес) for подпись, адрес in пункты]
 	подпись, адрес = АГЕНТЫ_И_СЕССИИ
 	context.post_login = [frappe._dict(label=подпись, url=адрес), *(context.get("post_login") or [])]
-	context.footer_powered = ПОДВАЛ
+
+
+def подвал(context) -> dict:
+	"""`update_website_context`: подвал всех страниц на теме сайта — вход,
+	согласие, OAuth, кабинет автора. `Why:` значение в Website Settings не
+	переживает пересоздания сайта, а знак возрастной категории нужен на каждой
+	странице (learning-services#746)."""
+	return {"footer_powered": ПОДВАЛ}

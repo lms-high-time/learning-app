@@ -587,8 +587,12 @@ override_whitelisted_methods = {
 ignore_links_on_delete = ["Agent Consent"]
 
 # Страница SPA Learning: мета-теги курса и группы вне витрины и версия Frappe —
-# по правилу витрины (learning-services#692).
-update_website_context = ["lms_frappe_app.agent_learning.learning_reads.страница_learning"]
+# по правилу витрины (learning-services#692). Подвал страниц на теме сайта —
+# исходный код и знак «12+» (learning-services#746).
+update_website_context = [
+	"lms_frappe_app.agent_learning.learning_reads.страница_learning",
+	"lms_frappe_app.site_navigation.подвал",
+]
 
 # Request Events
 # ----------------
