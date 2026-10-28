@@ -1,155 +1,141 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
 
-"""Свой файл переводов интерфейса.
+"""Строки интерфейса — с английским исходником и русским переводом.
 
-`Why:` в `frappe/lms` часть строк не переведена, а править её `ru.po` значит
-потерять работу при первом обновлении чужого приложения. Frappe читает
-`<app>/translations/<lang>.csv` без компиляции и обходит приложения в порядке
-установки — наше последнее, поэтому его переводы перекрывают LMS.
+Исходник строки — английский, как у Frappe и Learning; русский — перевод в
+`translations/ru.csv` (learning-services#737). Выбравший на cenda.app
+английский видит исходник, остальные — перевод.
 
-Битую строку Frappe не роняет, а молча пишет в лог: без теста испорченный
-файл выглядел бы как «часть интерфейса вдруг снова по-английски».
+`Why:` строка без перевода молча показывается русскому интерфейсу
+по-английски, а зашитая по-русски — английскому по-русски. Ни то, ни другое
+не видно ни в коде, ни в тестах поведения (learning-services#741).
 """
 
-import csv
 import re
 from pathlib import Path
 
 import frappe
-from frappe.tests import IntegrationTestCase, UnitTestCase
-from frappe.translate import get_all_translations
+from frappe.tests import UnitTestCase
+from babel.messages.pofile import read_po
+from frappe.translate import get_translations_from_csv
 
-ФАЙЛ = Path(frappe.get_app_path("lms_frappe_app", "translations", "ru.csv"))
+ПРИЛОЖЕНИЕ = Path(frappe.get_app_path("lms_frappe_app"))
 
-ПЛЕЙСХОЛДЕР = re.compile(r"\{[^}]*\}")
+#: `_("…")`, `_('…')` и `frappe._("…")` с литералом. Склейки сюда не попадают —
+#: их ловит ревью; f-строку ловит `ВЫЗОВ_F`: переводу у неё не из чего взяться.
+ВЫЗОВ = re.compile(r"""(?:(?<![\w.])|(?<=frappe\.))_\(\s*(["'])((?:\\.|(?!\1).)*)\1\s*[,)]""")
+ВЫЗОВ_F = re.compile(r"""(?:(?<![\w.])|(?<=frappe\.))_\(\s*f["']""")
+ПЛЕЙСХОЛДЕР = re.compile(r"\{\d+\}")
+КИРИЛЛИЦА = re.compile(r"[А-Яа-яЁё]")
+
+#: Страницы пути входа (learning-services#737): гость видит их на языке,
+#: выбранном на сайте, и русского в разметке быть не должно.
+СТРАНИЦЫ_ВХОДА = (
+	"www/consent.html",
+	"www/update-password.html",
+	"templates/includes/oauth_confirmation.html",
+)
+КОММЕНТАРИЙ = re.compile(r"\{#.*?#\}|<!--.*?-->", re.S)
+СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script>", re.S)
+ВЫРАЖЕНИЕ = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
+#: Строковый литерал — в выражениях Jinja и в коде скриптов.
+ЛИТЕРАЛ = re.compile(r"""(["'`])((?:\\.|(?!\1).)*?)\1""", re.S)
+КОММЕНТАРИЙ_JS = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.S)
 
 
-def _строки() -> list[list[str]]:
-	with ФАЙЛ.open(encoding="utf-8") as ф:
-		return list(csv.reader(ф))
+def видимый_русский(разметка: str) -> list[str]:
+	"""Русский, который увидит человек: текст разметки и строковые литералы
+	в выражениях Jinja и в скриптах. Имена переменных и комментарии — нет:
+	кириллица в них — соглашение кода, а не текст интерфейса."""
+	разметка = КОММЕНТАРИЙ.sub("", разметка)
+	найдено = []
+	for _тег, код in СКРИПТ.findall(разметка):
+		код = КОММЕНТАРИЙ_JS.sub("", код)
+		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(код) if КИРИЛЛИЦА.search(строка)]
+	разметка = СКРИПТ.sub("", разметка)
+	for выражение in ВЫРАЖЕНИЕ.findall(разметка):
+		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(выражение) if КИРИЛЛИЦА.search(строка)]
+	# Куски между `<` и `>`: и текст, и атрибуты тегов — `placeholder`,
+	# `aria-label`, `title` человек тоже видит или слышит.
+	куски = re.split(r"[<>]", ВЫРАЖЕНИЕ.sub(" ", разметка))
+	найдено += [" ".join(кусок.split()) for кусок in куски if КИРИЛЛИЦА.search(кусок)]
+	return найдено
 
 
-class TestФайлПереводов(UnitTestCase):
-	"""Разбор самого файла — без базы."""
+def русские_переводы() -> dict[str, str]:
+	"""Русские переводы всех приложений — из исходников: `ru.csv` и `locale/ru.po`.
 
-	def test_файл_разбирается_и_не_пуст(self):
-		строки = _строки()
+	`Why:` Frappe читает переводы `.po` только скомпилированными в `.mo`
+	(`sites/assets/locale`), а CI их не компилирует: ворота видели бы перевод
+	Frappe и Learning на одной машине и не видели на другой."""
+	переводы: dict[str, str] = {}
+	for приложение in frappe.get_installed_apps():
+		файл = Path(frappe.get_app_path(приложение, "locale", "ru.po"))
+		if файл.exists():
+			with файл.open("rb") as po:
+				переводы |= {
+					сообщение.id: сообщение.string
+					for сообщение in read_po(po)
+					if isinstance(сообщение.id, str) and сообщение.string and not сообщение.fuzzy
+				}
+		переводы |= get_translations_from_csv("ru", приложение) or {}
+	return переводы
 
-		self.assertTrue(строки)
-		for строка in строки:
-			self.assertIn(len(строка), (2, 3), f"неверное число полей: {строка[:1]}")
-			self.assertTrue(строка[1].strip(), f"пустой перевод: {строка[0]!r}")
 
-	def test_плейсхолдеры_не_потеряны(self):
-		"""`{0}` в переводе подставляется по номеру: потеря ломает фразу."""
-		for оригинал, перевод, *_ in _строки():
-			self.assertEqual(
-				sorted(ПЛЕЙСХОЛДЕР.findall(оригинал)),
-				sorted(ПЛЕЙСХОЛДЕР.findall(перевод)),
-				f"разошлись плейсхолдеры: {оригинал!r}",
-			)
+def исходники():
+	for путь in sorted(ПРИЛОЖЕНИЕ.rglob("*")):
+		if путь.suffix not in (".py", ".html") or "tests" in путь.parts or путь.name.startswith("test_"):
+			continue
+		yield путь
 
-	def test_строк_с_краевыми_пробелами_нет(self):
-		"""`Why:` Frappe обрезает перевод (`strip` в `get_translation_dict_from_file`),
-		и краевой пробел до платформы не доедет. Такие строки — куски
-		предложений из писем: переведёшь — слова слипнутся («опубликован
-		наFrappe Learning»). Пусть остаются английскими, это заметно меньше.
-		Проверено CI: сверка с общим словарём Frappe падала именно на них."""
-		с_пробелами = [
-			о for о, *_ in _строки() if о[:1] == " " or о[-1:] == " "
+
+def строки_интерфейса() -> dict[str, list[str]]:
+	"""Английские литералы `_()` → где встречаются."""
+	найдено: dict[str, list[str]] = {}
+	for путь in исходники():
+		for _кавычка, строка in ВЫЗОВ.findall(путь.read_text(encoding="utf-8")):
+			if not КИРИЛЛИЦА.search(строка):
+				найдено.setdefault(строка, []).append(str(путь.relative_to(ПРИЛОЖЕНИЕ)))
+	return найдено
+
+
+class UnitTestTranslations(UnitTestCase):
+	def test_у_каждой_строки_интерфейса_есть_русский_перевод(self):
+		"""Перевод — из `ru.csv` приложения или из переводов Frappe и Learning."""
+		перевод = русские_переводы()
+		без_перевода = {
+			строка: места for строка, места in строки_интерфейса().items() if not перевод.get(строка)
+		}
+		self.assertEqual(без_перевода, {}, "добавьте строки в translations/ru.csv")
+
+	def test_строки_без_f_строк_в_переводе(self):
+		места = [
+			str(путь.relative_to(ПРИЛОЖЕНИЕ))
+			for путь in исходники()
+			if ВЫЗОВ_F.search(путь.read_text(encoding="utf-8"))
 		]
+		self.assertEqual(места, [], "_(f\"…\") не переводится: плейсхолдеры {0} и .format()")
 
-		self.assertEqual(с_пробелами, [], "такую строку Frappe обрежет")
+	def test_перевод_сохраняет_плейсхолдеры(self):
+		"""Перевод без `{0}` молча теряет имя агента или ссылку."""
+		разные = {
+			исходник: перевод
+			for исходник, перевод in (get_translations_from_csv("ru", "lms_frappe_app") or {}).items()
+			if sorted(ПЛЕЙСХОЛДЕР.findall(исходник)) != sorted(ПЛЕЙСХОЛДЕР.findall(перевод))
+		}
+		self.assertEqual(разные, {})
 
+	def test_страницы_входа_без_зашитого_русского(self):
+		for имя in СТРАНИЦЫ_ВХОДА:
+			with self.subTest(страница=имя):
+				строки = видимый_русский((ПРИЛОЖЕНИЕ / имя).read_text(encoding="utf-8"))
+				self.assertEqual(строки, [], "строки страницы — через _() с английским исходником")
 
-class IntegrationTestTranslations(IntegrationTestCase):
-	def test_письма_о_пароле_переведены_целиком(self):
-		"""Приглашение после регистрации и сброс пароля — шаблоны Frappe.
-
-		`Why:` у Frappe переведена половина их строк, и письмо приходило
-		вперемешку русским и английским (learning-services#460). Все строки —
-		в нашем файле, а не в переводах Frappe: в CI Frappe свежее стенда, и
-		его перевод части строк там уже другой. Строки — из
-		`frappe/templates/emails/new_user.html` и `password_reset.html`.
-		"""
-		словарь = get_all_translations("ru")
-		строки = (
-			"Reset your password",
-			"Dear",
-			"We received a request to reset the password for your account. "
-			"Click the button below to set a new password.",
-			"Reset Password",
-			"If you did not request a password reset, please ignore this email. "
-			"Your password will remain unchanged.",
-			"Complete your registration",
-			"Hello",
-			"Your login ID is:",
-			"Click the button below to complete your registration and set a new password.",
-			"Complete Registration",
-			"Or copy and paste this link:",
-			"A new account has been created for you at {0}.",
-			"Welcome to {0}",
-			"Password Reset",
-			"Thank you",
-			"Thanks",
+	def test_видимый_русский_без_имён_и_комментариев(self):
+		разметка = (
+			'{# комментарий #}<h1>{{ агент or "агента" }}</h1>{% set имя = 1 %}<p>Привет</p>'
+			'<input placeholder="Почта">'
+			'<script>// комментарий\nconst текст = "Готово"; const ok = "ok";</script>'
 		)
-
-		свои = {оригинал for оригинал, *_ in _строки()}
-		self.assertEqual([с for с in строки if с not in свои], [])
-		self.assertEqual([с for с in строки if not словарь.get(с)], [])
-		# Перевод Frappe «Уважаемый» угадывает пол адресата.
-		self.assertEqual(словарь["Dear"], "Здравствуйте,")
-
-	def test_страница_входа_переведена_целиком(self):
-		"""Вход, регистрация, «забыли пароль» и вход по ссылке — шаблон Frappe
-		`frappe/www/login.html` и его скрипт `templates/includes/login/login.js`.
-
-		`Why:` у Frappe часть его строк в `ru.po` пустая, и русскоязычный
-		посетитель видел вход вперемешку: «Sign In», «Forgot password?»,
-		«Create Account» рядом с «Почта» и «Продолжить». А «Sign up» Learning
-		переводит «Войти» — ссылка на регистрацию звала войти
-		(learning-services#563). Строки — в нашем файле, по той же причине,
-		что и письма: переводы Frappe в CI и на стенде разные.
-		"""
-		словарь = get_all_translations("ru")
-		строки = (
-			"Sign In",
-			"Welcome! Please sign in to continue.",
-			"Email",
-			"jane@example.com",
-			"Password",
-			"Continue",
-			"Forgot Password?",
-			"Send login link",
-			"Login with {0}",
-			"Signup Disabled",
-			"Signups have been disabled for this website.",
-			"Password is required.",
-			"Invalid Email.",
-			"Sent",
-			"Forgot password?",
-			"Don't have an account?",
-			"Sign up",
-			"Sign Up",
-			"Let's setup your account.",
-			"Create Account",
-			"Please enter your email, we'll send you password reset link",
-			"Send Link",
-			"Back to sign in",
-			"Please check your email.",
-			"Didn't receive the link?",
-			"Resend",
-			"Login with password",
-			"Login with Email Link",
-			"Email is required.",
-			"Please enter a valid email.",
-			"Full name is required.",
-			"Invalid credentials, try again.",
-		)
-
-		# Действует именно наш перевод: «где-то переведено» прошло бы и с чужим.
-		свои = {оригинал: перевод for оригинал, перевод, *_ in _строки()}
-		self.assertEqual([с for с in строки if с not in свои], [])
-		self.assertEqual({с: словарь.get(с) for с in строки}, {с: свои[с] for с in строки})
-		self.assertEqual(словарь["Sign up"], "Зарегистрироваться")
+		self.assertEqual(видимый_русский(разметка), ["Готово", "агента", "Привет", 'input placeholder="Почта"'])
