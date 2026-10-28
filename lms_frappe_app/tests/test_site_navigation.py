@@ -11,7 +11,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.site_navigation import АГЕНТЫ_И_СЕССИИ, КАБИНЕТ_АВТОРА, ПУНКТЫ, шапка_платформы
+from lms_frappe_app.site_navigation import АГЕНТЫ_И_СЕССИИ, КАБИНЕТ_АВТОРА, ПУНКТЫ, подвал, шапка_платформы
 from lms_frappe_app.tests.sample_data import создать_куратора, создать_ученика
 
 
@@ -41,8 +41,6 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 
 			self.assertEqual(пункты, list(ПУНКТЫ))
 
-		with self.subTest("подвал ведёт к исходникам, а не на Frappe"):
-			self.assertIn("github.com/lms-high-time/learning-app", шапка.footer_powered)
 
 		with self.subTest("меню пользователя: «Агенты и сессии» перед пунктами Frappe"):
 			context = frappe._dict(post_login=[{"label": "My Account", "url": "/me"}])
@@ -70,3 +68,15 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 		author.get_context(context)
 		self.assertEqual(context.home_page, "/lms")
 		self.assertTrue(context.top_bar_items)
+
+	def test_подвал_всех_страниц_темы(self):
+		"""Вход, согласие и OAuth тоже на теме сайта — подвал им ставит хук."""
+		self.assertIn("lms_frappe_app.site_navigation.подвал", frappe.get_hooks("update_website_context"))
+		значение = подвал(frappe._dict())["footer_powered"]
+
+		with self.subTest("исходники, а не «Built on Frappe»"):
+			self.assertIn("github.com/lms-high-time/learning-app", значение)
+
+		with self.subTest("знак возрастной категории (learning-services#746)"):
+			self.assertIn(">12+</span>", значение)
+			self.assertNotIn("18+", значение)
