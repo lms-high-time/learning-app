@@ -13,7 +13,7 @@ from lms.lms.utils import get_chapters, get_lessons
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 from lms_frappe_app.agent_learning.releases import index, places, schema, service
 from lms_frappe_app.api import authoring
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	создать_занятие,
 	создать_куратора,
@@ -200,6 +200,22 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		self.assertEqual(
 			frappe.db.get_value("LMS Course", ответ["course"], "short_introduction"), "Пример курса"
 		)
+
+	def test_переводы_карточки_приходят_и_уходят_с_релизом(self):
+		"""Перевод из релиза — в `course_translations`; тот же релиз ничего не
+		пишет, релиз без переводов снимает их и с курса (learning-services#738)."""
+		ответ = self.опубликовать(перевести(пример_релиза(self.ключ)))
+		курс = ответ["course"]
+		записано = json.loads(frappe.db.get_value("LMS Course", курс, "course_translations"))
+		self.assertEqual(записано["en"]["title"], "Sample course")
+		self.assertEqual(записано["en"]["objectives"], ["Chapter 1", "Chapter 2"])
+		отметка = frappe.db.get_value("LMS Course", курс, "modified")
+
+		self.assertTrue(self.опубликовать(перевести(пример_релиза(self.ключ)))["unchanged"])
+		self.assertEqual(frappe.db.get_value("LMS Course", курс, "modified"), отметка)
+
+		self.опубликовать()
+		self.assertEqual(json.loads(frappe.db.get_value("LMS Course", курс, "course_translations")), {})
 
 	def test_релиз_без_документа(self):
 		релиз = пример_релиза(self.ключ)
@@ -514,3 +530,43 @@ class TestРазборИПроверкаРелиза(UnitTestCase):
 						"total": подробности["total"],
 					}
 				self.assertEqual((отказ.код, подробности), ожидание)
+
+
+class TestПереводыКарточки(UnitTestCase):
+	def test_переводы_карточки_из_релиза(self):
+		"""Пустые тексты перевода — как у русской карточки: краткое — название,
+		полное — краткое; цель главы без перевода — русское название
+		(learning-services#738)."""
+		for случай, правка, ожидается in (
+			("без переводов", lambda р: None, {}),
+			(
+				"полный",
+				перевести,
+				{
+					"en": {
+						"title": "Sample course",
+						"short_introduction": "Short card",
+						"description": "Course page text.",
+						"objectives": ["Chapter 1", "Chapter 2"],
+					}
+				},
+			),
+			(
+				"только название, одна глава",
+				lambda р: перевести(р, главы=1)["course"].update(
+					translations={"en": {"title": "T", "summary": ""}}
+				),
+				{
+					"en": {
+						"title": "T",
+						"short_introduction": "T",
+						"description": "T",
+						"objectives": ["Chapter 1", "Глава вторая"],
+					}
+				},
+			),
+		):
+			with self.subTest(случай):
+				р = пример_релиза()
+				правка(р)
+				self.assertEqual(service.переводы_карточки(р), ожидается)

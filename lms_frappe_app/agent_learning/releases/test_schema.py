@@ -6,7 +6,7 @@
 import unittest
 
 from lms_frappe_app.agent_learning.releases import schema
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза
 
 
 def _слова(узел, найдено: set) -> set:
@@ -87,6 +87,11 @@ class TestСхемаНаПримере(unittest.TestCase):
 			"пример как есть": lambda релиз: None,
 			"agent и map непрозрачны": lambda релиз: релиз.update(agent={"что": ["угодно", 1, None]}, map={}),
 			"документ может отсутствовать": _без_документа,
+			# learning-services#738: переводы необязательны, у карточки — только название.
+			"переводы карточки и глав": перевести,
+			"перевод карточки без описаний": lambda релиз: релиз["course"].update(
+				translations={"en": {"title": "Sample"}, "de": {"title": "Beispiel", "summary": ""}}
+			),
 		}.items():
 			with self.subTest(случай):
 				релиз = пример_релиза()
@@ -138,5 +143,40 @@ class TestСхемаНаПримере(unittest.TestCase):
 		):
 			with self.subTest(случай):
 				релиз = пример_релиза()
+				правка(релиз)
+				self.assertEqual(schema.ошибки(релиз), [ошибка])
+
+	def test_переводы_по_правке(self):
+		"""Ключ перевода — код языка; у перевода только свои поля, название обязательно
+		(learning-services#738)."""
+		for случай, правка, ошибка in (
+			(
+				"язык не кодом",
+				lambda р: р["course"]["translations"].update(EN={"title": "Sample"}),
+				{"path": "$.course.translations.EN", "message": "не по шаблону ^[a-z]{2}$"},
+			),
+			(
+				"лишнее поле перевода карточки",
+				lambda р: р["course"]["translations"]["en"].update(promise="By the end"),
+				{"path": "$.course.translations.en.promise", "message": "лишнее поле"},
+			),
+			(
+				"перевод карточки без названия",
+				lambda р: р["course"]["translations"]["en"].pop("title"),
+				{"path": "$.course.translations.en", "message": "нет поля «title»"},
+			),
+			(
+				"язык главы не кодом",
+				lambda р: р["chapters"][0]["translations"].update(eng={"title": "Chapter"}),
+				{"path": "$.chapters[0].translations.eng", "message": "не по шаблону ^[a-z]{2}$"},
+			),
+			(
+				"лишнее поле перевода главы",
+				lambda р: р["chapters"][0]["translations"]["en"].update(description="Text"),
+				{"path": "$.chapters[0].translations.en.description", "message": "лишнее поле"},
+			),
+		):
+			with self.subTest(случай):
+				релиз = перевести(пример_релиза())
 				правка(релиз)
 				self.assertEqual(schema.ошибки(релиз), [ошибка])

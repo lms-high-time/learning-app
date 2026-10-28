@@ -26,7 +26,7 @@ from lms_frappe_app.agent_learning.doctype.agent_course_release.test_agent_cours
 )
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 from lms_frappe_app.agent_learning.releases import service
-from lms_frappe_app.agent_learning.releases.course_guard import ДОКУМЕНТ
+from lms_frappe_app.agent_learning.releases.course_guard import ДОКУМЕНТ, ПЕРЕВОД_АВТОРА
 from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	курс_из_релиза,
@@ -104,6 +104,22 @@ class IntegrationTestПоляРелизаУКурса(IntegrationTestCase):
 		курс.reload()
 		курс.short_introduction = "Правка карточки в desk"
 		курс.save()
+
+	def test_переводы_карточки_правят_релиз_и_автор(self):
+		"""Переводы карточки (learning-services#738) обычным сохранением не меняются
+		и у курса без релиза: пишут их публикация и авторские методы с флагом."""
+		курс = frappe.get_doc("LMS Course", создать_курс(f"Переводы {frappe.generate_hash(length=6)}"))
+		курс.course_translations = json.dumps({"en": {"title": "Desk"}})
+		with self.assertRaisesRegex(frappe.ValidationError, "Переводы карточки"):
+			курс.save()
+		курс.reload()
+		курс.course_translations = json.dumps({"en": {"title": "Desk"}})
+		курс.flags[ПЕРЕВОД_АВТОРА] = True
+		курс.save()
+		self.assertEqual(
+			json.loads(frappe.db.get_value("LMS Course", курс.name, "course_translations")),
+			{"en": {"title": "Desk"}},
+		)
 
 	def test_действующий_релиз_только_свой(self):
 		свой = создать_курс(f"Правила {frappe.generate_hash(length=6)}")
