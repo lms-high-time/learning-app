@@ -24,7 +24,7 @@ from frappe.translate import get_translations_from_csv
 
 #: `_("…")`, `_('…')` и `frappe._("…")` с литералом. Склейки сюда не попадают —
 #: их ловит ревью; f-строку ловит `ВЫЗОВ_F`: переводу у неё не из чего взяться.
-ВЫЗОВ = re.compile(r"""(?:(?<![\w.])|(?<=frappe\.))_\(\s*(["'])((?:\\.|(?!\1).)*)\1\s*[,)]""")
+ВЫЗОВ = re.compile(r"""(?:(?<![\w.])|(?<=frappe\.))_\(\s*(["'])((?:\\.|(?!\1)[^\\])*)\1\s*[,)]""")
 ВЫЗОВ_F = re.compile(r"""(?:(?<![\w.])|(?<=frappe\.))_\(\s*f["']""")
 ПЛЕЙСХОЛДЕР = re.compile(r"\{\d+\}")
 КИРИЛЛИЦА = re.compile(r"[А-Яа-яЁё]")
@@ -37,10 +37,10 @@ from frappe.translate import get_translations_from_csv
 	"templates/includes/oauth_confirmation.html",
 )
 КОММЕНТАРИЙ = re.compile(r"\{#.*?#\}|<!--.*?-->", re.S)
-СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script>", re.S)
+СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script\s*>", re.S | re.I)
 ВЫРАЖЕНИЕ = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
 #: Строковый литерал — в выражениях Jinja и в коде скриптов.
-ЛИТЕРАЛ = re.compile(r"""(["'`])((?:\\.|(?!\1).)*?)\1""", re.S)
+ЛИТЕРАЛ = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\])*)\1""", re.S)
 КОММЕНТАРИЙ_JS = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.S)
 
 
