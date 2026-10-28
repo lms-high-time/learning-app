@@ -594,7 +594,8 @@ update_website_context = ["lms_frappe_app.agent_learning.learning_reads.стра
 #
 # Оригиналы подменённых методов снимаются из реестра whitelisted на каждом
 # запросе и задаче: иначе до них доходят под другим путём модуля
-# (learning-services#692).
+# (learning-services#692). Методы приложения payments — так же, целиком:
+# оплаты через его шлюзы на платформе нет (learning-services#679).
 #
 # Хеш пароля — argon2id: контекст passlib Frappe настраивается до смены
 # пароля в вебе, раньше переадресации на согласие; до входа — `before_login`
@@ -603,6 +604,7 @@ before_request = [
 	"lms_frappe_app.session_guard.отклонить_sid_из_запроса",
 	"lms_frappe_app.session_guard.завершить_истёкшую",
 	"lms_frappe_app.whitelist_guard.снять_подменённые",
+	"lms_frappe_app.whitelist_guard.снять_методы_payments",
 	"lms_frappe_app.password_hash.настроить",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]

@@ -78,3 +78,47 @@ class TestСнятиеПодменённых(UnitTestCase):
 		frappe.set_user("Guest")
 		with self.assertRaises(frappe.PermissionError):
 			frappe.is_whitelisted(функция)
+
+
+class TestСнятиеМетодовPayments(UnitTestCase):
+	"""Методы payments по HTTP не вызываются, кроме цели подмены
+	(learning-services#679)."""
+
+	ГОСТЕВОЙ = "payments.templates.pages.stripe_checkout.make_payment"
+	ЦЕЛЬ_ПОДМЕНЫ = "payments.overrides.payment_webform.accept"
+
+	def test_хук_стоит_на_запросе(self):
+		self.assertIn(
+			"lms_frappe_app.whitelist_guard.снять_методы_payments", frappe.get_hooks("before_request")
+		)
+
+	def test_в_реестре_нет_методов_payments_кроме_цели_подмены(self):
+		whitelist_guard.снять_методы_payments()
+
+		self.assertTrue(whitelist_guard._модули_payments)
+		оставшиеся = {
+			f"{функция.__module__}.{функция.__qualname__}"
+			for функция in frappe.whitelisted
+			if функция.__module__.startswith("payments.")
+		}
+		self.assertEqual(оставшиеся, {self.ЦЕЛЬ_ПОДМЕНЫ})
+		self.assertFalse({ф for ф in frappe.guest_methods if ф.__module__.startswith("payments.")} - {
+			frappe.get_attr(self.ЦЕЛЬ_ПОДМЕНЫ)
+		})
+
+	def test_гостю_отказ_на_методе_шлюза(self):
+		"""Так же, как `cmd` из тела запроса: `execute_cmd` сверяет реестр."""
+		from frappe.handler import execute_cmd
+
+		whitelist_guard.снять_методы_payments()
+		self.addCleanup(frappe.set_user, frappe.session.user)
+		frappe.set_user("Guest")
+		with self.assertRaises(frappe.PermissionError):
+			execute_cmd(self.ГОСТЕВОЙ)
+
+	def test_отправка_веб_формы_жива(self):
+		whitelist_guard.снять_подменённые()
+		whitelist_guard.снять_методы_payments()
+
+		путь = frappe.override_whitelisted_method("frappe.website.doctype.web_form.web_form.accept")
+		self.assertIn(frappe.get_attr(путь), frappe.whitelisted)

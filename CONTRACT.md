@@ -280,7 +280,9 @@ OAuth выдаёт область `all`. Контрактом этот путь 
 подменяет (`override_whitelisted_methods` в `hooks.py`). Подменённый метод
 доступен только под своим HTTP-именем: оригинал снят из реестра whitelisted
 Frappe, и под другим путём модуля он отвечает отказом
-(`lms_frappe_app/whitelist_guard.py`).
+(`lms_frappe_app/whitelist_guard.py`). Методы приложения payments (его
+требует Learning, оплаты на платформе нет) по HTTP не вызываются вовсе —
+кроме цели подмены `web_form.accept`.
 
 **Чтение.**
 

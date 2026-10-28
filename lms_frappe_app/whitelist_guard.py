@@ -17,11 +17,20 @@
 Чего не делает: не разделяет сайты. Реестр общий на процесс, и на bench с
 несколькими сайтами, где у части приложение не стоит, снятие задело бы и их:
 там исходный метод перестал бы отвечать. На стенде cenda.app сайт один.
+
+Методы приложения payments снимаются из реестров целиком
+(`снять_методы_payments`, learning-services#679): его требует Learning
+(`required_apps`), а оплаты через его шлюзы на платформе нет.
 """
 
+import importlib
 from collections.abc import Callable
+from pathlib import Path
 
 import frappe
+
+# Модули payments с whitelisted-функциями, импортированные в этом процессе.
+_модули_payments: list[str] | None = None
 
 
 def снять_подменённые(*args, **kwargs) -> None:
@@ -43,6 +52,56 @@ def снять_подменённые(*args, **kwargs) -> None:
 		frappe.guest_methods.discard(функция)
 		frappe.xss_safe_methods.discard(функция)
 		frappe.allowed_http_methods_for_whitelisted_func.pop(функция, None)
+
+
+def снять_методы_payments(*args, **kwargs) -> None:
+	"""Убирает из реестров whitelisted-методов функции приложения payments.
+
+	Оставляет цели подмен: payments подменяет `web_form.accept`, и без цели
+	перестали бы отправляться веб-формы. Из питона методы по-прежнему
+	вызываются — реестр нужен только HTTP.
+
+	Реестр заполняется при импорте модуля, поэтому сначала импортируются все
+	модули payments с `frappe.whitelist`: модуль, импортированный уже после
+	снятия, зарегистрировал бы свои методы заново.
+	"""
+	_импортировать_payments()
+	цели = {
+		цель
+		for подмены in frappe.get_hooks("override_whitelisted_methods").values()
+		if подмены and (цель := _функция(подмены[-1])) is not None
+	}
+	for функция in list(frappe.whitelisted):
+		if функция in цели or not getattr(функция, "__module__", "").startswith("payments."):
+			continue
+		frappe.whitelisted.discard(функция)
+		frappe.guest_methods.discard(функция)
+		frappe.xss_safe_methods.discard(функция)
+		frappe.allowed_http_methods_for_whitelisted_func.pop(функция, None)
+
+
+def _импортировать_payments() -> None:
+	"""Импортирует модули payments, где есть `frappe.whitelist`, — один раз
+	на процесс. Модуль, который не импортируется (нет библиотеки шлюза), не
+	вызывается и по HTTP — его пропускаем."""
+	global _модули_payments
+	if _модули_payments is not None:
+		return
+	_модули_payments = []
+	try:
+		корень = Path(importlib.import_module("payments").__file__).parent
+	except ImportError:
+		return
+	for файл in sorted(корень.rglob("*.py")):
+		if "frappe.whitelist" not in файл.read_text(encoding="utf-8", errors="ignore"):
+			continue
+		части = файл.relative_to(корень.parent).with_suffix("").parts
+		имя = ".".join(части[:-1] if части[-1] == "__init__" else части)
+		try:
+			importlib.import_module(имя)
+		except Exception:
+			continue
+		_модули_payments.append(имя)
 
 
 def _функция(путь: str) -> Callable | None:
