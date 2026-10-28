@@ -9,6 +9,8 @@
 выбор администратора (#540).
 """
 
+from types import SimpleNamespace
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.translate import get_all_languages
@@ -54,6 +56,28 @@ class IntegrationTestLanguage(IntegrationTestCase):
 		self.assertEqual(новый_пользователь(), ЯЗЫК)
 		self.assertEqual(новый_пользователь(язык="en"), "en", "выбранный язык не перетирается")
 
+	def test_зарегистрировавшийся_получает_язык_выбранный_на_сайте(self):
+		"""Выбор языка на cenda.app — кука `preferred_language` (learning-services#735,
+		#737). По ней Frappe показывает гостю вход, и на ней же он регистрируется."""
+		прежний = frappe.db.get_single_value("System Settings", "language")
+		умолчание = frappe.db.get_default("language")
+		self.addCleanup(frappe.set_user, "Administrator")
+		self.addCleanup(frappe.db.set_default, "language", умолчание)
+		self.addCleanup(frappe.db.set_single_value, "System Settings", "language", прежний or "")
+		frappe.db.set_single_value("System Settings", "language", ЯЗЫК)
+		frappe.db.set_default("language", ЯЗЫК)
+		запрос = getattr(frappe.local, "request", None)
+		self.addCleanup(setattr, frappe.local, "request", запрос)
+
+		for кука, ожидаемый in {"en": "en", ЯЗЫК: ЯЗЫК, "xx": ЯЗЫК, None: ЯЗЫК}.items():
+			with self.subTest(кука=кука):
+				frappe.local.request = SimpleNamespace(cookies={"preferred_language": кука} if кука else {})
+				self.assertEqual(новый_пользователь(), ожидаемый)
+
+		# Пользователя заводит другой — сотрудник в desk, приглашение команды: язык системы.
+		frappe.local.request = SimpleNamespace(cookies={"preferred_language": "en"})
+		self.assertEqual(новый_пользователь(гостем=False), ЯЗЫК)
+
 	def test_патч_переводит_учеников_с_en_кроме_выбравших(self):
 		"""Решение владельца по уже созданным — вариант А в #633."""
 		прежний = frappe.db.get_single_value("System Settings", "language")
@@ -81,10 +105,10 @@ class IntegrationTestLanguage(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_default("language"), ЯЗЫК)
 
 
-def новый_пользователь(язык: str | None = None, *, имя: bool = False) -> str:
+def новый_пользователь(язык: str | None = None, *, имя: bool = False, гостем: bool = True) -> str:
 	"""Язык пользователя, созданного как при регистрации: гостем, с обходом
-	прав. С `имя` — его адрес."""
-	frappe.set_user("Guest")
+	прав. С `имя` — его адрес; без `гостем` — от имени администратора."""
+	frappe.set_user("Guest" if гостем else "Administrator")
 	пользователь = frappe.new_doc("User")
 	пользователь.update(
 		{

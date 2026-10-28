@@ -16,6 +16,7 @@ from frappe import _
 from frappe.auth import MAX_PASSWORD_SIZE
 from frappe.core.doctype.user import user as frappe_user
 from frappe.rate_limiter import rate_limit
+from frappe.translate import get_all_languages
 from frappe.twofactor import should_run_2fa
 from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
@@ -34,6 +35,30 @@ from lms_frappe_app.agent_learning.oauth_client import отозвать_токе
 #: Общий ключ счётчика регистраций. Frappe ключует счётчик вызванным методом,
 #: и без общего ключа каждая форма и `/api/v2` считали бы попытки порознь.
 ЛИМИТ_РЕГИСТРАЦИИ = "lms_frappe_app.access.sign_up"
+
+
+#: Кука выбора языка на cenda.app (`site/static/language.js`, learning-services#735).
+#: Гостю Frappe показывает страницы на её языке раньше `Accept-Language`.
+КУКА_ЯЗЫКА = "preferred_language"
+
+
+def язык_нового_пользователя(doc, method=None) -> None:
+	"""Зарегистрировавшемуся самому — язык, выбранный на сайте.
+
+	`Why:` гость, выбравший английский на cenda.app, проходит вход и
+	регистрацию по-английски — Frappe читает ту же куку, — а аккаунт получал
+	язык системы (`Document._set_defaults`, #633), и дальше всё открывалось
+	по-русски (learning-services#737). Регистрация формой и первый вход через
+	Google создают пользователя в гостевой сессии. Пользователя, которого
+	заводит другой — сотрудник в desk, приглашение команды, — это не касается:
+	выбор языка на сайте делал не он.
+	"""
+	if frappe.session.user != "Guest":
+		return
+	запрос = getattr(frappe.local, "request", None)
+	выбор = запрос.cookies.get(КУКА_ЯЗЫКА) if запрос is not None else None
+	if выбор and выбор in get_all_languages():
+		doc.language = выбор
 
 
 def запись_ключа(key: str | None):
