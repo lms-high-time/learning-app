@@ -80,17 +80,18 @@ class TestСнятиеПодменённых(UnitTestCase):
 			frappe.is_whitelisted(функция)
 
 
-
 class TestСнятиеМетодовPayments(UnitTestCase):
 	"""Приложение payments по HTTP не отвечает (learning-services#679)."""
 
 	ГОСТЕВОЙ = "payments.templates.pages.stripe_checkout.make_payment"
 	ACCEPT = "frappe.website.doctype.web_form.web_form.accept"
 
-	def test_хук_стоит_на_запросе_и_задаче(self):
+	def test_хук_стоит_только_на_запросе(self):
+		"""В задаче снятие стоило бы импорта payments на каждую: воркер rq
+		форкает процесс под задачу."""
 		путь = "lms_frappe_app.whitelist_guard.снять_методы_payments"
 		self.assertIn(путь, frappe.get_hooks("before_request"))
-		self.assertIn(путь, frappe.get_hooks("before_job"))
+		self.assertNotIn(путь, frappe.get_hooks("before_job"))
 
 	def test_в_реестре_нет_функций_payments(self):
 		whitelist_guard.снять_методы_payments()
@@ -167,7 +168,7 @@ class TestСнятиеМетодовPayments(UnitTestCase):
 				self._запрос(путь)
 				_, страница = PathResolver(путь, http_status_code=200).resolve()
 				self.assertIsInstance(страница, whitelist_guard.СтраницаPayments)
-				self.assertEqual(страница.http_status_code, 404)
+				self.assertEqual(страница.render().status_code, 404)
 
 	def test_прочие_страницы_не_задеты(self):
 		from frappe.website.path_resolver import PathResolver

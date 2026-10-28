@@ -21,19 +21,22 @@
 Методы приложения payments снимаются из реестров целиком, его страницы
 отвечают 404 (`снять_методы_payments`, `СтраницаPayments`,
 learning-services#679): его требует Learning (`required_apps`), а оплаты
-через его шлюзы на платформе нет. Оговорка про несколько сайтов — та же.
+через его шлюзы на платформе нет. Снятие — только на запросе: HTTP в
+фоновых задачах нет, а воркер rq форкает процесс на каждую задачу, и импорт
+payments шёл бы в каждой. Оговорка про несколько сайтов — та же.
 Включат платные курсы — снимать: ссылка на оплату Learning
 (`get_payment_link`) ведёт на страницу шлюза.
 """
 
+import functools
 import pkgutil
 import threading
 from collections.abc import Callable
 from importlib import import_module
+from pathlib import Path
 
 import frappe
 from frappe.website.page_renderers.not_found_page import NotFoundPage
-from frappe.website.page_renderers.template_page import TemplatePage
 
 # Модули payments, импортированные в этом процессе; `None` — ещё нет.
 _модули_payments: list[str] | None = None
@@ -68,9 +71,10 @@ def снять_методы_payments(*args, **kwargs) -> None:
 	веб-формы, которую payments подменял, идёт штатным методом Frappe
 	(подмена в `hooks.py`).
 
-	Реестр заполняется при импорте модуля, поэтому сначала импортируются все
+	Реестр заполняется при импорте модуля, поэтому сначала импортируются
 	модули payments: модуль, импортированный уже после снятия, зарегистрировал
-	бы свои методы заново.
+	бы свои методы заново. Каталоги без `__init__.py` обход не видит — что в
+	них нет whitelisted-функций, проверяет тест.
 	"""
 	_импортировать_payments()
 	for функция in list(frappe.whitelisted):
@@ -84,16 +88,35 @@ def снять_методы_payments(*args, **kwargs) -> None:
 
 class СтраницаPayments(NotFoundPage):
 	"""Страница сайта из приложения payments (шлюзы, итог оплаты) — 404: её
-	`get_context` исполнял бы код шлюза по запросу без входа."""
+	`get_context` исполнял бы код шлюза по запросу без входа.
+
+	Рендерер создаётся на каждый запрос страницы сайта, поэтому до
+	`can_render` он только сверяет путь со списком страниц payments, а
+	страницу «не найдено» собирает уже в `render`. Опубликованная Web Form
+	или Web Page с тем же маршрутом тоже ответит 404.
+	"""
 
 	def __init__(self, path, http_status_code=None):
-		# Frappe передаёт рендерерам статус 200, а `NotFoundPage` оставляет
-		# переданный: страница «не найдено» ушла бы с кодом 200.
-		super().__init__(path, 404)
+		self._путь = path.strip("/ ")
 
 	def can_render(self):
-		страница = TemplatePage(self.request_path)
-		return bool(страница.can_render()) and getattr(страница, "app", None) == "payments"
+		return self._путь in _страницы_payments()
+
+	def render(self):
+		# Frappe передаёт рендерерам статус 200, а `NotFoundPage` оставляет
+		# переданный: страница «не найдено» ушла бы с кодом 200.
+		super().__init__(self._путь, 404)
+		return super().render()
+
+
+@functools.cache
+def _страницы_payments() -> frozenset[str]:
+	"""Маршруты страниц payments — имена шаблонов `templates/pages`."""
+	try:
+		каталог = Path(frappe.get_app_path("payments", "templates", "pages"))
+	except Exception:
+		return frozenset()
+	return frozenset(файл.stem for файл in каталог.glob("*") if файл.suffix in (".html", ".md"))
 
 
 def _из_payments(функция) -> bool:
