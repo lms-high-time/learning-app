@@ -73,6 +73,7 @@ Choose a payment provider to configure its credentials.,"Выберите пла
 Click the button below to complete your registration and set a new password.,"Нажмите кнопку ниже, чтобы завершить регистрацию и задать пароль."
 Click to upload an image.,"Нажмите, чтобы загрузить изображение."
 Close student view,Выйти из режима студента
+"Cloudflare — backups of the platform, encrypted before they leave our server; Cloudflare has no key.","Cloudflare — резервные копии платформы, зашифрованные до отправки с нашего сервера; ключа у Cloudflare нет."
 Coaching or Training Institute,Курсы или учебный центр
 College or University,Колледж или университет
 Comma separated keywords,Ключевые слова через запятую
@@ -213,6 +214,7 @@ Google Meet Account deleted successfully,Аккаунт Google Meet успешн
 Google Meet Account updated successfully,Аккаунт Google Meet успешно обновлён
 Google hasn't verified the email address of this account. Verify the address in your Google settings or sign in with your email and password.,Google не подтвердил адрес почты этого аккаунта. Подтвердите адрес в настройках Google или войдите по почте с паролем.
 "Google sign-in is turned off for this account: sign in with your email, password, and a code from your authenticator app.",Для этой учётной записи вход через Google закрыт: войдите по почте с паролем и кодом из приложения-генератора.
+"Google — the fact that you signed in, if you sign in with Google.","Google — факт входа, если вы входите через Google."
 Hello,"Здравствуйте,"
 Hello Learner,Здравствуйте
 Here are the details:,Вот подробности:
@@ -227,6 +229,7 @@ I am under 18,Мне нет 18 лет
 "If this address is registered, an email with a link is on its way.","Если адрес зарегистрирован, письмо со ссылкой уже в пути."
 "If this wasn't you, you don't need to do anything: the password can't be changed without this link.","Если регистрировались не вы, ничего делать не нужно: без этой ссылки пароль не поменять."
 "If this wasn't you, {0}. We'll send the link to this email address.","Если это сделали не вы, {0}: ссылка придёт на этот адрес."
+"If you connect your own AI assistant (Claude, ChatGPT or another), its provider receives lesson data under your agreement with it.","Если вы подключите своего AI-ассистента (Claude, ChatGPT или другого), данные урока получит его провайдер — по вашему договору с ним."
 "If you did not request a password reset, please ignore this email. Your password will remain unchanged.","Если вы не просили сменить пароль, просто проигнорируйте письмо: пароль останется прежним."
 "If you signed in with Google before, sign in the same way. Or {0} and sign in with your email.",Если вы входили через Google — войдите так же. Или {0} и входите по почте.
 Import via Data Import Tool,Импорт через Data Import Tool
@@ -315,6 +318,7 @@ Only show batches that offer a certificate,Показывать только п�
 Only show courses that offer a certificate,Показывать только курсы с сертификатом
 Only {0} file is allowed.,Можно загружать только файлы {0}.
 Open to Work,Ищу работу
+"OpenRouter and the language model provider — your web chat conversation, if you study in the browser.","OpenRouter и провайдер языковой модели — разговор в веб-чате, если вы занимаетесь в браузере."
 Or copy and paste this link:,Или скопируйте ссылку в адресную строку:
 Org Admin,Администратор
 Organization Admin,Администратор команды
@@ -357,9 +361,11 @@ Please select a course to view available slots.,"Выберите курс, чт
 Please select a payment for the purchased certificate.,Выберите платёж за приобретённый сертификат.
 Please select a student to enroll.,Выберите студента для записи.
 "Please upload an MP4, WebM, or OGG video — formats like .MOV can't be played in the browser.","Загрузите видео в формате MP4, WebM или OGG — например, .MOV браузер воспроизвести не сможет."
+"PostHog — how you use the site, only if you allow analytics, and without your name or email.","PostHog — как вы пользуетесь сайтом, только если вы разрешили аналитику, и без имени и email."
 Powered by Frappe Learning,Работает на Frappe Learning
 Preview video,Ознакомительное видео
 Pricing and certification,Цена и сертификация
+"Privacy Policy, section 8","Политика конфиденциальности, раздел 8"
 Programming Exercise Progress,Прогресс по упражнениям по программированию
 Progress is already recorded for this lesson.,Прогресс по этому уроку уже записан.
 Publish my first course,Опубликовать первый курс
@@ -375,6 +381,7 @@ Remove the image to pick a color instead.,"Удалите изображение
 Reply cannot be empty.,Ответ не может быть пустым.
 Requested:,Запрошено:
 Resend,Отправить ещё раз
+"Resend — your email address, name and the text of service emails, to deliver them.","Resend — ваш email, имя и текст служебных писем, чтобы доставить их."
 Reset Password,Сбросить пароль
 Reset your password,Задайте новый пароль
 Review and update the details of this payment.,Проверьте и обновите данные этого платежа.
@@ -505,7 +512,9 @@ What is this badge awarded for?,За что выдаётся этот бейдж
 What's the first milestone you'd like to achieve?,Какой первой цели вы хотите достичь?
 "When on, anyone can preview this lesson without enrolling. Otherwise it is visible only to enrolled students.","Когда включено, любой может открыть этот урок без записи на курс. Иначе он доступен только записанным студентам."
 "When you feel ready, you can schedule an evaluation to get certified.","Когда почувствуете, что готовы, запишитесь на оценку, чтобы получить сертификат."
+Where these services are and on what grounds we pass data to them: {0}. Questions: {1}.,Где находятся эти сервисы и на каком основании мы передаём им данные: {0}. Вопросы: {1}.
 Where will you be using Frappe Learning?,Где вы будете использовать Frappe Learning?
+Who receives your data on {0},Кто получает ваши данные на {0}
 Whole Organization,Вся команда
 Work,Работа
 Work context,Контекст работы,Learner profile
@@ -543,6 +552,7 @@ You do not have permission to modify this role.,У вас нет прав на �
 You do not have permission to send confirmation emails for this enrollment.,У вас нет прав на отправку писем-подтверждений по этой записи.
 You do not have permission to set up calendar events for this evaluation.,У вас нет прав на создание событий календаря для этой оценки.
 You do not have permission to update this submission.,У вас нет прав на изменение этой отправленной работы.
+"You have created an account on {0}. The platform runs on several services, and some of your data goes to them:","Вы создали аккаунт на {0}. Платформа работает с помощью нескольких сервисов, и часть ваших данных уходит к ним:"
 You must be an Admin to assign badges to users.,Назначать бейджи пользователям может только администратор.
 You're all caught up! Check back later for updates.,Всё прочитано! Загляните позже за новостями.
 "You're enrolled and all set! The course content is ready, so you can start learning right away and go at your own pace.","Вы записаны, всё готово! Материалы курса уже доступны, поэтому вы можете начать учиться прямо сейчас и заниматься в своём темпе."
