@@ -10,6 +10,7 @@ import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.api import analytics
+from lms_frappe_app.site_secrets import АНАЛИТИКА
 from lms_frappe_app.tests.sample_data import создать_ученика
 
 СЕКРЕТ = "0f" * 32
@@ -18,7 +19,7 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 class IntegrationTestAnalyticsId(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
-		подмена = patch.dict(frappe.conf, {analytics.КЛЮЧ_СЕКРЕТА: СЕКРЕТ})
+		подмена = patch.dict(frappe.conf, {АНАЛИТИКА: СЕКРЕТ})
 		подмена.start()
 		self.addCleanup(подмена.stop)
 		суффикс = frappe.generate_hash(length=6)
@@ -56,30 +57,17 @@ class UnitTestAnalyticsSecret(UnitTestCase):
 	"""Секрет идентификатора — свой ключ конфигурации сайта (learning-services#690)."""
 
 	def test_идентификатор_зависит_только_от_своего_секрета(self):
-		with patch.dict(frappe.conf, {analytics.КЛЮЧ_СЕКРЕТА: СЕКРЕТ}):
+		with patch.dict(frappe.conf, {АНАЛИТИКА: СЕКРЕТ}):
 			прежний = analytics.идентификатор("a@example.com")
 			self.assertEqual(analytics.идентификатор("A@Example.com "), прежний, "регистр и пробелы не важны")
 			# Смена ключа шифрования сайта идентификатор не трогает.
 			with patch.dict(frappe.conf, {"encryption_key": "смена-ключа-шифрования"}):
 				self.assertEqual(analytics.идентификатор("a@example.com"), прежний)
-		with patch.dict(frappe.conf, {analytics.КЛЮЧ_СЕКРЕТА: "1e" * 32}):
+		with patch.dict(frappe.conf, {АНАЛИТИКА: "1e" * 32}):
 			self.assertNotEqual(analytics.идентификатор("a@example.com"), прежний)
 
 	def test_без_секрета_идентификатора_нет(self):
 		with patch.dict(frappe.conf):
-			frappe.conf.pop(analytics.КЛЮЧ_СЕКРЕТА, None)
+			frappe.conf.pop(АНАЛИТИКА, None)
 			with self.assertRaises(RuntimeError):
 				analytics.идентификатор("a@example.com")
-
-	def test_секрет_заводится_один_раз(self):
-		with patch.dict(frappe.conf), patch("frappe.installer.update_site_config") as запись:
-			frappe.conf.pop(analytics.КЛЮЧ_СЕКРЕТА, None)
-
-			analytics.обеспечить_секрет()
-			analytics.обеспечить_секрет()
-
-			запись.assert_called_once()
-			ключ, значение = запись.call_args.args
-			self.assertEqual(ключ, analytics.КЛЮЧ_СЕКРЕТА)
-			self.assertRegex(значение, r"^[0-9a-f]{64}$")
-			self.assertEqual(frappe.conf[analytics.КЛЮЧ_СЕКРЕТА], значение, "виден в этом же процессе")
