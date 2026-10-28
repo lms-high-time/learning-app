@@ -2,9 +2,12 @@ A new account has been created for you at {0}.,Для вас создан акк
 A new batch '{0}' has been published that might interest you. Check it out!,"Опубликован новый поток «{0}», который может вас заинтересовать. Загляните!"
 A new course '{0}' has been published that might interest you. Check it out!,"Опубликован новый курс «{0}», который может вас заинтересовать. Загляните!"
 A new course has been published on {0},Новый курс опубликован на {0}
+"A program on this computer ({0}) will get access. Only allow it if you started the connection yourself, for example, in Claude Code.","Доступ получит программа на&nbsp;этом компьютере ({0}). Разрешайте, только если сами запустили её подключение&nbsp;— например, в&nbsp;Claude&nbsp;Code."
 A short summary of the course for search results.,Краткое описание курса для результатов поиска.
 About this course,О курсе
+Accept and continue,Принять и продолжить
 "Access courses, join batches, and track learning progress","Доступ к курсам, участие в потоках и отслеживание прогресса"
+Account deletion,Удаление учётной записи
 Activate this Google Meet account for scheduling meetings.,Активировать этот аккаунт Google Meet для планирования встреч.
 Activate this Zoom account for scheduling meetings.,Активировать этот аккаунт Zoom для планирования встреч.
 Add New Member,Добавить участника
@@ -17,7 +20,9 @@ Add new question,Добавить новый вопрос
 Add students to the batch to make an announcement,"Добавьте студентов в поток, чтобы сделать объявление"
 Add tag,Добавить тег
 Agent Connections,Подключения агентов
+Agent connection — Cenda,Подключение агента — Cenda
 All Members,Все участники
+All that's left is to confirm your age and accept the terms.,Осталось подтвердить возраст и принять условия.
 Allow Job Posting,Разрешить публикацию вакансий
 Allow this badge to be awarded to learners.,Разрешить выдавать этот бейдж студентам.
 Allow this coupon to be used for discounts.,Разрешить использовать этот купон для скидок.
@@ -30,10 +35,12 @@ Are you sure you want to submit the quiz?,"Вы уверены, что хоти�
 As a part of this batch's curriculum you will have to complete the following courses and assessments.,В программе этого потока вам нужно пройти следующие курсы и оценки.
 Assignment Progress,Прогресс по заданиям
 Assignments deleted successfully,Задания успешно удалены
+At least {0} characters and no platform name. Tip: a few words strung together work well.,Не короче {0} символов и без названия платформы. Удобно — несколько слов подряд.
 Attempted Questions,Отвечено вопросов
 Average Completion Rate,Средняя доля прохождения
 Average Watch Time (mins),Среднее время просмотра (мин)
 Award my first certificate,Выдать первый сертификат
+Back to homepage,На главную
 Back to previous question,К предыдущему вопросу
 Back to sign in,Вернуться ко входу
 Badge assigned successfully,Бейдж успешно назначен
@@ -49,6 +56,7 @@ Book a free onboarding session with the Frappe team,Записаться на б
 "Build and manage courses, chapters, and lessons","Создание и ведение курсов, глав и уроков"
 Cannot search for roles: {0},Не удалось выполнить поиск по ролям: {0}
 Canvas,Canvas
+Cenda is only available to people 18 or older. We will delete your account and the data associated with it.,"Cenda доступна только лицам, достигшим 18 лет. Мы удалим вашу учётную запись и данные, связанные с ней."
 Certificate of completion,Сертификат об окончании
 Certificate price,Цена сертификата
 Certificates render from a Print Format. Build or customize templates from the desk.,Сертификаты формируются из формата печати. Создавайте и настраивайте шаблоны в интерфейсе Desk.
@@ -58,6 +66,7 @@ Certification cannot be issued as the member is not enrolled in this course.,С�
 Chapter renamed successfully,Глава успешно переименована
 Charge a fee for batch enrollment.,Брать плату за запись на поток.
 Charge learners to enroll in this course.,Брать плату за запись на этот курс.
+Check your email: we've sent you a message with a link.,Проверьте почту: мы отправили письмо со ссылкой.
 Checkout the batch,Перейти к потоку
 Checkout the course,Перейти к курсу
 Choose a payment provider to configure its credentials.,"Выберите платёжного провайдера, чтобы настроить его доступы."
@@ -72,6 +81,7 @@ Company or Workplace,Компания или рабочее место
 Complete Registration,Завершить регистрацию
 Complete your profile,Заполните профиль
 Complete your registration,Завершите регистрацию
+Complete your sign-up,Завершите регистрацию
 Completion Rate,Доля прохождения
 Completion certificate,Сертификат об окончании
 Conferencing,Видеосвязь
@@ -81,12 +91,22 @@ Configure the credentials and options for this payment gateway.,Настройт
 Confirm Cancellation?,Подтвердить отмену?
 Confirm Your Action,Подтвердите действие
 Confirm clearing demo data?,Удалить демоданные?
+Confirm password,Повторите пароль
 Connect a Google Meet account to schedule and host live classes.,"Подключите аккаунт Google Meet, чтобы планировать и проводить онлайн-уроки."
 Connect a Zoom account to schedule and host live classes.,"Подключите аккаунт Zoom, чтобы планировать и проводить онлайн-уроки."
+Connect an agent to Cenda?,Подключить агента к&nbsp;Cenda?
+Connect {0} to Cenda?,Подключить {0} к&nbsp;Cenda?
 Continue,Продолжить
 Could not create the course ZIP file. Please try again later. Error: {0},Не удалось создать ZIP-файл курса. Попробуйте позже. Ошибка: {0}
 Could not delete the quiz,Не удалось удалить тест
 Could not update publish status,Не удалось изменить статус публикации
+Couldn't complete the request. Please try again or email privacy@cenda.app.,Не удалось выполнить запрос. Попробуйте ещё раз или напишите на privacy@cenda.app.
+Couldn't connect the agent,Не удалось подключить агента
+Couldn't connect {0},Не удалось подключить {0}
+Couldn't save your consent. Please try again.,Не удалось сохранить согласие. Попробуйте ещё раз.
+Couldn't save. Please try again.,"Не получилось сохранить, попробуйте ещё раз."
+Couldn't send. Please try again.,"Не получилось отправить, попробуйте ещё раз."
+Couldn't sign in with Google,Не удалось войти через Google
 Coupon updated successfully,Купон успешно обновлён
 Course Content coming soon!,Содержание курса скоро появится!
 Course Progress,Прогресс по курсу
@@ -111,9 +131,11 @@ Current task,Задача сейчас,Learner profile
 Curriculum,Программа обучения
 Customer Academy,Академия для клиентов
 Dear,"Здравствуйте,"
+Decline,Отказать
 Deduct marks for incorrect answers.,Снимать баллы за неверные ответы.
 Default Sending & Inbox,Отправка и входящие по умолчанию
 Define a badge and the criteria for awarding it to learners.,Опишите бейдж и условия его выдачи студентам.
+Delete account,Удалить учётную запись
 Delete quiz,Удалить тест
 Delete this quiz?,Удалить этот тест?
 Delete user,Удалить пользователя
@@ -122,6 +144,7 @@ Deleting this quiz permanently removes it and its submissions. This action canno
 Deletion not allowed for {0},Удаление {0} запрещено
 Demo Data Present,Демоданные загружены
 Demo data cleared successfully,Демоданные успешно удалены
+Details about this agent are published at {0}.,Сведения об&nbsp;агенте опубликованы на&nbsp;сайте {0}.
 Details cannot be empty.,Описание не может быть пустым.
 Didn't receive the link?,Не пришла ссылка?
 Display correct answers after each question is attempted.,Показывать правильные ответы после каждого отвеченного вопроса.
@@ -154,6 +177,9 @@ Enrolled On,Дата записи
 Enrollment & Certification,Запись и сертификация
 Enrollment Confirmation Email Template,Шаблон письма о подтверждении записи
 Enter Brand Name,Введите название бренда
+Enter a password.,Введите пароль.
+Enter your email and we'll send you a new one.,Отправим новую — укажите почту.
+Enter your email.,Укажите почту.
 Error Uploading File,Ошибка при загрузке файла
 Error creating Google Meet Account,Ошибка при создании аккаунта Google Meet
 Error creating batch,Ошибка при создании потока
@@ -185,6 +211,8 @@ Google Meet Account,Аккаунт Google Meet
 Google Meet Account created successfully,Аккаунт Google Meet успешно создан
 Google Meet Account deleted successfully,Аккаунт Google Meet успешно удалён
 Google Meet Account updated successfully,Аккаунт Google Meet успешно обновлён
+Google hasn't verified the email address of this account. Verify the address in your Google settings or sign in with your email and password.,Google не подтвердил адрес почты этого аккаунта. Подтвердите адрес в настройках Google или войдите по почте с паролем.
+"Google sign-in is turned off for this account: sign in with your email, password, and a code from your authenticator app.",Для этой учётной записи вход через Google закрыт: войдите по почте с паролем и кодом из приложения-генератора.
 Hello,"Здравствуйте,"
 Hello Learner,Здравствуйте
 Here are the details:,Вот подробности:
@@ -192,8 +220,15 @@ Highlight on the homepage.,Показывать на главной страни
 Highlight what makes you unique and show your skills.,"Расскажите, чем вы уникальны, и покажите свои навыки."
 How I learn best,Как удобно учиться,Learner profile
 How to edit a lesson,Как редактировать урок
+I accept the {0}Terms of Use{1} and the {2}Privacy Policy{1},Я принимаю {0}Условия использования{1} и {2}Политику конфиденциальности{1}
+I am 18 or older,Мне исполнилось 18 лет
 I am happy to announce that I earned the {0} badge on {1} at {2},"Рад сообщить, что {1} я получил бейдж {0} на платформе {2}"
+I am under 18,Мне нет 18 лет
+"If this address is registered, an email with a link is on its way.","Если адрес зарегистрирован, письмо со ссылкой уже в пути."
+"If this wasn't you, you don't need to do anything: the password can't be changed without this link.","Если регистрировались не вы, ничего делать не нужно: без этой ссылки пароль не поменять."
+"If this wasn't you, {0}. We'll send the link to this email address.","Если это сделали не вы, {0}: ссылка придёт на этот адрес."
 "If you did not request a password reset, please ignore this email. Your password will remain unchanged.","Если вы не просили сменить пароль, просто проигнорируйте письмо: пароль останется прежним."
+"If you signed in with Google before, sign in the same way. Or {0} and sign in with your email.",Если вы входили через Google — войдите так же. Или {0} и входите по почте.
 Import via Data Import Tool,Импорт через Data Import Tool
 Import via ZIP,Импорт из ZIP
 In-app,В приложении
@@ -248,6 +283,7 @@ Meta keywords,Мета-ключевые слова
 Moodle,Moodle
 New Google Meet Account,Новый аккаунт Google Meet
 New lesson,Новый урок
+New password,Новый пароль
 Next question,Следующий вопрос
 No LMS yet,Пока нет LMS
 No announcements have been made yet for this batch,В этом потоке пока нет объявлений
@@ -271,6 +307,7 @@ On site,В офисе
 Onboard my existing learners,Перевести своих учеников на платформу
 Only PDF files are allowed.,Можно загружать только файлы PDF.
 Only ZIP files are allowed.,Можно загружать только файлы ZIP.
+"Only allow it if you started the connection yourself in Claude, ChatGPT, or another agent.","Разрешайте, только если подключение начали вы сами&nbsp;— в&nbsp;Claude, ChatGPT или другом агенте."
 Only document file of type .doc or .docx are allowed.,Можно загружать только документы .doc или .docx.
 Only image data is allowed in quiz answers.,В ответах на тест можно использовать только изображения.
 Only show assignments from the current course,Показывать только задания текущего курса
@@ -290,7 +327,13 @@ Paid certificate,Платный сертификат
 Paid course,Платный курс
 Password,Пароль
 Password Reset,Сброс пароля
+Password changed,Пароль изменён
 Password is required.,Укажите пароль.
+Password is too simple: add more words that aren't related to you or the platform.,"Пароль слишком простой: добавьте ещё слов, не связанных с вами и платформой."
+Password must be at least {0} characters.,Пароль должен быть не короче {0} символов.
+Password must not contain the platform name.,Пароль не должен содержать название платформы.
+Password not accepted,Пароль не подходит
+Passwords don't match.,Пароли не совпадают.
 Paste a YouTube link,Вставьте ссылку на YouTube
 "Paste a YouTube link, or upload a video file (MP4, WebM, or OGG) to show a preview on the course page.","Вставьте ссылку на YouTube или загрузите видеофайл (MP4, WebM или OGG), чтобы показать превью на странице курса."
 Payment gateways deleted successfully,Платёжные шлюзы успешно удалены
@@ -330,13 +373,16 @@ Randomize the order of questions for each attempt.,Перемешивать по
 Remove row,Удалить строку
 Remove the image to pick a color instead.,"Удалите изображение, чтобы выбрать цвет."
 Reply cannot be empty.,Ответ не может быть пустым.
+Requested:,Запрошено:
 Resend,Отправить ещё раз
 Reset Password,Сбросить пароль
 Reset your password,Задайте новый пароль
 Review and update the details of this payment.,Проверьте и обновите данные этого платежа.
 Role,Роль,Learner profile
 Rust,Rust
+Save password,Сохранить пароль
 Saved — this format can't be previewed here.,Сохранено — этот формат здесь не показывается.
+Saving password…,Сохраняем…
 School,Школа
 See less,Свернуть
 See more,Показать полностью
@@ -357,28 +403,35 @@ Send Notification for Published Batches,Отправлять уведомлен�
 Send Notification for Published Courses,Отправлять уведомления об опубликованных курсах
 Send Payment Reminders for Batch,Отправлять напоминания об оплате потока
 Send Payment Reminders for Course,Отправлять напоминания об оплате курса
+Send a new link,Отправить новую ссылку
 Send login link,Отправить ссылку для входа
 Sent,Отправлено
 Session refreshed successfully,Сессия успешно обновлена
+Set a password,Задайте пароль
 "Set the discount, validity, and the courses or batches this coupon applies to.","Задайте скидку, срок действия и курсы или потоки, к которым применяется купон."
 Set the name of your brand. Appears in the left sidebar.,Укажите название бренда. Оно отображается в левой панели.
 Short description,Краткое описание
 Short introduction,Краткое вступление
 Sign In,Вход
 Sign Up,Регистрация
+Sign in,Войти
+Sign out,Выйти
 Sign up,Зарегистрироваться
 Signup Disabled,Регистрация отключена
 Signups have been disabled for this website.,Регистрация на этом сайте отключена.
 Skip for now,Пропустить
 Slots,Слоты
+"Someone tried to sign up with this address, but an account with it already exists.","На этот адрес пытались зарегистрироваться, но аккаунт с ним уже есть."
 Sort by,Сортировать по
 Spreadsheets,Таблицы
+"Start connecting again from your agent. If the error happens again, email {0} and include the text below.","Начните подключение заново в&nbsp;агенте. Если ошибка повторится, напишите на&nbsp;{0} и&nbsp;приложите текст ниже."
 Starting level,Стартовый уровень,Learner profile
 Status/Percentage,Статус/Процент
 Student View,Режим студента
 Student enrolled successfully,Студент успешно записан
 Student is already enrolled in this course.,Студент уже записан на этот курс.
 Submissions,Отправленные работы
+Switch account,Сменить
 TalentLMS,TalentLMS
 Taught by,Преподают
 Taught by a team of {0},Преподаёт команда из {0}
@@ -386,23 +439,34 @@ Teachable,Teachable
 Thank you,Спасибо
 Thanks,Спасибо
 The Google Meet account does not have a Google Calendar configured. Please set up a Google Calendar first.,Для аккаунта Google Meet не настроен Google Календарь. Сначала настройте Google Календарь.
+The agent,Агент
 The deadline to schedule evaluations has passed. Please contact the Instructor for assistance.,Срок записи на оценку истёк. Обратитесь за помощью к инструктору.
 The instructor has left a comment on your assignment {0},Инструктор оставил комментарий к вашему заданию {0}
 The last day to schedule your evaluation is {0}.,"Последний день, чтобы записаться на оценку, — {0}."
+The new Terms of Use and Privacy Policy are now in effect.,Действуют новые Условия использования и Политика конфиденциальности.
+The new Terms of Use and Privacy Policy take effect on {0}.,С {0} действуют новые Условия использования и Политика конфиденциальности.
+The password for your account on {0} has been changed.,Пароль от вашего аккаунта на {0} изменён.
 The selected Google Meet account does not have a Google Calendar configured.,Для выбранного аккаунта Google Meet не настроен Google Календарь.
 The selected Google Meet account is disabled. Please enable it or select another account.,Выбранный аккаунт Google Meet отключён. Включите его или выберите другой.
+The site {0} will get access.,Доступ получит сайт {0}.
 These tags help search engines describe and rank your course in results.,Эти теги помогают поисковым системам описывать и ранжировать ваш курс в результатах поиска.
 Thinkific,Thinkific
 This batch is not associated with this course.,Этот поток не связан с этим курсом.
 This course includes:,Что входит в курс:
+"This email address is linked to a different Google account on the platform. Sign in with the Google account you used before, or with your email and password.","Этот адрес почты на платформе привязан к другому аккаунту Google. Войдите тем аккаунтом Google, которым входили раньше, или по почте с паролем."
+This link has already been used or is invalid,Ссылка уже использована или недействительна
+This link has expired,Ссылка устарела
+This password has appeared in data breaches. Choose a different one.,Этот пароль встречается в утечках данных — выберите другой.
 This permanently deletes the email account and cannot be undone.,"Почтовый аккаунт будет удалён навсегда, отменить это нельзя."
 This permanently deletes the email template and cannot be undone.,"Шаблон письма будет удалён навсегда, отменить это нельзя."
 This permanently deletes the user account and cannot be undone.,"Учётная запись пользователя будет удалена навсегда, отменить это нельзя."
 This quiz has no questions available yet.,В этом тесте пока нет вопросов.
+This sign-in method isn't available on this platform. Sign in with Google or with your email and password.,Этот способ входа на платформе не используется. Войдите через Google или по почте с паролем.
 This user cannot be deleted.,Этого пользователя нельзя удалить.
 This video's codec can't be played in browsers (e.g. HEVC/H.265). Please upload an H.264 MP4 or a WebM.,"Кодек этого видео не воспроизводится в браузерах (например, HEVC/H.265). Загрузите MP4 с кодеком H.264 или WebM."
 Time per week,Время в неделю,Learner profile
 Title cannot be empty.,Заголовок не может быть пустым.
+"To continue, confirm your age and accept the terms.","Чтобы продолжить, подтвердите возраст и примите условия."
 Tools and methods,Инструменты и методики,Learner profile
 Total Questions,Всего вопросов
 Transaction created successfully,Транзакция успешно создана
@@ -432,6 +496,8 @@ Video failed to load — this lesson will still be marked complete after you spe
 View all reviews,Смотреть все отзывы
 Watch Time (mins),Время просмотра (мин)
 We received a request to reset the password for your account. Click the button below to set a new password.,"Мы получили запрос на смену пароля от вашего аккаунта. Нажмите кнопку ниже, чтобы задать новый пароль."
+We'll email you a link to set it.,"Пришлём на почту ссылку, по которой его можно задать."
+We've updated our terms,Мы обновили условия
 Welcome to {0},Добро пожаловать в {0}
 Welcome! Please sign in to continue.,"Войдите, чтобы продолжить."
 What are you using today to manage learning?,Чем вы сейчас пользуетесь для организации обучения?
@@ -443,6 +509,7 @@ Where will you be using Frappe Learning?,Где вы будете использ
 Whole Organization,Вся команда
 Work,Работа
 Work context,Контекст работы,Learner profile
+You already have an account on {0},У вас уже есть аккаунт на {0}
 You are not authorized to view the assessments of this batch.,У вас нет прав на просмотр оценок этого потока.
 You are not authorized to view the chart data of this batch.,У вас нет прав на просмотр данных графиков этого потока.
 You are not authorized to view the details of this program.,У вас нет прав на просмотр сведений об этой программе.
@@ -451,8 +518,10 @@ You are not authorized to view the discussion topics for this item.,У вас н
 You are not authorized to view the students of this batch.,У вас нет прав на просмотр студентов этого потока.
 You are not authorized to view this quiz.,У вас нет прав на просмотр этого теста.
 You are not the assigned evaluator for this course and batch.,Вы не назначены оценщиком для этого курса и потока.
+You are signed in as,Вы вошли как
 You can only submit assignments for your own account.,Отправлять задания можно только от своего имени.
 You can only upload {0} files,Можно загружать только файлы {0}
+You can use it to sign in with your email.,С ним можно входить по почте.
 You cannot book an evaluation for another user.,Нельзя записать на оценку другого пользователя.
 You do not have permission to access announcements for this batch.,У вас нет прав на доступ к объявлениям этого потока.
 You do not have permission to access badges.,У вас нет прав на доступ к бейджам.
@@ -479,9 +548,12 @@ You're all caught up! Check back later for updates.,Всё прочитано! �
 "You're enrolled and all set! The course content is ready, so you can start learning right away and go at your own pace.","Вы записаны, всё готово! Материалы курса уже доступны, поэтому вы можете начать учиться прямо сейчас и заниматься в своём темпе."
 You're enrolled in {0} – start whenever you're ready,"Вы записаны на {0} — начинайте, когда будете готовы"
 YouTube link added — students see it embedded on the course page. Clear the field to upload a file instead.,"Ссылка на YouTube добавлена — студенты видят видео на странице курса. Очистите поле, чтобы вместо этого загрузить файл."
+Your account and the data associated with it have been deleted.,Учётная запись и связанные с ней данные удалены.
+"Your account has been closed. The data associated with it will be deleted within 30 days. If you clicked by mistake, email privacy@cenda.app.","Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней. Если вы нажали по ошибке, напишите на privacy@cenda.app."
 Your browser does not support the video tag.,Ваш браузер не поддерживает тег video.
 Your evaluation for the course {0} has been scheduled on {1} at {2} ({3} time).,Ваша оценка по курсу {0} назначена на {1} в {2} (время {3}).
 Your login ID is:,Ваш логин:
+Your password has expired. Set a new one.,Срок пароля истёк — задайте новый.
 Zoom,Zoom
 Zoom account deleted successfully,Аккаунт Zoom успешно удалён
 course must be a string,course должен быть строкой
@@ -494,6 +566,8 @@ jane@example.com,ivan@example.com
 name must be a string,name должен быть строкой
 sections,разделов
 service must be a string,service должен быть строкой
+set a new password,задайте новый пароль
+set a password,задайте пароль
 that might interest you!,"и, возможно, он вас заинтересует!"
 title must be a string,title должен быть строкой
 user must be a string,user должен быть строкой
@@ -504,4 +578,5 @@ user ratings,оценок
 {0} must be a string,{0} должен быть строкой
 {0} replies,{0} ответов
 {0} reply,{0} ответ
+"{0} will be able to work in Cenda on your behalf — for example, running lessons from your courses and recording decisions in your working documents.","{0} сможет работать в&nbsp;Cenda от&nbsp;вашего имени&nbsp;— например, вести уроки по&nbsp;вашим курсам и&nbsp;записывать решения в&nbsp;рабочие документы."
 {0}% complete,пройдено {0}%

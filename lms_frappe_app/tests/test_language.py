@@ -9,14 +9,13 @@
 выбор администратора (#540).
 """
 
-from types import SimpleNamespace
-
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.translate import get_all_languages
 
 from lms_frappe_app.install import ЯЗЫК, обеспечить_русский_язык, согласовать_умолчание_языка
 from lms_frappe_app.patches.v0_1 import students_language
+from lms_frappe_app.tests.test_consent import запрос
 
 
 class IntegrationTestLanguage(IntegrationTestCase):
@@ -66,17 +65,15 @@ class IntegrationTestLanguage(IntegrationTestCase):
 		self.addCleanup(frappe.db.set_single_value, "System Settings", "language", прежний or "")
 		frappe.db.set_single_value("System Settings", "language", ЯЗЫК)
 		frappe.db.set_default("language", ЯЗЫК)
-		запрос = getattr(frappe.local, "request", None)
-		self.addCleanup(setattr, frappe.local, "request", запрос)
-
-		for кука, ожидаемый in {"en": "en", ЯЗЫК: ЯЗЫК, "xx": ЯЗЫК, None: ЯЗЫК}.items():
-			with self.subTest(кука=кука):
-				frappe.local.request = SimpleNamespace(cookies={"preferred_language": кука} if кука else {})
+		# Из куки — только языки сайта; вариант сводится к основному, как у Frappe.
+		случаи = {"en": "en", ЯЗЫК: ЯЗЫК, "en-US": "en", "de": ЯЗЫК, "xx": ЯЗЫК, None: ЯЗЫК}
+		for кука, ожидаемый in случаи.items():
+			with self.subTest(кука=кука), запрос(cookie=f"preferred_language={кука}" if кука else None):
 				self.assertEqual(новый_пользователь(), ожидаемый)
 
-		# Пользователя заводит другой — сотрудник в desk, приглашение команды: язык системы.
-		frappe.local.request = SimpleNamespace(cookies={"preferred_language": "en"})
-		self.assertEqual(новый_пользователь(гостем=False), ЯЗЫК)
+		# Пользователя заводит сотрудник в desk: язык системы.
+		with запрос(cookie="preferred_language=en"):
+			self.assertEqual(новый_пользователь(гостем=False), ЯЗЫК)
 
 	def test_патч_переводит_учеников_с_en_кроме_выбравших(self):
 		"""Решение владельца по уже созданным — вариант А в #633."""

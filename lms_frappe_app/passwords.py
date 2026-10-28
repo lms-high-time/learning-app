@@ -33,6 +33,7 @@ from collections.abc import Iterable
 
 import frappe
 import requests
+from frappe import _
 from frappe.utils import cint
 from frappe.utils.password_strength import test_password_strength
 
@@ -97,10 +98,26 @@ _НАЗВАНИЯ = [_шаблон_названия(название) for наз
 #: держать человека у формы ради проверки, которую всё равно пропустим.
 ТАЙМАУТ_УТЕЧЕК = 3
 
-КОРОТКИЙ = f"Пароль должен быть не короче {МИНИМУМ_ДЛИНЫ} символов."
-С_НАЗВАНИЕМ = "Пароль не должен содержать название платформы."
-ПРОСТОЙ = "Пароль слишком простой: добавьте ещё слов, не связанных с вами и платформой."
-УТЁК = "Этот пароль встречается в утечках данных — выберите другой."
+# Тексты отказов — функциями, а не константами: `_()` переводит на язык
+# запроса, а константа перевелась бы при импорте, до запроса
+# (learning-services#737).
+
+
+def короткий() -> str:
+	return _("Password must be at least {0} characters.").format(МИНИМУМ_ДЛИНЫ)
+
+
+def с_названием() -> str:
+	return _("Password must not contain the platform name.")
+
+
+def простой() -> str:
+	return _("Password is too simple: add more words that aren't related to you or the platform.")
+
+
+def утёкший() -> str:
+	return _("This password has appeared in data breaches. Choose a different one.")
+
 
 #: Флаг запроса (`frappe.flags`): идёт вход через Google, `google_login`.
 #: `Why:` Frappe заводит аккаунт при первом входе со случайным паролем из
@@ -117,22 +134,22 @@ def проверить_пароль(password: str, сведения: Iterable = 
 	"""Отказ `ValidationError`, если пароль не годится; `сведения` — имя,
 	почта и прочее о самом пользователе, для оценки zxcvbn."""
 	if причина := причина_отказа(password, сведения):
-		frappe.throw(причина, title="Пароль не подходит")
+		frappe.throw(причина, title=_("Password not accepted"))
 
 
 def причина_отказа(password: str, сведения: Iterable = ()) -> str | None:
 	"""Текст отказа или `None`. Проверки — от дешёвой к сетевой: до сервиса
 	утечек доходит только пароль, прошедший остальные."""
 	if len(password) < МИНИМУМ_ДЛИНЫ:
-		return КОРОТКИЙ
+		return короткий()
 	if есть_название(password):
-		return С_НАЗВАНИЕМ
+		return с_названием()
 	слова = [*КОНТЕКСТНЫЕ_СЛОВА, *(str(с) for с in сведения if с)]
 	порог = cint(frappe.get_system_settings("minimum_password_score")) or БАЛЛ_ПО_УМОЛЧАНИЮ
 	if test_password_strength(password, user_inputs=слова).get("score", 0) < порог:
-		return ПРОСТОЙ
+		return простой()
 	if утёк(password):
-		return УТЁК
+		return утёкший()
 	return None
 
 

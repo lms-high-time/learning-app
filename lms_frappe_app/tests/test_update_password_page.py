@@ -15,6 +15,12 @@ from lms_frappe_app.www.update_password import ЗАПРОС_ССЫЛКИ, get_co
 
 
 class IntegrationTestUpdatePasswordPage(IntegrationTestCase):
+	def setUp(self):
+		# Тексты страницы сверяются по-русски: исходник — английский, русский —
+		# перевод (learning-services#737).
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
+
 	def tearDown(self):
 		frappe.form_dict.clear()
 		frappe.local.flags.redirect_location = None

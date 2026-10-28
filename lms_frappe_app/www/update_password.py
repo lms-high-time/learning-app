@@ -10,6 +10,7 @@
 """
 
 import frappe
+from frappe import _
 from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 
 from lms_frappe_app.access import КЛЮЧ_ДЕЙСТВУЕТ, запись_ключа, состояние_ключа
@@ -43,7 +44,7 @@ def get_context(context):
 		frappe.local.flags.redirect_location = ВОССТАНОВЛЕНИЕ
 		raise frappe.Redirect
 	context.no_breadcrumbs = True
-	context.title = "Задайте пароль"
+	context.title = _("Set a password")
 	context.logo = get_app_logo()
 	context.password_expired = bool(frappe.form_dict.get("password_expired"))
 	# Подсказка и проверка формы — из требований сервера (learning-services#666).
