@@ -7,6 +7,7 @@
 и `agent_learning/releases/test_service.py`; здесь — что вокруг неё.
 """
 
+import json
 from functools import cached_property
 
 import frappe
@@ -103,6 +104,39 @@ class IntegrationTestAuthoringEdits(IntegrationTestCase):
 		ответ = authoring.update_course(course=анонс, title="Стало", summary="и описание")
 		self.assertEqual(ответ["data"]["title"], "Стало")
 		self.assertEqual(frappe.db.get_value("LMS Course", анонс, "short_introduction"), "и описание")
+
+	def test_правка_анонса_на_другом_языке(self):
+		"""`lang` пишет тексты в перевод карточки, а не в основные поля; `ru` — основные
+		поля; пустая строка снимает текст перевода (learning-services#738)."""
+		анонс = authoring.create_course(title="Анонс", summary="Кратко")["data"]["id"]
+
+		ответ = authoring.update_course(
+			course=анонс, lang="en", title="Announcement", summary="Short", description="Long"
+		)
+		self.assertEqual(
+			ответ["data"], {"id": анонс, "title": "Announcement", "summary": "Short", "promise": None}
+		)
+		authoring.update_course(course=анонс, lang="en", description="")
+		authoring.update_course(course=анонс, lang="ru", title="Анонс по-русски")
+
+		сведения = frappe.db.get_value(
+			"LMS Course", анонс, ["title", "short_introduction", "course_translations"], as_dict=True
+		)
+		self.assertEqual((сведения.title, сведения.short_introduction), ("Анонс по-русски", "Кратко"))
+		self.assertEqual(
+			json.loads(сведения.course_translations),
+			{"en": {"title": "Announcement", "short_introduction": "Short"}},
+		)
+		for случай, аргументы, код in (
+			("язык не сайта", {"lang": "de", "title": "Ankündigung"}, authoring.ЯЗЫК_НЕИЗВЕСТЕН),
+			(
+				"обещание не переводится",
+				{"lang": "en", "promise": "By the end"},
+				authoring.ОБЕЩАНИЕ_НЕ_ПЕРЕВОДИТСЯ,
+			),
+		):
+			with self.subTest(случай):
+				self.assertEqual(authoring.update_course(course=анонс, **аргументы)["error"]["code"], код)
 
 
 class IntegrationTestCourseRevision(IntegrationTestCase):

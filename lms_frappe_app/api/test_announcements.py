@@ -15,7 +15,7 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import announcements, notices
 from lms_frappe_app.api import authoring, public, student, team
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_куратора,
@@ -69,6 +69,17 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		)
 		self.assertTrue(ответ["ok"], ответ)
 		return ответ["data"]
+
+	def на_языке(self, язык: str, кто: str, метод, **аргументы) -> dict:
+		"""Вызов на языке запроса `язык` (`frappe.local.lang`)."""
+		frappe.set_user(кто)
+		прежний = frappe.local.lang
+		frappe.local.lang = язык
+		try:
+			return метод(**аргументы)
+		finally:
+			frappe.local.lang = прежний
+			frappe.set_user("Administrator")
 
 	def код_отказа(self, ответ: dict) -> str | None:
 		return None if ответ["ok"] else ответ["error"]["code"]
@@ -214,6 +225,55 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		self.от_имени(self.ученик, student.notify_when_released, course=self.курс)
 		данные = self.от_имени(self.ученик, public.course_map, course=self.курс)["data"]
 		self.assertTrue(данные["notify"])
+
+	def test_карта_анонса_на_языке_запроса(self):
+		"""Название и цели анонса без релиза — на языке запроса, если автор их
+		перевёл (`lang` у `update_course` и `announce_course`), иначе русские
+		(learning-services#738)."""
+		self.анонсировать()
+		ответ = self.от_имени(
+			self.куратор,
+			authoring.announce_course,
+			course=self.курс,
+			objectives=["Describe the process", "Find the junctions"],
+			lang="en",
+		)
+		self.assertEqual(ответ["data"]["objectives"], ["Describe the process", "Find the junctions"])
+		self.от_имени(
+			self.куратор, authoring.update_course, course=self.курс, lang="en", title="Announcement"
+		)
+
+		for язык, название, цели in (
+			("en", "Announcement", ["Describe the process", "Find the junctions"]),
+			("ru", frappe.db.get_value("LMS Course", self.курс, "title"), ЦЕЛИ.splitlines()),
+		):
+			with self.subTest(язык):
+				данные = self.на_языке(язык, "Guest", public.course_map, course=self.курс)["data"]
+				self.assertEqual((данные["title"], данные["objectives"]), (название, цели))
+
+	def test_курс_из_релиза_на_языке_запроса(self):
+		"""У курса из релиза перевод карточки и целей анонса приходит релизом: цель
+		главы без перевода — русская. Каталог агента остаётся русским."""
+		курс = self.опубликовать_релиз(
+			release=перевести(пример_релиза(f"an-{frappe.generate_hash(length=6)}"), главы=1)
+		)["course"]
+		ответ = self.на_языке("ru", self.куратор, authoring.announce_course, course=курс, lang="en")
+		self.assertEqual(ответ["data"]["objectives"], ["Chapter 1", "Глава вторая"])
+
+		данные = self.на_языке("en", "Guest", public.course_map, course=курс)["data"]
+		self.assertEqual(
+			(данные["title"], данные["objectives"]), ("Sample course", ["Chapter 1", "Глава вторая"])
+		)
+		каталог = self.на_языке("en", self.ученик, student.list_catalog)["data"]
+		self.assertEqual(
+			next(к for к in каталог["courses"] if к["id"] == курс)["objectives"],
+			["Глава первая", "Глава вторая"],
+		)
+
+		self.от_имени(self.куратор, authoring.publish_course, course=курс)
+		self.assertEqual(
+			self.на_языке("en", "Guest", public.course_map, course=курс)["data"]["title"], "Sample course"
+		)
 
 	# --- руководитель ---
 
