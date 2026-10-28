@@ -31,6 +31,7 @@ import datetime
 from urllib.parse import quote, urlsplit
 
 import frappe
+from babel.dates import format_date
 from frappe.utils import add_days, add_years, get_datetime, now_datetime
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import redirect
@@ -201,12 +202,20 @@ def принимал_прежде(пользователь: str) -> bool:
 
 
 def дата_редакции() -> str | None:
-	"""«20 октября 2026 года» — для редакции-даты, иначе `None`."""
+	"""«20 октября 2026 года» по-русски, «October 20, 2026» на других языках —
+	для редакции-даты, иначе `None`.
+
+	`Why:` дата стоит во фразе экрана согласия, а фраза — на языке запроса:
+	у приложения два языка интерфейса, и всё, что не русское, — английское
+	(learning-services#737).
+	"""
 	try:
 		день = datetime.date.fromisoformat(редакция_документов())
 	except ValueError:
 		return None
-	return f"{день.day} {МЕСЯЦЫ[день.month - 1]} {день.year} года"
+	if (frappe.local.lang or "").split("-")[0] == "ru":
+		return f"{день.day} {МЕСЯЦЫ[день.month - 1]} {день.year} года"
+	return format_date(день, "long", locale="en")
 
 
 def потребовать_согласие():

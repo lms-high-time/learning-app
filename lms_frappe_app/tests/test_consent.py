@@ -236,6 +236,9 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 		self.assertFalse(consent.есть_явное(адрес))
 
 	def test_экран_отличает_незавершённую_регистрацию_от_новой_редакции(self):
+		# Тексты экрана сверяются по-русски: исходник — английский (learning-services#737).
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
 		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "2026-10-20")
 		# Отсчёт — от часов базы: в контейнере тестов они отстают (learning-services#509).
 		self.enterContext(patch.object(consent, "ЧИСТКА_С", str(add_days(now_datetime(), -1))))
@@ -288,6 +291,10 @@ class IntegrationTestExplicitConsent(IntegrationTestCase):
 				"С 1 декабря 2026 года действуют новые Условия использования и Политика конфиденциальности.",
 			),
 		)
+
+		frappe.local.lang = "en"
+		self.assertEqual(consent.дата_редакции(), "December 1, 2026")
+		frappe.local.lang = "ru"
 
 		frappe.db.set_single_value(НАСТРОЙКИ, "legal_version", "v2")
 		self.assertIsNone(consent.дата_редакции())

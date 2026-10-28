@@ -26,6 +26,12 @@ from lms_frappe_app.tests.sample_data import создать_ученика
 
 
 class IntegrationTestOAuthConfirmation(IntegrationTestCase):
+	def setUp(self):
+		# Тексты экрана сверяются по-русски: исходник шаблона — английский,
+		# русский — перевод (learning-services#737).
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
+
 	def test_экран_подтверждения(self):
 		"""Экран называет агента и учётную запись и остаётся рабочим: кнопки и
 		защита от CSRF — из исходного шаблона, их легко потерять."""
@@ -70,6 +76,11 @@ class IntegrationTestOAuthConfirmation(IntegrationTestCase):
 
 		with self.subTest("агент без имени"):
 			self.assertIn("Подключить агента к&nbsp;Cenda?", экран(client_id=None))
+
+		with self.subTest("по-английски — исходник"):
+			frappe.local.lang = "en"
+			self.assertIn("Connect Claude to Cenda?", экран())
+			frappe.local.lang = "ru"
 
 		# Frappe 16 эту ветку не зовёт (ошибки уходят JSON); держим её рабочей
 		# на случай, если начнёт.

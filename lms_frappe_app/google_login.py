@@ -27,7 +27,10 @@ learning-services#664).
 спрашивает, и эти роли входят паролем и кодом.
 """
 
+from collections.abc import Callable
+
 import frappe
+from frappe import _
 from frappe.integrations import oauth2_logins
 from frappe.utils import cint
 from frappe.utils.oauth import consume_oauth_state, get_email, get_info_via_oauth, login_oauth_user
@@ -40,27 +43,44 @@ from lms_frappe_app.passwords import ВХОД_ЧЕРЕЗ_GOOGLE
 #: кроме Google. Оба имени каждого метода подменены отказом (hooks.py).
 ПРОВАЙДЕРЫ_FRAPPE = ("github", "facebook", "frappe", "office365", "salesforce", "fairlogin", "keycloak")
 
-ЗАГОЛОВОК = "Не удалось войти через Google"
-НЕ_ПОДТВЕРЖДЁН = (
-	"Google не подтвердил адрес почты этого аккаунта. Подтвердите адрес в настройках Google "
-	"или войдите по почте с паролем."
-)
-ДРУГОЙ_АККАУНТ = (
-	"Этот адрес почты на платформе привязан к другому аккаунту Google. Войдите тем аккаунтом "
-	"Google, которым входили раньше, или по почте с паролем."
-)
-СО_ВТОРЫМ_ФАКТОРОМ = (
-	"Для этой учётной записи вход через Google закрыт: войдите по почте с паролем и кодом "
-	"из приложения-генератора."
-)
-ДРУГОЙ_ПРОВАЙДЕР = (
-	"Этот способ входа на платформе не используется. Войдите через Google или по почте с паролем."
-)
+# Тексты страницы отказа — функциями, а не константами: `_()` переводит на
+# язык запроса, а константа перевелась бы при импорте, до запроса
+# (learning-services#737). `lang` — для журнала: он по-русски на любом языке
+# запроса, иначе одну причину отказа искали бы в нём по двум текстам.
 
 
-def причина_отказа(данные: dict, привязанный: str | None) -> str | None:
-	"""Текст отказа или `None`; `привязанный` — идентификатор Google, записанный
-	у пользователя платформы с этим адресом.
+def заголовок(lang: str | None = None) -> str:
+	return _("Couldn't sign in with Google", lang=lang)
+
+
+def не_подтверждён(lang: str | None = None) -> str:
+	return _(
+		"Google hasn't verified the email address of this account. Verify the address in your Google settings or sign in with your email and password.",
+		lang=lang,
+	)
+
+
+def другой_аккаунт(lang: str | None = None) -> str:
+	return _(
+		"This email address is linked to a different Google account on the platform. Sign in with the Google account you used before, or with your email and password.",
+		lang=lang,
+	)
+
+
+def закрыт_со_вторым_фактором(lang: str | None = None) -> str:
+	return _(
+		"Google sign-in is turned off for this account: sign in with your email, password, and a code from your authenticator app.",
+		lang=lang,
+	)
+
+
+def другой_провайдер(lang: str | None = None) -> str:
+	return _("This sign-in method isn't available on this platform. Sign in with Google or with your email and password.", lang=lang)
+
+
+def причина_отказа(данные: dict, привязанный: str | None) -> Callable[..., str] | None:
+	"""Текст отказа — функцией от языка — или `None`; `привязанный` —
+	идентификатор Google, записанный у пользователя платформы с этим адресом.
 
 	Frappe берёт данные из `oauth2/v2/userinfo` (`Social Login Key` Google): там
 	флаг подтверждения — `verified_email`, а идентификатор — `id`. В OpenID
@@ -68,10 +88,10 @@ def причина_отказа(данные: dict, привязанный: str 
 	написания. Флаг — только булево `True`: строка или его отсутствие — отказ.
 	"""
 	if данные.get("email_verified") is not True and данные.get("verified_email") is not True:
-		return НЕ_ПОДТВЕРЖДЁН
+		return не_подтверждён
 	идентификатор = str(данные.get("sub") or данные.get("id") or "")
 	if привязанный and идентификатор != str(привязанный):
-		return ДРУГОЙ_АККАУНТ
+		return другой_аккаунт
 	return None
 
 
@@ -113,13 +133,13 @@ def login_via_google(code: str, state: str):
 	данные = get_info_via_oauth(ПРОВАЙДЕР, code, decoder=oauth2_logins.decoder_compat)
 	отказ = причина_отказа(данные, привязанный_идентификатор(данные))
 	if not отказ and со_вторым_фактором(данные):
-		отказ = СО_ВТОРЫМ_ФАКТОРОМ
+		отказ = закрыт_со_вторым_фактором
 	if отказ:
 		consume_oauth_state(state)
 		frappe.logger("lms_frappe_app.google_login").warning(
-			f"Вход через Google отклонён: {отказ} ({get_email(данные)})"
+			f"Вход через Google отклонён: {отказ(lang='ru')} ({get_email(данные)})"
 		)
-		frappe.respond_as_web_page(ЗАГОЛОВОК, отказ, http_status_code=403, indicator_color="red")
+		frappe.respond_as_web_page(заголовок(), отказ(), http_status_code=403, indicator_color="red")
 		return
 	# Случайный пароль аккаунта, который заведёт первый вход, не проверяется.
 	frappe.flags[ВХОД_ЧЕРЕЗ_GOOGLE] = True
@@ -161,4 +181,4 @@ def отклонить_провайдера(code: str | None = None, state: str 
 	"""
 	if state:
 		consume_oauth_state(state)
-	frappe.respond_as_web_page(ЗАГОЛОВОК, ДРУГОЙ_ПРОВАЙДЕР, http_status_code=403, indicator_color="red")
+	frappe.respond_as_web_page(заголовок(), другой_провайдер(), http_status_code=403, indicator_color="red")

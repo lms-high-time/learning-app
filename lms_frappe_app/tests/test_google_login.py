@@ -20,11 +20,11 @@ from frappe.utils.password import get_decrypted_password
 
 from lms_frappe_app import google_login
 from lms_frappe_app.google_login import (
-	ДРУГОЙ_АККАУНТ,
-	ДРУГОЙ_ПРОВАЙДЕР,
-	НЕ_ПОДТВЕРЖДЁН,
 	ПРОВАЙДЕРЫ_FRAPPE,
-	СО_ВТОРЫМ_ФАКТОРОМ,
+	другой_аккаунт,
+	другой_провайдер,
+	закрыт_со_вторым_фактором,
+	не_подтверждён,
 	причина_отказа,
 )
 from lms_frappe_app.install import (
@@ -150,10 +150,10 @@ class UnitTestGoogleAccount(UnitTestCase):
 			"v2, тот же аккаунт": (v2, "111", None),
 			"OIDC, тот же аккаунт": ({"email_verified": True, "sub": "111"}, "111", None),
 			"число и строка — один идентификатор": ({**v2, "id": 111}, "111", None),
-			"адрес не подтверждён": ({**v2, "verified_email": False}, None, НЕ_ПОДТВЕРЖДЁН),
-			"флага нет": ({"email": "a@gmail.com", "id": "111"}, None, НЕ_ПОДТВЕРЖДЁН),
-			"флаг строкой": ({**v2, "verified_email": "true"}, None, НЕ_ПОДТВЕРЖДЁН),
-			"другой аккаунт Google": ({**v2, "id": "222"}, "111", ДРУГОЙ_АККАУНТ),
+			"адрес не подтверждён": ({**v2, "verified_email": False}, None, не_подтверждён),
+			"флага нет": ({"email": "a@gmail.com", "id": "111"}, None, не_подтверждён),
+			"флаг строкой": ({**v2, "verified_email": "true"}, None, не_подтверждён),
+			"другой аккаунт Google": ({**v2, "id": "222"}, "111", другой_аккаунт),
 		}
 		for что, (данные, привязанный, причина) in случаи.items():
 			with self.subTest(что):
@@ -187,13 +187,16 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 				) as вход,
 				patch.object(google_login, "consume_oauth_state"),
 				patch("frappe.respond_as_web_page") as страница,
+				patch.object(google_login.frappe, "logger") as журнал,
 			):
 				google_login.login_via_google(code="код", state="состояние")
 
 				self.assertEqual(вход.called, впущен)
 				self.assertEqual(страница.called, not впущен)
 				if not впущен:
-					self.assertEqual(страница.call_args.args[1], ДРУГОЙ_АККАУНТ)
+					self.assertEqual(страница.call_args.args[1], другой_аккаунт())
+					# Журнал — по-русски на любом языке запроса (learning-services#737).
+					self.assertIn(другой_аккаунт(lang="ru"), журнал.return_value.warning.call_args.args[0])
 		# Вход Frappe идёт под флагом: случайный пароль нового аккаунта не проверяется.
 		self.assertEqual(флаги, [True])
 		self.assertIsNone(frappe.flags.get(ВХОД_ЧЕРЕЗ_GOOGLE))
@@ -224,7 +227,7 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 				self.assertEqual(вход.called, впущен)
 				self.assertEqual(гашение.called, not впущен)
 				if not впущен:
-					self.assertEqual(страница.call_args.args[1], СО_ВТОРЫМ_ФАКТОРОМ)
+					self.assertEqual(страница.call_args.args[1], закрыт_со_вторым_фактором())
 
 	def test_другие_провайдеры_отклоняются(self):
 		"""Вход — только Google: у прочих провайдеров Frappe подтверждения
@@ -240,7 +243,7 @@ class IntegrationTestGoogleAccount(IntegrationTestCase):
 					)
 		with patch("frappe.respond_as_web_page") as страница:
 			google_login.отклонить_провайдера(code="код", state="состояние")
-		self.assertEqual(страница.call_args.args[1], ДРУГОЙ_ПРОВАЙДЕР)
+		self.assertEqual(страница.call_args.args[1], другой_провайдер())
 		self.assertEqual(страница.call_args.kwargs["http_status_code"], 403)
 
 	def test_custom_google_идёт_через_проверку(self):

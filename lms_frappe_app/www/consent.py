@@ -10,6 +10,7 @@
 from urllib.parse import quote
 
 import frappe
+from frappe import _
 from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 
 from lms_frappe_app.agent_learning import consent
@@ -36,16 +37,16 @@ def get_context(context):
 		_уйти(назад)
 	context.no_breadcrumbs = True
 	if consent.принимал_прежде(frappe.session.user):
-		context.title = "Мы обновили условия"
+		context.title = _("We've updated our terms")
 		дата = consent.дата_редакции()
 		context.subtitle = (
-			f"С {дата} действуют новые Условия использования и Политика конфиденциальности."
+			_("The new Terms of Use and Privacy Policy take effect on {0}.").format(дата)
 			if дата
-			else "Действуют новые Условия использования и Политика конфиденциальности."
+			else _("The new Terms of Use and Privacy Policy are now in effect.")
 		)
 	else:
-		context.title = "Завершите регистрацию"
-		context.subtitle = "Осталось подтвердить возраст и принять условия."
+		context.title = _("Complete your sign-up")
+		context.subtitle = _("All that's left is to confirm your age and accept the terms.")
 	context.logo = get_app_logo()
 	context.redirect_to = назад
 	context.csrf_token = frappe.sessions.get_csrf_token()

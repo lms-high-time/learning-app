@@ -15,14 +15,14 @@ from lms_frappe_app.access import (
 	КЛЮЧ_НЕ_НАЙДЕН,
 	КЛЮЧ_УСТАРЕЛ,
 	ЛИМИТ_РЕГИСТРАЦИИ,
-	ПРОВЕРЬТЕ_ПОЧТУ,
 	accept_invitation,
 	sign_up,
 	sign_up_learning,
 	update_password,
+	проверьте_почту,
 	состояние_ключа,
 )
-from lms_frappe_app.passwords import КОРОТКИЙ
+from lms_frappe_app.passwords import короткий
 from lms_frappe_app.tests.sample_data import создать_ученика
 
 СРОК = "reset_password_link_expiry_duration"
@@ -175,7 +175,7 @@ class IntegrationTestPasswordChanged(IntegrationTestCase):
 			with self.assertRaises(frappe.ValidationError) as отказ:
 				update_password("короткий", key=свой)
 
-			self.assertIn(КОРОТКИЙ, str(отказ.exception))
+			self.assertIn(короткий(), str(отказ.exception))
 			self.assertEqual(состояние_ключа(свой), КЛЮЧ_ДЕЙСТВУЕТ)
 			письма.assert_not_called()
 
@@ -298,7 +298,7 @@ class IntegrationTestSignUp(IntegrationTestCase):
 	def test_после_пароля_возврат_туда_откуда_пришёл_и_без_кэша(self):
 		"""Кэш Redis может вытесниться, пока человек идёт к письму."""
 		адрес = self.новый_адрес()
-		self.assertEqual(sign_up(адрес, "Новый Ученик", "/lms/join/abc"), (1, ПРОВЕРЬТЕ_ПОЧТУ))
+		self.assertEqual(sign_up(адрес, "Новый Ученик", "/lms/join/abc"), (1, проверьте_почту()))
 		frappe.cache.hdel("redirect_after_login", адрес)
 
 		переход = update_password(НОВЫЙ_ПАРОЛЬ, key=ключ(адрес))
@@ -309,10 +309,33 @@ class IntegrationTestSignUp(IntegrationTestCase):
 		"""«Already Registered» — тупик для вошедшего через Google (learning-services#459)."""
 		пользователь = ученик()
 
-		self.assertEqual(sign_up(пользователь, "Кто-то", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
+		self.assertEqual(sign_up(пользователь, "Кто-то", ""), (1, проверьте_почту()))
 		письмо = self.письма.call_args.kwargs
 		self.assertEqual(письмо["recipients"], [пользователь])
 		self.assertIn("/update-password?key=", письмо["message"])
+
+	def test_письмо_на_языке_владельца_адреса_а_не_гостя(self):
+		"""Регистрацию на чужой адрес пробует гость со своим языком, а письмо читает
+		владелец аккаунта (learning-services#737)."""
+		прежний = frappe.local.lang
+		self.addCleanup(setattr, frappe.local, "lang", прежний)
+		for гость, владелец in (("en", "ru"), ("ru", "en")):
+			with self.subTest(гость=гость, владелец=владелец):
+				пользователь = ученик()
+				frappe.db.set_value("User", пользователь, "language", владелец)
+				frappe.local.lang = гость
+				self.письма.reset_mock()
+				self.сбросить_лимит()
+
+				sign_up(пользователь, "Кто-то", "")
+
+				тема = self.письма.call_args.kwargs["subject"]
+				начало = {
+					язык: frappe._("You already have an account on {0}", lang=язык).split("{0}")[0]
+					for язык in (гость, владелец)
+				}
+				self.assertNotEqual(начало[гость], начало[владелец], "в ru.csv нет перевода темы")
+				self.assertTrue(тема.startswith(начало[владелец]), тема)
 
 	def test_новый_и_занятый_адрес_неразличимы(self):
 		"""По ответу формы не узнать, зарегистрирован ли чужой адрес."""
@@ -328,8 +351,8 @@ class IntegrationTestSignUp(IntegrationTestCase):
 		пользователь = ученик()
 
 		for написание in (" " + пользователь, пользователь.upper() + "\n"):
-			self.assertEqual(sign_up(написание, "Кто-то", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ), написание)
-			self.assertEqual(sign_up_learning(написание, "Кто-то", 1, ""), (1, ПРОВЕРЬТЕ_ПОЧТУ), написание)
+			self.assertEqual(sign_up(написание, "Кто-то", ""), (1, проверьте_почту()), написание)
+			self.assertEqual(sign_up_learning(написание, "Кто-то", 1, ""), (1, проверьте_почту()), написание)
 		self.assertEqual(
 			{tuple(вызов.kwargs["recipients"]) for вызов in self.письма.call_args_list}, {(пользователь,)}
 		)
@@ -341,7 +364,7 @@ class IntegrationTestSignUp(IntegrationTestCase):
 			sign_up(пользователь if попытка % 2 else пользователь.upper(), "Кто-то", "")
 
 		# Лимит — по адресу, а не по IP (обоснование в `access.py`).
-		self.assertEqual(sign_up(ученик(), "Кто-то", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
+		self.assertEqual(sign_up(ученик(), "Кто-то", ""), (1, проверьте_почту()))
 		with self.assertRaises(frappe.RateLimitExceededError):
 			sign_up(" " + пользователь, "Кто-то", "")
 
@@ -370,14 +393,14 @@ class IntegrationTestSignUp(IntegrationTestCase):
 		пользователь = ученик()
 		frappe.db.set_value("User", пользователь, "enabled", 0)
 
-		self.assertEqual(sign_up(пользователь, "Кто-то", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
+		self.assertEqual(sign_up(пользователь, "Кто-то", ""), (1, проверьте_почту()))
 		self.письма.assert_not_called()
 
 	def test_служебным_пользователям_ссылки_нет(self):
 		"""`reset_password` Frappe их пропускает — и регистрация не должна выдавать."""
 		for служебный in frappe.STANDARD_USERS:
 			адрес = frappe.db.get_value("User", служебный, "email")
-			self.assertEqual(sign_up(адрес, "Кто-то", ""), (1, ПРОВЕРЬТЕ_ПОЧТУ), служебный)
+			self.assertEqual(sign_up(адрес, "Кто-то", ""), (1, проверьте_почту()), служебный)
 		self.письма.assert_not_called()
 
 	def test_без_почты_занятый_адрес_отвечает_как_новый(self):
@@ -387,7 +410,7 @@ class IntegrationTestSignUp(IntegrationTestCase):
 			код, текст = sign_up(ученик(), "Кто-то", "")
 
 		self.assertEqual(код, 2)
-		self.assertNotEqual(текст, ПРОВЕРЬТЕ_ПОЧТУ)
+		self.assertNotEqual(текст, проверьте_почту())
 		self.почта.start()
 
 	def test_закрытая_регистрация_закрыта_и_для_занятого_адреса(self):
@@ -399,7 +422,7 @@ class IntegrationTestSignUp(IntegrationTestCase):
 	def test_форма_learning_создаёт_аккаунт(self):
 		адрес = self.новый_адрес()
 
-		self.assertEqual(sign_up_learning(адрес, "Новый Ученик", 1, ""), (1, ПРОВЕРЬТЕ_ПОЧТУ))
+		self.assertEqual(sign_up_learning(адрес, "Новый Ученик", 1, ""), (1, проверьте_почту()))
 		self.assertTrue(frappe.db.exists("User", адрес))
 
 

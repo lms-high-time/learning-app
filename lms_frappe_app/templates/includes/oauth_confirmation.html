@@ -44,10 +44,9 @@
 {% set права = (details or []) | reject("equalto", "all") | reject("equalto", "All") | list %}
 <div class="cenda-oauth">
 	<img class="cenda-oauth__logo" src="{{ логотип }}" alt="Cenda" width="32" height="32">
-	<h1 class="cenda-oauth__title">Подключить {{ агент or "агента" }} к&nbsp;Cenda?</h1>
+	<h1 class="cenda-oauth__title">{{ _("Connect {0} to Cenda?").format(агент) if агент else _("Connect an agent to Cenda?") }}</h1>
 	<p class="cenda-oauth__lead">
-		{{ агент or "Агент" }} сможет работать в&nbsp;Cenda от&nbsp;вашего имени&nbsp;— например,
-		вести уроки по&nbsp;вашим курсам и&nbsp;записывать решения в&nbsp;рабочие документы.
+		{{ _("{0} will be able to work in Cenda on your behalf — for example, running lessons from your courses and recording decisions in your working documents.").format(агент or _("The agent")) }}
 	</p>
 	{#
 		Куда уйдёт код доступа. Имя агента клиент пишет о себе сам, хост адреса
@@ -56,23 +55,22 @@
 	#}
 	{% set возврат = возврат_подключения() if возврат_подключения is defined else {} %}
 	{% if возврат.сайт_клиента %}
-	<p class="cenda-oauth__redirect">Сведения об&nbsp;агенте опубликованы на&nbsp;сайте <b>{{ возврат.сайт_клиента | e }}</b>.</p>
+	<p class="cenda-oauth__redirect">{{ _("Details about this agent are published at {0}.").format("<b>" ~ (возврат.сайт_клиента | e) ~ "</b>") }}</p>
 	{% endif %}
 	{% if возврат.хост and возврат.локальный %}
 	<p class="cenda-oauth__redirect cenda-oauth__redirect--local">
-		Доступ получит программа на&nbsp;этом компьютере ({{ возврат.хост | e }}). Разрешайте, только
-		если сами запустили её подключение&nbsp;— например, в&nbsp;Claude&nbsp;Code.
+		{{ _("A program on this computer ({0}) will get access. Only allow it if you started the connection yourself, for example, in Claude Code.").format(возврат.хост | e) }}
 	</p>
 	{% elif возврат.хост %}
-	<p class="cenda-oauth__redirect">Доступ получит сайт <b>{{ возврат.хост | e }}</b>.</p>
+	<p class="cenda-oauth__redirect">{{ _("The site {0} will get access.").format("<b>" ~ (возврат.хост | e) ~ "</b>") }}</p>
 	{% endif %}
 	{% if права %}
-	<p class="cenda-oauth__scopes">Запрошено: {% for право in права %}{{ _(право.title()) | e }}{{ ", " if not loop.last }}{% endfor %}</p>
+	<p class="cenda-oauth__scopes">{{ _("Requested:") }} {% for право in права %}{{ _(право.title()) | e }}{{ ", " if not loop.last }}{% endfor %}</p>
 	{% endif %}
 	<div class="cenda-oauth__account">
 		<span class="cenda-oauth__avatar" aria-hidden="true">{{ буквы | upper | e }}</span>
 		<span class="cenda-oauth__who">
-			<span class="sr-only">Вы вошли как </span>
+			<span class="sr-only">{{ _("You are signed in as") }} </span>
 			{% if имя and имя != почта %}<b>{{ имя | e }}</b><span>{{ почта | e }}</span>{% else %}<b>{{ почта | e }}</b>{% endif %}
 		</span>
 		{#
@@ -82,23 +80,27 @@
 		#}
 		<form class="cenda-oauth__switch-form" method="POST" action="/api/method/web_logout" data-cenda-switch>
 			<input type="hidden" name="csrf_token" value="{{ csrf_token | e }}">
-			<button type="submit" class="cenda-oauth__switch">Сменить</button>
+			<button type="submit" class="cenda-oauth__switch">{{ _("Switch account") }}</button>
 		</form>
 	</div>
 	<form method="POST" action="{{ success_url | e }}">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token | e }}">
-		<button type="submit" class="cenda-oauth__btn cenda-oauth__btn--allow">Разрешить</button>
+		<button type="submit" class="cenda-oauth__btn cenda-oauth__btn--allow">{{ _("Allow") }}</button>
 	</form>
-	<a href="{{ failure_url | e }}" class="cenda-oauth__btn cenda-oauth__btn--deny">Отказать</a>
+	<a href="{{ failure_url | e }}" class="cenda-oauth__btn cenda-oauth__btn--deny">{{ _("Decline") }}</a>
 	<p class="cenda-oauth__fine">
-		Разрешайте, только если подключение начали вы сами&nbsp;— в&nbsp;Claude, ChatGPT или
-		другом агенте.
+		{{ _("Only allow it if you started the connection yourself in Claude, ChatGPT, or another agent.") }}
 	</p>
 </div>
+{#
+	Тексты скрипта — отсюда: скрипту веб-страницы Frappe переводов не отдаёт
+	(learning-services#737).
+#}
+<script type="application/json" id="cenda-oauth-texts">{{ {"title": _("Agent connection — Cenda")} | tojson }}</script>
 <script>
-	// Заголовок вкладки Frappe задаёт на языке пользователя, а у нового
-	// аккаунта это английский «Confirm Access»; экран — по-русски.
-	document.title = "Подключение агента — Cenda";
+	// Заголовок вкладки Frappe задаёт своей строкой «Confirm Access», а не
+	// названием экрана.
+	document.title = JSON.parse(document.getElementById("cenda-oauth-texts").textContent).title;
 	// Выход и сразу вход с тем же подключением: экран открыт по адресу
 	// авторизации, и гостю Frappe сам покажет вход с возвратом сюда — с
 	// параметрами, даже если авторизация пришла POST'ом. Не вышло — обычная
@@ -126,12 +128,11 @@
 #}
 <div class="cenda-oauth">
 	<img class="cenda-oauth__logo" src="{{ логотип }}" alt="Cenda" width="32" height="32">
-	<h1 class="cenda-oauth__title">Не удалось подключить {{ агент or "агента" }}</h1>
+	<h1 class="cenda-oauth__title">{{ _("Couldn't connect {0}").format(агент) if агент else _("Couldn't connect the agent") }}</h1>
 	<p class="cenda-oauth__lead">
-		Начните подключение заново в&nbsp;агенте. Если ошибка повторится, напишите
-		на&nbsp;<a href="mailto:support@cenda.app">support@cenda.app</a> и&nbsp;приложите текст ниже.
+		{{ _("Start connecting again from your agent. If the error happens again, email {0} and include the text below.").format('<a href="mailto:support@cenda.app">support@cenda.app</a>') }}
 	</p>
 	<p class="cenda-oauth__error">{{ error | e }}</p>
-	<a href="/" class="cenda-oauth__btn cenda-oauth__btn--deny">На главную</a>
+	<a href="/" class="cenda-oauth__btn cenda-oauth__btn--deny">{{ _("Back to homepage") }}</a>
 </div>
 {% endif %}

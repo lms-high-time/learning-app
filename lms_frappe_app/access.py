@@ -16,6 +16,7 @@ from frappe import _
 from frappe.auth import MAX_PASSWORD_SIZE
 from frappe.core.doctype.user import user as frappe_user
 from frappe.rate_limiter import rate_limit
+from frappe.translate import get_all_languages, get_parent_language
 from frappe.twofactor import should_run_2fa
 from frappe.utils import cint, escape_html, get_url, now_datetime
 from frappe.utils.data import sha256_hash
@@ -29,11 +30,51 @@ from lms_frappe_app.agent_learning.oauth_client import отозвать_токе
 КЛЮЧ_УСТАРЕЛ = "expired"
 КЛЮЧ_НЕ_НАЙДЕН = "not_found"
 
-ПРОВЕРЬТЕ_ПОЧТУ = "Проверьте почту: мы отправили письмо со ссылкой."
+
+def проверьте_почту() -> str:
+	"""Ответ формы регистрации. Функцией: `_()` переводит на язык запроса."""
+	return _("Check your email: we've sent you a message with a link.")
+
 
 #: Общий ключ счётчика регистраций. Frappe ключует счётчик вызванным методом,
 #: и без общего ключа каждая форма и `/api/v2` считали бы попытки порознь.
 ЛИМИТ_РЕГИСТРАЦИИ = "lms_frappe_app.access.sign_up"
+
+
+#: Кука выбора языка на cenda.app (`site/static/language.js`, learning-services#735).
+#: Гостю Frappe показывает страницы на её языке раньше `Accept-Language`.
+КУКА_ЯЗЫКА = "preferred_language"
+
+#: Языки, на которых есть сайт и строки приложения. `Why:` Frappe включает
+#: десятки языков, а строки приложения переведены только на эти: аккаунт с
+#: немецким из чужой куки показывал бы Frappe по-немецки, а приложение —
+#: по-английски.
+ЯЗЫКИ_САЙТА = ("en", "ru")
+
+
+def язык_нового_пользователя(doc, method=None) -> None:
+	"""Зарегистрировавшемуся самому — язык, выбранный на сайте.
+
+	`Why:` гость, выбравший английский на cenda.app, проходит вход и
+	регистрацию по-английски — Frappe читает ту же куку, — а аккаунт получал
+	язык системы (`Document._set_defaults`, #633), и дальше всё открывалось
+	по-русски (learning-services#737). Гостевая сессия — у регистрации формой,
+	первого входа через Google и принятия приглашения: во всех трёх случаях
+	язык выбирал сам будущий пользователь. Заведённого сотрудником в desk это
+	не касается.
+
+	Вариант языка (`en-US`) сводится к основному, как у Frappe
+	(`get_parent_language`). `Accept-Language` не учитывается: nginx сайта
+	заменяет его на `ru`, а язык системы новый пользователь и так получает.
+	"""
+	if frappe.session.user != "Guest":
+		return
+	запрос = getattr(frappe.local, "request", None)
+	выбор = (запрос.cookies.get(КУКА_ЯЗЫКА) or "").strip().lower() if запрос is not None else ""
+	for язык in (выбор, get_parent_language(выбор)):
+		if язык in ЯЗЫКИ_САЙТА and язык in get_all_languages():
+			doc.language = язык
+			return
 
 
 def запись_ключа(key: str | None):
@@ -66,6 +107,13 @@ def состояние_ключа(key: str | None) -> str:
 
 def _название() -> str:
 	return frappe.db.get_single_value("Website Settings", "app_name") or get_url()
+
+
+def _язык(пользователь: str) -> str:
+	"""Язык письма — язык получателя, а не того, кто вызвал отправку."""
+	return frappe.db.get_value("User", пользователь, "language") or frappe.db.get_single_value(
+		"System Settings", "language"
+	)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -157,14 +205,20 @@ def accept_invitation(key: str) -> None:
 def _письмо_пароль_изменён(пользователь: str) -> None:
 	if not почта_есть():
 		return
+	язык = _язык(пользователь)
+	ссылка_сброса = ссылка(get_url("/login#forgot"), _("set a new password", lang=язык))
+	абзацы = (
+		_("The password for your account on {0} has been changed.", lang=язык).format(
+			escape_html(_название())
+		),
+		_("If this wasn't you, {0}. We'll send the link to this email address.", lang=язык).format(
+			ссылка_сброса
+		),
+	)
 	frappe.sendmail(
 		recipients=[frappe.db.get_value("User", пользователь, "email")],
-		subject="Пароль изменён",
-		message=(
-			f"<p>Пароль от вашего аккаунта на {escape_html(_название())} изменён.</p>"
-			f"<p>Если это сделали не вы, {ссылка(get_url('/login#forgot'), 'задайте новый пароль')}: "
-			"ссылка придёт на этот адрес.</p>"
-		),
+		subject=_("Password changed", lang=язык),
+		message="".join(f"<p>{абзац}</p>" for абзац in абзацы),
 	)
 
 
@@ -235,7 +289,7 @@ def _зарегистрировать_в_лимите(адрес: str, созд�
 		# Служебным пользователям ссылку не выдаёт и `reset_password` Frappe.
 		if занятый.enabled and занятый.name not in frappe.STANDARD_USERS:
 			_письмо_аккаунт_есть(занятый.name)
-		return 1, ПРОВЕРЬТЕ_ПОЧТУ
+		return 1, проверьте_почту()
 	код, текст = создать()
 	if код != 1:
 		# Письмо-приглашение не ушло (почта не настроена) — честный ответ Frappe.
@@ -245,7 +299,7 @@ def _зарегистрировать_в_лимите(адрес: str, созд�
 	# человек идёт к письму. Поле `update_password` прочтёт и тогда.
 	if возврат := frappe.cache.hget("redirect_after_login", пользователь):
 		frappe.db.set_value("User", пользователь, "redirect_url", возврат)
-	return 1, ПРОВЕРЬТЕ_ПОЧТУ
+	return 1, проверьте_почту()
 
 
 def _письмо_аккаунт_есть(пользователь: str) -> None:
@@ -265,14 +319,21 @@ def _письмо_аккаунт_есть(пользователь: str) -> None
 	# подстрокам имён (`key`, `token`, `password`), кириллическое имя ушло бы в
 	# журнал как есть (learning-services#664).
 	reset_key_link = документ._reset_password()
+	язык = _язык(пользователь)
+	задать = ссылка(reset_key_link, _("set a password", lang=язык))
+	абзацы = (
+		_("Someone tried to sign up with this address, but an account with it already exists.", lang=язык),
+		_(
+			"If you signed in with Google before, sign in the same way. Or {0} and sign in with your email.",
+			lang=язык,
+		).format(задать),
+		_(
+			"If this wasn't you, you don't need to do anything: the password can't be changed without this link.",
+			lang=язык,
+		),
+	)
 	frappe.sendmail(
 		recipients=[frappe.db.get_value("User", пользователь, "email")],
-		subject=f"У вас уже есть аккаунт на {_название()}",
-		message=(
-			"<p>На этот адрес пытались зарегистрироваться, но аккаунт с ним уже есть.</p>"
-			"<p>Если вы входили через Google — войдите так же. Или "
-			f"{ссылка(reset_key_link, 'задайте пароль')} и входите по почте.</p>"
-			"<p>Если регистрировались не вы, ничего делать не нужно: без этой ссылки "
-			"пароль не поменять.</p>"
-		),
+		subject=_("You already have an account on {0}", lang=язык).format(_название()),
+		message="".join(f"<p>{абзац}</p>" for абзац in абзацы),
 	)

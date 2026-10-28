@@ -23,45 +23,70 @@
 			<div class="page-card-body">
 				<label class="consent-check">
 					<input type="checkbox" name="age_confirmed" required>
-					<span>Мне исполнилось 18 лет</span>
+					<span>{{ _("I am 18 or older") }}</span>
 				</label>
 				<label class="consent-check">
 					<input type="checkbox" name="documents_accepted" required>
-					<span>Я принимаю <a href="/terms" target="_blank" rel="noopener">Условия использования</a> и <a href="/privacy" target="_blank" rel="noopener">Политику конфиденциальности</a></span>
+					{#
+						Ссылки — подстановкой, а не разметкой в строке: падеж названий
+						документов зависит от фразы, и переводится она целиком.
+					#}
+					<span>{{ _("I accept the {0}Terms of Use{1} and the {2}Privacy Policy{1}").format(
+						'<a href="/terms" target="_blank" rel="noopener">',
+						"</a>",
+						'<a href="/privacy" target="_blank" rel="noopener">',
+					) }}</span>
 				</label>
 				<p class="field-error text-danger" id="consent-error" role="alert"></p>
 			</div>
 			<div class="page-card-actions">
-				<button type="submit" class="btn btn-sm btn-primary btn-block">Принять и продолжить</button>
+				<button type="submit" class="btn btn-sm btn-primary btn-block">{{ _("Accept and continue") }}</button>
 			</div>
 		</form>
 		<div class="consent-underage" id="underage" hidden>
-			<h5 id="underage-title" tabindex="-1">Удаление учётной записи</h5>
-			<p>Cenda доступна только лицам, достигшим 18 лет. Мы удалим вашу учётную запись и данные, связанные с ней.</p>
+			<h5 id="underage-title" tabindex="-1">{{ _("Account deletion") }}</h5>
+			<p>{{ _("Cenda is only available to people 18 or older. We will delete your account and the data associated with it.") }}</p>
 			<p class="field-error text-danger" id="underage-error" role="alert"></p>
 			<div class="page-card-actions">
-				<button type="button" class="btn btn-sm btn-danger btn-block" id="underage-confirm">Удалить учётную запись</button>
-				<button type="button" class="btn btn-sm btn-default btn-block" id="underage-cancel">Отмена</button>
+				<button type="button" class="btn btn-sm btn-danger btn-block" id="underage-confirm">{{ _("Delete account") }}</button>
+				<button type="button" class="btn btn-sm btn-default btn-block" id="underage-cancel">{{ _("Cancel") }}</button>
 			</div>
 		</div>
 		<div class="consent-done" id="underage-done" hidden>
 			<p id="underage-done-text"></p>
-			<a href="/">На главную</a>
+			<a href="/">{{ _("Back to homepage") }}</a>
 		</div>
 		<div class="text-center sign-up-message" id="consent-links">
-			<button type="button" class="btn-link" id="underage-open">Мне нет 18 лет</button>
+			<button type="button" class="btn-link" id="underage-open">{{ _("I am under 18") }}</button>
 			<span aria-hidden="true">·</span>
-			<a href="/logout">Выйти</a>
+			<a href="/logout">{{ _("Sign out") }}</a>
 		</div>
 	</div>
 </section>
-<script type="application/json" id="consent-page">{{ {"csrf": csrf_token, "next": redirect_to} | tojson }}</script>
+{#
+	Тексты скрипта — отсюда: скрипту веб-страницы Frappe переводов не отдаёт,
+	и `__()` вернул бы исходник и русскому (learning-services#737).
+#}
+<script type="application/json" id="consent-page">{{ {
+	"csrf": csrf_token,
+	"next": redirect_to,
+	"texts": {
+		"marks_required": _("To continue, confirm your age and accept the terms."),
+		"save_failed": _("Couldn't save your consent. Please try again."),
+		"deleted": _("Your account and the data associated with it have been deleted."),
+		"closed": _(
+			"Your account has been closed. The data associated with it will be deleted within 30 days. If you clicked by mistake, email privacy@cenda.app."
+		),
+		"request_failed": _("Couldn't complete the request. Please try again or email privacy@cenda.app."),
+	},
+} | tojson }}</script>
 {% endblock %}
 
 {% block script %}
 <script>
 (() => {
 	const страница = JSON.parse(document.getElementById("consent-page").textContent);
+	const тексты = страница.texts;
 	const форма = document.getElementById("consent-form");
 	const ошибка = document.getElementById("consent-error");
 	const кнопка = форма.querySelector("button");
@@ -70,7 +95,7 @@
 		const возраст = форма.elements.age_confirmed.checked;
 		const документы = форма.elements.documents_accepted.checked;
 		if (!возраст || !документы) {
-			ошибка.textContent = "Чтобы продолжить, подтвердите возраст и примите условия.";
+			ошибка.textContent = тексты.marks_required;
 			return;
 		}
 		ошибка.textContent = "";
@@ -90,7 +115,7 @@
 				return;
 			}
 		} catch {}
-		ошибка.textContent = "Не удалось сохранить согласие. Попробуйте ещё раз.";
+		ошибка.textContent = тексты.save_failed;
 		кнопка.disabled = false;
 	});
 
@@ -125,14 +150,12 @@
 			if (итог) {
 				окно.hidden = true;
 				document.getElementById("underage-done-text").textContent =
-					итог === "deleted"
-						? "Учётная запись и связанные с ней данные удалены."
-						: "Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней. Если вы нажали по ошибке, напишите на privacy@cenda.app.";
+					итог === "deleted" ? тексты.deleted : тексты.closed;
 				document.getElementById("underage-done").hidden = false;
 				return;
 			}
 		} catch {}
-		ошибкаУдаления.textContent = "Не удалось выполнить запрос. Попробуйте ещё раз или напишите на privacy@cenda.app.";
+		ошибкаУдаления.textContent = тексты.request_failed;
 		удалить.disabled = false;
 	});
 })();
