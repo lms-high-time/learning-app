@@ -34,6 +34,6 @@ def обеспечить() -> None:
 	from frappe.installer import update_site_config
 
 	for ключ in недостаёт:
-		значение = secrets.token_hex(32)
-		update_site_config(ключ, значение)
-		frappe.conf[ключ] = значение
+		secret = secrets.token_hex(32)
+		update_site_config(ключ, secret)
+		frappe.conf[ключ] = secret

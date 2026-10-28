@@ -209,10 +209,10 @@ def _кто_входил(имя: str | None) -> dict:
 		return {"login_unknown": True} if имя else {}
 	if frappe.db.exists("User", имя):
 		return {"login": имя}
-	секрет = frappe.conf.get(ЖУРНАЛ_ВХОДА)
-	if not секрет:
+	secret = frappe.conf.get(ЖУРНАЛ_ВХОДА)
+	if not secret:
 		return {"login_unknown": True}
-	отпечаток = hmac.new(секрет.encode(), имя.encode(), hashlib.sha256).hexdigest()[:12]
+	отпечаток = hmac.new(secret.encode(), имя.encode(), hashlib.sha256).hexdigest()[:12]
 	return {"login_unknown": True, "login_hmac": отпечаток}
 
 
