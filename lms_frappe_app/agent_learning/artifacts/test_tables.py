@@ -370,10 +370,13 @@ class TestВыгрузка(UnitTestCase):
 			export.markdown(ПРАВИЛА, д), "- Способ: Согласие\n  или голосование\n- Исключение: 5"
 		)
 		self.assertEqual(export.markdown(ЖУРНАЛ, data.данные(None)), "")
-		self.assertEqual(
-			export.собрать_markdown("Журнал", [ПРАВИЛА, ЖУРНАЛ], data.данные(None)),
-			"# Журнал\n\n## Как мы решаем\n\n_Не заполнено._\n\n## Договорённости\n\n_Не заполнено._\n",
-		)
+		# Подписи выгрузки — на языке получателя файла (learning-services#767).
+		for язык, пусто in (("ru", "_Не заполнено._"), ("en", "_Not filled in._")):
+			with self.subTest(язык):
+				self.assertEqual(
+					export.собрать_markdown("Журнал", [ПРАВИЛА, ЖУРНАЛ], data.данные(None), язык),
+					f"# Журнал\n\n## Как мы решаем\n\n{пусто}\n\n## Договорённости\n\n{пусто}\n",
+				)
 
 	def test_книга_xlsx(self):
 		from openpyxl import load_workbook
@@ -387,7 +390,7 @@ class TestВыгрузка(UnitTestCase):
 			"columns": [{"key": "sum", "title": "=SUM(A1)", "required": False}],
 		}
 		книга = load_workbook(
-			io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА, второй, странный, история], self.данные()))
+			io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА, второй, странный, история], self.данные(), "ru"))
 		)
 
 		self.assertEqual(
@@ -408,4 +411,16 @@ class TestВыгрузка(UnitTestCase):
 				["Как мы решаем", "Исключение", "5"],
 				["Как мы решаем", "Кто снимает", None],
 			],
+		)
+
+	def test_книга_xlsx_на_английском(self):
+		"""Лист полей и его шапка — на языке получателя; названия — из схемы."""
+		from openpyxl import load_workbook
+
+		книга = load_workbook(io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА], self.данные(), "en")))
+
+		self.assertEqual(книга.sheetnames, ["Договорённости", "Fields"])
+		self.assertEqual(
+			[к.value for к in книга["Fields"][1]] + [к.value for к in книга["Fields"][2]][:2],
+			["Section", "Field", "Value", "Как мы решаем", "Способ"],
 		)

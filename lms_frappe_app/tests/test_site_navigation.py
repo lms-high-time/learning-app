@@ -39,7 +39,7 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 		with self.subTest("курсы, занятие, агент и документы"):
 			пункты = [(п.label, п.url) for п in шапка.top_bar_items]
 
-			self.assertEqual(пункты, list(ПУНКТЫ))
+			self.assertEqual(пункты, [(frappe._(подпись), адрес) for подпись, адрес in ПУНКТЫ])
 
 		with self.subTest("подвал ведёт к исходникам, а не на Frappe"):
 			self.assertIn("github.com/lms-high-time/learning-app", шапка.footer_powered)
@@ -50,8 +50,22 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 
 			self.assertEqual(
 				[(п["label"], п["url"]) for п in context.post_login],
-				[АГЕНТЫ_И_СЕССИИ, ("My Account", "/me")],
+				[(frappe._(АГЕНТЫ_И_СЕССИИ[0]), АГЕНТЫ_И_СЕССИИ[1]), ("My Account", "/me")],
 			)
+
+	def test_шапка_и_подвал_на_языке_запроса(self):
+		"""Подписи — английский исходник, русский — перевод (learning-services#767)."""
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		for язык, курсы, агенты, подвал in (
+			("ru", "Курсы", "Агенты и сессии", "исходный код"),
+			("en", "Courses", "Agents and sessions", "source code"),
+		):
+			with self.subTest(язык):
+				frappe.local.lang = язык
+				шапка = self.шапка(self.куратор)
+				self.assertEqual(шапка.top_bar_items[0].label, курсы)
+				self.assertEqual(шапка.post_login[0].label, агенты)
+				self.assertIn(f">{подвал}</a>", шапка.footer_powered)
 
 	def test_кабинет_автора_только_автору(self):
 		у_ученика = [п.url for п in self.шапка(self.ученик).top_bar_items]

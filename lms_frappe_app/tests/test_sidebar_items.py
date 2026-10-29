@@ -3,13 +3,14 @@
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
-# (route пункта, заголовок, куда уводит редирект)
+# (route пункта, заголовок, куда уводит редирект). Заголовок — английский
+# исходник: SPA переводит его на язык пользователя (learning-services#767).
 ПУНКТЫ = (
-	("agent-sidebar", "Подключить ассистента", "/lms/agent"),
+	("agent-sidebar", "Connect an assistant", "/lms/agent"),
 	# Чат живёт в MCP-сервисе на том же домене, что и сайт, — как `/mcp`.
-	("study-in-browser", "Заниматься в браузере", "/chat"),
-	("artifacts-sidebar", "Мои документы", "/lms/documents"),
-	("connections-sidebar", "Агенты и сессии", "/connections"),
+	("study-in-browser", "Study in the browser", "/chat"),
+	("artifacts-sidebar", "My documents", "/lms/documents"),
+	("connections-sidebar", "Agents and sessions", "/connections"),
 )
 
 
@@ -21,9 +22,13 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 
 	def test_пункты_сайдбара_ставятся_один_раз(self):
 		from lms_frappe_app.install import обеспечить_пункты_сайдбара
+		from lms_frappe_app.patches.v0_1 import sidebar_titles_english
 
 		frappe.set_user("Administrator")
 		обеспечить_пункты_сайдбара()
+		# Заглушки сайта, заведённые до английских подписей, переименовывает
+		# патч — как на стенде после миграции.
+		sidebar_titles_english.execute()
 		строки = {"parenttype": "LMS Settings", "parentfield": "sidebar_items"}
 		было = frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx")
 		обеспечить_пункты_сайдбара()
@@ -185,6 +190,23 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 		execute()
 		обеспечить_пункты_сайдбара()
 
+		self.assertEqual(self._подписи(заглушка), ("Свой ИИ", "Свой ИИ"))
+
+	def test_патч_подписей_на_английском(self):
+		"""Прежняя русская подпись — английская; сменённая админом остаётся
+		(learning-services#767)."""
+		from lms_frappe_app.patches.v0_1.sidebar_titles_english import ПОДПИСИ, execute
+
+		заглушка = self._пункт_ассистента()
+		прежняя, новая = ПОДПИСИ["agent-sidebar"]
+		self._подписать(заглушка, прежняя)
+
+		execute()
+		execute()  # повторный запуск ничего не ломает
+
+		self.assertEqual(self._подписи(заглушка), (новая, новая))
+		self._подписать(заглушка, "Свой ИИ")
+		execute()
 		self.assertEqual(self._подписи(заглушка), ("Свой ИИ", "Свой ИИ"))
 
 

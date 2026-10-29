@@ -37,7 +37,7 @@ def только_сам() -> str:
 	пользователь = текущий_пользователь()
 	# Вне запроса (задача, консоль) заголовков нет, и `get_request_header` упал бы.
 	if (frappe.request and frappe.get_request_header("Authorization")) or от_имени():
-		raise Отказ(ТОЛЬКО_САМ, "Это может сделать только сам пользователь на странице «Агенты и сессии»")
+		raise Отказ(ТОЛЬКО_САМ, _("Only the user themselves can do this, on the “Agents and sessions” page"))
 	return пользователь
 
 

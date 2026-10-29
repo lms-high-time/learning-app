@@ -3,10 +3,13 @@
 {#
 	Шаблоны Frappe не экранируют вывод. Имя агента (`app_name`) клиент пишет о
 	себе сам, адрес и устройство сессии приходят из запроса — всё через `| e`.
+	Строки — `_()` с английским исходником, русский — перевод в `ru.csv`
+	(learning-services#767); разметка во фразе — подстановкой `{0}`.
 #}
 {% block title %}{{ title | e }}{% endblock %}
 
-{% macro дата(значение) %}{{ (frappe.utils.format_datetime(значение, "dd.MM.yyyy HH:mm") if значение else "—") | e }}{% endmacro %}
+{# Дата — по языку страницы: по-русски цифрами, как прежде, по-английски — месяц словом. #}
+{% macro дата(значение) %}{{ (дата_время(значение) or "—") | e }}{% endmacro %}
 
 {% block page_content %}
 <style>
@@ -120,16 +123,16 @@
 <div class="account-page">
 <div class="wrap">
 	<header>
-		<h1>Агенты и сессии</h1>
-		<p class="intro">Какие агенты подключены к вашему аккаунту и где вы вошли в Cenda. Отключите то, чем больше не пользуетесь, и завершите сессии на устройствах, которых не узнаёте.</p>
+		<h1>{{ _("Agents and sessions") }}</h1>
+		<p class="intro">{{ _("Which agents are connected to your account and where you're signed in to Cenda. Disconnect what you no longer use and end sessions on devices you don't recognize.") }}</p>
 	</header>
 	<p class="status" id="account-status" role="status"></p>
 
 	<section class="panel" aria-labelledby="agents-title">
 		<div class="panel-head">
 			<div>
-				<h2 id="agents-title" tabindex="-1">Подключённые агенты</h2>
-				<p class="panel-note">Отключение отзывает доступ агента к Cenda. Чтобы снова работать с ним, подключите его заново.</p>
+				<h2 id="agents-title" tabindex="-1">{{ _("Connected agents") }}</h2>
+				<p class="panel-note">{{ _("Disconnecting revokes the agent's access to Cenda. To use it again, reconnect it.") }}</p>
 			</div>
 		</div>
 		{% if agents %}
@@ -139,31 +142,31 @@
 				<div class="item-main">
 					<div class="item-title">
 						<strong>{{ п.agent | e }}</strong>
-						{%- if п.app_name and п.app_name != п.agent and not п.web_chat %} <span class="muted">— называет себя «{{ п.app_name | e }}»</span>{% endif %}
+						{%- if п.app_name and п.app_name != п.agent and not п.web_chat %} <span class="muted">— {{ _("calls itself “{0}”").format(п.app_name | e) }}</span>{% endif %}
 					</div>
 					<p class="meta">
-						{%- if п.site %}Сайт агента: {{ п.site | e }} · {% endif -%}
-						подключён {{ дата(п.connected) }} · последняя активность {{ дата(п.last_active) }}
+						{%- if п.site %}{{ _("Agent's website: {0}").format(п.site | e) }} · {% endif -%}
+						{{ _("connected {0} · last active {1}").format(дата(п.connected), дата(п.last_active)) }}
 					</p>
-					{% if п.web_chat %}<p class="hint">Веб-чат Cenda подключается сам, когда вы открываете чат. Отключение выведет из чата на всех устройствах; при следующем открытии он подключится снова.</p>{% endif %}
+					{% if п.web_chat %}<p class="hint">{{ _("The Cenda web chat connects on its own when you open the chat. Disconnecting signs you out of the chat on all devices; it will connect again the next time you open it.") }}</p>{% endif %}
 				</div>
-				<button type="button" class="button danger" data-disconnect="{{ п.id | e }}" data-name="{{ п.agent | e }}">Отключить</button>
+				<button type="button" class="button danger" data-disconnect="{{ п.id | e }}" data-name="{{ п.agent | e }}">{{ _("Disconnect") }}</button>
 			</li>
 			{% endfor %}
 		</ul>
 		{% else %}
-		<p class="empty">Подключённых агентов нет. <a href="{{ connect_url | e }}">Подключить ассистента</a></p>
+		<p class="empty">{{ _("No connected agents.") }} <a href="{{ connect_url | e }}">{{ _("Connect an assistant") }}</a></p>
 		{% endif %}
-		<p class="footnote">Коннектор в настройках самого агента после отключения остаётся — уберите его там, если он больше не нужен. «Последняя активность» — когда агент в последний раз получил доступ: пока он работает, это происходит раз в час.</p>
+		<p class="footnote">{{ _("The connector in the agent's own settings stays after you disconnect — remove it there if you no longer need it. “Last active” is when the agent last got access: while it's working, this happens once an hour.") }}</p>
 	</section>
 
 	<section class="panel" aria-labelledby="sessions-title">
 		<div class="panel-head">
 			<div>
-				<h2 id="sessions-title" tabindex="-1">Мои сессии</h2>
-				<p class="panel-note">Браузеры и устройства, где вы вошли в Cenda. Завершить сессию можно, подтвердив пароль.</p>
+				<h2 id="sessions-title" tabindex="-1">{{ _("My sessions") }}</h2>
+				<p class="panel-note">{{ _("Browsers and devices where you're signed in to Cenda. To end a session, confirm your password.") }}</p>
 			</div>
-			{% if other_sessions %}<button type="button" class="button danger" id="end-others">Завершить все, кроме этой</button>{% endif %}
+			{% if other_sessions %}<button type="button" class="button danger" id="end-others">{{ _("End all except this one") }}</button>{% endif %}
 		</div>
 		<ul class="rows" id="sessions">
 			{% for с in sessions %}
@@ -171,38 +174,43 @@
 				<div class="item-main">
 					<div class="item-title">
 						<strong>{{ с.device | e }}</strong>
-						{%- if с.current %} <span class="badge">эта сессия</span>{% endif %}
-						{%- if с.impersonated %} <span class="badge warn">вход администратора от вашего имени</span>{% endif %}
+						{%- if с.current %} <span class="badge">{{ _("this session") }}</span>{% endif %}
+						{%- if с.impersonated %} <span class="badge warn">{{ _("an administrator signed in as you") }}</span>{% endif %}
 					</div>
 					<p class="meta">
 						{%- if с.ip %}IP {{ с.ip | e }} · {% endif -%}
-						вход {{ дата(с.started) }} · активность {{ дата(с.last_active) }}
+						{{ _("signed in {0} · active {1}").format(дата(с.started), дата(с.last_active)) }}
 					</p>
 				</div>
-				{% if not с.current %}<button type="button" class="button danger" data-end="{{ с.id | e }}" data-name="{{ с.device | e }}">Завершить</button>{% endif %}
+				{% if not с.current %}<button type="button" class="button danger" data-end="{{ с.id | e }}" data-name="{{ с.device | e }}">{{ _("End session") }}</button>{% endif %}
 			</li>
 			{% endfor %}
 		</ul>
 
 		<form class="confirm" id="confirm" hidden novalidate>
 			<h3 id="confirm-title" tabindex="-1"></h3>
-			<p>Подтвердите, что это вы: введите пароль от Cenda.</p>
+			<p>{{ _("Confirm it's you: enter your Cenda password.") }}</p>
 			{# Почта — менеджеру паролей: без неё он не найдёт, какой пароль подставить. #}
 			<input type="text" name="username" autocomplete="username" value="{{ user | e }}" hidden>
-			<label for="confirm-password">Пароль</label>
+			<label for="confirm-password">{{ _("Password") }}</label>
 			<input type="password" id="confirm-password" name="password" autocomplete="current-password" required>
 			<p class="error" id="confirm-error" role="alert"></p>
-			<p class="error" id="confirm-no-password" hidden>У аккаунта нет пароля. <a href="{{ set_password_url | e }}">Задайте его по ссылке из письма</a> — смена пароля сама завершит другие сессии.</p>
+			<p class="error" id="confirm-no-password" hidden>{{ _("Your account has no password. {0}Set one using the link in an email{1} — changing your password will end your other sessions on its own.").format('<a href="' ~ (set_password_url | e) ~ '">', "</a>") }}</p>
 			<div class="confirm-actions">
-				<button type="submit" class="button primary" id="confirm-submit">Завершить</button>
-				<button type="button" class="button" id="confirm-cancel">Отмена</button>
+				<button type="submit" class="button primary" id="confirm-submit">{{ _("End session") }}</button>
+				<button type="button" class="button" id="confirm-cancel">{{ _("Cancel") }}</button>
 			</div>
 		</form>
 
-		<p class="footnote">Входите через Google и не знаете пароля? <a href="{{ set_password_url | e }}">Задайте его по ссылке из письма</a>: смена пароля сама завершает все другие сессии и отключает агентов.</p>
+		<p class="footnote">{{ _("Sign in with Google and don't know your password? {0}Set one using the link in an email{1}: changing your password ends all your other sessions and disconnects your agents on its own.").format('<a href="' ~ (set_password_url | e) ~ '">', "</a>") }}</p>
 	</section>
 </div>
 </div>
+{#
+	Тексты скрипта — в `page_data.texts` (`www/connections.py`): скрипту
+	веб-страницы Frappe переводов не отдаёт, и `__()` вернул бы исходник и
+	русскому (learning-services#767).
+#}
 <script type="application/json" id="account-page-data">{{ page_data | tojson }}</script>
 {% endblock %}
 
@@ -210,7 +218,10 @@
 <script>
 (() => {
 	const данные = JSON.parse(document.getElementById("account-page-data").textContent);
+	const тексты = данные.texts;
 	const статус = document.getElementById("account-status");
+	// `{0}` в тексте — подстановка, как у `.format()` шаблона.
+	const подставить = (текст, ...значения) => текст.replace(/\{(\d+)\}/g, (_, номер) => значения[номер]);
 
 	// Явный адрес метода, а не `frappe.call`: тот шлёт вызов на корень сайта,
 	// где стоит лендинг (learning-services#459).
@@ -224,35 +235,38 @@
 				body: new URLSearchParams(параметры),
 			});
 		} catch {
-			return { ошибка: "Нет связи с сервером. Попробуйте ещё раз." };
+			return { ошибка: тексты.offline };
 		}
 		if (ответ.status === 429) {
-			return { ошибка: "Слишком много попыток. Подождите и попробуйте снова." };
+			return { ошибка: тексты.too_many };
 		}
 		const тело = await ответ.json().catch(() => ({}));
 		const итог = тело.message;
 		if (ответ.ok && итог && итог.ok) return { данные: итог.data };
 		if (ответ.ok && итог && итог.error) return { ошибка: итог.error.message, код: итог.error.code };
 		if (ответ.status === 400 || ответ.status === 403) {
-			return { ошибка: "Страница устарела. Обновите её и попробуйте снова." };
+			return { ошибка: тексты.stale };
 		}
-		return { ошибка: "Не получилось. Попробуйте ещё раз." };
+		return { ошибка: тексты.failed };
 	}
 
 	// Подключённые агенты: отключение без пароля — его можно вернуть, подключив
 	// агента заново.
 	for (const кнопка of document.querySelectorAll("[data-disconnect]")) {
 		кнопка.addEventListener("click", async () => {
-			if (!window.confirm(`Отключить «${кнопка.dataset.name}»? Агент потеряет доступ к Cenda.`)) return;
+			if (!window.confirm(подставить(тексты.disconnect_confirm, кнопка.dataset.name))) return;
 			кнопка.disabled = true;
 			const итог = await позвать("disconnect", { connection: кнопка.dataset.disconnect });
 			// Уже отключён — тоже убрать строку: доступа у агента нет.
 			if (итог.данные || итог.код === "connection_not_found") {
 				const список = document.getElementById("agents");
 				кнопка.closest("[data-row]").remove();
-				статус.textContent = `«${кнопка.dataset.name}» отключён.`;
+				статус.textContent = подставить(тексты.disconnected, кнопка.dataset.name);
 				if (!список.children.length) {
-					список.outerHTML = '<p class="empty">Подключённых агентов нет.</p>';
+					const пусто = document.createElement("p");
+					пусто.className = "empty";
+					пусто.textContent = тексты.no_agents;
+					список.replaceWith(пусто);
 				}
 				// Кнопки больше нет — фокус к началу раздела, а не в начало страницы.
 				document.getElementById("agents-title").focus();
@@ -298,12 +312,12 @@
 	for (const кнопка of document.querySelectorAll("[data-end]")) {
 		кнопка.addEventListener("click", () =>
 			открыть({ метод: "end", параметры: { session: кнопка.dataset.end }, строка: кнопка.closest("[data-row]") },
-				`Завершить сессию «${кнопка.dataset.name}»?`, кнопка),
+				подставить(тексты.end_confirm, кнопка.dataset.name), кнопка),
 		);
 	}
 	if (всеКроме) {
 		всеКроме.addEventListener("click", () =>
-			открыть({ метод: "end_others", параметры: {} }, "Завершить все сессии, кроме этой?", всеКроме),
+			открыть({ метод: "end_others", параметры: {} }, тексты.end_others_confirm, всеКроме),
 		);
 	}
 	document.getElementById("confirm-cancel").addEventListener("click", закрыть);
@@ -312,7 +326,7 @@
 		событие.preventDefault();
 		if (!действие) return;
 		if (!пароль.value) {
-			ошибка.textContent = "Введите пароль.";
+			ошибка.textContent = тексты.password_required;
 			пароль.focus();
 			return;
 		}
@@ -324,10 +338,10 @@
 			if (действие.метод === "end_others") {
 				for (const строка of document.querySelectorAll("#sessions [data-other]")) строка.remove();
 				const число = итог.данные ? итог.данные.ended : 0;
-				статус.textContent = число ? `Другие сессии завершены: ${число}.` : "Других сессий не было.";
+				статус.textContent = число ? подставить(тексты.others_ended, число) : тексты.no_others;
 			} else {
 				действие.строка.remove();
-				статус.textContent = уже ? "Эта сессия уже была завершена." : "Сессия завершена.";
+				статус.textContent = уже ? тексты.already_ended : тексты.ended;
 			}
 			прибрать_другие();
 			действие = null;

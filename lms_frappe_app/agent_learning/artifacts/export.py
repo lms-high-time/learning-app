@@ -1,19 +1,27 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Документ наружу: markdown раздела и документа, книга Excel."""
+"""Документ наружу: markdown раздела и документа, книга Excel.
+
+Подписи выгрузки — «Не заполнено», лист «Поля» и его шапка — на языке того,
+кто выгрузку получит (learning-services#767): страница выгрузки — язык
+запроса, письмо ушедшему из команды — язык получателя (`язык`). Названия
+документа, разделов и колонок — из схемы курса, как есть.
+"""
 
 from __future__ import annotations
 
 import re
 
+from frappe import _
+
 from lms_frappe_app.agent_learning.artifacts.data import поля, строки
 from lms_frappe_app.agent_learning.artifacts.schema import МНОГО
 
-#: Чем markdown документа отмечает пустой раздел.
-ПУСТОЙ_РАЗДЕЛ = "_Не заполнено._"
-#: Лист книги с полями разделов `one`.
-ЛИСТ_ПОЛЕЙ = "Поля"
+#: Контекст переводов шапки листа полей. `Why:` у `Fields`, `Section`, `Field`
+#: и `Value` есть переводы Frappe и Learning, и общий ключ переопределил бы их
+#: по всей платформе.
+КОНТЕКСТ = "Document export"
 #: Знаки, которых Excel не принимает в имени листа, и длина имени.
 НЕЛЬЗЯ_В_ЛИСТЕ = re.compile(r"[\[\]:*?/\\]")
 ДЛИНА_ЛИСТА = 31
@@ -56,16 +64,26 @@ def _таблица(колонки: list[dict], ряды: list[dict]) -> str:
 	return "\n".join(линии)
 
 
-def собрать_markdown(название: str, разделы: list[dict], д: dict) -> str:
+def пустой_раздел(язык: str | None = None) -> str:
+	"""Чем markdown документа отмечает пустой раздел — курсивом."""
+	return "_{0}_".format(_("Not filled in.", lang=язык))
+
+
+def лист_полей(язык: str | None = None) -> str:
+	"""Лист книги с полями разделов `one`."""
+	return _("Fields", lang=язык, context=КОНТЕКСТ)
+
+
+def собрать_markdown(название: str, разделы: list[dict], д: dict, язык: str | None = None) -> str:
 	"""Документ одним файлом: заголовок и разделы в порядке схемы."""
 	части = [f"# {название}"]
 	for раздел in разделы:
 		части.append(f"## {раздел['title']}")
-		части.append(markdown(раздел, д) or ПУСТОЙ_РАЗДЕЛ)
+		части.append(markdown(раздел, д) or пустой_раздел(язык))
 	return "\n\n".join(части) + "\n"
 
 
-def книга_xlsx(разделы: list[dict], д: dict) -> bytes:
+def книга_xlsx(разделы: list[dict], д: dict, язык: str | None = None) -> bytes:
 	"""Документ книгой Excel: лист на раздел `many` и лист «Поля» с полями
 	разделов `one` — на месте первого из них. Пустые клетки и поля — тоже в
 	книге: её продолжают вести после курса.
@@ -84,7 +102,7 @@ def книга_xlsx(разделы: list[dict], д: dict) -> bytes:
 	книга.remove(книга.active)
 	заливка = PatternFill("solid", fgColor="EEF2F6")
 	занятые: set[str] = set()
-	лист_полей = None
+	лист_с_полями = None
 
 	def текстом(клетки) -> None:
 		for клетка in клетки:
@@ -110,32 +128,42 @@ def книга_xlsx(разделы: list[dict], д: dict) -> bytes:
 
 	for раздел in разделы:
 		if раздел["rows"] == МНОГО:
-			лист = книга.create_sheet(_имя_листа(раздел["title"], занятые))
+			лист = книга.create_sheet(_имя_листа(раздел["title"], занятые, язык))
 			шапка(
 				лист, ["ID", *(к["title"] for к in раздел["columns"])], [8, *(36 for _ in раздел["columns"])]
 			)
 			for р in строки(раздел, д):
 				строка(лист, [р["id"], *(р.get(к["key"]) for к in раздел["columns"])])
 			continue
-		if лист_полей is None:
-			лист_полей = книга.create_sheet(_имя_листа(ЛИСТ_ПОЛЕЙ, занятые))
-			шапка(лист_полей, ["Раздел", "Поле", "Значение"], [30, 36, 60])
+		if лист_с_полями is None:
+			лист_с_полями = книга.create_sheet(_имя_листа(лист_полей(язык), занятые, язык))
+			шапка(
+				лист_с_полями,
+				[
+					_("Section", lang=язык, context=КОНТЕКСТ),
+					_("Field", lang=язык, context=КОНТЕКСТ),
+					_("Value", lang=язык, context=КОНТЕКСТ),
+				],
+				[30, 36, 60],
+			)
 		значения = поля(раздел, д)
 		for к in раздел["columns"]:
-			строка(лист_полей, [раздел["title"], к["title"], значения.get(к["key"])])
+			строка(лист_с_полями, [раздел["title"], к["title"], значения.get(к["key"])])
 	if not книга.worksheets:
-		книга.create_sheet(ЛИСТ_ПОЛЕЙ)
+		книга.create_sheet(лист_полей(язык))
 
 	поток = io.BytesIO()
 	книга.save(поток)
 	return поток.getvalue()
 
 
-def _имя_листа(название: str, занятые: set[str]) -> str:
+def _имя_листа(название: str, занятые: set[str], язык: str | None = None) -> str:
 	"""Имя листа Excel из названия раздела: без запрещённых знаков, не длиннее
 	31 знака, не повторяется в книге (без учёта регистра, как сравнивает Excel)
 	и не совпадает с именем, которое Excel держит за собой."""
-	основа = НЕЛЬЗЯ_В_ЛИСТЕ.sub(" ", название or "").strip().strip("'") or "Раздел"
+	основа = НЕЛЬЗЯ_В_ЛИСТЕ.sub(" ", название or "").strip().strip("'") or _(
+		"Section", lang=язык, context=КОНТЕКСТ
+	)
 	имя = основа[:ДЛИНА_ЛИСТА]
 	номер = 1
 	while имя.lower() in занятые or имя.lower() == ЗАНЯТОЕ_ИМЯ_ЛИСТА:

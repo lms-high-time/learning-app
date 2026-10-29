@@ -188,12 +188,14 @@ def _пустые_блоки_урока(ученик: str, курс: str, lesson
 
 
 def выгрузка(
-	ученик: str, course: str, пространство: str | None, artifact: str, формат: str
+	ученик: str, course: str, пространство: str | None, artifact: str, формат: str, язык: str | None = None
 ) -> tuple[str, bytes | str]:
-	"""Документ файлом — имя и содержимое: книга Excel или markdown."""
+	"""Документ файлом — имя и содержимое: книга Excel или markdown.
+
+	`язык` — подписей выгрузки (`export`); без него — язык запроса."""
 	схема = _действующая_схема(course, artifact)
 	данные = _данные(_экземпляр(ученик, course, схема.slug, пространство))
 	разделы = [schema.раздел(блок) for блок in схема.blocks]
 	if формат == "xlsx":
-		return f"{схема.slug}.xlsx", export.книга_xlsx(разделы, данные)
-	return f"{схема.slug}.md", export.собрать_markdown(схема.title, разделы, данные)
+		return f"{схема.slug}.xlsx", export.книга_xlsx(разделы, данные, язык)
+	return f"{схема.slug}.md", export.собрать_markdown(схема.title, разделы, данные, язык)

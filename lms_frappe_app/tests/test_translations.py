@@ -30,12 +30,16 @@ from frappe.translate import get_translations_from_csv
 ПЛЕЙСХОЛДЕР = re.compile(r"\{\d+\}")
 КИРИЛЛИЦА = re.compile(r"[А-Яа-яЁё]")
 
-#: Страницы пути входа (learning-services#737): гость видит их на языке,
-#: выбранном на сайте, и русского в разметке быть не должно.
-СТРАНИЦЫ_ВХОДА = (
+#: Страницы, которые человек видит на языке, выбранном на сайте, — русского в
+#: разметке быть не должно: путь входа (learning-services#737), «Агенты и
+#: сессии» и «Мои документы» (learning-services#767). Кабинет автора остаётся
+#: русским — решение владельца.
+СТРАНИЦЫ_С_ПЕРЕВОДОМ = (
 	"www/consent.html",
 	"www/update-password.html",
 	"templates/includes/oauth_confirmation.html",
+	"www/connections.html",
+	"www/artifacts.html",
 )
 #: Модули, отказы которых человек видит в интерфейсе Learning: SPA показывает
 #: `error.message` как есть (learning-services#766). Значение — функции, в
@@ -75,10 +79,15 @@ from frappe.translate import get_translations_from_csv
 }
 КОММЕНТАРИЙ = re.compile(r"\{#.*?#\}|<!--.*?-->", re.S)
 СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script\b[^>]*>", re.S | re.I)
+#: Стили: комментарии CSS человек не видит, литералы (`content: "…"`) — видит.
+СТИЛЬ = re.compile(r"(<style\b[^>]*>)(.*?)</style\b[^>]*>", re.S | re.I)
+КОММЕНТАРИЙ_CSS = re.compile(r"/\*.*?\*/", re.S)
 ВЫРАЖЕНИЕ = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
 #: Строковый литерал — в выражениях Jinja и в коде скриптов.
 ЛИТЕРАЛ = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\])*)\1""", re.S)
 КОММЕНТАРИЙ_JS = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.S)
+#: `${…}` шаблонной строки JS — код, а не текст: кириллица в нём — имена.
+ПОДСТАНОВКА_JS = re.compile(r"\$\{[^}]*\}")
 
 
 def видимый_русский(разметка: str) -> list[str]:
@@ -87,9 +96,17 @@ def видимый_русский(разметка: str) -> list[str]:
 	кириллица в них — соглашение кода, а не текст интерфейса."""
 	разметка = КОММЕНТАРИЙ.sub("", разметка)
 	найдено = []
+	for _тег, стиль in СТИЛЬ.findall(разметка):
+		стиль = КОММЕНТАРИЙ_CSS.sub("", стиль)
+		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(стиль) if КИРИЛЛИЦА.search(строка)]
+	разметка = СТИЛЬ.sub("", разметка)
 	for _тег, код in СКРИПТ.findall(разметка):
 		код = КОММЕНТАРИЙ_JS.sub("", код)
-		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(код) if КИРИЛЛИЦА.search(строка)]
+		найдено += [
+			строка
+			for _к, строка in ЛИТЕРАЛ.findall(код)
+			if КИРИЛЛИЦА.search(ПОДСТАНОВКА_JS.sub("", строка))
+		]
 	разметка = СКРИПТ.sub("", разметка)
 	for выражение in ВЫРАЖЕНИЕ.findall(разметка):
 		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(выражение) if КИРИЛЛИЦА.search(строка)]
@@ -249,8 +266,8 @@ class UnitTestTranslations(UnitTestCase):
 			],
 		)
 
-	def test_страницы_входа_без_зашитого_русского(self):
-		for имя in СТРАНИЦЫ_ВХОДА:
+	def test_страницы_без_зашитого_русского(self):
+		for имя in СТРАНИЦЫ_С_ПЕРЕВОДОМ:
 			with self.subTest(страница=имя):
 				строки = видимый_русский((ПРИЛОЖЕНИЕ / имя).read_text(encoding="utf-8"))
 				self.assertEqual(строки, [], "строки страницы — через _() с английским исходником")
@@ -259,6 +276,26 @@ class UnitTestTranslations(UnitTestCase):
 		разметка = (
 			'{# комментарий #}<h1>{{ агент or "агента" }}</h1>{% set имя = 1 %}<p>Привет</p>'
 			'<input placeholder="Почта">'
-			'<script>// комментарий\nconst текст = "Готово"; const ok = "ok";</script>'
+			'<script>// комментарий\nconst текст = "Готово"; const ok = "ok"; fetch(`/api/${пути[имя]}`);</script>'
+			'<style>/* тёмная тема */ .пусто::after { content: "Пусто"; }</style>'
 		)
-		self.assertEqual(видимый_русский(разметка), ["Готово", "агента", "Привет", 'input placeholder="Почта"'])
+		self.assertEqual(
+			видимый_русский(разметка), ["Пусто", "Готово", "агента", "Привет", 'input placeholder="Почта"']
+		)
+
+	def test_подписи_меню_и_сайдбара_переведены(self):
+		"""Подписи — константы, а переводятся при выводе: шапкой страниц
+		(`site_navigation`) и SPA Learning (`__()` заголовка заглушки,
+		learning-services#767). Литералов `_()` здесь нет, и общие ворота их
+		не видят."""
+		from lms_frappe_app import site_navigation
+		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА
+
+		перевод = русские_переводы()
+		подписи = [
+			*(подпись for подпись, _адрес in site_navigation.ПУНКТЫ),
+			site_navigation.КАБИНЕТ_АВТОРА[0],
+			site_navigation.АГЕНТЫ_И_СЕССИИ[0],
+			*(пункт["title"] for пункт in ПУНКТЫ_САЙДБАРА),
+		]
+		self.assertEqual([п for п in подписи if КИРИЛЛИЦА.search(п) or not перевод.get(п)], [])
