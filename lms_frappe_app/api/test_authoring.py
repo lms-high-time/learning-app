@@ -107,7 +107,7 @@ class IntegrationTestAuthoringEdits(IntegrationTestCase):
 
 	def test_правка_анонса_на_другом_языке(self):
 		"""`lang` пишет тексты в перевод карточки, а не в основные поля; `ru` — основные
-		поля; пустая строка снимает текст перевода (learning-services#738)."""
+		поля; пустая строка и пробелы снимают текст перевода (learning-services#738)."""
 		анонс = authoring.create_course(title="Анонс", summary="Кратко")["data"]["id"]
 
 		ответ = authoring.update_course(
@@ -116,7 +116,7 @@ class IntegrationTestAuthoringEdits(IntegrationTestCase):
 		self.assertEqual(
 			ответ["data"], {"id": анонс, "title": "Announcement", "summary": "Short", "promise": None}
 		)
-		authoring.update_course(course=анонс, lang="en", description="")
+		authoring.update_course(course=анонс, lang="en", description="  ")
 		authoring.update_course(course=анонс, lang="ru", title="Анонс по-русски")
 
 		сведения = frappe.db.get_value(

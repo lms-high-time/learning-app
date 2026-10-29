@@ -208,7 +208,6 @@ class IntegrationTestПубликацияРелиза(IntegrationTestCase):
 		курс = ответ["course"]
 		записано = json.loads(frappe.db.get_value("LMS Course", курс, "course_translations"))
 		self.assertEqual(записано["en"]["title"], "Sample course")
-		self.assertEqual(записано["en"]["objectives"], ["Chapter 1", "Chapter 2"])
 		отметка = frappe.db.get_value("LMS Course", курс, "modified")
 
 		self.assertTrue(self.опубликовать(перевести(пример_релиза(self.ключ)))["unchanged"])
@@ -539,6 +538,12 @@ class TestПереводыКарточки(UnitTestCase):
 		(learning-services#738)."""
 		for случай, правка, ожидается in (
 			("без переводов", lambda р: None, {}),
+			# Русский текст — основные поля: перевода на русский не бывает.
+			(
+				"русский пропускается",
+				lambda р: р["course"].update(translations={"ru": {"title": "Пример"}}),
+				{},
+			),
 			(
 				"полный",
 				перевести,

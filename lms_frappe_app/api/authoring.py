@@ -220,7 +220,7 @@ def update_course(
 
 	`lang` — язык текстов (`ЯЗЫКИ_САЙТА`; `ru` и без него — основные поля):
 	на другом языке название и описания пишутся в перевод карточки
-	(`course_translations`, learning-services#738), пустая строка снимает
+	(`course_translations`, learning-services#738), пустая строка или пробелы снимают
 	текст перевода. Обещание не переводится: его читает агент.
 	"""
 	_автор()
@@ -251,9 +251,11 @@ def update_course(
 		переводы = переводы_курса.разобрать(документ.get(переводы_курса.ПОЛЕ))
 		перевод = переводы.setdefault(язык, {})
 		for поле, значение in тексты:
-			if значение:
+			if значение is None:
+				continue
+			if значение := str(значение).strip():
 				перевод[поле] = значение
-			elif значение is not None:
+			else:
 				перевод.pop(поле, None)
 		документ.set(переводы_курса.ПОЛЕ, переводы_курса.в_json(переводы))
 		документ.flags[ПЕРЕВОД_АВТОРА] = True
@@ -898,8 +900,8 @@ def announce_course(course: str, objectives=None, lang: str | None = None) -> di
 
 	`lang` — язык целей, как у `update_course`: на другом языке `objectives`
 	пишутся в перевод карточки (learning-services#738), пустой список снимает
-	перевод целей. Анонс и тогда требует русских целей, а в ответе цели — на
-	языке `lang`, без перевода — русские.
+	перевод целей. Курс и тогда анонсируется, как без `lang`, и требует
+	русских целей, а в ответе цели — на языке `lang`, без перевода — русские.
 	"""
 	_автор()
 	язык = _язык(lang)
@@ -909,6 +911,9 @@ def announce_course(course: str, objectives=None, lang: str | None = None) -> di
 		course,
 		["published", "upcoming", "active_release", announcements.ПОЛЕ_ЦЕЛЕЙ, переводы_курса.ПОЛЕ],
 		as_dict=True,
+		# Переводы дописываются к прочитанным: без блокировки одновременный
+		# `update_course` с языком потерялся бы.
+		for_update=True,
 	)
 	if сведения.active_release and objectives is not None:
 		raise Отказ(

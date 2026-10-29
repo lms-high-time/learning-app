@@ -8,6 +8,7 @@
 назначения, которое создаёт зачисления само.
 """
 
+import json
 from unittest.mock import patch
 
 import frappe
@@ -251,18 +252,44 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 				данные = self.на_языке(язык, "Guest", public.course_map, course=self.курс)["data"]
 				self.assertEqual((данные["title"], данные["objectives"]), (название, цели))
 
+	def test_правка_целей_анонса_на_другом_языке(self):
+		"""Перевод целей не заменяет русских: без них анонс не выходит и ничего не
+		пишет; пустой список снимает перевод целей (learning-services#738)."""
+		with self.subTest("без русских целей — отказ"):
+			ответ = self.от_имени(
+				self.куратор, authoring.announce_course, course=self.курс, objectives=["Goal"], lang="en"
+			)
+			self.assertEqual(self.код_отказа(ответ), authoring.НЕТ_ЦЕЛЕЙ_КУРСА)
+			сведения = frappe.db.get_value(
+				"LMS Course", self.курс, ["published", "course_translations"], as_dict=True
+			)
+			self.assertFalse(сведения.published)
+			self.assertFalse(сведения.course_translations)
+		with self.subTest("пустой список снимает перевод целей"):
+			self.анонсировать()
+			self.от_имени(
+				self.куратор, authoring.announce_course, course=self.курс, objectives=["Goal"], lang="en"
+			)
+			ответ = self.от_имени(
+				self.куратор, authoring.announce_course, course=self.курс, objectives=[], lang="en"
+			)
+			self.assertEqual(ответ["data"]["objectives"], ЦЕЛИ.splitlines())
+			self.assertEqual(
+				json.loads(frappe.db.get_value("LMS Course", self.курс, "course_translations")), {}
+			)
+
 	def test_курс_из_релиза_на_языке_запроса(self):
-		"""У курса из релиза перевод карточки и целей анонса приходит релизом: цель
-		главы без перевода — русская. Каталог агента остаётся русским."""
+		"""У курса из релиза перевод карточки и целей анонса приходит релизом.
+		Каталог агента остаётся русским."""
 		курс = self.опубликовать_релиз(
-			release=перевести(пример_релиза(f"an-{frappe.generate_hash(length=6)}"), главы=1)
+			release=перевести(пример_релиза(f"an-{frappe.generate_hash(length=6)}"))
 		)["course"]
 		ответ = self.на_языке("ru", self.куратор, authoring.announce_course, course=курс, lang="en")
-		self.assertEqual(ответ["data"]["objectives"], ["Chapter 1", "Глава вторая"])
+		self.assertEqual(ответ["data"]["objectives"], ["Chapter 1", "Chapter 2"])
 
 		данные = self.на_языке("en", "Guest", public.course_map, course=курс)["data"]
 		self.assertEqual(
-			(данные["title"], данные["objectives"]), ("Sample course", ["Chapter 1", "Глава вторая"])
+			(данные["title"], данные["objectives"]), ("Sample course", ["Chapter 1", "Chapter 2"])
 		)
 		каталог = self.на_языке("en", self.ученик, student.list_catalog)["data"]
 		self.assertEqual(

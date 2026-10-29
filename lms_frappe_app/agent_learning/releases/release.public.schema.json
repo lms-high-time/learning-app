@@ -22,7 +22,12 @@
       "description": "Стабильный ключ узла курса: на нём держится состояние ученика между релизами."
     },
     "text": {"type": "string", "minLength": 1},
-    "language": {"type": "string", "pattern": "^[a-z]{2}$", "description": "Код языка ISO 639-1 в нижнем регистре."},
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}$",
+      "not": {"const": "ru"},
+      "description": "Код языка ISO 639-1 в нижнем регистре; не ru — русский текст в основных полях."
+    },
     "public_text": {
       "type": "string",
       "description": "Текст для ученика; пустая строка — текста нет (сборка с --allow-missing), валидатор сообщает об этом."

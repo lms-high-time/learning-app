@@ -147,13 +147,23 @@ class TestСхемаНаПримере(unittest.TestCase):
 				self.assertEqual(schema.ошибки(релиз), [ошибка])
 
 	def test_переводы_по_правке(self):
-		"""Ключ перевода — код языка; у перевода только свои поля, название обязательно
-		(learning-services#738)."""
+		"""Ключ перевода — код языка, кроме `ru`: русский текст — основные поля; у
+		перевода только свои поля, название обязательно (learning-services#738)."""
 		for случай, правка, ошибка in (
 			(
 				"язык не кодом",
 				lambda р: р["course"]["translations"].update(EN={"title": "Sample"}),
 				{"path": "$.course.translations.EN", "message": "не по шаблону ^[a-z]{2}$"},
+			),
+			(
+				"русский перевод карточки",
+				lambda р: р["course"]["translations"].update(ru={"title": "Пример"}),
+				{"path": "$.course.translations.ru", "message": "запрещённое значение"},
+			),
+			(
+				"русский перевод главы",
+				lambda р: р["chapters"][0]["translations"].update(ru={"title": "Глава"}),
+				{"path": "$.chapters[0].translations.ru", "message": "запрещённое значение"},
 			),
 			(
 				"лишнее поле перевода карточки",
