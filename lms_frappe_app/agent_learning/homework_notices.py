@@ -11,6 +11,9 @@
 Однократность держит журнал `Homework Notice` с уникальным ключом:
 `{сдача}:reminder:{срок}`, `{строка журнала}:returned`,
 `{получатель}:digest:{дата}`. Новый срок сдачи — новый ключ напоминания.
+
+Тема и текст — на языке получателя, срок — по нему же (learning-services#768):
+рассылку зовёт задача, и язык запроса тут ничей.
 """
 
 from __future__ import annotations
@@ -18,9 +21,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 import frappe
+from frappe import _
 from frappe.query_builder import Order
-from frappe.utils import escape_html, format_datetime, get_url, now_datetime
+from frappe.utils import escape_html, get_url, now_datetime
 
+from lms_frappe_app import languages
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.agent_learning.access import курсы_ученика
@@ -92,6 +98,13 @@ class _Получатели:
 		self._курсы: dict[str, set[str]] = {}
 		self._членства: dict[tuple[str, str], bool] = {}
 		self._адреса: dict[str, dict[str, str]] = {}
+		self._языки: dict[str, str] = {}
+
+	def язык(self, user: str) -> str:
+		"""Язык письма — получателя; раз на получателя за запуск."""
+		if user not in self._языки:
+			self._языки[user] = languages.язык_пользователя(user)
+		return self._языки[user]
 
 	def ученику_можно(self, сдача, курс: str | None) -> bool:
 		"""Ученик активен, курс ему открыт, а у сдачи организации — он в ней состоит."""
@@ -199,18 +212,26 @@ def _напоминания(сейчас, получатели: _Получат�
 		if not получатели.ученику_можно(сдача, урок.course):
 			return None
 		задание = задания.get(сдача.homework) or ""
-		курс = _название_курса(урок.course)
+		язык = получатели.язык(сдача.member)
+		курс = _название_курса(урок.course, язык)
 		return {
 			"key": _ключ_напоминания(сдача),
 			"kind": НАПОМИНАНИЕ,
 			"recipient": сдача.member,
 			"submission": сдача.name,
-			"subject": f"Скоро срок домашнего задания «{задание}»",
-			"message": (
-				f"<p>Срок домашнего задания «{escape_html(задание)}» к уроку "
-				f"«{escape_html(урок.title or '')}» курса «{escape_html(курс)}» — "
-				f"{format_datetime(сдача.due_at, 'dd.MM.yyyy HH:mm')}.</p>"
-				f"<p>{notices.ссылка(получатели.адрес(сдача.lesson, урок.course), 'Открыть задание')}</p>"
+			"subject": _("The homework “{0}” is due soon", lang=язык).format(задание),
+			"message": notices.абзацы(
+				_(
+					"The homework “{0}” for the lesson “{1}” in the course “{2}” is due {3}.", lang=язык
+				).format(
+					escape_html(задание),
+					escape_html(урок.title or ""),
+					escape_html(курс),
+					escape_html(languages.дата_время(сдача.due_at, язык)),
+				),
+				notices.ссылка(
+					получатели.адрес(сдача.lesson, урок.course), _("Open the homework", lang=язык)
+				),
 			),
 		}
 
@@ -266,19 +287,39 @@ def _возвраты(сейчас, получатели: _Получатели)
 		if not получатели.ученику_можно(строка, урок.course):
 			return None
 		задание = задания.get(строка.homework) or ""
-		что = "отменили приём домашнего задания" if строка.event == "reopened" else "вернули домашнее задание"
+		язык = получатели.язык(строка.member)
+		названия = (
+			escape_html(задание),
+			escape_html(урок.title or ""),
+			escape_html(_название_курса(урок.course, язык)),
+		)
+		# Отмена приёма и возврат — разные предложения целиком, а не вставка в одно.
+		что_случилось = (
+			_(
+				"Acceptance of your homework “{0}” for the lesson “{1}” in the course “{2}” has been revoked. What to redo:",
+				lang=язык,
+			)
+			if строка.event == "reopened"
+			else _(
+				"Your homework “{0}” for the lesson “{1}” in the course “{2}” has been returned. What to redo:",
+				lang=язык,
+			)
+		).format(*названия)
 		комментарий = escape_html(строка.comment or "").replace("\n", "<br>")
 		return {
 			"key": _ключ_возврата(строка),
 			"kind": ВЕРНУЛИ,
 			"recipient": строка.member,
 			"submission": строка.name,
-			"subject": f"Домашнее задание «{задание}» — на доработку",
+			"subject": _("The homework “{0}” needs more work", lang=язык).format(задание),
 			"message": (
-				f"<p>Вам {что} «{escape_html(задание)}» к уроку «{escape_html(урок.title or '')}» "
-				f"курса «{escape_html(_название_курса(урок.course))}». Что доделать:</p>"
+				f"<p>{что_случилось}</p>"
 				f"<blockquote>{комментарий}</blockquote>"
-				f"<p>{notices.ссылка(получатели.адрес(строка.lesson, урок.course), 'Открыть задание')}</p>"
+				+ notices.абзацы(
+					notices.ссылка(
+						получатели.адрес(строка.lesson, урок.course), _("Open the homework", lang=язык)
+					)
+				)
 			),
 		}
 
@@ -394,45 +435,91 @@ def _дайджесты(сейчас, _получатели=None) -> list[dict]:
 		]
 		if not видит:
 			return None
-		число = len(видит)
+		язык = languages.язык_пользователя(куратор)
 		return {
 			"key": ключ(куратор),
 			"kind": ДАЙДЖЕСТ,
 			"recipient": куратор,
 			"submission": None,
-			"subject": f"{число} {_домашек(число)} {'ждёт' if _одна(число) else 'ждут'} проверки",
-			"message": (
-				f"<p>На проверке{_где(свои_роли, руководит.get(куратор), ведёт.get(куратор))} — "
-				f"{число} {_домашек(число)}: ученики сдали и ждут ответа.</p>"
-				f"<p>{notices.ссылка(get_url(АДРЕС_ОЧЕРЕДИ), 'Открыть очередь')}</p>"
-			),
+			**_дайджест(len(видит), _где(свои_роли, руководит.get(куратор), ведёт.get(куратор)), язык),
 		}
 
 	return _по_одному(кураторы, построить)
 
 
+#: Чья очередь в дайджесте (`_где`).
+ВСЯ = ""
+В_КУРСАХ = "courses"
+В_КОМАНДАХ = "teams"
+
+
 def _где(роли: set[str], организации, курсы) -> str:
 	"""Чья очередь в письме: у одной роли — её область, у нескольких — без уточнения."""
 	if "Moderator" in роли or (организации and курсы):
-		return ""
+		return ВСЯ
 	if курсы:
-		return " в курсах, где вы автор"
+		return В_КУРСАХ
 	if организации:
-		return " в ваших командах"
-	return ""
+		return В_КОМАНДАХ
+	return ВСЯ
 
 
-def _одна(число: int) -> bool:
-	return число % 10 == 1 and число % 100 != 11
+def _дайджест(число: int, где: str, язык: str) -> dict[str, str]:
+	"""Тема и текст дайджеста — «N домашек ждут проверки» — на языке куратора.
 
-
-def _домашек(число: int) -> str:
-	"""«домашка», «домашки», «домашек» — по числу."""
-	if _одна(число):
-		return "домашка"
-	if число % 10 in (2, 3, 4) and число % 100 not in (12, 13, 14):
-		return "домашки"
-	return "домашек"
+	Единственное и множественное — разные msgid, форма множественного языка
+	— контекст перевода (`languages.форма_числа`): «1 домашка ждёт», «3
+	домашки ждут», «5 домашек ждут». Каждый вариант — предложение целиком.
+	"""
+	форма = languages.форма_числа(число, язык)
+	одна = форма == "one"
+	if одна:
+		тема = _("{0} homework assignment is awaiting review", lang=язык, context=форма)
+	else:
+		тема = _("{0} homework assignments are awaiting review", lang=язык, context=форма)
+	if где == В_КУРСАХ and одна:
+		текст = _(
+			"In courses you author, {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.",
+			lang=язык,
+			context=форма,
+		)
+	elif где == В_КУРСАХ:
+		текст = _(
+			"In courses you author, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",
+			lang=язык,
+			context=форма,
+		)
+	elif где == В_КОМАНДАХ and одна:
+		текст = _(
+			"In your teams, {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.",
+			lang=язык,
+			context=форма,
+		)
+	elif где == В_КОМАНДАХ:
+		текст = _(
+			"In your teams, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",
+			lang=язык,
+			context=форма,
+		)
+	elif одна:
+		текст = _(
+			"{0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.",
+			lang=язык,
+			context=форма,
+		)
+	else:
+		текст = _(
+			"{0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",
+			lang=язык,
+			context=форма,
+		)
+	return {
+		"subject": тема.format(число),
+		"message": notices.абзацы(
+			текст.format(число),
+			notices.ссылка(get_url(АДРЕС_ОЧЕРЕДИ), _("Open the review queue", lang=язык)),
+		),
+	}
 
 
 # --- отправка ---
@@ -494,5 +581,5 @@ def _откатить_письмо() -> None:
 		frappe.db.rollback()
 
 
-def _название_курса(курс: str | None) -> str:
-	return (frappe.get_cached_value("LMS Course", курс, "title") if курс else None) or курс or ""
+def _название_курса(курс: str | None, язык: str) -> str:
+	return переводы_курса.название(курс, languages.основной(язык))

@@ -1,6 +1,7 @@
 # Copyright (c) 2026, NikoMusaev and Contributors
 # See license.txt
-"""Тексты на языке читателя: даты (learning-services#767).
+"""Тексты на языке читателя: язык получателя письма, даты, формы числа
+(learning-services#767, #768).
 
 У приложения два языка интерфейса — русский и английский, — и всё, что не
 русское, показывается по-английски, как у даты редакции на экране согласия
@@ -9,6 +10,7 @@
 """
 
 import frappe
+from babel import Locale
 from babel.dates import format_date, format_time
 from frappe.utils import get_datetime, getdate
 
@@ -17,6 +19,14 @@ from frappe.utils import get_datetime, getdate
 #: Русская запись — прежняя, цифрами: страницы и письма её не меняют.
 ДАТА_РУ = "dd.MM.yyyy"
 ВРЕМЯ_РУ = "HH:mm"
+
+
+def язык_пользователя(пользователь: str) -> str:
+	"""Язык письма — язык получателя, а не того, кто вызвал отправку: письма
+	уходят из задач и из запросов других людей (learning-services#737, #768)."""
+	return frappe.db.get_value("User", пользователь, "language") or frappe.db.get_single_value(
+		"System Settings", "language"
+	)
 
 
 def основной(язык: str | None = None) -> str:
@@ -52,3 +62,15 @@ def дата_время(значение, язык: str | None = None) -> str:
 			f"{format_date(момент, ДАТА_РУ, locale=РУССКИЙ)} {format_time(момент, ВРЕМЯ_РУ, locale=РУССКИЙ)}"
 		)
 	return f"{format_date(момент, 'medium', locale='en')}, {format_time(момент, 'short', locale='en')}"
+
+
+def форма_числа(число: int, язык: str | None = None) -> str:
+	"""Категория множественного числа CLDR для `число`: `one`, `few`, `many`
+	или `other` — у русского, `one` или `other` — у английского.
+
+	`Why:` у `_()` Frappe нет форм множественного числа. Фраза с числом —
+	два msgid, единственное и множественное, а категория — контекст перевода:
+	русский перевод множественного без контекста — форма `many` («5 домашек»),
+	с контекстом `few` — «3 домашки».
+	"""
+	return Locale.parse(РУССКИЙ if русский(язык) else "en").plural_form(abs(int(число)))

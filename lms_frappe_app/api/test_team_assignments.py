@@ -85,6 +85,28 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 
 		self.assertEqual(self.письма.call_count, отправлено)
 
+	def test_письмо_на_языке_каждого_получателя(self):
+		"""Назначает руководитель со своим языком, а письмо читает каждый
+		сотрудник на своём: тема, срок, название курса из перевода карточки
+		(learning-services#768)."""
+		frappe.db.set_value("User", self.сотрудник, "language", "ru")
+		frappe.db.set_value("User", self.коллега, "language", "en")
+		frappe.db.set_value("User", self.руководитель, "language", "en")
+		frappe.db.set_value(
+			"LMS Course", self.курс, "course_translations", json.dumps({"en": {"title": "Basics"}})
+		)
+		русское = frappe.db.get_value("LMS Course", self.курс, "title")
+
+		self.назначить(deadline="2030-01-01")
+
+		письма = {вызов.kwargs["recipients"][0]: вызов.kwargs for вызов in self.письма.call_args_list}
+		self.assertEqual(письма[self.коллега]["subject"], "You've been assigned the course “Basics”")
+		self.assertIn("has assigned you the course “Basics”. Due date: Jan 1, 2030.", письма[self.коллега]["message"])
+		self.assertIn(">Open the course</a>", письма[self.коллега]["message"])
+		self.assertEqual(письма[self.сотрудник]["subject"], f"Вам назначен курс «{русское}»")
+		self.assertIn(f"назначила вам курс «{русское}». Срок — 01.01.2030.", письма[self.сотрудник]["message"])
+		self.assertIn(">Открыть курс</a> — занятие идёт с наставником", письма[self.сотрудник]["message"])
+
 	def test_выбранным_и_дописанному_потом(self):
 		назначение = self.назначить(members=[self.сотрудник])
 		self.assertFalse(self.зачислен(self.коллега))

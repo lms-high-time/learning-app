@@ -10,6 +10,7 @@ import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import now_datetime
 
+from lms_frappe_app import languages
 from lms_frappe_app.agent_learning import homework as домашка
 from lms_frappe_app.agent_learning import homework_notices as письма
 from lms_frappe_app.agent_learning import notices
@@ -27,6 +28,11 @@ from lms_frappe_app.tests.sample_data import (
 
 #: «Сейчас» запуска: утро, после часа дайджеста.
 УТРО = now_datetime().replace(hour=10, minute=0, second=0, microsecond=0)
+
+
+def по_русски(*пользователи: str) -> None:
+	for пользователь in пользователи:
+		frappe.db.set_value("User", пользователь, "language", "ru")
 
 
 class IntegrationTestHomeworkNotices(IntegrationTestCase):
@@ -54,6 +60,8 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.организация = создать_организацию(f"Орг {с}")
 		добавить_в_организацию(self.ученик, self.организация)
 		self.менеджер = создать_менеджера(f"hnm-{с}@example.com", self.организация)
+		# Письма сверяются по-русски: язык письма — получателя (learning-services#768).
+		по_русски(self.ученик, self.менеджер)
 
 	# --- помощники ---
 
@@ -265,6 +273,7 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.сдать(None)
 		зачислить(методист, self.урок)
 		self.сдать(None, ученик=методист)
+		по_русски(методист)
 		письма.разослать()
 		[письмо] = self.письма_к(методист)
 		self.assertIn("1 домашка", письмо["subject"])
@@ -435,6 +444,7 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 			f"hny-{frappe.generate_hash(length=6)}@example.com", self.организация, "Moderator"
 		)
 		self.сдать(self.организация)
+		по_русски(методист)
 		письма.разослать()
 		[письмо] = self.письма_к(методист)
 		self.assertIn("1 домашка", письмо["subject"])
@@ -452,6 +462,38 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		self.assertEqual(len(self.дайджест(self.менеджер)), 1)
 		ждут.assert_not_called()
 
+	def test_письма_на_языке_получателя(self):
+		"""Рассылку зовёт задача, а письмо читает получатель — на своём языке:
+		тема, текст и срок (learning-services#768)."""
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
+		with self.subTest("напоминание"):
+			self.заново()
+			frappe.db.set_value("User", self.ученик, "language", "en")
+			сдача = self.выдана(выдана_за=timedelta(days=5), срок_через=timedelta(days=2))
+			письма.разослать()
+			[письмо] = self.письма_к(self.ученик)
+			self.assertTrue(письмо["subject"].startswith("The homework “"), письмо["subject"])
+			срок = frappe.db.get_value(домашка.СДАЧА, сдача, "due_at")
+			self.assertIn(f"is due {languages.дата_время(срок, 'en')}.", письмо["message"])
+			self.assertIn(">Open the homework</a>", письмо["message"])
+		with self.subTest("вернули"):
+			self.заново()
+			frappe.db.set_value("User", self.ученик, "language", "en")
+			self.вернуть()
+			письма.разослать()
+			[письмо] = self.письма_к(self.ученик)
+			self.assertTrue(письмо["subject"].endswith("” needs more work"), письмо["subject"])
+			self.assertIn("has been returned. What to redo:", письмо["message"])
+		with self.subTest("дайджест"):
+			self.заново()
+			frappe.db.set_value("User", self.менеджер, "language", "en")
+			self.сдать(self.организация)
+			письма.разослать()
+			[письмо] = self.письма_к(self.менеджер)
+			self.assertEqual(письмо["subject"], "1 homework assignment is awaiting review")
+			self.assertIn("In your teams, 1 homework assignment is awaiting review", письмо["message"])
+
 	def test_запись_о_сбое_коммитится(self):
 		"""Запись лога — сразу в базу: полный откат следующего письма её не снимет."""
 		with (
@@ -462,6 +504,65 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 		):
 			письма.разослать()
 		self.коммит.assert_called_once()
+
+
+class TestДайджестПоЧислу(UnitTestCase):
+	"""Без базы: формы числа в дайджесте (learning-services#768). Русские —
+	как прежде: «1 домашка ждёт», «3 домашки ждут», «5 домашек ждут»."""
+
+	def test_тема_и_текст_по_числу_и_языку(self):
+		случаи = (
+			(
+				"ru",
+				1,
+				письма.ВСЯ,
+				"1 домашка ждёт проверки",
+				"На проверке — 1 домашка: ученики сдали и ждут ответа.",
+			),
+			(
+				"ru",
+				3,
+				письма.В_КУРСАХ,
+				"3 домашки ждут проверки",
+				"На проверке в курсах, где вы автор — 3 домашки:",
+			),
+			(
+				"ru",
+				5,
+				письма.В_КОМАНДАХ,
+				"5 домашек ждут проверки",
+				"На проверке в ваших командах — 5 домашек:",
+			),
+			("ru", 11, письма.ВСЯ, "11 домашек ждут проверки", "На проверке — 11 домашек:"),
+			("ru", 21, письма.ВСЯ, "21 домашка ждёт проверки", "На проверке — 21 домашка:"),
+			("ru", 22, письма.ВСЯ, "22 домашки ждут проверки", "На проверке — 22 домашки:"),
+			(
+				"en",
+				1,
+				письма.ВСЯ,
+				"1 homework assignment is awaiting review",
+				"1 homework assignment is awaiting review:",
+			),
+			(
+				"en",
+				21,
+				письма.В_КУРСАХ,
+				"21 homework assignments are awaiting review",
+				"In courses you author, 21 homework",
+			),
+			(
+				"en",
+				3,
+				письма.В_КОМАНДАХ,
+				"3 homework assignments are awaiting review",
+				"In your teams, 3 homework",
+			),
+		)
+		for язык, число, где, тема, начало in случаи:
+			with self.subTest(язык=язык, число=число):
+				письмо = письма._дайджест(число, где, язык)
+				self.assertEqual(письмо["subject"], тема)
+				self.assertTrue(письмо["message"].startswith(f"<p>{начало}"), письмо["message"])
 
 
 class TestHomeworkNoticeIndex(UnitTestCase):
