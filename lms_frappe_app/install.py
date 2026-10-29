@@ -7,6 +7,7 @@ from zoneinfo import available_timezones
 import frappe
 from frappe.utils import cint, get_url
 
+from lms_frappe_app import site_secrets
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	НАСТРОЙКИ,
 )
@@ -745,6 +746,7 @@ def after_install() -> None:
 	обеспечить_настройки_oauth()
 	выключить_прочих_провайдеров()
 	обеспечить_русский_язык()
+	site_secrets.обеспечить()
 
 
 def after_sync() -> None:
@@ -772,3 +774,4 @@ def after_migrate() -> None:
 	выключить_прочих_провайдеров()
 	обеспечить_сроки_журналов()
 	закрыть_штатные_запросы()
+	site_secrets.обеспечить()
