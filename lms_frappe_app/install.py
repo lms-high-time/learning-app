@@ -20,6 +20,11 @@ from lms_frappe_app.personal_data import закрыть_штатные_запр�
 #: (`fetch_from`). Заглушки не публикуются: сами страницы живут в Learning и в
 #: MCP-сервисе, а с маршрута заглушки на них ведёт `website_redirects` в hooks.
 #:
+#: Подпись (`title`) — английский исходник: SPA переводит её `__()` на язык
+#: пользователя, русский — перевод в `translations/ru.csv` и переводах
+#: Learning (learning-services#767); прежние русские подписи стенда
+#: переименовал патч `sidebar_titles_english`.
+#:
 #: Иконка — имя компонента `lucide-vue-next` (PascalCase), как её сохраняет
 #: выбор иконки в самом Learning: по нему рисует сайдбар на десктопе, а
 #: телефон выводит из него класс `lucide-…`. `Why:` имена в kebab-case
@@ -28,13 +33,13 @@ from lms_frappe_app.personal_data import закрыть_штатные_запр�
 	# Веб-чат живёт в MCP-сервисе на том же домене, что и сайт. Маршрут заглушки
 	# не начинается с путей этого сервиса: Traefik сопоставляет их по префиксу, и
 	# `/chat-…` ушёл бы в MCP-сервис с «Not Found» вместо переадресации.
-	{"title": "Заниматься в браузере", "route": "study-in-browser", "icon": "MessageCircle", "page": "/chat"},
-	{"title": "Подключить ассистента", "route": "agent-sidebar", "icon": "Bot", "page": "/lms/agent"},
-	{"title": "Мои документы", "route": "artifacts-sidebar", "icon": "FileText", "page": "/lms/documents"},
+	{"title": "Study in the browser", "route": "study-in-browser", "icon": "MessageCircle", "page": "/chat"},
+	{"title": "Connect an assistant", "route": "agent-sidebar", "icon": "Bot", "page": "/lms/agent"},
+	{"title": "My documents", "route": "artifacts-sidebar", "icon": "FileText", "page": "/lms/documents"},
 	# Подключённые агенты и сессии браузера (learning-services#669): меню
 	# пользователя живёт в Learning, а не в приложении, и дорога туда — пункт
 	# сайдбара.
-	{"title": "Агенты и сессии", "route": "connections-sidebar", "icon": "ShieldCheck", "page": "/connections"},
+	{"title": "Agents and sessions", "route": "connections-sidebar", "icon": "ShieldCheck", "page": "/connections"},
 )
 
 #: Иконки, которые прежде ставила сама установка, — их правка админа не трогает.

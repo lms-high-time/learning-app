@@ -76,7 +76,7 @@ def _проверить_адрес(файл) -> None:
 	if not адрес or адрес.startswith(("http://", "https://")):
 		return
 	if not _адрес_канонический(адрес):
-		_отказать(_("Неверный адрес файла"))
+		_отказать(_("Invalid file URL"))
 	if адрес.startswith("/private/"):
 		видимые = [
 			имя
@@ -84,7 +84,7 @@ def _проверить_адрес(файл) -> None:
 			if frappe.has_permission("File", "read", doc=имя)
 		]
 		if not видимые:
-			_отказать(_("Неверный адрес файла"))
+			_отказать(_("Invalid file URL"))
 
 
 def _по_запросу() -> bool:
@@ -110,7 +110,7 @@ def _проверить_расширение(файл) -> None:
 	if тип and mimetypes.guess_extension(тип):
 		return
 	if расширение(имя) and расширение(имя) not in {р.lower() for р in разрешённые}:
-		_отказать(_("Такой тип файла загрузить нельзя"))
+		_отказать(_("This file type can't be uploaded"))
 
 
 class ФайлПлатформы:
@@ -119,9 +119,9 @@ class ФайлПлатформы:
 	def before_insert(self):
 		if _без_роли():
 			if self.attached_to_doctype == СДАЧА and not self.flags.get(ФЛАГ_ФАЙЛА_СДАЧИ):
-				_отказать(_("Файлы сдачи домашки добавляет только её сохранение"))
+				_отказать(_("Homework submission files can only be added by saving the submission"))
 			if self.thumbnail_url or self.content_hash:
-				_отказать(_("Миниатюру и отпечаток файла задаёт платформа"))
+				_отказать(_("The platform sets the file's thumbnail and hash"))
 			# И с содержимым: дедупликация Frappe оставляет адрес из запроса.
 			_проверить_адрес(self)
 			_проверить_расширение(self)
@@ -132,14 +132,14 @@ class ФайлПлатформы:
 		прежний = None if self.flags.in_insert else self.get_doc_before_save()
 		if прежний is not None and _без_роли():
 			if _изменены_неизменные(self, прежний):
-				_отказать(_("Адрес, миниатюра и приватность файла не меняются"))
+				_отказать(_("A file's URL, thumbnail, and privacy can't be changed"))
 			if СДАЧА in (self.attached_to_doctype, прежний.attached_to_doctype):
-				_отказать(_("Файлы сдачи домашки не правятся"))
+				_отказать(_("Homework submission files can't be edited"))
 		родитель = getattr(super(), "before_validate", None)
 		if родитель:
 			родитель()
 
 	def on_trash(self):
 		if self.attached_to_doctype == СДАЧА and _без_роли():
-			_отказать(_("Файлы сдачи домашки не удаляются"))
+			_отказать(_("Homework submission files can't be deleted"))
 		super().on_trash()

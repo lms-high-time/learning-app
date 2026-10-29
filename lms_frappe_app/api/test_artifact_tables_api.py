@@ -261,7 +261,12 @@ class IntegrationTestArtifactAPI(IntegrationTestCase):
 		self.assertEqual(frappe.response["filename"], "agreements_log.md")
 		self.assertTrue(frappe.response["filecontent"].startswith("# Журнал договорённостей\n"))
 
-		download(self.курс, "agreements_log", format="xlsx")
-		self.assertEqual(frappe.response["filename"], "agreements_log.xlsx")
-		книга = load_workbook(BytesIO(frappe.response["filecontent"]))
-		self.assertEqual(книга.sheetnames, ["Договорённости", "Поля"])
+		# Подписи книги — на языке запроса выгрузившего (learning-services#767).
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		for язык, лист in (("ru", "Поля"), ("en", "Fields")):
+			with self.subTest(язык):
+				frappe.local.lang = язык
+				download(self.курс, "agreements_log", format="xlsx")
+				self.assertEqual(frappe.response["filename"], "agreements_log.xlsx")
+				книга = load_workbook(BytesIO(frappe.response["filecontent"]))
+				self.assertEqual(книга.sheetnames, ["Договорённости", лист])

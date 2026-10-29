@@ -3,6 +3,8 @@
 
 """Порядок курсов программы Learning — на сервере, а не только в интерфейсе (#405)."""
 
+import json
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -63,6 +65,23 @@ class IntegrationTestPrograms(IntegrationTestCase):
 			self.assertEqual(ответ["error"]["code"], ПОРЯДОК_ПРОГРАММЫ)
 			self.assertEqual(ответ["error"]["previous"]["id"], self.первый)
 			self.assertEqual(ответ["error"]["program"], self.программа.name)
+
+		with self.subTest("текст отказа — на языке запроса, курс — из перевода карточки"):
+			# learning-services#766: отказ видит человек на странице курса.
+			frappe.db.set_value(
+				"LMS Course", self.первый, "course_translations", json.dumps({"en": {"title": "First steps"}})
+			)
+			русское = frappe.db.get_value("LMS Course", self.первый, "title")
+			self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+			for язык, начало in (
+				("en", "Complete the course “First steps” first: the program “"),
+				("ru", f"Сначала пройдите курс «{русское}»: программа «"),
+			):
+				frappe.local.lang = язык
+				ответ = self.от_имени(self.ученик, student.enroll, course=self.второй)
+				self.assertTrue(ответ["error"]["message"].startswith(начало), ответ["error"]["message"])
+
+		with self.subTest("предыдущий открыт для записи"):
 			self.assertTrue(self.от_имени(self.ученик, student.enroll, course=self.первый)["ok"])
 
 		self._пройти(self.первый)

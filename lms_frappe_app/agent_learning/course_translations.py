@@ -87,3 +87,13 @@ def язык_запроса() -> str:
 	"""Язык запроса Learning (`frappe.local.lang`: кука гостя или язык профиля)
 	без варианта: `en-US` → `en`."""
 	return (getattr(frappe.local, "lang", None) or ОСНОВНОЙ).split("-")[0].lower()
+
+
+def название(course: str | None, язык: str | None) -> str:
+	"""Название курса на языке `язык` — для письма: перевод карточки, если он
+	есть, иначе русское (learning-services#768). Из кэша документа: письма
+	собираются пачкой."""
+	if not course:
+		return ""
+	заголовок, переводы = frappe.get_cached_value("LMS Course", course, ["title", ПОЛЕ]) or (None, None)
+	return перевод(переводы, язык).get("title") or заголовок or course

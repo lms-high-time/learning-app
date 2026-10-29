@@ -10,6 +10,7 @@
 
 import io
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from lms_frappe_app.agent_learning.artifacts import codes, data, export, fill, schema
@@ -229,6 +230,21 @@ class TestЗапись(UnitTestCase):
 			max=data.СТРОК_МАКС,
 		)
 
+	def test_текст_отказа_на_языке_запроса(self):
+		"""Отказ записи документа видит человек на странице «Мои документы»: текст
+		— на языке запроса, плейсхолдер подставлен (learning-services#766)."""
+		д = data.записать(ЖУРНАЛ, None, rows=[{"topic": str(н)} for н in range(data.СТРОК_МАКС)])
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		for язык, текст in (
+			("en", f"No more than {data.СТРОК_МАКС} rows"),
+			("ru", f"Не больше {data.СТРОК_МАКС} строк"),
+		):
+			with self.subTest(язык):
+				frappe.local.lang = язык
+				with self.assertRaises(Отказ) as пойман:
+					data.записать(ЖУРНАЛ, д, rows=[{"topic": "лишняя"}])
+				self.assertEqual(пойман.exception.сообщение, текст)
+
 	def test_строки_и_json_строкой(self):
 		"""Тело запроса формой приносит списки и объекты строками JSON."""
 		д = data.записать(ЖУРНАЛ, None, rows='[{"topic": "Ретро"}]')
@@ -354,10 +370,13 @@ class TestВыгрузка(UnitTestCase):
 			export.markdown(ПРАВИЛА, д), "- Способ: Согласие\n  или голосование\n- Исключение: 5"
 		)
 		self.assertEqual(export.markdown(ЖУРНАЛ, data.данные(None)), "")
-		self.assertEqual(
-			export.собрать_markdown("Журнал", [ПРАВИЛА, ЖУРНАЛ], data.данные(None)),
-			"# Журнал\n\n## Как мы решаем\n\n_Не заполнено._\n\n## Договорённости\n\n_Не заполнено._\n",
-		)
+		# Подписи выгрузки — на языке получателя файла (learning-services#767).
+		for язык, пусто in (("ru", "_Не заполнено._"), ("en", "_Not filled in._")):
+			with self.subTest(язык):
+				self.assertEqual(
+					export.собрать_markdown("Журнал", [ПРАВИЛА, ЖУРНАЛ], data.данные(None), язык),
+					f"# Журнал\n\n## Как мы решаем\n\n{пусто}\n\n## Договорённости\n\n{пусто}\n",
+				)
 
 	def test_книга_xlsx(self):
 		from openpyxl import load_workbook
@@ -371,7 +390,7 @@ class TestВыгрузка(UnitTestCase):
 			"columns": [{"key": "sum", "title": "=SUM(A1)", "required": False}],
 		}
 		книга = load_workbook(
-			io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА, второй, странный, история], self.данные()))
+			io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА, второй, странный, история], self.данные(), "ru"))
 		)
 
 		self.assertEqual(
@@ -392,4 +411,16 @@ class TestВыгрузка(UnitTestCase):
 				["Как мы решаем", "Исключение", "5"],
 				["Как мы решаем", "Кто снимает", None],
 			],
+		)
+
+	def test_книга_xlsx_на_английском(self):
+		"""Лист полей и его шапка — на языке получателя; названия — из схемы."""
+		from openpyxl import load_workbook
+
+		книга = load_workbook(io.BytesIO(export.книга_xlsx([ЖУРНАЛ, ПРАВИЛА], self.данные(), "en")))
+
+		self.assertEqual(книга.sheetnames, ["Договорённости", "Fields"])
+		self.assertEqual(
+			[к.value for к in книга["Fields"][1]] + [к.value for к in книга["Fields"][2]][:2],
+			["Section", "Field", "Value", "Как мы решаем", "Способ"],
 		)

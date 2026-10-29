@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import nowdate
 
@@ -81,7 +82,7 @@ class OrganizationMembership(Document):
 		)
 		if уже_есть:
 			frappe.throw(
-				frappe._("{0} уже состоит в команде {1}").format(self.user, self.organization),
+				_("{0} is already a member of team {1}").format(self.user, self.organization),
 				frappe.DuplicateEntryError,
 			)
 

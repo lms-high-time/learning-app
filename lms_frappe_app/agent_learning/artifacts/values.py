@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from frappe import _
+
 from lms_frappe_app.agent_learning.artifacts.codes import НЕВЕРНОЕ_ЗНАЧЕНИЕ
 from lms_frappe_app.agent_learning.errors import Отказ
 
@@ -22,10 +24,15 @@ def привести(значение, **где) -> str | None:
 	if значение is None:
 		return None
 	if isinstance(значение, bool) or not isinstance(значение, str | int | float):
-		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, "Значение — текст", **где)
+		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, _("The value must be text"), **где)
 	текст = str(значение).strip()
 	if len(текст) > ДЛИНА_МАКС:
-		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, f"Не длиннее {ДЛИНА_МАКС} знаков", max=ДЛИНА_МАКС, **где)
+		raise Отказ(
+			НЕВЕРНОЕ_ЗНАЧЕНИЕ,
+			_("Must be no longer than {0} characters").format(ДЛИНА_МАКС),
+			max=ДЛИНА_МАКС,
+			**где,
+		)
 	return текст or None
 
 

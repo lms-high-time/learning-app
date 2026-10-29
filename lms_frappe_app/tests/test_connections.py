@@ -120,9 +120,16 @@ class UnitTestConnections(UnitTestCase):
 			"curl/8.5.0": "Неизвестное устройство",
 			None: "Неизвестное устройство",
 		}
+		# Названия — по языку страницы (learning-services#767): русские — по-русски.
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
 		for ua, ожидается in случаи.items():
 			with self.subTest(ua=ua):
 				self.assertEqual(connections.устройство(ua), ожидается)
+		frappe.local.lang = "en"
+		with self.subTest("по-английски"):
+			self.assertEqual(connections.устройство("Chrome/141.0 YaBrowser/25.8"), "Yandex Browser")
+			self.assertEqual(connections.устройство(None), "Unknown device")
 
 	def test_подключение_это_клиент_и_семья(self):
 		def строка(имя, клиент, создан, семья=None, начало=None, срок=None):
