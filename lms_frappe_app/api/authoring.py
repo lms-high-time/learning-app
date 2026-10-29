@@ -17,6 +17,7 @@ import re
 
 import frappe
 
+from lms_frappe_app.access import ЯЗЫКИ_САЙТА
 from lms_frappe_app.agent_learning import (
 	announcements,
 	notes,
@@ -25,6 +26,7 @@ from lms_frappe_app.agent_learning import (
 	structure,
 	testers,
 )
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import findings as находки_публикации
 from lms_frappe_app.agent_learning.releases import index as releases_index
@@ -32,6 +34,7 @@ from lms_frappe_app.agent_learning.releases import places
 from lms_frappe_app.agent_learning.releases import projection as releases_projection
 from lms_frappe_app.agent_learning.releases import service as releases
 from lms_frappe_app.agent_learning.releases import view as просмотр_релиза
+from lms_frappe_app.agent_learning.releases.course_guard import ПЕРЕВОД_АВТОРА
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.agent_learning.runs import view as просмотр_прохождений
 from lms_frappe_app.agent_learning.constants import (
@@ -70,6 +73,10 @@ from lms_frappe_app.api import контракт, текущий_пользова
 ИНСТРУКТОР_НЕ_НАЙДЕН = "instructor_not_found"
 ИНСТРУКТОР_НЕ_АВТОР = "instructor_not_author"
 КОММИТ_НЕВЕРЕН = "invalid_commit"
+#: `lang` вне языков сайта (`ЯЗЫКИ_САЙТА`).
+ЯЗЫК_НЕИЗВЕСТЕН = "unknown_language"
+#: `promise` с `lang` другого языка: обещание курса не переводится.
+ОБЕЩАНИЕ_НЕ_ПЕРЕВОДИТСЯ = "promise_not_translated"
 #: Полный хеш коммита git: SHA-1 или SHA-256, в нижнем регистре — как его
 #: печатает `git rev-parse HEAD`.
 ХЕШ_КОММИТА = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
@@ -203,14 +210,21 @@ def update_course(
 	summary: str | None = None,
 	description: str | None = None,
 	promise: str | None = None,
+	lang: str | None = None,
 ) -> dict:
 	"""Правит название, описания или обещание анонса — курса без релиза и уроков.
 
 	`promise` — что человек получит к концу курса; звучит ученику на первом
 	занятии по курсу. Пустая строка очищает (#238). Карточку курса из релиза
 	пишет релиз (`course_from_release`).
+
+	`lang` — язык текстов (`ЯЗЫКИ_САЙТА`; `ru` и без него — основные поля):
+	на другом языке название и описания пишутся в перевод карточки
+	(`course_translations`, learning-services#738), пустая строка или пробелы снимают
+	текст перевода. Обещание не переводится: его читает агент.
 	"""
 	_автор()
+	язык = _язык(lang)
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	_не_из_релиза(course)
 	if уроки := structure.уроки_курса(course):
@@ -220,13 +234,40 @@ def update_course(
 			course=course,
 			lessons=len(уроки),
 		)
+	if язык and promise is not None:
+		raise Отказ(
+			ОБЕЩАНИЕ_НЕ_ПЕРЕВОДИТСЯ,
+			"Обещание курса не переводится: передайте его без lang",
+			course=course,
+			lang=язык,
+		)
 	документ = frappe.get_doc("LMS Course", course)
-	for поле, значение in (
+	тексты = (
 		("title", title),
 		("short_introduction", summary),
 		("description", description),
-		("course_promise", promise),
-	):
+	)
+	if язык:
+		переводы = переводы_курса.разобрать(документ.get(переводы_курса.ПОЛЕ))
+		перевод = переводы.setdefault(язык, {})
+		for поле, значение in тексты:
+			if значение is None:
+				continue
+			if значение := str(значение).strip():
+				перевод[поле] = значение
+			else:
+				перевод.pop(поле, None)
+		документ.set(переводы_курса.ПОЛЕ, переводы_курса.в_json(переводы))
+		документ.flags[ПЕРЕВОД_АВТОРА] = True
+		документ.save()
+		перевод = переводы_курса.перевод(документ.get(переводы_курса.ПОЛЕ), язык)
+		return {
+			"id": документ.name,
+			"title": перевод.get("title"),
+			"summary": перевод.get("short_introduction"),
+			"promise": документ.get("course_promise") or None,
+		}
+	for поле, значение in (*тексты, ("course_promise", promise)):
 		if значение is not None:
 			документ.set(поле, значение)
 	документ.save()
@@ -236,6 +277,21 @@ def update_course(
 		"summary": документ.short_introduction,
 		"promise": документ.get("course_promise") or None,
 	}
+
+
+def _язык(lang) -> str | None:
+	"""Язык перевода карточки из параметра `lang`; основной (`ru`) и пустой — `None`."""
+	if lang is None or not str(lang).strip():
+		return None
+	язык = str(lang).strip().lower()
+	if язык not in ЯЗЫКИ_САЙТА:
+		raise Отказ(
+			ЯЗЫК_НЕИЗВЕСТЕН,
+			"Такого языка у сайта нет",
+			lang=lang,
+			supported=list(ЯЗЫКИ_САЙТА),
+		)
+	return None if язык == переводы_курса.ОСНОВНОЙ else язык
 
 
 # --- заметки автора ---
@@ -828,7 +884,7 @@ def publish_course(course: str) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @контракт
-def announce_course(course: str, objectives=None) -> dict:
+def announce_course(course: str, objectives=None, lang: str | None = None) -> dict:
 	"""Показывает курс в каталоге как анонс: записаться нельзя, можно
 	попросить сообщить о выходе.
 
@@ -841,14 +897,23 @@ def announce_course(course: str, objectives=None) -> dict:
 	строке на цель) пишутся в поле курса; не переданы — действуют записанные
 	раньше (learning-services#512). Открытый курс анонсом не становится: на
 	него уже записаны ученики.
+
+	`lang` — язык целей, как у `update_course`: на другом языке `objectives`
+	пишутся в перевод карточки (learning-services#738), пустой список снимает
+	перевод целей. Курс и тогда анонсируется, как без `lang`, и требует
+	русских целей, а в ответе цели — на языке `lang`, без перевода — русские.
 	"""
 	_автор()
+	язык = _язык(lang)
 	_должен_существовать("LMS Course", course, КУРС_НЕ_НАЙДЕН)
 	сведения = frappe.db.get_value(
 		"LMS Course",
 		course,
-		["published", "upcoming", "active_release", announcements.ПОЛЕ_ЦЕЛЕЙ],
+		["published", "upcoming", "active_release", announcements.ПОЛЕ_ЦЕЛЕЙ, переводы_курса.ПОЛЕ],
 		as_dict=True,
+		# Переводы дописываются к прочитанным: без блокировки одновременный
+		# `update_course` с языком потерялся бы.
+		for_update=True,
 	)
 	if сведения.active_release and objectives is not None:
 		raise Отказ(
@@ -866,9 +931,10 @@ def announce_course(course: str, objectives=None) -> dict:
 	if сведения.published and not сведения.upcoming:
 		raise Отказ(КУРС_УЖЕ_ОТКРЫТ, "Курс уже открыт ученикам", course=course)
 	поля = {"published": 1, "upcoming": 1}
+	переводы = переводы_курса.разобрать(сведения.get(переводы_курса.ПОЛЕ))
 	if сведения.active_release:
 		цели = announcements.цели_курса(course)
-	elif objectives is not None:
+	elif objectives is not None and not язык:
 		цели = announcements.строки(objectives)
 		поля[announcements.ПОЛЕ_ЦЕЛЕЙ] = "\n".join(цели)
 	else:
@@ -879,7 +945,17 @@ def announce_course(course: str, objectives=None) -> dict:
 			"У курса нет целей: передайте их в objectives, по строке на цель",
 			course=course,
 		)
+	if язык and objectives is not None:
+		перевод = переводы.setdefault(язык, {})
+		if в_переводе := announcements.строки(objectives):
+			перевод[переводы_курса.ЦЕЛИ] = в_переводе
+		else:
+			перевод.pop(переводы_курса.ЦЕЛИ, None)
+		поля[переводы_курса.ПОЛЕ] = переводы_курса.в_json(переводы)
+		переводы = переводы_курса.разобрать(поля[переводы_курса.ПОЛЕ])
 	frappe.db.set_value("LMS Course", course, поля)
+	if в_переводе := переводы_курса.перевод(переводы, язык).get(переводы_курса.ЦЕЛИ):
+		цели = в_переводе
 	return {"id": course, "published": True, "upcoming": True, "objectives": цели}
 
 

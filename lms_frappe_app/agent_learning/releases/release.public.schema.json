@@ -22,6 +22,12 @@
       "description": "Стабильный ключ узла курса: на нём держится состояние ученика между релизами."
     },
     "text": {"type": "string", "minLength": 1},
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}$",
+      "not": {"const": "ru"},
+      "description": "Код языка ISO 639-1 в нижнем регистре; не ru — русский текст в основных полях."
+    },
     "public_text": {
       "type": "string",
       "description": "Текст для ученика; пустая строка — текста нет (сборка с --allow-missing), валидатор сообщает об этом."
@@ -65,6 +71,21 @@
               "definition": {"$ref": "#/$defs/text"}
             }
           }
+        },
+        "translations": {
+          "type": "object",
+          "description": "Карточка курса на других языках: ключ — код языка; русский — основные поля. Необязательно.",
+          "propertyNames": {"$ref": "#/$defs/language"},
+          "additionalProperties": {
+            "type": "object",
+            "required": ["title"],
+            "additionalProperties": false,
+            "properties": {
+              "title": {"$ref": "#/$defs/text"},
+              "summary": {"$ref": "#/$defs/public_text"},
+              "description": {"$ref": "#/$defs/public_text", "description": "markdown"}
+            }
+          }
         }
       }
     },
@@ -76,7 +97,18 @@
         "key": {"$ref": "#/$defs/key"},
         "title": {"$ref": "#/$defs/text"},
         "description": {"$ref": "#/$defs/public_text"},
-        "lessons": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/key"}}
+        "lessons": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/key"}},
+        "translations": {
+          "type": "object",
+          "description": "Название главы на других языках: цель анонса на этом языке. Необязательно.",
+          "propertyNames": {"$ref": "#/$defs/language"},
+          "additionalProperties": {
+            "type": "object",
+            "required": ["title"],
+            "additionalProperties": false,
+            "properties": {"title": {"$ref": "#/$defs/text"}}
+          }
+        }
       }
     },
     "lesson": {

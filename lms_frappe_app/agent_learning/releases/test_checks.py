@@ -6,7 +6,7 @@
 import unittest
 
 from lms_frappe_app.agent_learning.releases import checks
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза
 
 
 def _коды(релиз) -> list[str]:
@@ -54,6 +54,7 @@ class TestПроверкиРелиза(unittest.TestCase):
 				map={"answers": {"correct": "V1"}},
 			),
 			"релиз без пакета агента": lambda р: р.pop("agent"),
+			"перевод карточки и всех глав": перевести,
 		}.items():
 			with self.subTest(случай):
 				р = пример_релиза()
@@ -194,6 +195,51 @@ class TestПроверкиРелиза(unittest.TestCase):
 		self.assertEqual(
 			checks.проблемы(р),
 			([], [{"code": "course_card_markup", "where": "course.title", "chars": ["<"]}]),
+		)
+
+	def test_неполный_перевод_предупреждение(self):
+		"""Язык карточки, на который переведены не все главы, — `translation_partial`
+		с главами без перевода; глава на языке, которого нет у карточки, — не в счёт
+		(learning-services#738)."""
+		р = перевести(пример_релиза(), главы=1)
+		р["chapters"][0]["translations"]["de"] = {"title": "Kapitel 1"}
+		self.assertEqual(
+			checks.проблемы(р),
+			([], [{"code": "translation_partial", "where": "chapters", "lang": "en", "keys": ["ch-2"]}]),
+		)
+
+	def test_знаки_и_длина_в_переводах(self):
+		"""Перевод карточки и названия главы — под тем же правилом `course_card_markup`,
+		что и русская карточка; название в переводе — под пределом названия курса."""
+		р = перевести(пример_релиза())
+		р["course"]["translations"]["en"] = {
+			"title": "Course a < b",
+			"summary": "<b>",
+			"description": "x > y",
+		}
+		р["chapters"][1]["translations"]["en"]["title"] = "Chapter <2>"
+		self.assertEqual(
+			checks.проблемы(р)[1],
+			[
+				{"code": "course_card_markup", "where": "course.translations.en.title", "chars": ["<"]},
+				{
+					"code": "course_card_markup",
+					"where": "course.translations.en.summary",
+					"chars": ["<", ">"],
+				},
+				{"code": "course_card_markup", "where": "course.translations.en.description", "chars": [">"]},
+				{
+					"code": "course_card_markup",
+					"where": "chapters[ch-2].translations.en.title",
+					"chars": ["<", ">"],
+				},
+			],
+		)
+		р = перевести(пример_релиза())
+		р["course"]["translations"]["en"]["title"] = "t" * 141
+		self.assertEqual(
+			checks.проблемы(р)[0],
+			[{"code": "text_too_long", "where": "course.translations.en.title", "limit": 140, "length": 141}],
 		)
 
 	def test_пустые_тексты_ученику_предупреждения(self):
