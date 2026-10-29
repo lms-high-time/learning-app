@@ -66,5 +66,5 @@ def текущий_пользователь() -> str:
 	"""Пользователь, от имени которого пришёл вызов."""
 	пользователь = frappe.session.user
 	if not пользователь or пользователь == "Guest":
-		frappe.throw(frappe._("Требуется вход"), frappe.AuthenticationError)
+		frappe.throw(frappe._("Sign-in required"), frappe.AuthenticationError)
 	return пользователь

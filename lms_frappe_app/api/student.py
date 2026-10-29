@@ -14,6 +14,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 import frappe
+from frappe import _
 from frappe.model.delete_doc import delete_dynamic_links
 from frappe.query_builder import Order
 from frappe.utils import getdate, now_datetime, nowdate
@@ -224,7 +225,7 @@ def enroll(course: str, space: str | None = None) -> dict:
 	организация = _названное_или_текущее(ученик, space)
 	можно, причина = пространства.можно_записаться(ученик, course, организация)
 	if not можно:
-		raise Отказ(причина, "На этот курс записаться нельзя", course=course)
+		raise Отказ(причина, _("You can't enroll in this course"), course=course)
 	# Участник программы с обязательным порядком не записывается через голову
 	# предыдущего курса (learning-services#405).
 	программы.требовать_порядок(ученик, course)
@@ -255,7 +256,7 @@ def notify_when_released(course: str, notify: bool | int | str = True) -> dict:
 	подписать = notify not in (False, 0, "0", "false", "False")
 	if подписать:
 		if not announcements.анонсирован(course):
-			raise Отказ(КУРС_НЕ_АНОНС, "Этот курс не готовится к выходу", course=course)
+			raise Отказ(КУРС_НЕ_АНОНС, _("This course isn't coming soon"), course=course)
 		announcements.подписать(ученик, course)
 	else:
 		announcements.отписать(ученик, course)
@@ -383,7 +384,7 @@ def start_lesson(
 			if frappe.db.exists("LMS Enrollment", {"member": ученик, "course": курс})
 			else НЕ_ЗАЧИСЛЕН
 		)
-		raise Отказ(причина, "Этот курс сейчас недоступен", course=курс)
+		raise Отказ(причина, _("This course isn't available right now"), course=курс)
 	# Запись могла появиться раньше вступления в программу: порядок
 	# проверяется и на занятии, а не только при записи (#405).
 	программы.требовать_порядок(ученик, курс)
@@ -756,7 +757,7 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 	ученик = текущий_пользователь()
 	вид = ВИДЫ_ЗАМЕТОК.get((kind or "").strip().lower())
 	if not вид:
-		raise Отказ(НЕИЗВЕСТНЫЙ_ВИД, "Вид заметки — fact, observation или project", kind=kind)
+		raise Отказ(НЕИЗВЕСТНЫЙ_ВИД, _("The note kind must be fact, observation, or project"), kind=kind)
 
 	# Пустая строка, а не None: ею Frappe хранит незаполненный Link, и фильтр
 	# по None искал бы `course is null`, не находя ни одной записи.
@@ -766,7 +767,7 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		if not session:
 			raise Отказ(
 				ЧУЖОЕ_ЗАНЯТИЕ,
-				"Наблюдение и проект записываются в рамках занятия: передайте session",
+				_("Observations and projects are recorded within a session: pass session"),
 			)
 		занятие = _своё_занятие(session)
 		курс = занятие.course
@@ -777,11 +778,11 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		# Свой код, а не «неизвестный вид»: вид к этому месту уже распознан,
 		# и агент, ветвящийся по коду, стал бы подставлять другой вид вместо
 		# того, чтобы дать ключ (lms-platform#209).
-		raise Отказ(ПУСТОЙ_КЛЮЧ, "Ключ заметки обязателен", key=key)
+		raise Отказ(ПУСТОЙ_КЛЮЧ, _("A note key is required"), key=key)
 	if len(ключ) > ДЛИНА_КЛЮЧА:
-		raise Отказ(ДЛИННЫЙ_КЛЮЧ, "Ключ заметки слишком длинный", limit=ДЛИНА_КЛЮЧА, length=len(ключ))
+		raise Отказ(ДЛИННЫЙ_КЛЮЧ, _("The note key is too long"), limit=ДЛИНА_КЛЮЧА, length=len(ключ))
 	if len(text or "") > ДЛИНА_ЗАМЕТКИ:
-		raise Отказ(ДЛИННАЯ_ЗАМЕТКА, "Заметка слишком длинная", limit=ДЛИНА_ЗАМЕТКИ, length=len(text))
+		raise Отказ(ДЛИННАЯ_ЗАМЕТКА, _("The note is too long"), limit=ДЛИНА_ЗАМЕТКИ, length=len(text))
 
 	существующая = frappe.db.exists(
 		"Agent Student Note", {"student": ученик, "course": курс, "note_key": ключ}
@@ -790,7 +791,7 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 		прежняя = frappe.db.get_value("Agent Student Note", существующая, ["text", "kind"], as_dict=True)
 		raise Отказ(
 			ЗАМЕТКА_ЕСТЬ,
-			"Заметка с этим ключом уже есть: замена — отдельным вызовом без new_only",
+			_("A note with this key already exists: replace it with a separate call without new_only"),
 			key=ключ,
 			text=прежняя.text,
 			# Вид — потому что ключ один на курс: проект может упереться в
@@ -810,12 +811,12 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 			сколько = _заметок_набора(ученик, курс, вид)
 		except frappe.QueryDeadlockError:
 			frappe.db.rollback()
-			raise Отказ(ЗАНЯТО, "Заметки сейчас пишет другой запрос — повторите", key=ключ)
+			raise Отказ(ЗАНЯТО, _("Another request is writing notes right now — please try again"), key=ключ)
 		предел = лимит_заметок()
 		if сколько >= предел:
 			raise Отказ(
 				ПЕРЕПОЛНЕНО,
-				"Заметок уже предельно много: замените запись по существующему ключу",
+				_("The note limit has been reached: replace a note under an existing key"),
 				limit=предел,
 			)
 
@@ -841,7 +842,7 @@ def remember(kind: str, key: str, text: str, session: str | None = None, new_onl
 			).insert(ignore_permissions=True)
 		except frappe.QueryDeadlockError:
 			frappe.db.rollback()
-			raise Отказ(ЗАНЯТО, "Заметки сейчас пишет другой запрос — повторите", key=ключ)
+			raise Отказ(ЗАНЯТО, _("Another request is writing notes right now — please try again"), key=ключ)
 
 	ответ = {"key": запись.note_key, "kind": kind}
 	# Запоминают посреди занятия — там же напоминание, где урок по целям (#409).
@@ -902,7 +903,7 @@ def forget(key: str, course: str | None = None) -> dict:
 		},
 	)
 	if not имя:
-		raise Отказ(ЗАМЕТКА_НЕ_НАЙДЕНА, "Такой заметки нет", key=key)
+		raise Отказ(ЗАМЕТКА_НЕ_НАЙДЕНА, _("There's no such note"), key=key)
 	frappe.delete_doc("Agent Student Note", имя, ignore_permissions=True, delete_permanently=True)
 	delete_dynamic_links("Agent Student Note", имя)
 	return {"key": key}
@@ -1004,9 +1005,9 @@ def my_profile(user: str | None = None, summary: int | str | None = None) -> dic
 		if not видит_всё(кто):
 			# Несуществующий логин отклоняется так же: иначе отказ
 			# подтверждал бы, есть ли такой человек на платформе.
-			raise Отказ(ЧУЖОЙ_ПРОФИЛЬ, "Чужой профиль недоступен", user=user)
+			raise Отказ(ЧУЖОЙ_ПРОФИЛЬ, _("You can't view someone else's profile"), user=user)
 		if not frappe.db.exists("User", чей):
-			raise Отказ(ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН, "Такого пользователя нет", user=user)
+			raise Отказ(ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН, _("There's no such user"), user=user)
 
 	# Интервью ведётся только о себе: команда платформы смотрит чужой
 	# профиль, но не заполняет его за ученика.
@@ -1265,7 +1266,7 @@ def submit_homework(
 		# испорчена — откат и отказ «повторите», а не 500. Откат убирает и
 		# байты файлов этого вызова (`File.on_rollback`).
 		frappe.db.rollback()
-		raise Отказ(домашка.ЗАНЯТО, "Сдачу сейчас сохраняет другой запрос — повторите", lesson=lesson)
+		raise Отказ(домашка.ЗАНЯТО, _("Another request is saving this submission right now — please try again"), lesson=lesson)
 	return {
 		"space": пространства.наружу(пространство),
 		"submission": домашка.описание_сдачи(документ, с_версиями=True, читатель=ученик),
@@ -1296,7 +1297,7 @@ def _список_домашки(значение, тип: type) -> list:
 	):
 		raise Отказ(
 			домашка.НЕВЕРНЫЕ_ФАЙЛЫ,
-			"files — список объектов { name, data }, remove_files — список id файлов",
+			_("files must be a list of objects { name, data }, and remove_files a list of file ids"),
 		)
 	if тип is dict:
 		return [{**э, "data": э.get("data") if isinstance(э.get("data"), str) else None} for э in значение]
@@ -1913,7 +1914,7 @@ def _требовать_доступ_к_курсу(ученик: str, course: st
 	"""Тот же отказ, что у начала урока: курс не назначен или приостановлен."""
 	можно, причина = доступен_курс(ученик, course)
 	if not можно:
-		raise Отказ(причина, "Этот курс сейчас недоступен", course=course)
+		raise Отказ(причина, _("This course isn't available right now"), course=course)
 
 
 def _текущее_занятие(ученик: str, lesson: str, пространство: str | None):
@@ -2276,7 +2277,7 @@ def _курс_урока(lesson: str) -> str:
 	"""Курс урока — или отказ агенту: без курса занятию неоткуда взяться."""
 	курс = курс_урока(lesson)
 	if not курс:
-		raise Отказ(УРОК_НЕ_НАЙДЕН, "Такого урока нет", lesson=lesson)
+		raise Отказ(УРОК_НЕ_НАЙДЕН, _("There's no such lesson"), lesson=lesson)
 	return курс
 
 

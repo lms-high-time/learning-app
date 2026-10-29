@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 
 import frappe
+from frappe import _
 
 from lms_frappe_app.agent_learning.artifacts import schema
 from lms_frappe_app.agent_learning.artifacts.codes import АРТЕФАКТ_НЕ_НАЙДЕН, БЛОК_НЕ_НАЙДЕН
@@ -79,7 +80,7 @@ def _действующая_схема(course: str, artifact: str):
 		{"course": course, "slug": нормализовать_ключ(artifact), "is_active": 1},
 	)
 	if not имя:
-		raise Отказ(АРТЕФАКТ_НЕ_НАЙДЕН, "В этом курсе нет такого документа", artifact=artifact)
+		raise Отказ(АРТЕФАКТ_НЕ_НАЙДЕН, _("This course has no such document"), artifact=artifact)
 	return frappe.get_doc("Agent Course Artifact", имя)
 
 
@@ -89,7 +90,7 @@ def _блок_схемы(course: str, artifact: str, key: str):
 	ключ = нормализовать_ключ(key)
 	блок = next((б for б in схема.blocks if б.block_key == ключ), None)
 	if блок is None:
-		raise Отказ(БЛОК_НЕ_НАЙДЕН, "В этом документе нет такого блока", artifact=схема.slug, key=key)
+		raise Отказ(БЛОК_НЕ_НАЙДЕН, _("This document has no such section"), artifact=схема.slug, key=key)
 	return схема, блок
 
 

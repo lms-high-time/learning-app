@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import re
 
+from frappe import _
+
 from lms_frappe_app.agent_learning.artifacts.codes import (
 	НЕ_ТОТ_РАЗДЕЛ,
 	НЕВЕРНОЕ_ЗНАЧЕНИЕ,
@@ -106,13 +108,18 @@ def записать(раздел: dict, сырые, rows=None, delete_rows=None
 	fields = _словарь(fields, "fields")
 	if not (rows or delete_rows or fields):
 		raise Отказ(
-			НЕЧЕГО_ПИСАТЬ, "Нечего записывать: rows, delete_rows, fields или clear", key=раздел["key"]
+			НЕЧЕГО_ПИСАТЬ, _("Nothing to write: pass rows, delete_rows, fields, or clear"), key=раздел["key"]
 		)
 	if раздел["rows"] == ОДИН and (rows or delete_rows):
-		raise Отказ(НЕ_ТОТ_РАЗДЕЛ, "Раздел заполняется один раз: только fields", key=раздел["key"], rows=ОДИН)
+		raise Отказ(
+			НЕ_ТОТ_РАЗДЕЛ, _("This section is filled in once: fields only"), key=раздел["key"], rows=ОДИН
+		)
 	if раздел["rows"] == МНОГО and fields:
 		raise Отказ(
-			НЕ_ТОТ_РАЗДЕЛ, "Раздел ведётся строками: только rows и delete_rows", key=раздел["key"], rows=МНОГО
+			НЕ_ТОТ_РАЗДЕЛ,
+			_("This section is kept in rows: rows and delete_rows only"),
+			key=раздел["key"],
+			rows=МНОГО,
 		)
 
 	д = данные(сырые)
@@ -120,7 +127,9 @@ def записать(раздел: dict, сырые, rows=None, delete_rows=None
 	if fields:
 		for имя, значение in fields.items():
 			if имя not in свои:
-				raise Отказ(НЕТ_ПОЛЯ, "У раздела нет такого поля", key=раздел["key"], field=имя, fields=свои)
+				raise Отказ(
+					НЕТ_ПОЛЯ, _("This section has no such field"), key=раздел["key"], field=имя, fields=свои
+				)
 			приведено = привести(значение, field=имя)
 			if приведено is None:
 				д["fields"].pop(имя, None)
@@ -132,7 +141,7 @@ def записать(раздел: dict, сырые, rows=None, delete_rows=None
 	for id_строки in delete_rows:
 		найдено = _найти(текущие, id_строки)
 		if найдено is None:
-			raise Отказ(НЕТ_СТРОКИ, "Такой строки нет", key=раздел["key"], row=id_строки)
+			raise Отказ(НЕТ_СТРОКИ, _("There's no such row"), key=раздел["key"], row=id_строки)
 		текущие.remove(найдено)
 	for строка in rows:
 		строка = _словарь(строка, "rows")
@@ -140,16 +149,23 @@ def записать(раздел: dict, сырые, rows=None, delete_rows=None
 		for имя in строка:
 			if имя not in свои:
 				raise Отказ(
-					НЕТ_КОЛОНКИ, "У раздела нет такой колонки", key=раздел["key"], column=имя, columns=свои
+					НЕТ_КОЛОНКИ,
+					_("This section has no such column"),
+					key=раздел["key"],
+					column=имя,
+					columns=свои,
 				)
 		if id_строки:
 			цель = _найти(текущие, id_строки)
 			if цель is None:
-				raise Отказ(НЕТ_СТРОКИ, "Такой строки нет", key=раздел["key"], row=id_строки)
+				raise Отказ(НЕТ_СТРОКИ, _("There's no such row"), key=раздел["key"], row=id_строки)
 		else:
 			if len(текущие) >= СТРОК_МАКС:
 				raise Отказ(
-					СТРОК_СЛИШКОМ_МНОГО, f"Не больше {СТРОК_МАКС} строк", key=раздел["key"], max=СТРОК_МАКС
+					СТРОК_СЛИШКОМ_МНОГО,
+					_("No more than {0} rows").format(СТРОК_МАКС),
+					key=раздел["key"],
+					max=СТРОК_МАКС,
 				)
 			цель = {"id": _следующий_id(раздел, д, текущие)}
 			текущие.append(цель)
@@ -219,9 +235,9 @@ def _список(значение, имя: str) -> list:
 		try:
 			значение = json.loads(значение)
 		except ValueError as ошибка:
-			raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, f"{имя} — список", param=имя) from ошибка
+			raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, _("{0} must be a list").format(имя), param=имя) from ошибка
 	if not isinstance(значение, list):
-		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, f"{имя} — список", param=имя)
+		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, _("{0} must be a list").format(имя), param=имя)
 	return значение
 
 
@@ -232,7 +248,7 @@ def _словарь(значение, имя: str) -> dict:
 		try:
 			значение = json.loads(значение)
 		except ValueError as ошибка:
-			raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, f"{имя} — объект", param=имя) from ошибка
+			raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, _("{0} must be an object").format(имя), param=имя) from ошибка
 	if not isinstance(значение, dict):
-		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, f"{имя} — объект", param=имя)
+		raise Отказ(НЕВЕРНОЕ_ЗНАЧЕНИЕ, _("{0} must be an object").format(имя), param=имя)
 	return dict(значение)

@@ -104,7 +104,7 @@ def _учесть(имя: str, предел: int, окно: int) -> None:
 	if вызовов > предел:
 		frappe.local.response_headers.set("Retry-After", str(max(cint(осталось), 1)))
 		frappe.throw(
-			frappe._("Слишком много вызовов подряд — повторите через {0} с").format(max(cint(осталось), 1)),
+			frappe._("Too many calls in a row — try again in {0} s").format(max(cint(осталось), 1)),
 			frappe.RateLimitExceededError,
 		)
 
@@ -162,7 +162,7 @@ def проверить_квоту(пользователь: str, новых_ба
 	if занято + новых_байт > квота:
 		raise Отказ(
 			КВОТА_ИСЧЕРПАНА,
-			"Место под файлы за последние 30 дней закончилось — напишите в поддержку",
+			frappe._("You've used up your file storage for the last 30 days — contact support"),
 			limit_mb=квота // МБ,
 			used_mb=round(занято / МБ, 1),
 			days=ОКНО_КВОТЫ_ДНЕЙ,
@@ -179,7 +179,7 @@ def проверить_файл(файл, method=None) -> None:
 	if файл.is_folder or not под_квотой(файл.owner):
 		return
 	if not cint(файл.is_private) and not _внешний(файл) and _тип(файл) not in ПУБЛИЧНЫЕ_ТИПЫ:
-		frappe.throw(frappe._("Публично загружаются только изображения PNG, JPEG, GIF, WebP и AVIF"))
+		frappe.throw(frappe._("Only PNG, JPEG, GIF, WebP, and AVIF images can be uploaded publicly"))
 	if файл.flags.get(КВОТА_ПРОВЕРЕНА):
 		return
 	try:

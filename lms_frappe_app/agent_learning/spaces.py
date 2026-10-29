@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import frappe
+from frappe import _
 from frappe.utils import getdate
 
 from lms_frappe_app.agent_learning import announcements
@@ -116,7 +117,7 @@ def проверить(user: str, space: str | None) -> str | None:
 		return None
 	доступные = {п["id"] for п in пространства(user) if not п["suspended"]}
 	if space not in доступные:
-		raise Отказ(ПРОСТРАНСТВО_НЕДОСТУПНО, "Такого пространства у вас нет", space=space)
+		raise Отказ(ПРОСТРАНСТВО_НЕДОСТУПНО, _("You don't have such a space"), space=space)
 	return space
 
 
@@ -173,7 +174,7 @@ def пространство_курса(user: str, course: str, space: str | Non
 		if not в_пространстве(user, course, организация):
 			raise Отказ(
 				КУРС_НЕ_В_ПРОСТРАНСТВЕ,
-				"Этого курса нет в выбранном пространстве",
+				_("This course isn't in the selected space"),
 				course=course,
 				space=наружу(организация),
 			)

@@ -10,6 +10,7 @@
 
 import io
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from lms_frappe_app.agent_learning.artifacts import codes, data, export, fill, schema
@@ -228,6 +229,21 @@ class TestЗапись(UnitTestCase):
 			lambda: data.записать(ЖУРНАЛ, д, rows=[{"topic": "лишняя"}]),
 			max=data.СТРОК_МАКС,
 		)
+
+	def test_текст_отказа_на_языке_запроса(self):
+		"""Отказ записи документа видит человек на странице «Мои документы»: текст
+		— на языке запроса, плейсхолдер подставлен (learning-services#766)."""
+		д = data.записать(ЖУРНАЛ, None, rows=[{"topic": str(н)} for н in range(data.СТРОК_МАКС)])
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		for язык, текст in (
+			("en", f"No more than {data.СТРОК_МАКС} rows"),
+			("ru", f"Не больше {data.СТРОК_МАКС} строк"),
+		):
+			with self.subTest(язык):
+				frappe.local.lang = язык
+				with self.assertRaises(Отказ) as пойман:
+					data.записать(ЖУРНАЛ, д, rows=[{"topic": "лишняя"}])
+				self.assertEqual(пойман.exception.сообщение, текст)
 
 	def test_строки_и_json_строкой(self):
 		"""Тело запроса формой приносит списки и объекты строками JSON."""

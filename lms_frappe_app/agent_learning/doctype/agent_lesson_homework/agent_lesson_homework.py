@@ -4,6 +4,7 @@
 import re
 from datetime import date
 
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
@@ -41,11 +42,13 @@ def проверить_срок(due_mode, due_days, due_date, *, режимы=В
 	отсутствие строки.
 	"""
 	if due_mode not in режимы:
-		raise Отказ(НЕВЕРНЫЙ_СРОК, f"Срок: {', '.join(режимы)}", due_mode=due_mode)
+		raise Отказ(НЕВЕРНЫЙ_СРОК, _("Due date mode: {0}").format(", ".join(режимы)), due_mode=due_mode)
 	if due_mode == "relative" and cint(due_days) <= 0:
-		raise Отказ(НЕВЕРНЫЙ_СРОК, "Относительному сроку нужно число дней больше нуля", due_mode=due_mode)
+		raise Отказ(
+			НЕВЕРНЫЙ_СРОК, _("A relative due date needs a number of days greater than zero"), due_mode=due_mode
+		)
 	if due_mode == "absolute" and not due_date:
-		raise Отказ(НЕВЕРНЫЙ_СРОК, "Абсолютному сроку нужна дата", due_mode=due_mode)
+		raise Отказ(НЕВЕРНЫЙ_СРОК, _("A fixed due date needs a date"), due_mode=due_mode)
 	# Why: лишнее поле другого режима читалось бы как действующий срок.
 	return (
 		cint(due_days) if due_mode == "relative" else None,
@@ -64,8 +67,8 @@ def _дата(значение) -> str:
 	текст = str(значение)
 	# Why: `fromisoformat` с Python 3.11 принимает и `20300501`, и `2030-W01-1`.
 	if not ФОРМАТ_ДАТЫ.fullmatch(текст):
-		raise Отказ(НЕВЕРНЫЙ_СРОК, "Дата — ГГГГ-ММ-ДД", due_date=текст)
+		raise Отказ(НЕВЕРНЫЙ_СРОК, _("Date format: YYYY-MM-DD"), due_date=текст)
 	try:
 		return date.fromisoformat(текст).isoformat()
 	except ValueError:
-		raise Отказ(НЕВЕРНЫЙ_СРОК, "Дата — ГГГГ-ММ-ДД", due_date=текст)
+		raise Отказ(НЕВЕРНЫЙ_СРОК, _("Date format: YYYY-MM-DD"), due_date=текст)

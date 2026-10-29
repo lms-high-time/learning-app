@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from datetime import datetime, time, timedelta
 
 import frappe
+from frappe import _
 from frappe.core.api.file import get_max_file_size
 from frappe.core.doctype.file.exceptions import MaxFileSizeReachedError
 from frappe.utils import get_datetime, getdate, now_datetime
@@ -382,14 +383,14 @@ def _новая_сдача(задание, ученик: str, организац
 def _ответ(документ, answer: str | None, новые: Sequence[tuple[str, bytes]], убрать: Sequence[str]):
 	"""Текст и прежние файлы нового ответа — или отказ, до первой записи."""
 	if документ.status == ДОМАШКА_ПРИНЯТА:
-		raise Отказ(УЖЕ_ПРИНЯТА, "Домашку уже приняли — её больше не правят", submission=документ.name)
+		raise Отказ(УЖЕ_ПРИНЯТА, _("This homework has already been accepted and can no longer be edited"), submission=документ.name)
 	текст = (документ.answer or "") if answer is None else answer.strip()
 	убираемые = set(убрать)
 	файлы = [строка.file for строка in документ.files if строка.file not in убираемые]
 	if len(файлы) + len(новые) > ПРЕДЕЛ_ФАЙЛОВ:
-		raise Отказ(СЛИШКОМ_МНОГО_ФАЙЛОВ, f"В ответе не больше {ПРЕДЕЛ_ФАЙЛОВ} файлов", limit=ПРЕДЕЛ_ФАЙЛОВ)
+		raise Отказ(СЛИШКОМ_МНОГО_ФАЙЛОВ, _("An answer can have at most {0} files").format(ПРЕДЕЛ_ФАЙЛОВ), limit=ПРЕДЕЛ_ФАЙЛОВ)
 	if not текст and not файлы and not новые:
-		raise Отказ(ПУСТОЙ_ОТВЕТ, "Ответ пустой: нужен текст или файл")
+		raise Отказ(ПУСТОЙ_ОТВЕТ, _("The answer is empty: add text or a file"))
 	return текст, файлы
 
 
@@ -420,38 +421,39 @@ def сохранить(
 	# Why: задание, снятое из релиза (`retired`), живёт ради уже выданных
 	# сдач — новой сдачи по нему не заводят, для ученика без сдачи его нет.
 	if not задание or (задание.retired and not имя):
-		raise Отказ(ЗАДАНИЯ_НЕТ, "У этого урока нет домашнего задания", lesson=lesson)
+		raise Отказ(ЗАДАНИЯ_НЕТ, _("This lesson has no homework"), lesson=lesson)
 	текст_можно = задание.answer_mode in ("text", "text_and_files")
 	файлы_можно = задание.answer_mode in ("files", "text_and_files")
 	if answer and answer.strip() and not текст_можно:
-		raise Отказ(НЕ_ТОТ_ВИД_ОТВЕТА, "Это задание сдаётся файлами", answer_mode=задание.answer_mode)
+		raise Отказ(НЕ_ТОТ_ВИД_ОТВЕТА, _("This homework is submitted as files"), answer_mode=задание.answer_mode)
 	if новые and not файлы_можно:
-		raise Отказ(НЕ_ТОТ_ВИД_ОТВЕТА, "Это задание сдаётся текстом", answer_mode=задание.answer_mode)
+		raise Отказ(НЕ_ТОТ_ВИД_ОТВЕТА, _("This homework is submitted as text"), answer_mode=задание.answer_mode)
 	if answer and len(answer) > ДЛИНА_ОТВЕТА:
 		raise Отказ(
-			ДЛИННЫЙ_ОТВЕТ, "Текст ответа слишком длинный", limit=ДЛИНА_ОТВЕТА, length=len(answer)
+			ДЛИННЫЙ_ОТВЕТ, _("The answer text is too long"), limit=ДЛИНА_ОТВЕТА, length=len(answer)
 		)
 	предел = файлы_платформы.предел_байт()
 	for имя_файла, данные in новые:
 		# Why: пустой или битый base64 приходит пустыми байтами — выброшенный
 		# молча, файл пропал бы из ответа, а ученик считал бы его сданным.
 		if not данные:
-			raise Отказ(ФАЙЛ_ПУСТ, "Файл не передан или пуст", file=имя_файла)
+			raise Отказ(ФАЙЛ_ПУСТ, _("The file is missing or empty"), file=имя_файла)
 		if len(данные) > предел:
-			raise Отказ(ФАЙЛ_ВЕЛИК, "Файл больше допустимого", file=имя_файла, limit_mb=предел // (1024 * 1024))
+			raise Отказ(ФАЙЛ_ВЕЛИК, _("The file is larger than allowed"), file=имя_файла, limit_mb=предел // (1024 * 1024))
 		if not файлы_платформы.тип_принят(имя_файла, данные):
 			допустимые = sorted(файлы_платформы.ТИПЫ_ДОМАШКИ)
 			raise Отказ(
 				ТИП_НЕ_ПРИНЯТ,
-				"Такой файл сдать нельзя: тип не из списка или содержимое не того типа. "
-				f"Принимаются: {', '.join(допустимые)}",
+				_(
+					"This file can't be submitted: its type isn't on the list or its content doesn't match the type. Accepted: {0}"
+				).format(", ".join(допустимые)),
 				file=имя_файла,
 				allowed=допустимые,
 			)
 	if sum(len(данные) for _, данные in новые) > ПРЕДЕЛ_СОХРАНЕНИЯ_МБ * 1024 * 1024:
 		raise Отказ(
 			ОТВЕТ_ВЕЛИК,
-			f"За одно сохранение — не больше {ПРЕДЕЛ_СОХРАНЕНИЯ_МБ} МБ файлов",
+			_("At most {0} MB of files per save").format(ПРЕДЕЛ_СОХРАНЕНИЯ_МБ),
 			limit_mb=ПРЕДЕЛ_СОХРАНЕНИЯ_МБ,
 		)
 	проверить_квоту(ученик, sum(len(данные) for _, данные in новые))
@@ -462,7 +464,7 @@ def сохранить(
 	else:
 		заблокированное = заблокировать_задание(задание.name)
 		if not заблокированное or заблокированное.retired:
-			raise Отказ(ЗАДАНИЯ_НЕТ, "У этого урока нет домашнего задания", lesson=lesson)
+			raise Отказ(ЗАДАНИЯ_НЕТ, _("This lesson has no homework"), lesson=lesson)
 		документ = _новая_сдача(задание, ученик, организация, сейчас)
 	новая = not документ.name
 	текст, файлы = _ответ(документ, answer, новые, убрать)
@@ -494,14 +496,14 @@ def сохранить(
 		# Why: предел Frappe (`max_file_size`) бывает меньше нашего.
 		raise Отказ(
 			ФАЙЛ_ВЕЛИК,
-			"Файл больше допустимого",
+			_("The file is larger than allowed"),
 			file=имя_файла,
 			limit_mb=get_max_file_size() // (1024 * 1024),
 		) from ошибка
 	except frappe.ValidationError as ошибка:
 		_откатить(вложенные)
 		# Why: запрещённый тип Frappe отдаёт 417 без кода — агенту нужен код контракта.
-		raise Отказ(ФАЙЛ_ОТКЛОНЁН, "Такой файл сдать нельзя", file=имя_файла) from ошибка
+		raise Отказ(ФАЙЛ_ОТКЛОНЁН, _("This file can't be submitted"), file=имя_файла) from ошибка
 	frappe.db.release_savepoint(ТОЧКА_СОХРАНЕНИЯ)
 
 	документ.answer = текст
@@ -580,20 +582,20 @@ def проверить(куратор: str, имя: str, действие: str, 
 	из_статуса, в_статус, событие, нужен = ПЕРЕХОДЫ[действие]
 	текст = (comment or "").strip()
 	if нужен and not текст:
-		raise Отказ(НУЖЕН_КОММЕНТАРИЙ, "Напишите, что доделать", submission=имя)
+		raise Отказ(НУЖЕН_КОММЕНТАРИЙ, _("Write what needs to be redone"), submission=имя)
 	документ = frappe.get_doc(СДАЧА, имя, for_update=True)
 	if not документ.member:
 		# Why: сброс прогресса архивирует сдачу, пока куратор на неё смотрит.
-		raise Отказ(НЕ_ТОТ_СТАТУС, "Сдача больше не активна", submission=имя, status=документ.status)
+		raise Отказ(НЕ_ТОТ_СТАТУС, _("This submission is no longer active"), submission=имя, status=документ.status)
 	if int(version) != (документ.version or 0):
 		raise Отказ(
 			ВЕРСИЯ_УСТАРЕЛА,
-			"Ученик сохранил новую версию — посмотрите её",
+			_("The student has saved a new version — take a look at it"),
 			submission=имя,
 			version=документ.version,
 		)
 	if документ.status != из_статуса:
-		raise Отказ(НЕ_ТОТ_СТАТУС, "Сдачу уже проверили", submission=имя, status=документ.status)
+		raise Отказ(НЕ_ТОТ_СТАТУС, _("This submission has already been reviewed"), submission=имя, status=документ.status)
 	документ.status = в_статус
 	документ.append(
 		"history",
@@ -758,10 +760,16 @@ def _файлы(имена: list[str], сведения: dict[str, dict]) -> lis
 	return [{"id": имя, **сведения[имя]} for имя in имена if имя in сведения]
 
 
-#: Как назвать в журнале куратора без имени в профиле.
-КУРАТОР = "Куратор"
-#: Как назвать в журнале куратора ученика без имени в профиле.
-УЧЕНИК = "Ученик"
+def подпись_куратора() -> str:
+	"""Как назвать в журнале куратора без имени в профиле — на языке запроса."""
+	return _("Curator")
+
+
+def подпись_ученика() -> str:
+	"""Как назвать в журнале куратора ученика без имени в профиле — на языке
+	запроса. Контекст — у `Student` есть перевод Learning («Студент»), и общий
+	ключ переопределил бы его по всей платформе."""
+	return _("Student", context="Homework history")
 
 
 def _автор_события(user: str | None, читатель: str, ученик: str | None = None) -> dict:
@@ -784,7 +792,7 @@ def автор_события(user: str | None, имя: str | None, читате
 		return {"by": None, "by_name": None}
 	if user == читатель:
 		return {"by": user, "by_name": имя or user}
-	return {"by": None, "by_name": имя or (УЧЕНИК if user == ученик else КУРАТОР)}
+	return {"by": None, "by_name": имя or (подпись_ученика() if user == ученик else подпись_куратора())}
 
 
 def _время(значение) -> str | None:

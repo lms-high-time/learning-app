@@ -134,6 +134,9 @@ class IntegrationTestHomeworkApi(IntegrationTestCase):
 		документ.append("history", {"event": "accepted", "by_user": безымянный, "at": now_datetime()})
 		документ.save(ignore_permissions=True)
 		frappe.set_user(self.ученик)
+		# Подпись куратора без имени — на языке запроса (learning-services#766).
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
 		for история in (
 			student.homework(lesson=self.урок)["data"]["submission"]["history"],
 			student.my_homework(lesson=self.урок)["data"]["items"][0]["submission"]["history"],
