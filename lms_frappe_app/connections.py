@@ -329,7 +329,7 @@ def завершить_сессию(пользователь: str, сессия:
 		if not _тот_же(отпечаток(session_token_row.sid), сессия or ""):
 			continue
 		if session_token_row.sid == current_session_token:
-			raise Отказ(ТЕКУЩАЯ_СЕССИЯ, _("To end this session, use “Sign out”"))
+			raise Отказ(ТЕКУЩАЯ_СЕССИЯ, _("To end this session, use “Log out”"))
 		delete_session(session_token_row.sid, user=пользователь, reason=ПРИЧИНА_ЗАВЕРШЕНИЯ)
 		return
 	raise Отказ(СЕССИЯ_НЕ_НАЙДЕНА, _("This session has already been ended"))

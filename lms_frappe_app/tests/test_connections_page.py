@@ -65,19 +65,12 @@ class IntegrationTestConnectionsPage(IntegrationTestCase):
 		with self.subTest("ни токена, ни sid"):
 			self.assertNotIn(токен, html)
 			self.assertNotIn(другая, html)
-
-	def test_страница_на_английском(self):
-		"""Разметка, тексты скрипта и даты — на языке страницы (learning-services#767)."""
-		ученик = создать_ученика(f"page-en-{frappe.generate_hash(length=8)}@example.com")
-		клиент = завести_клиента(адрес="https://agent.example/cb")
-		завести_токен(клиент, ученик, f"page-en-{frappe.generate_hash(length=8)}")
-		frappe.set_user(ученик)
-		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
-		frappe.local.lang = "en"
-
-		html = get_html_for_route("connections")
-
-		self.assertIn("<h1>Agents and sessions</h1>", html)
-		self.assertIn('<h2 id="agents-title" tabindex="-1">Connected agents</h2>', html)
-		self.assertIn('"no_agents": "No connected agents."', html)
-		self.assertIn(f"connected {languages.дата_время(now_datetime(), 'en')[:6]}", html)
+		with self.subTest("en: разметка, тексты скрипта и даты — на языке страницы"):
+			# learning-services#767
+			frappe.local.lang = "en"
+			html = get_html_for_route("connections")
+			self.assertIn("<h1>Agents and sessions</h1>", html)
+			self.assertIn('<h2 id="agents-title" tabindex="-1">Connected agents</h2>', html)
+			self.assertIn("End all except this one", html)
+			self.assertIn('"no_agents": "No connected agents."', html)
+			self.assertIn(f"connected {languages.дата_время(now_datetime(), 'en')[:6]}", html)

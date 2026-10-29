@@ -582,7 +582,7 @@ def проверить(куратор: str, имя: str, действие: str, 
 	из_статуса, в_статус, событие, нужен = ПЕРЕХОДЫ[действие]
 	текст = (comment or "").strip()
 	if нужен and not текст:
-		raise Отказ(НУЖЕН_КОММЕНТАРИЙ, _("Write what needs to be redone"), submission=имя)
+		raise Отказ(НУЖЕН_КОММЕНТАРИЙ, _("Write what needs to be changed"), submission=имя)
 	документ = frappe.get_doc(СДАЧА, имя, for_update=True)
 	if not документ.member:
 		# Why: сброс прогресса архивирует сдачу, пока куратор на неё смотрит.

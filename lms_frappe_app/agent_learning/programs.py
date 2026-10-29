@@ -21,6 +21,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning.errors import Отказ
 
 #: Код отказа: курс программы заперт, пока не пройден предыдущий.
@@ -188,8 +189,11 @@ def требовать_порядок(ученик: str, курс: str) -> None:
 	if заперт:
 		raise Отказ(
 			ПОРЯДОК_ПРОГРАММЫ,
-			_("Complete the course “{0}” first: the program “{1}” is taken in order").format(
-				заперт["previous"]["title"], заперт["program_title"]
+			_("Complete the course “{0}” first: the program “{1}” must be taken in order").format(
+				# Название курса — на языке запроса, если у курса есть перевод; у
+				# программы переводов нет. Данные отказа (`previous`) — как есть.
+				переводы_курса.название(заперт["previous"]["id"], переводы_курса.язык_запроса()),
+				заперт["program_title"],
 			),
 			course=курс,
 			**заперт,

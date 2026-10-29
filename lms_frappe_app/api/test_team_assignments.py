@@ -10,6 +10,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, nowdate
 
+from lms_frappe_app import languages
 from lms_frappe_app.agent_learning import notices
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.api import team
@@ -163,6 +164,27 @@ class IntegrationTestTeamAssignments(IntegrationTestCase):
 			pluck="user",
 		)
 		self.assertEqual(sorted(напоминания), sorted([self.сотрудник, self.руководитель]))
+
+	def test_напоминание_о_сроке_на_языке_получателя(self):
+		"""Напоминание зовёт задача — язык и дата у каждого свои (learning-services#768)."""
+		frappe.db.set_value("User", self.сотрудник, "language", "ru")
+		frappe.db.set_value("User", self.коллега, "language", "en")
+		срок = add_days(nowdate(), 2)
+		self.назначить(deadline=срок)
+		self.письма.reset_mock()
+
+		notices.напомнить_о_сроках()
+
+		письма = {вызов.kwargs["recipients"][0]: вызов.kwargs for вызов in self.письма.call_args_list}
+		курс = frappe.db.get_value("LMS Course", self.курс, "title")
+		self.assertEqual(письма[self.коллега]["subject"], f"The course “{курс}” is due soon")
+		self.assertIn(
+			f"is due in a few days. Due date: {languages.дата(срок, 'en')}.", письма[self.коллега]["message"]
+		)
+		self.assertEqual(письма[self.сотрудник]["subject"], f"Скоро срок курса «{курс}»")
+		self.assertIn(
+			f"осталось несколько дней. Срок — {languages.дата(срок, 'ru')}.", письма[self.сотрудник]["message"]
+		)
 
 	def test_сбой_одного_напоминания_не_останавливает_рассылку(self):
 		self.назначить(deadline=add_days(nowdate(), 2))

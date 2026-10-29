@@ -104,7 +104,7 @@ def _учесть(имя: str, предел: int, окно: int) -> None:
 	if вызовов > предел:
 		frappe.local.response_headers.set("Retry-After", str(max(cint(осталось), 1)))
 		frappe.throw(
-			frappe._("Too many calls in a row — try again in {0} s").format(max(cint(осталось), 1)),
+			frappe._("Too many calls in a row — try again in {0} seconds").format(max(cint(осталось), 1)),
 			frappe.RateLimitExceededError,
 		)
 

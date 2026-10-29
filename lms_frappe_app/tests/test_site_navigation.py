@@ -80,7 +80,11 @@ class IntegrationTestSiteNavigation(IntegrationTestCase):
 		from lms_frappe_app.www import author
 
 		frappe.set_user(self.ученик)
+		# Кабинет автора русский при любом языке — и шапка с подвалом тоже.
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "en"
 		context = frappe._dict()
 		author.get_context(context)
 		self.assertEqual(context.home_page, "/lms")
-		self.assertTrue(context.top_bar_items)
+		self.assertEqual(context.top_bar_items[0].label, "Курсы")
+		self.assertIn(">исходный код</a>", context.footer_powered)

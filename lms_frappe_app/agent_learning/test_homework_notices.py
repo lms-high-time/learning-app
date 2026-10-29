@@ -483,8 +483,16 @@ class IntegrationTestHomeworkNotices(IntegrationTestCase):
 			self.вернуть()
 			письма.разослать()
 			[письмо] = self.письма_к(self.ученик)
-			self.assertTrue(письмо["subject"].endswith("” needs more work"), письмо["subject"])
-			self.assertIn("has been returned. What to redo:", письмо["message"])
+			self.assertTrue(письмо["subject"].endswith("” needs changes"), письмо["subject"])
+			self.assertIn("has been sent back for changes. What to change:", письмо["message"])
+		with self.subTest("отменили приём"):
+			self.заново()
+			frappe.db.set_value("User", self.ученик, "language", "en")
+			self.вернуть("reopen", "Принял по ошибке")
+			письма.разослать()
+			[письмо] = self.письма_к(self.ученик)
+			self.assertIn("Acceptance of your homework “", письмо["message"])
+			self.assertIn("has been canceled. What to change:", письмо["message"])
 		with self.subTest("дайджест"):
 			self.заново()
 			frappe.db.set_value("User", self.менеджер, "language", "en")

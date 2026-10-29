@@ -28,7 +28,10 @@ def привести(значение, **где) -> str | None:
 	текст = str(значение).strip()
 	if len(текст) > ДЛИНА_МАКС:
 		raise Отказ(
-			НЕВЕРНОЕ_ЗНАЧЕНИЕ, _("No longer than {0} characters").format(ДЛИНА_МАКС), max=ДЛИНА_МАКС, **где
+			НЕВЕРНОЕ_ЗНАЧЕНИЕ,
+			_("Must be no longer than {0} characters").format(ДЛИНА_МАКС),
+			max=ДЛИНА_МАКС,
+			**где,
 		)
 	return текст or None
 

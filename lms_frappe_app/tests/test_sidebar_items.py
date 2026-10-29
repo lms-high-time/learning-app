@@ -22,13 +22,17 @@ class IntegrationTestSidebarItems(IntegrationTestCase):
 
 	def test_пункты_сайдбара_ставятся_один_раз(self):
 		from lms_frappe_app.install import обеспечить_пункты_сайдбара
-		from lms_frappe_app.patches.v0_1 import sidebar_titles_english
 
 		frappe.set_user("Administrator")
+		# Как на новом сайте: заглушек ещё нет. `Why:` сайт разработки мог
+		# завести их до английских подписей, а их переименование — разовый
+		# патч со своим тестом (`test_патч_подписей_на_английском`).
+		заглушки = frappe.get_all("Web Page", {"route": ("in", [п[0] for п in ПУНКТЫ])}, pluck="name")
+		frappe.db.delete(
+			"LMS Sidebar Item", {"parenttype": "LMS Settings", "web_page": ("in", заглушки or [""])}
+		)
+		frappe.db.delete("Web Page", {"name": ("in", заглушки or [""])})
 		обеспечить_пункты_сайдбара()
-		# Заглушки сайта, заведённые до английских подписей, переименовывает
-		# патч — как на стенде после миграции.
-		sidebar_titles_english.execute()
 		строки = {"parenttype": "LMS Settings", "parentfield": "sidebar_items"}
 		было = frappe.get_all("LMS Sidebar Item", строки, ["name", "modified"], order_by="idx")
 		обеспечить_пункты_сайдбара()

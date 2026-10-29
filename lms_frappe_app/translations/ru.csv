@@ -1,7 +1,6 @@
 A copy of the documents you built in its space is attached.,"Копия документов, которые вы собирали в её пространстве, — во вложении."
 "A file's URL, thumbnail, and privacy can't be changed","Адрес, миниатюра и приватность файла не меняются"
 A fixed due date needs a date,Абсолютному сроку нужна дата
-A homework can have only one due date in an assignment,У задания в назначении один срок
 A new account has been created for you at {0}.,Для вас создан аккаунт на {0}.
 A new batch '{0}' has been published that might interest you. Check it out!,"Опубликован новый поток «{0}», который может вас заинтересовать. Загляните!"
 A new course '{0}' has been published that might interest you. Check it out!,"Опубликован новый курс «{0}», который может вас заинтересовать. Загляните!"
@@ -14,7 +13,7 @@ A short summary of the course for search results.,Краткое описани�
 A team with this name already exists,Команда с таким названием уже есть
 About this course,О курсе
 Accept and continue,Принять и продолжить
-Acceptance of your homework “{0}” for the lesson “{1}” in the course “{2}” has been revoked. What to redo:,Вам отменили приём домашнего задания «{0}» к уроку «{1}» курса «{2}». Что доделать:
+Acceptance of your homework “{0}” for the lesson “{1}” in the course “{2}” has been canceled. What to change:,Вам отменили приём домашнего задания «{0}» к уроку «{1}» курса «{2}». Что доделать:
 "Access courses, join batches, and track learning progress","Доступ к курсам, участие в потоках и отслеживание прогресса"
 Account deletion,Удаление учётной записи
 Activate this Google Meet account for scheduling meetings.,Активировать этот аккаунт Google Meet для планирования встреч.
@@ -53,7 +52,7 @@ Assignments deleted successfully,Задания успешно удалены
 At least {0} characters and no platform name. Tip: a few words strung together work well.,Не короче {0} символов и без названия платформы. Удобно — несколько слов подряд.
 At most {0} MB of files per save,За одно сохранение — не больше {0} МБ файлов
 Attempted Questions,Отвечено вопросов
-Author workspace,Кабинет автора
+Author view,Кабинет автора
 Average Completion Rate,Средняя доля прохождения
 Average Watch Time (mins),Среднее время просмотра (мин)
 Award my first certificate,Выдать первый сертификат
@@ -100,7 +99,7 @@ Comma separated keywords,Ключевые слова через запятую
 Company and team,Компания и команда,Learner profile
 Company or Workplace,Компания или рабочее место
 Complete Registration,Завершить регистрацию
-Complete the course “{0}” first: the program “{1}” is taken in order,Сначала пройдите курс «{0}»: программа «{1}» идёт по порядку
+Complete the course “{0}” first: the program “{1}” must be taken in order,Сначала пройдите курс «{0}»: программа «{1}» идёт по порядку
 Complete your profile,Заполните профиль
 Complete your registration,Завершите регистрацию
 Complete your sign-up,Завершите регистрацию
@@ -118,6 +117,7 @@ Confirm password,Повторите пароль
 Connect a Google Meet account to schedule and host live classes.,"Подключите аккаунт Google Meet, чтобы планировать и проводить онлайн-уроки."
 Connect a Zoom account to schedule and host live classes.,"Подключите аккаунт Zoom, чтобы планировать и проводить онлайн-уроки."
 Connect an agent to Cenda?,Подключить агента к&nbsp;Cenda?
+Connect an assistant,Подключить ассистента
 Connect {0} to Cenda?,Подключить {0} к&nbsp;Cenda?
 Connected agents,Подключённые агенты
 Continue,Продолжить
@@ -150,6 +150,7 @@ Course thumbnail,Обложка курса
 Course unpublished,Курс снят с публикации
 Course {0} is still being prepared,Курс {0} ещё готовится
 Course {0} isn't available to team {1},Курс {0} не открыт команде {1}
+Courses,Курсы
 Create Account,Создать аккаунт
 Create a reusable email template for your notifications.,Создайте многоразовый шаблон письма для ваших уведомлений.
 Create and manage reusable email templates for your notifications.,Создавайте и ведите многоразовые шаблоны писем для ваших уведомлений.
@@ -183,8 +184,9 @@ Display correct answers after each question is attempted.,Показывать �
 "Do not refresh the page or close this window. If you do, the quiz will be submitted automatically.",Не обновляйте страницу и не закрывайте это окно. Иначе тест будет отправлен автоматически.
 Don't have an account?,Нет аккаунта?
 "Drag and drop a ZIP file, or upload from your",Перетащите ZIP-файл или загрузите со своего
-Due date mode: {0},Срок: {0}
+Due date mode must be one of: {0},Срок: {0}
 Duplicate Template,Дублировать шаблон
+Each homework assignment can have only one due date in an assignment,У задания в назначении один срок
 Each user can only receive this badge one time.,Каждый пользователь может получить этот бейдж только один раз.
 Edit Google Meet Account,Изменить аккаунт Google Meet
 Edit Member,Изменить участника
@@ -335,6 +337,8 @@ Member added successfully,Участник успешно добавлен
 Member updated,Участник обновлён
 Meta keywords,Мета-ключевые слова
 Moodle,Moodle
+Must be no longer than {0} characters,Не длиннее {0} знаков
+My documents,Мои документы
 My sessions,Мои сессии
 New Google Meet Account,Новый аккаунт Google Meet
 New lesson,Новый урок
@@ -347,7 +351,6 @@ No calendar is configured for the conferencing provider. Please set up a calenda
 No chapters yet,Глав пока нет
 No connected agents.,Подключённых агентов нет.
 No courses added to this batch,В этот поток не добавлено ни одного курса
-No longer than {0} characters,Не длиннее {0} знаков
 No more than {0} rows,Не больше {0} строк
 No other published courses available,Других опубликованных курсов нет
 No read notifications,Нет прочитанных уведомлений
@@ -486,10 +489,10 @@ Short introduction,Краткое вступление
 Sign In,Вход
 Sign Up,Регистрация
 Sign in,Войти
-Sign in with Google and don't know your password? {0}Set one using the link in an email{1}: changing your password ends all your other sessions and disconnects your agents on its own.,Входите через Google и не знаете пароля? {0}Задайте его по ссылке из письма{1}: смена пароля сама завершает все другие сессии и отключает агентов.
 Sign out,Выйти
 Sign up,Зарегистрироваться
 Sign-in required,Требуется вход
+Signed in with Google and don't know your password? {0}Set one using the link in an email{1}: changing your password automatically ends all your other sessions and disconnects your agents.,Входите через Google и не знаете пароля? {0}Задайте его по ссылке из письма{1}: смена пароля сама завершает все другие сессии и отключает агентов.
 Signup Disabled,Регистрация отключена
 Signups have been disabled for this website.,Регистрация на этом сайте отключена.
 Skip for now,Пропустить
@@ -506,6 +509,7 @@ Student,Ученик,Homework history
 Student View,Режим студента
 Student enrolled successfully,Студент успешно записан
 Student is already enrolled in this course.,Студент уже записан на этот курс.
+Study in the browser,Заниматься в браузере
 Submissions,Отправленные работы
 Switch account,Сменить
 TalentLMS,TalentLMS
@@ -515,7 +519,7 @@ Teachable,Teachable
 Team {0} is suspended,Команда {0} приостановлена
 Thank you,Спасибо
 Thanks,Спасибо
-The Cenda web chat connects on its own when you open the chat. Disconnecting signs you out of the chat on all devices; it will connect again the next time you open it.,"Веб-чат Cenda подключается сам, когда вы открываете чат. Отключение выведет из чата на всех устройствах; при следующем открытии он подключится снова."
+The Cenda web chat connects automatically when you open the chat. Disconnecting signs you out of the chat on all devices; it will connect again the next time you open it.,"Веб-чат Cenda подключается сам, когда вы открываете чат. Отключение выведет из чата на всех устройствах; при следующем открытии он подключится снова."
 The Google Meet account does not have a Google Calendar configured. Please set up a Google Calendar first.,Для аккаунта Google Meet не настроен Google Календарь. Сначала настройте Google Календарь.
 The agent,Агент
 The answer is empty: add text or a file,Ответ пустой: нужен текст или файл
@@ -533,7 +537,7 @@ The file is larger than allowed,Файл больше допустимого
 The file is missing or empty,Файл не передан или пуст
 The homework “{0}” for the lesson “{1}” in the course “{2}” is due {3}.,Срок домашнего задания «{0}» к уроку «{1}» курса «{2}» — {3}.
 The homework “{0}” is due soon,Скоро срок домашнего задания «{0}»
-The homework “{0}” needs more work,Домашнее задание «{0}» — на доработку
+The homework “{0}” needs changes,Домашнее задание «{0}» — на доработку
 The instructor has left a comment on your assignment {0},Инструктор оставил комментарий к вашему заданию {0}
 The last day to schedule your evaluation is {0}.,"Последний день, чтобы записаться на оценку, — {0}."
 The name must be 2 to 140 characters long,Название — от 2 до 140 знаков
@@ -611,9 +615,9 @@ This video's codec can't be played in browsers (e.g. HEVC/H.265). Please upload 
 Time per week,Время в неделю,Learner profile
 Title cannot be empty.,Заголовок не может быть пустым.
 "To continue, confirm your age and accept the terms.","Чтобы продолжить, подтвердите возраст и примите условия."
-"To end this session, use “Sign out”",Эту сессию завершает «Выйти»
+"To end this session, use “Log out”",Эту сессию завершает «Выйти»
 Too many attempts. Wait a moment and try again.,Слишком много попыток. Подождите и попробуйте снова.
-Too many calls in a row — try again in {0} s,Слишком много вызовов подряд — повторите через {0} с
+Too many calls in a row — try again in {0} seconds,Слишком много вызовов подряд — повторите через {0} с
 Too many incorrect attempts. Try again in a few minutes,Слишком много неверных попыток. Попробуйте через несколько минут
 Tools and methods,Инструменты и методики,Learner profile
 Total Questions,Всего вопросов
@@ -660,7 +664,7 @@ Which agents are connected to your account and where you're signed in to Cenda. 
 Whole Organization,Вся команда
 Work,Работа
 Work context,Контекст работы,Learner profile
-Write what needs to be redone,"Напишите, что доделать"
+Write what needs to be changed,"Напишите, что доделать"
 Yandex Browser,Яндекс Браузер
 You already have an account on {0},У вас уже есть аккаунт на {0}
 You are not authorized to view the assessments of this batch.,У вас нет прав на просмотр оценок этого потока.
@@ -716,11 +720,11 @@ YouTube link added — students see it embedded on the course page. Clear the fi
 Your account and the data associated with it have been deleted.,Учётная запись и связанные с ней данные удалены.
 "Your account has been closed. The data associated with it will be deleted within 30 days. If you clicked by mistake, email privacy@cenda.app.","Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней. Если вы нажали по ошибке, напишите на privacy@cenda.app."
 Your account has no password. Set one using the link in an email,У аккаунта нет пароля. Задайте его по ссылке из письма
-Your account has no password. {0}Set one using the link in an email{1} — changing your password will end your other sessions on its own.,У аккаунта нет пароля. {0}Задайте его по ссылке из письма{1} — смена пароля сама завершит другие сессии.
+Your account has no password. {0}Set one using the link in an email{1} — changing your password will automatically end your other sessions.,У аккаунта нет пароля. {0}Задайте его по ссылке из письма{1} — смена пароля сама завершит другие сессии.
 Your browser does not support the video tag.,Ваш браузер не поддерживает тег video.
 Your documents from the team “{0}”,Ваши документы из команды «{0}»
 Your evaluation for the course {0} has been scheduled on {1} at {2} ({3} time).,Ваша оценка по курсу {0} назначена на {1} в {2} (время {3}).
-Your homework “{0}” for the lesson “{1}” in the course “{2}” has been returned. What to redo:,Вам вернули домашнее задание «{0}» к уроку «{1}» курса «{2}». Что доделать:
+Your homework “{0}” for the lesson “{1}” in the course “{2}” has been sent back for changes. What to change:,Вам вернули домашнее задание «{0}» к уроку «{1}» курса «{2}». Что доделать:
 Your login ID is:,Ваш логин:
 Your password has expired. Set a new one.,Срок пароля истёк — задайте новый.
 Zoom,Zoom

@@ -825,7 +825,8 @@ def _очередь(заметки: list[dict]) -> dict[str, list[dict]]:
 
 def get_context(context):
 	context.no_breadcrumbs = True
-	шапка_платформы(context)
+	# Кабинет автора — русский при любом языке, и шапка с подвалом тоже.
+	шапка_платформы(context, "ru")
 	context.update(
 		сведения(
 			frappe.session.user,

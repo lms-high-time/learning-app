@@ -76,7 +76,18 @@ from frappe.translate import get_translations_from_csv
 	"agent_learning/programs.py": None,
 	"agent_learning/write_limits.py": None,
 	"agent_learning/file_guard.py": None,
+	# «Агенты и сессии» и письма (learning-services#767, #768).
+	"api/account.py": None,
+	"connections.py": None,
+	"agent_learning/notices.py": None,
+	"agent_learning/homework_notices.py": None,
+	"agent_learning/leave.py": None,
 }
+#: Строки с кириллицей, которые не текст для человека: ключи и флаги — одно
+#: слово в нижнем регистре (`@частота("запись")`). Заголовки журнала ошибок —
+#: аргументы этих вызовов: их читает оператор, по-русски.
+ИМЯ_КЛЮЧА = re.compile(r"[а-яё_]+")
+ВЫЗОВЫ_ЖУРНАЛА = {"log_error", "_в_лог", "по_одной"}
 КОММЕНТАРИЙ = re.compile(r"\{#.*?#\}|<!--.*?-->", re.S)
 СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script\b[^>]*>", re.S | re.I)
 #: Стили: комментарии CSS человек не видит, литералы (`content: "…"`) — видит.
@@ -170,6 +181,36 @@ def русские_отказы(исходник: str, функции: tuple[str
 	return [f"{строка}: {текст}" for строка, текст in sorted(найдено)]
 
 
+def русские_константы(исходник: str) -> list[str]:
+	"""Русский текст в любой строке модуля, кроме докстрингов, ключей и
+	заголовков журнала. `Why:` текст, вынесенный в константу модуля
+	(`ОТКАЗ = "…"; frappe.throw(ОТКАЗ)`, подпись `ЛИЧНОЕ = "Личное"`),
+	`русские_отказы` не видит — там вызов с именем, а не с литералом."""
+	дерево = ast.parse(исходник)
+	мимо = set()
+	for узел in ast.walk(дерево):
+		if isinstance(узел, ast.Expr) and isinstance(узел.value, ast.Constant):
+			мимо.add(id(узел.value))
+		if isinstance(узел, ast.Call) and _имя_вызова(узел) in ВЫЗОВЫ_ЖУРНАЛА:
+			for аргумент in [*узел.args, *(к.value for к in узел.keywords)]:
+				мимо |= {id(часть) for часть in ast.walk(аргумент)}
+	return [
+		f"{узел.lineno}: {узел.value}"
+		for узел in sorted(
+			(
+				у
+				for у in ast.walk(дерево)
+				if isinstance(у, ast.Constant)
+				and isinstance(у.value, str)
+				and id(у) not in мимо
+				and КИРИЛЛИЦА.search(у.value)
+				and not ИМЯ_КЛЮЧА.fullmatch(у.value)
+			),
+			key=lambda у: у.lineno,
+		)
+	]
+
+
 def русские_переводы() -> dict[str, str]:
 	"""Русские переводы всех приложений — из исходников: `ru.csv` и `locale/ru.po`.
 
@@ -244,6 +285,8 @@ class UnitTestTranslations(UnitTestCase):
 					}
 					self.assertEqual(set(функции) - определены, set(), "функции нет в модуле — поправьте список")
 				self.assertEqual(русские_отказы(исходник, функции), [], "текст — _() с английским исходником")
+				if функции is None:
+					self.assertEqual(русские_константы(исходник), [], "текст — _() с английским исходником")
 
 	def test_русские_отказы_находит_литерал_f_строку_и_msgid(self):
 		исходник = (
@@ -265,6 +308,18 @@ class UnitTestTranslations(UnitTestCase):
 				"6: 'Нельзя'",
 			],
 		)
+
+	def test_русские_константы_мимо_ключей_журнала_и_докстрингов(self):
+		исходник = (
+			'"""Модуль."""\n'
+			'ОТКАЗ = "Нельзя"\n'
+			'ЛИЧНОЕ = "Личное"\n'
+			"def метод():\n"
+			'\t"""Докстринг."""\n'
+			'\tfrappe.log_error(title="Письмо не ушло")\n'
+			'\treturn частота("запись")\n'
+		)
+		self.assertEqual(русские_константы(исходник), ["2: Нельзя", "3: Личное"])
 
 	def test_страницы_без_зашитого_русского(self):
 		for имя in СТРАНИЦЫ_С_ПЕРЕВОДОМ:

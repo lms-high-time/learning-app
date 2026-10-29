@@ -42,7 +42,7 @@ def проверить_срок(due_mode, due_days, due_date, *, режимы=В
 	отсутствие строки.
 	"""
 	if due_mode not in режимы:
-		raise Отказ(НЕВЕРНЫЙ_СРОК, _("Due date mode: {0}").format(", ".join(режимы)), due_mode=due_mode)
+		raise Отказ(НЕВЕРНЫЙ_СРОК, _("Due date mode must be one of: {0}").format(", ".join(режимы)), due_mode=due_mode)
 	if due_mode == "relative" and cint(due_days) <= 0:
 		raise Отказ(
 			НЕВЕРНЫЙ_СРОК, _("A relative due date needs a number of days greater than zero"), due_mode=due_mode

@@ -34,7 +34,7 @@ from frappe import _
 
 #: Кабинет автора — только тем, кто собирает курсы: ученику в нём делать нечего.
 РОЛИ_АВТОРА = {"Course Creator", "Moderator"}
-КАБИНЕТ_АВТОРА = ("Author workspace", "/author")
+КАБИНЕТ_АВТОРА = ("Author view", "/author")
 
 #: Первый пункт меню пользователя (аватар в шапке), перед «My Account» и
 #: «Log out» Frappe (learning-services#669).
@@ -45,22 +45,24 @@ from frappe import _
 ИСХОДНЫЙ_КОД = "https://github.com/lms-high-time/learning-app"
 
 
-def подпись(текст: str) -> str:
-	"""Подпись пункта шапки на языке запроса. `Why:` пункты — константы
-	модуля, а `_()` переводит в момент вызова; ворота переводов
+def подпись(текст: str, язык: str | None = None) -> str:
+	"""Подпись пункта шапки на языке `язык`, без него — запроса. `Why:` пункты —
+	константы модуля, а `_()` переводит в момент вызова; ворота переводов
 	(`tests/test_translations.py`) сверяют подписи с `ru.csv` отдельно."""
-	return _(текст)
+	return _(текст, lang=язык)
 
 
-def подвал() -> str:
-	"""Подвал на языке запроса; ссылка — подстановкой, фраза переводится целиком."""
-	return _("The platform's learning app is open source under AGPL-3.0 — {0}source code{1}").format(
+def подвал(язык: str | None = None) -> str:
+	"""Подвал на языке `язык`; ссылка — подстановкой, фраза переводится целиком."""
+	return _("The platform's learning app is open source under AGPL-3.0 — {0}source code{1}", lang=язык).format(
 		f'<a href="{ИСХОДНЫЙ_КОД}" class="text-muted">', "</a>"
 	)
 
 
-def шапка_платформы(context) -> None:
-	"""Логотип и пункты шапки для страницы платформы."""
+def шапка_платформы(context, язык: str | None = None) -> None:
+	"""Логотип и пункты шапки для страницы платформы — на языке запроса или на
+	`язык`: кабинет автора русский при любом языке (решение владельца,
+	learning-services#732), и шапка у него тоже русская."""
 	пункты = list(ПУНКТЫ)
 	if РОЛИ_АВТОРА & set(frappe.get_roles()):
 		пункты.append(КАБИНЕТ_АВТОРА)
@@ -70,7 +72,7 @@ def шапка_платформы(context) -> None:
 	имя = frappe.get_cached_value("Website Settings", None, "app_name")
 	if имя:
 		context.brand_html = escape(имя)
-	context.top_bar_items = [frappe._dict(label=подпись(текст), url=адрес) for текст, адрес in пункты]
+	context.top_bar_items = [frappe._dict(label=подпись(текст, язык), url=адрес) for текст, адрес in пункты]
 	текст, адрес = АГЕНТЫ_И_СЕССИИ
-	context.post_login = [frappe._dict(label=подпись(текст), url=адрес), *(context.get("post_login") or [])]
-	context.footer_powered = подвал()
+	context.post_login = [frappe._dict(label=подпись(текст, язык), url=адрес), *(context.get("post_login") or [])]
+	context.footer_powered = подвал(язык)

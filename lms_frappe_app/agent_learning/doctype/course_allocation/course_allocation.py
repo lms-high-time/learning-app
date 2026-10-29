@@ -138,7 +138,7 @@ class CourseAllocation(Document):
 					continue
 				raise Отказ(ЗАДАНИЕ_НЕ_ИЗ_КУРСА, _("This homework isn't part of the assigned course"), homework=строка.homework)
 			if строка.homework in встречены:
-				raise Отказ(НЕВЕРНЫЙ_СРОК, _("A homework can have only one due date in an assignment"), homework=строка.homework)
+				raise Отказ(НЕВЕРНЫЙ_СРОК, _("Each homework assignment can have only one due date in an assignment"), homework=строка.homework)
 			встречены.add(строка.homework)
 			строка.due_days, строка.due_date = проверить_срок(
 				строка.due_mode, строка.due_days, строка.due_date, режимы=РЕЖИМЫ_СРОКА_НАЗНАЧЕНИЯ

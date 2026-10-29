@@ -148,7 +148,7 @@
 						{%- if п.site %}{{ _("Agent's website: {0}").format(п.site | e) }} · {% endif -%}
 						{{ _("connected {0} · last active {1}").format(дата(п.connected), дата(п.last_active)) }}
 					</p>
-					{% if п.web_chat %}<p class="hint">{{ _("The Cenda web chat connects on its own when you open the chat. Disconnecting signs you out of the chat on all devices; it will connect again the next time you open it.") }}</p>{% endif %}
+					{% if п.web_chat %}<p class="hint">{{ _("The Cenda web chat connects automatically when you open the chat. Disconnecting signs you out of the chat on all devices; it will connect again the next time you open it.") }}</p>{% endif %}
 				</div>
 				<button type="button" class="button danger" data-disconnect="{{ п.id | e }}" data-name="{{ п.agent | e }}">{{ _("Disconnect") }}</button>
 			</li>
@@ -195,14 +195,14 @@
 			<label for="confirm-password">{{ _("Password") }}</label>
 			<input type="password" id="confirm-password" name="password" autocomplete="current-password" required>
 			<p class="error" id="confirm-error" role="alert"></p>
-			<p class="error" id="confirm-no-password" hidden>{{ _("Your account has no password. {0}Set one using the link in an email{1} — changing your password will end your other sessions on its own.").format('<a href="' ~ (set_password_url | e) ~ '">', "</a>") }}</p>
+			<p class="error" id="confirm-no-password" hidden>{{ _("Your account has no password. {0}Set one using the link in an email{1} — changing your password will automatically end your other sessions.").format('<a href="' ~ (set_password_url | e) ~ '">', "</a>") }}</p>
 			<div class="confirm-actions">
 				<button type="submit" class="button primary" id="confirm-submit">{{ _("End session") }}</button>
 				<button type="button" class="button" id="confirm-cancel">{{ _("Cancel") }}</button>
 			</div>
 		</form>
 
-		<p class="footnote">{{ _("Sign in with Google and don't know your password? {0}Set one using the link in an email{1}: changing your password ends all your other sessions and disconnects your agents on its own.").format('<a href="' ~ (set_password_url | e) ~ '">', "</a>") }}</p>
+		<p class="footnote">{{ _("Signed in with Google and don't know your password? {0}Set one using the link in an email{1}: changing your password automatically ends all your other sessions and disconnects your agents.").format('<a href="' ~ (set_password_url | e) ~ '">', "</a>") }}</p>
 	</section>
 </div>
 </div>

@@ -296,12 +296,12 @@ def _возвраты(сейчас, получатели: _Получатели)
 		# Отмена приёма и возврат — разные предложения целиком, а не вставка в одно.
 		что_случилось = (
 			_(
-				"Acceptance of your homework “{0}” for the lesson “{1}” in the course “{2}” has been revoked. What to redo:",
+				"Acceptance of your homework “{0}” for the lesson “{1}” in the course “{2}” has been canceled. What to change:",
 				lang=язык,
 			)
 			if строка.event == "reopened"
 			else _(
-				"Your homework “{0}” for the lesson “{1}” in the course “{2}” has been returned. What to redo:",
+				"Your homework “{0}” for the lesson “{1}” in the course “{2}” has been sent back for changes. What to change:",
 				lang=язык,
 			)
 		).format(*названия)
@@ -311,7 +311,7 @@ def _возвраты(сейчас, получатели: _Получатели)
 			"kind": ВЕРНУЛИ,
 			"recipient": строка.member,
 			"submission": строка.name,
-			"subject": _("The homework “{0}” needs more work", lang=язык).format(задание),
+			"subject": _("The homework “{0}” needs changes", lang=язык).format(задание),
 			"message": (
 				f"<p>{что_случилось}</p>"
 				f"<blockquote>{комментарий}</blockquote>"
