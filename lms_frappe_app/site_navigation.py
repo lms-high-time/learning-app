@@ -53,10 +53,27 @@ def подпись(текст: str, язык: str | None = None) -> str:
 
 
 def подвал(язык: str | None = None) -> str:
-	"""Подвал на языке `язык`; ссылка — подстановкой, фраза переводится целиком."""
-	return _("The platform's learning app is open source under AGPL-3.0 — {0}source code{1}", lang=язык).format(
+	"""Подвал на языке `язык`; ссылка — подстановкой, фраза переводится целиком.
+
+	Знак «12+» — возрастная категория: страницы платформы — информационная
+	продукция, без знака её оборот не допускается (ЗРУ-444, ПКМ № 848,
+	learning-services#746).
+	"""
+	исходники = _("The platform's learning app is open source under AGPL-3.0 — {0}source code{1}", lang=язык).format(
 		f'<a href="{ИСХОДНЫЙ_КОД}" class="text-muted">', "</a>"
 	)
+	return f'{исходники} · <span title="{_("Age rating", lang=язык)}">12+</span>'
+
+
+def подвал_темы(context) -> dict | None:
+	"""`update_website_context`: подвал всех страниц на теме сайта — вход,
+	согласие, OAuth. Страница, поставившая подвал сама (`шапка_платформы`,
+	кабинет автора — русский при любом языке), его сохраняет. `Why:` значение
+	в Website Settings не переживает пересоздания сайта, а знак возрастной
+	категории нужен на каждой странице (learning-services#746)."""
+	if context.get("footer_powered"):
+		return None
+	return {"footer_powered": подвал()}
 
 
 def шапка_платформы(context, язык: str | None = None) -> None:
