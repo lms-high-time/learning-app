@@ -188,6 +188,17 @@ def проверить_файл(файл, method=None) -> None:
 		frappe.throw(отказ.сообщение, КвотаИсчерпана)
 
 
+def отклонить_части_загрузки() -> None:
+	"""`before_request`: загрузка по частям — только вне квоты.
+
+	`Why:` квота считается по записям `File`, а части пишутся на диск раньше неё
+	(learning-services#779). Формы Learning и методы платформы частями не
+	грузят, загрузчик desk остаётся авторам и администраторам.
+	"""
+	if frappe.form_dict.get("chunk_index") is not None and под_квотой(frappe.session.user):
+		raise frappe.PermissionError
+
+
 def закрепить_размер(файл, method=None) -> None:
 	"""`doc_events` `File.validate`: размер файла пользователя под квотой — по
 	байтам, а не из запроса.

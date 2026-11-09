@@ -620,6 +620,7 @@ before_request = [
 	"lms_frappe_app.whitelist_guard.снять_подменённые",
 	"lms_frappe_app.whitelist_guard.снять_методы_payments",
 	"lms_frappe_app.password_hash.настроить",
+	"lms_frappe_app.agent_learning.write_limits.отклонить_части_загрузки",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 # Отказы 401, 403, 429 и неудачный вход — в журнал событий безопасности

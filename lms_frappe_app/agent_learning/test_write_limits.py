@@ -196,6 +196,16 @@ class IntegrationTestWriteLimits(IntegrationTestCase):
 		).insert()
 		self.assertTrue(свежий.name)
 
+	def test_части_загрузки_только_вне_квоты(self):
+		# `set_user` очищает `form_dict`, поэтому часть — после него.
+		frappe.set_user(self.ученик)
+		frappe.form_dict.chunk_index = 0
+		with self.assertRaises(frappe.PermissionError):
+			пределы.отклонить_части_загрузки()
+		frappe.set_user("Administrator")
+		frappe.form_dict.chunk_index = 0
+		пределы.отклонить_части_загрузки()
+
 	def test_кто_под_квотой(self):
 		"""Квота — у учеников, руководитель команды — тоже ученик. Методист,
 		модератор и администратор загружают материалы курса без квоты. Фото

@@ -200,19 +200,16 @@ class IntegrationTestFileGuard(IntegrationTestCase):
 		self._от_соседа(lambda: frappe.delete_doc("File", свой.name))
 		self.assertTrue(frappe.get_doc("File", self.файл).exists_on_disk())
 
-	def test_тип_без_выведенного_расширения_сверяется_со_списком(self):
+	def test_типы_домашки_проходят_проверку_frappe(self):
+		"""Типы сдачи проходят `File.validate_file_extension` при загрузке запросом.
+		Сверяет сам Frappe: своей копией правила это не проверить."""
 		from unittest.mock import patch
 
-		from lms_frappe_app.agent_learning import file_guard
+		from lms_frappe_app.agent_learning import uploads
 
-		with patch.object(file_guard, "_по_запросу", return_value=True), self.assertRaises(
-			frappe.PermissionError
-		):
-			self._от_соседа(
-				lambda: frappe.get_doc(
-					{"doctype": "File", "file_name": "макрос.docm", "content": b"PK\x03\x04"}
-				).insert()
-			)
+		for тип in uploads.ТИПЫ_ДОМАШКИ:
+			with self.subTest(тип), patch("frappe.request", True):
+				frappe.get_doc({"doctype": "File", "file_name": f"a.{тип}"}).validate_file_extension()
 
 	def test_system_manager_правит_файл_сдачи(self):
 		файл = frappe.get_doc("File", self.файл)

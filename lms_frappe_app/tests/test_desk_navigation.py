@@ -11,8 +11,10 @@
 """
 
 import json
+from unittest import mock
 
 import frappe
+from frappe.desk.doctype.desktop_icon.desktop_icon import import_desktop_icon_fixtures
 from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.tests.sample_data import создать_ученика
@@ -21,11 +23,15 @@ WORKSPACE = "Agent Learning"
 МОДУЛЬ = "Agent Learning"
 
 
-def _плитка() -> dict:
-	"""Плитка из файла приложения: записи Desktop Icon есть только на сайтах с
-	сеткой иконок, чистая установка Frappe показывает экран приложений."""
-	with open(frappe.get_app_path("lms_frappe_app", "desktop_icon", "agent_learning.json")) as файл:
-		return json.load(файл)
+def _плитка():
+	"""Плитка, как её импортирует сайт с сеткой иконок: стенд остаётся на ней, а
+	чистая установка Frappe показывает экран приложений и записей не заводит."""
+	with (
+		mock.patch("frappe.desk.doctype.desktop_icon.desktop_icon.is_desktop_icons_page", return_value=True),
+		mock.patch.object(frappe.db, "commit"),
+	):
+		import_desktop_icon_fixtures("lms_frappe_app")
+	return frappe.get_doc("Desktop Icon", WORKSPACE)
 
 
 class IntegrationTestDeskNavigation(IntegrationTestCase):
@@ -127,9 +133,9 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 		логотипа, а видна тем, кому доступен хоть один пункт сайдбара."""
 		плитка = _плитка()
 
-		self.assertTrue(плитка["standard"])
-		self.assertFalse(плитка["hidden"])
-		self.assertEqual((плитка["link_type"], плитка["link_to"]), ("Workspace Sidebar", WORKSPACE))
+		self.assertTrue(плитка.standard)
+		self.assertFalse(плитка.hidden)
+		self.assertEqual((плитка.link_type, плитка.link_to), ("Workspace Sidebar", WORKSPACE))
 
 	def test_логотип_отдаётся_методом_с_типом_svg(self):
 		"""`Why:` /assets приложения до стенда не доезжают, а logo_url —
@@ -141,7 +147,7 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 
 		self.assertEqual(ответ.mimetype, "image/svg+xml")
 		self.assertIn(b"<svg", ответ.get_data())
-		self.assertEqual(_плитка()["logo_url"], АДРЕС)
+		self.assertEqual(_плитка().logo_url, АДРЕС)
 		self.assertEqual(
 			next(п for п in frappe.get_hooks("add_to_apps_screen") if п["name"] == "lms_frappe_app")["logo"],
 			АДРЕС,

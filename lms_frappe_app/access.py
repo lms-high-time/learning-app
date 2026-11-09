@@ -37,11 +37,6 @@ def проверьте_почту() -> str:
 	return _("Check your email: we've sent you a message with a link.")
 
 
-#: Общий ключ счётчика регистраций. Frappe ключует счётчик вызванным методом,
-#: и без общего ключа каждая форма и `/api/v2` считали бы попытки порознь.
-ЛИМИТ_РЕГИСТРАЦИИ = "lms_frappe_app.access.sign_up"
-
-
 #: Кука выбора языка на cenda.app (`site/static/language.js`, learning-services#735).
 #: Гостю Frappe показывает страницы на её языке раньше `Accept-Language`.
 КУКА_ЯЗЫКА = "preferred_language"
@@ -247,15 +242,10 @@ def _зарегистрировать(адрес: str, создать) -> tuple[
 		frappe.throw(_("Sign Up is disabled"), title=_("Not Allowed"))
 	if not адрес:
 		frappe.throw(_("Please enter a valid email."))
-	# Лимит берёт адрес и метод из `form_dict`: кладём туда приведённый адрес
-	# и общий ключ, иначе каждое написание адреса и каждая форма считались бы
-	# отдельно.
-	прежний = frappe.form_dict.cmd
-	frappe.form_dict.update(email=адрес, cmd=ЛИМИТ_РЕГИСТРАЦИИ)
-	try:
-		return _зарегистрировать_в_лимите(адрес, создать)
-	finally:
-		frappe.form_dict.cmd = прежний
+	# Лимит берёт адрес из `form_dict`: кладём туда приведённый, иначе каждое
+	# написание адреса считалось бы отдельно.
+	frappe.form_dict.email = адрес
+	return _зарегистрировать_в_лимите(адрес, создать)
 
 
 # По адресу, а не по IP: nginx образа `frontend` подставляет в

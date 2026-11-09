@@ -17,15 +17,14 @@
 
 Проверки — в классе-примеси (`extend_doctype_class`), а не в `doc_events`.
 `Why:` обработчики `doc_events` идут после метода контроллера, а
-`File.on_trash` и `File.before_insert` сразу трогают диск: отказ в обработчике
-удаления пришёл бы, когда байты уже стёрты, а запись осталась бы без них.
+`File.before_insert` сразу пишет на диск, а `File.on_trash` ставит файл на
+удаление: отказ в обработчике приходил бы уже после них.
 Примесь проверяет до метода контроллера — и при `ignore_permissions` тоже.
 """
 
 from __future__ import annotations
 
 import frappe
-import mimetypes
 import posixpath
 import re
 from urllib.parse import unquote
@@ -87,32 +86,6 @@ def _проверить_адрес(файл) -> None:
 			_отказать(_("Invalid file URL"))
 
 
-def _по_запросу() -> bool:
-	"""Вставка пришла запросом: как и Frappe, список типов сверяется только для загрузок."""
-	return bool(frappe.request)
-
-
-def _проверить_расширение(файл) -> None:
-	"""Расширение имени — из списка типов сайта там, где Frappe тип не узнаёт.
-
-	`Why:` Frappe сверяет со списком расширение, выведенное из типа по имени
-	(`File.set_file_type`: тип, затем обратно расширение), а когда обратного
-	расширения нет — например, у документов Office с макросами, — не проверяет
-	вовсе. Выведенное расширение проверит он сам.
-	"""
-	разрешённые = (frappe.get_system_settings("allowed_file_extensions") or "").split()
-	if not разрешённые or not _по_запросу() or файл.is_folder:
-		return
-	if (файл.file_url or "").startswith(("http://", "https://")):
-		return
-	имя = файл.file_name or (файл.file_url or "").rsplit("/", 1)[-1]
-	тип = mimetypes.guess_type(имя)[0]
-	if тип and mimetypes.guess_extension(тип):
-		return
-	if расширение(имя) and расширение(имя) not in {р.lower() for р in разрешённые}:
-		_отказать(_("This file type can't be uploaded"))
-
-
 class ФайлПлатформы:
 	"""Примесь к контроллеру `File`: проверки до его методов."""
 
@@ -124,7 +97,6 @@ class ФайлПлатформы:
 				_отказать(_("The platform sets the file's thumbnail and hash"))
 			# И с содержимым: дедупликация Frappe оставляет адрес из запроса.
 			_проверить_адрес(self)
-			_проверить_расширение(self)
 		super().before_insert()
 
 	def before_validate(self):
