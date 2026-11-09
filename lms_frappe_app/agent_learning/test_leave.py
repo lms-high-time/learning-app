@@ -78,9 +78,32 @@ class IntegrationTestLeave(IntegrationTestCase):
 		"""Схему сняли с курса — файла нет, а в письме сказано, что его нет."""
 		frappe.db.set_value("Agent Course Artifact", {"course": self.курс, "slug": "summary"}, "is_active", 0)
 
+		frappe.db.set_value("User", self.участник, "language", "ru")
+
 		файлов, письма = self.уйти()
 
 		self.assertEqual(файлов, 0)
 		аргументы = письма.call_args.kwargs
 		self.assertEqual(аргументы["attachments"], [])
 		self.assertIn("собрать не удалось", аргументы["message"])
+
+	def test_письмо_и_вложение_на_языке_ушедшего(self):
+		"""Уход зовёт и руководитель со своим языком, а письмо и подписи
+		документа — на языке ушедшего (learning-services#768)."""
+		frappe.db.set_value("User", self.участник, "language", "en")
+		# Пустой раздел — чтобы во вложении была подпись выгрузки.
+		схема_документа(
+			self.курс, "summary", "Резюме проекта", [раздел("goal", "Цель"), раздел("step", "Шаг")]
+		)
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
+
+		_файлов, письма = self.уйти()
+
+		аргументы = письма.call_args.kwargs
+		название = frappe.db.get_value("Learning Organization", self.команда, "organization_name")
+		self.assertEqual(аргументы["subject"], f"Your documents from the team “{название}”")
+		self.assertIn("You're no longer on the team", аргументы["message"])
+		self.assertIn("A copy of the documents you built in its space is attached.", аргументы["message"])
+		(файл,) = аргументы["attachments"]
+		self.assertIn("## Шаг\n\n_Not filled in._", файл["fcontent"])

@@ -170,6 +170,18 @@ def пример_релиза(ключ: str | None = None) -> dict:
 	return релиз
 
 
+def перевести(релиз: dict, главы: int | None = None) -> dict:
+	"""Английская карточка курса и названия первых `главы` глав (все — без
+	`главы`) в `translations` релиза (learning-services#738). Правит и
+	возвращает тот же релиз."""
+	релиз["course"]["translations"] = {
+		"en": {"title": "Sample course", "summary": "Short card", "description": "Course page text."}
+	}
+	for номер, глава in enumerate(релиз["chapters"][:главы], start=1):
+		глава["translations"] = {"en": {"title": f"Chapter {номер}"}}
+	return релиз
+
+
 def пример_карты(хвост: str = "") -> dict:
 	"""Карта курса в форме компилятора — заглушки (learning-services#560).
 

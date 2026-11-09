@@ -49,6 +49,7 @@ def проблемы(релиз: dict) -> tuple[list[dict], list[dict]]:
 	критичные.extend(_схемы(релиз))
 	_пустые_тексты(релиз, предупреждения)
 	_карточка_курса(релиз, предупреждения)
+	_неполный_перевод(релиз, предупреждения)
 	return критичные, предупреждения
 
 
@@ -225,6 +226,8 @@ def _длины(р: dict, к: list) -> None:
 			к.append({"code": "text_too_long", "where": где, "limit": предел, "length": len(текст)})
 
 	длинно(р["course"]["title"], ДЛИНА_DATA, "course.title")
+	for язык, тексты in _переводы(р).items():
+		длинно(тексты["title"], ДЛИНА_DATA, f"course.translations.{язык}.title")
 	for г in р["chapters"]:
 		длинно(г["title"], ДЛИНА_С_НОМЕРОМ, f"chapters[{г['key']}].title")
 	for у in р["lessons"]:
@@ -302,15 +305,45 @@ def _пустые_тексты(р: dict, п: list) -> None:
 
 
 def _карточка_курса(р: dict, п: list) -> None:
-	"""`<` или `>` в названии или карточке курса — предупреждение `course_card_markup`.
+	"""`<` или `>` в названии или карточке курса и в их переводах, в переводе
+	названия главы — предупреждение `course_card_markup`.
 
 	`Why:` карточку курса Learning выводят шаблоны и письма Learning без
 	экранирования, и при записи в ней чистится HTML (`html_text`): разметка
 	может быть вырезана, а `<`, с которого тег не сложился, становится `&lt;`
 	— «тег <role>» станет «тег &lt;role>». Отказ закрыл бы курсу такие тексты
 	целиком, а предупреждение говорит автору, что они могут дойти не как
-	написаны.
+	написаны. Переводы карточки и цели анонса из переведённых названий глав
+	чистятся так же (`course_translations`).
 	"""
+
+	def проверить(текст: str, где: str) -> None:
+		if знаки := [з for з in УГЛОВЫЕ if з in текст]:
+			п.append({"code": "course_card_markup", "where": где, "chars": знаки})
+
 	for поле in ("title", "summary", "description"):
-		if знаки := [з for з in УГЛОВЫЕ if з in р["course"][поле]]:
-			п.append({"code": "course_card_markup", "where": f"course.{поле}", "chars": знаки})
+		проверить(р["course"][поле], f"course.{поле}")
+	for язык, тексты in _переводы(р).items():
+		for поле in ("title", "summary", "description"):
+			if поле in тексты:
+				проверить(тексты[поле], f"course.translations.{язык}.{поле}")
+	for г in р["chapters"]:
+		for язык, тексты in (г.get("translations") or {}).items():
+			проверить(тексты["title"], f"chapters[{г['key']}].translations.{язык}.title")
+
+
+def _переводы(р: dict) -> dict:
+	"""Переводы карточки курса (`course.translations`): язык → тексты; нет — `{}`."""
+	return р["course"].get("translations") or {}
+
+
+def _неполный_перевод(р: dict, п: list) -> None:
+	"""Язык карточки курса, на который переведены не все главы, —
+	предупреждение `translation_partial` (`lang`, `keys` — главы без перевода).
+
+	Цель анонса у главы без перевода на этот язык показывается по-русски
+	(`service.переводы_карточки`)."""
+	for язык in _переводы(р):
+		без_перевода = [г["key"] for г in р["chapters"] if язык not in (г.get("translations") or {})]
+		if без_перевода:
+			п.append({"code": "translation_partial", "where": "chapters", "lang": язык, "keys": без_перевода})

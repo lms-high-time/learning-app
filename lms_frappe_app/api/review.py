@@ -12,6 +12,7 @@
 """
 
 import frappe
+from frappe import _
 from frappe.utils import cint
 
 from lms_frappe_app.agent_learning import homework as домашка
@@ -33,8 +34,6 @@ from lms_frappe_app.api import контракт, текущий_пользова
 #: Сколько строк очереди отдаётся за раз. `Why:` очередь читают глазами —
 #: больше полусотни не разобрать, а обогащение строк стоит запросов.
 ПОТОЛОК_ОЧЕРЕДИ = 50
-#: Как назвать личное пространство в очереди и фильтрах.
-ЛИЧНОЕ = "Личное"
 
 #: Действия куратора, доступные в статусе сдачи.
 ДЕЙСТВИЯ = {ДОМАШКА_СДАНА: ["accept", "send_back"], ДОМАШКА_ПРИНЯТА: ["reopen"]}
@@ -62,8 +61,16 @@ def _отбор(куратор: str) -> list | None:
 	return фильтры
 
 
+def личное() -> str:
+	"""Как назвать личное пространство в очереди и фильтрах — на языке запроса.
+
+	Контекст — у `Personal` перевод есть и у Frappe, и у Learning, и общий ключ
+	переопределил бы их по всей платформе."""
+	return _("Personal", context="Learning space")
+
+
 def _названия_организаций(организации) -> dict[str | None, str]:
-	return {**домашка.названия("Learning Organization", организации, "organization_name"), None: ЛИЧНОЕ}
+	return {**домашка.названия("Learning Organization", организации, "organization_name"), None: личное()}
 
 
 def _имена_учеников(ученики) -> dict[str, str]:
@@ -212,7 +219,7 @@ def карточка(документ, читатель: str) -> dict:
 
 def _сдача(имя: str):
 	if not имя or not frappe.db.exists(домашка.СДАЧА, имя):
-		raise Отказ(СДАЧА_НЕ_НАЙДЕНА, "Такой сдачи нет", submission=имя)
+		raise Отказ(СДАЧА_НЕ_НАЙДЕНА, _("This submission doesn't exist"), submission=имя)
 	return frappe.get_doc(домашка.СДАЧА, имя)
 
 
@@ -223,7 +230,7 @@ def submission(submission: str) -> dict:
 	читатель = текущий_пользователь()
 	документ = _сдача(submission)
 	if not доступна_сдача(документ, "read", читатель):
-		raise Отказ(НЕТ_ПРАВА, "Эта сдача вам не видна", submission=submission)
+		raise Отказ(НЕТ_ПРАВА, _("You can't view this submission"), submission=submission)
 	return карточка(документ, читатель)
 
 
@@ -231,7 +238,7 @@ def _проверить(submission: str, действие: str, version, comment
 	куратор = текущий_пользователь()
 	документ = _сдача(submission)
 	if not может_проверять(документ, куратор):
-		raise Отказ(НЕТ_ПРАВА, "Эту сдачу вы не проверяете", submission=submission)
+		raise Отказ(НЕТ_ПРАВА, _("You don't review this submission"), submission=submission)
 	# Why: снимок куратора открыт до блокировки, и коммит ученика между ними
 	# MariaDB стенда (снимочная изоляция) отдаёт взаимоблокировкой, а занятая
 	# строка — таймаутом. Откат и один повтор на новом снимке: ученик сохранил
@@ -246,7 +253,9 @@ def _проверить(submission: str, действие: str, version, comment
 			frappe.db.rollback()
 			if попытка:
 				raise Отказ(
-					домашка.ЗАНЯТО, "Сдачу сейчас меняет другой запрос — повторите", submission=submission
+					домашка.ЗАНЯТО,
+					_("Another request is changing this submission right now — please try again"),
+					submission=submission,
 				)
 	return карточка(документ, куратор)
 

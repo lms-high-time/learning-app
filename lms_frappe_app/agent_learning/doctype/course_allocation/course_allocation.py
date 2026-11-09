@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, getdate
 
@@ -71,11 +72,11 @@ class CourseAllocation(Document):
 		)
 		if организация.status != "Active":
 			frappe.throw(
-				frappe._("Команда {0} приостановлена").format(self.organization)
+				_("Team {0} is suspended").format(self.organization)
 			)
 		if not организация.разрешает_курс(self.course):
 			frappe.throw(
-				frappe._("Курс {0} не открыт команде {1}").format(
+				_("Course {0} isn't available to team {1}").format(
 					self.course, self.organization
 				)
 			)
@@ -91,7 +92,7 @@ class CourseAllocation(Document):
 		from lms_frappe_app.agent_learning.announcements import анонсирован
 
 		if анонсирован(self.course):
-			frappe.throw(frappe._("Курс {0} ещё готовится").format(self.course))
+			frappe.throw(_("Course {0} is still being prepared").format(self.course))
 
 	def проверить_сроки_домашек(self) -> None:
 		"""Сроки домашек назначения: задание — урока этого курса, без повторов,
@@ -135,9 +136,9 @@ class CourseAllocation(Document):
 			if строка.homework not in задания_курса:
 				if _правило(строка) in прежние:
 					continue
-				raise Отказ(ЗАДАНИЕ_НЕ_ИЗ_КУРСА, "Это задание не из курса назначения", homework=строка.homework)
+				raise Отказ(ЗАДАНИЕ_НЕ_ИЗ_КУРСА, _("This homework isn't part of the assigned course"), homework=строка.homework)
 			if строка.homework in встречены:
-				raise Отказ(НЕВЕРНЫЙ_СРОК, "У задания в назначении один срок", homework=строка.homework)
+				raise Отказ(НЕВЕРНЫЙ_СРОК, _("Each homework assignment can have only one due date in an assignment"), homework=строка.homework)
 			встречены.add(строка.homework)
 			строка.due_days, строка.due_date = проверить_срок(
 				строка.due_mode, строка.due_days, строка.due_date, режимы=РЕЖИМЫ_СРОКА_НАЗНАЧЕНИЯ

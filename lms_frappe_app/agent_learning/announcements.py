@@ -21,6 +21,8 @@ import json
 
 import frappe
 
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
+
 #: Поле курса с целями анонса: текст, по строке на цель.
 ПОЛЕ_ЦЕЛЕЙ = "announce_objectives"
 
@@ -59,18 +61,27 @@ def анонсы(courses: list[str]) -> set[str]:
 	)
 
 
-def цели_курса(course: str) -> list[str]:
+def цели_курса(course: str, lang: str | None = None) -> list[str]:
 	"""Цели курса по порядку: главы действующего релиза, иначе цели анонса.
 
 	У курса из релиза цели — названия его глав по порядку релиза
 	(learning-services#500); поле анонса у него не читается.
+
+	`lang` — язык, на котором нужны цели: есть у курса цели в переводе на него
+	(`course_translations`, learning-services#738) — они, нет — русские. У
+	курса из релиза перевод целей — переведённые названия глав, его пишет
+	публикация.
 
 	Действующий релиз — из базы, а не из кэша документа курса. `Why:` чтение,
 	начатое до коммита публикации, может положить в кэш прежний релиз уже после
 	того, как публикация его сбросила; содержимое прежнего освобождено
 	(learning-services#514), и цели пришли бы пустыми.
 	"""
-	релиз, цели = frappe.db.get_value("LMS Course", course, ["active_release", ПОЛЕ_ЦЕЛЕЙ]) or (None, None)
+	релиз, цели, переводы = frappe.db.get_value(
+		"LMS Course", course, ["active_release", ПОЛЕ_ЦЕЛЕЙ, переводы_курса.ПОЛЕ]
+	) or (None, None, None)
+	if в_переводе := переводы_курса.перевод(переводы, lang).get(переводы_курса.ЦЕЛИ):
+		return строки(в_переводе)
 	if релиз:
 		return frappe.get_all(
 			"Agent Release Chapter",

@@ -31,6 +31,7 @@ import math
 import frappe
 from frappe.utils import now_datetime
 
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning import release_quiz, structure
 from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
@@ -146,7 +147,7 @@ def опубликовать(
 		)
 		строки = index.строки(релиз, итог.главы, итог.уроки)
 		запись = _записать_релиз(курс, релиз, дайджест, строки, автор, коммит, находки, изменения)
-		_карточка(курс, релиз["course"], запись.name, инструкторы)
+		_карточка(курс, релиз["course"], переводы_карточки(релиз), запись.name, инструкторы)
 		release_quiz.перенести_попытки(попытки, запись.name, строки)
 		if прежний:
 			retention.освободить_прежние(курс)
@@ -434,10 +435,12 @@ def _дописать_находки(релиз: str, находки: list[dict]
 		frappe.db.set_value(РЕЛИЗ, релиз, "findings", index.в_json(находки), update_modified=False)
 
 
-def _карточка(курс: str, данные: dict, релиз: str, инструкторы: list[str] | None) -> None:
+def _карточка(курс: str, данные: dict, переводы: dict, релиз: str, инструкторы: list[str] | None) -> None:
 	"""Карточка курса — из релиза; пустые тексты Learning не принимает (`reqd`) —
 	на их месте название, о чём сказано в предупреждениях проверки.
 	`description` пишется как есть, как у `update_course`: отрисовку решает этап 6.
+	`переводы` — `переводы_карточки` релиза: релиз без них пишет `{}`, и
+	снятый из источника перевод уходит и с платформы.
 
 	Сохранением документа, а не `db.set_value`: порядок курса читает
 	действующий релиз из кэша документа, и сохранение его сбрасывает."""
@@ -451,6 +454,7 @@ def _карточка(курс: str, данные: dict, релиз: str, инс
 			"course_attribution": json.dumps(данные["attribution"], ensure_ascii=False)
 			if данные["attribution"]
 			else None,
+			переводы_курса.ПОЛЕ: переводы_курса.в_json(переводы),
 			"course_key": данные["key"],
 			"active_release": релиз,
 		}
@@ -459,6 +463,29 @@ def _карточка(курс: str, данные: dict, релиз: str, инс
 		_назначить_инструкторов(документ, инструкторы)
 	документ.flags[ИЗ_РЕЛИЗА] = True
 	документ.save(ignore_permissions=True)
+
+
+def переводы_карточки(релиз: dict) -> dict:
+	"""Переводы карточки курса (`course_translations`) из релиза: по языку
+	`course.translations` — название, краткое и полное описание с теми же
+	запасными текстами, что у русской карточки, и цели анонса — названия глав
+	по порядку релиза на этом языке, а у главы без перевода — русское.
+	Русского перевода не бывает: русский текст — основные поля карточки."""
+	итог = {}
+	for язык, тексты in (релиз["course"].get("translations") or {}).items():
+		if язык == переводы_курса.ОСНОВНОЙ:
+			continue
+		кратко = тексты.get("summary") or тексты["title"]
+		итог[язык] = {
+			"title": тексты["title"],
+			"short_introduction": кратко,
+			"description": тексты.get("description") or кратко,
+			переводы_курса.ЦЕЛИ: [
+				((г.get("translations") or {}).get(язык) or {}).get("title") or г["title"]
+				for г in релиз["chapters"]
+			],
+		}
+	return итог
 
 
 def _назначить_инструкторов(документ, инструкторы: list[str]) -> bool:

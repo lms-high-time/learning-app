@@ -50,13 +50,21 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import frappe
+from frappe import _
 from lms.lms.doctype.course_lesson import course_lesson
 
 #: Имя, которым метод зовёт страница урока; прочие имена той же функции — в `hooks.py`.
 ПОДМЕНЯЕМЫЙ = "lms.lms.doctype.course_lesson.course_lesson.save_progress"
-ОТКАЗ = "Урок закрывается на занятии с агентом — в веб-чате платформы или через вашего агента"
 #: `frappe.flags`: (ученик, урок), отметку которых сейчас пишет занятие (`закрытие_урока`).
 ЗАКРЫВАЕТСЯ = "lms_lesson_closing"
+
+
+def отказ() -> str:
+	"""Текст отказа. Функцией: `_()` переводит на язык запроса — отказ видит
+	страница урока Learning."""
+	return _(
+		"Lessons are completed in a session with an agent — in the platform's web chat or through your own agent"
+	)
 
 
 @frappe.whitelist()
@@ -64,7 +72,7 @@ def save_progress(lesson: str, course: str, scorm_details: dict | None = None):
 	"""Прогресс SCORM — как у Learning, кроме урока курса из релиза; всё остальное — отказ."""
 	if scorm_details and not _из_релиза(lesson):
 		return course_lesson.save_progress(lesson, course, scorm_details)
-	frappe.throw(ОТКАЗ, frappe.ValidationError)
+	frappe.throw(отказ(), frappe.ValidationError)
 
 
 @contextmanager
@@ -101,7 +109,7 @@ def проверить_отметку(отметка, method=None) -> None:
 	право = "create" if отметка.is_new() else "write"
 	if frappe.has_permission("LMS Course Progress", право, doc=отметка, user=frappe.session.user):
 		return
-	frappe.throw(ОТКАЗ, frappe.ValidationError)
+	frappe.throw(отказ(), frappe.ValidationError)
 
 
 def _из_релиза(урок: str) -> bool:
