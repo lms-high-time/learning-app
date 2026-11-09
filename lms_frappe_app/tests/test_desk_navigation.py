@@ -21,6 +21,13 @@ WORKSPACE = "Agent Learning"
 МОДУЛЬ = "Agent Learning"
 
 
+def _плитка() -> dict:
+	"""Плитка из файла приложения: записи Desktop Icon есть только на сайтах с
+	сеткой иконок, чистая установка Frappe показывает экран приложений."""
+	with open(frappe.get_app_path("lms_frappe_app", "desktop_icon", "agent_learning.json")) as файл:
+		return json.load(файл)
+
+
 class IntegrationTestDeskNavigation(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -70,7 +77,7 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 		"""Сайдбар начинается с обзора и ведёт на каждый доктайп и отчёт модуля.
 		Пин на состав: новый доктайп без строки в сайдбаре снова станет
 		невидимым, и заметят это по прямой ссылке, как в прошлый раз."""
-		сайдбар = frappe.get_doc("Workspace Sidebar", WORKSPACE)
+		сайдбар = frappe.get_doc("Sidebar", WORKSPACE)
 
 		with self.subTest("ведёт на каждый доктайп модуля"):
 			ссылки = {п.link_to for п in сайдбар.items if п.type == "Link" and п.link_type == "DocType"}
@@ -118,11 +125,11 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 		миграции не сработала: на проде стартовый экран показывал только
 		Framework и Frappe Learning. Плитка типа Link не требует файла
 		логотипа, а видна тем, кому доступен хоть один пункт сайдбара."""
-		плитка = frappe.get_doc("Desktop Icon", WORKSPACE)
+		плитка = _плитка()
 
-		self.assertTrue(плитка.standard)
-		self.assertFalse(плитка.hidden)
-		self.assertEqual((плитка.link_type, плитка.link_to), ("Workspace Sidebar", WORKSPACE))
+		self.assertTrue(плитка["standard"])
+		self.assertFalse(плитка["hidden"])
+		self.assertEqual((плитка["link_type"], плитка["link_to"]), ("Workspace Sidebar", WORKSPACE))
 
 	def test_логотип_отдаётся_методом_с_типом_svg(self):
 		"""`Why:` /assets приложения до стенда не доезжают, а logo_url —
@@ -134,7 +141,7 @@ class IntegrationTestDeskNavigation(IntegrationTestCase):
 
 		self.assertEqual(ответ.mimetype, "image/svg+xml")
 		self.assertIn(b"<svg", ответ.get_data())
-		self.assertEqual(frappe.get_doc("Desktop Icon", WORKSPACE).logo_url, АДРЕС)
+		self.assertEqual(_плитка()["logo_url"], АДРЕС)
 		self.assertEqual(
 			next(п for п in frappe.get_hooks("add_to_apps_screen") if п["name"] == "lms_frappe_app")["logo"],
 			АДРЕС,

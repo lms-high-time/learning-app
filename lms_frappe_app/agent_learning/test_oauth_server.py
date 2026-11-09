@@ -440,7 +440,7 @@ class IntegrationTestOAuthServer(IntegrationTestCase):
 		):
 			with (
 				self.subTest(что),
-				mock.patch("frappe.oauth.LoginManager") as пароль,
+				mock.patch("frappe.auth.LoginManager.authenticate") as пароль,
 			):
 				статус, ответ = self._токен(client_id=клиент.name, client_secret=клиент.client_secret, **поля)
 				self.assertEqual(статус, 400, ответ)

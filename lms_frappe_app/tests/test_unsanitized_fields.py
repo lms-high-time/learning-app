@@ -197,6 +197,8 @@ class IntegrationTestПоляМимоОчистки(IntegrationTestCase):
 							self.assertEqual(исполнимое(значение), [])
 							self.assertEqual(исполнимое(format_value(значение, поле, запись)), [])
 				with self.subTest(f"{вид}: печать {doctype}"):
+					# Печать строит имя файла из `name`, у несохранённого его нет.
+					документ.name = "печать"
 					self.assertEqual(исполнимое(frappe.get_print(doctype, doc=документ)), [])
 
 	def test_текст_без_тега_не_меняется(self):

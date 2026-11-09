@@ -353,6 +353,8 @@ class IntegrationTestPersonalData(IntegrationTestCase):
 			("File", файл.name),
 		):
 			self.assertFalse(есть(доктайп, имя), доктайп)
+		# Файл с диска Frappe удаляет после коммита.
+		frappe.db.after_commit.run()
 		self.assertFalse(os.path.exists(путь))
 		self.assertTrue(есть("Deleted Document", чужая_копия))
 		self.assertFalse(есть("Deleted Document", копия_команды))
