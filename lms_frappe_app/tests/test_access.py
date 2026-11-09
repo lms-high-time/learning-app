@@ -14,7 +14,6 @@ from lms_frappe_app.access import (
 	КЛЮЧ_ДЕЙСТВУЕТ,
 	КЛЮЧ_НЕ_НАЙДЕН,
 	КЛЮЧ_УСТАРЕЛ,
-	ЛИМИТ_РЕГИСТРАЦИИ,
 	accept_invitation,
 	sign_up,
 	sign_up_learning,
@@ -290,7 +289,7 @@ class IntegrationTestSignUp(IntegrationTestCase):
 
 	def сбросить_лимит(self):
 		# Только счётчик регистрации: сайт общий с соседними прогонами.
-		frappe.cache.delete_keys(f"rl:{ЛИМИТ_РЕГИСТРАЦИИ}:")
+		frappe.cache.delete_keys("rl:lms_frappe_app.access._зарегистрировать_в_лимите:")
 
 	def новый_адрес(self) -> str:
 		return f"signup-{frappe.generate_hash(length=8)}@example.com"
@@ -369,18 +368,15 @@ class IntegrationTestSignUp(IntegrationTestCase):
 			sign_up(" " + пользователь, "Кто-то", "")
 
 	def test_лимит_общий_для_обеих_форм(self):
-		"""Счётчик Frappe ключуется вызванным методом: без общего ключа каждая
+		"""Счётчик Frappe ключуется функцией, и обе формы идут через одну: иначе
 		форма и `/api/v2` давали бы свои пять писем в час на один ящик."""
 		пользователь = ученик()
 		for попытка in range(5):
 			if попытка % 2:
-				frappe.form_dict.cmd = "lms.lms.user.sign_up"
 				sign_up_learning(пользователь, "Кто-то", 1, "")
 			else:
-				frappe.form_dict.cmd = "frappe.core.doctype.user.user.sign_up"
 				sign_up(пользователь, "Кто-то", "")
 
-		frappe.form_dict.cmd = None
 		with self.assertRaises(frappe.RateLimitExceededError):
 			sign_up(пользователь, "Кто-то", "")
 

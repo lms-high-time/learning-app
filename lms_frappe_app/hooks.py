@@ -737,7 +737,10 @@ user_data_fields = [
 
 # Запрос с ключом API в заголовке — в журнал событий безопасности
 # (learning-services#680). Хук ничего не проверяет и никого не впускает.
-auth_hooks = ["lms_frappe_app.security_log.по_заголовку"]
+auth_hooks = [
+	"lms_frappe_app.security_log.по_заголовку",
+	"lms_frappe_app.agent_learning.write_limits.отклонить_части_загрузки",
+]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True

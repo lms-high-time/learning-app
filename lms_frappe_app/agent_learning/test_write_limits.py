@@ -4,10 +4,14 @@
 """Пределы записи ученика: частота методов и квота файлов (learning-services#684)."""
 
 import base64
+import io
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_days, now_datetime
+from werkzeug.datastructures import FileStorage
 
 from lms_frappe_app.agent_learning import write_limits as пределы
 from lms_frappe_app.api import student
@@ -195,6 +199,36 @@ class IntegrationTestWriteLimits(IntegrationTestCase):
 			{"doctype": "File", "file_name": "new.txt", "content": b"n" * (900 * 1024), "is_private": 1}
 		).insert()
 		self.assertTrue(свежий.name)
+
+	def test_незавершённая_загрузка_только_вне_квоты(self):
+		def запрос_с_файлом(байт: int):
+			return SimpleNamespace(files={"file": FileStorage(io.BytesIO(b"x" * байт))})
+
+		случаи = (
+			("часть", {"chunk_index": 0}, 1, True),
+			("размер больше присланного", {"total_file_size": 5}, 1, True),
+			("размер как прислано", {"total_file_size": 5}, 5, False),
+			("без размера", {}, 1, False),
+		)
+		for случай, поля, байт, отказ in случаи:
+			with self.subTest(случай), patch("frappe.request", запрос_с_файлом(байт)):
+				# `set_user` очищает `form_dict`, поэтому поля — после него.
+				frappe.set_user(self.ученик)
+				frappe.form_dict.update(поля)
+				if отказ:
+					with self.assertRaises(frappe.PermissionError):
+						пределы.отклонить_части_загрузки()
+				else:
+					пределы.отклонить_части_загрузки()
+				frappe.set_user("Administrator")
+				frappe.form_dict.update(поля)
+				пределы.отклонить_части_загрузки()
+
+	def test_части_загрузки_проверяются_после_входа_по_токену(self):
+		"""`before_request` идёт раньше входа по токену: там пользователь — гость."""
+		хук = "lms_frappe_app.agent_learning.write_limits.отклонить_части_загрузки"
+		self.assertIn(хук, frappe.get_hooks("auth_hooks"))
+		self.assertNotIn(хук, frappe.get_hooks("before_request"))
 
 	def test_кто_под_квотой(self):
 		"""Квота — у учеников, руководитель команды — тоже ученик. Методист,
