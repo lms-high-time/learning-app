@@ -281,8 +281,10 @@ I am under 18,Мне нет 18 лет
 Import via Data Import Tool,Импорт через Data Import Tool
 Import via ZIP,Импорт из ZIP
 "In courses you author, {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.","На проверке в курсах, где вы автор — {0} домашка: ученики сдали и ждут ответа."
+"In courses you author, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.","На проверке в курсах, где вы автор — {0} домашек: ученики сдали и ждут ответа."
 "In courses you author, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.","На проверке в курсах, где вы автор — {0} домашки: ученики сдали и ждут ответа.",few
 "In your teams, {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.",На проверке в ваших командах — {0} домашка: ученики сдали и ждут ответа.
+"In your teams, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",На проверке в ваших командах — {0} домашек: ученики сдали и ждут ответа.
 "In your teams, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",На проверке в ваших командах — {0} домашки: ученики сдали и ждут ответа.,few
 In-app,В приложении
 Include in preview,Включить в предпросмотр
@@ -765,7 +767,9 @@ user ratings,оценок
 {0} has published a new course {1},{0} опубликовал новый курс {1}
 {0} homework assignment is awaiting review,{0} домашка ждёт проверки
 {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.,На проверке — {0} домашка: ученики сдали и ждут ответа.
+{0} homework assignments are awaiting review,{0} домашек ждут проверки
 {0} homework assignments are awaiting review,{0} домашки ждут проверки,few
+{0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.,На проверке — {0} домашек: ученики сдали и ждут ответа.
 {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.,На проверке — {0} домашки: ученики сдали и ждут ответа.,few
 {0} is already a member of team {1},{0} уже состоит в команде {1}
 {0} must be a list,{0} — список
