@@ -197,6 +197,30 @@ class UnitTestSecurityLog(_Запрос):
 		self.assertEqual(первая["login_hmac"], вторая["login_hmac"])
 		self.assertNotEqual(первая["login_hmac"], hashlib.sha256(b"RAW-VALUE").hexdigest()[:12])
 
+	def test_отпечаток_на_своём_секрете(self):
+		"""Отпечаток — на своём секрете сайта, не на `encryption_key`; без
+		секрета (до первой миграции) — без отпечатка (learning-services#690)."""
+		from unittest.mock import patch
+
+		from lms_frappe_app.site_secrets import ЖУРНАЛ_ВХОДА
+
+		self.запрос(path="/api/method/login", usr="RAW-VALUE", pwd="PWD-VALUE")
+		отказ = lambda: security_log.записать_отказ(SimpleNamespace(status_code=401), frappe.request)  # noqa: E731
+		with patch.dict(frappe.conf, {ЖУРНАЛ_ВХОДА: "0f" * 32}):
+			(прежняя,) = self.записи(отказ)
+			with patch.dict(frappe.conf, {"encryption_key": "смена-ключа-шифрования"}):
+				(после_смены_ключа,) = self.записи(отказ)
+		with patch.dict(frappe.conf, {ЖУРНАЛ_ВХОДА: "1e" * 32}):
+			(другой_секрет,) = self.записи(отказ)
+		with patch.dict(frappe.conf):
+			frappe.conf.pop(ЖУРНАЛ_ВХОДА, None)
+			(без_секрета,) = self.записи(отказ)
+
+		self.assertEqual(после_смены_ключа["login_hmac"], прежняя["login_hmac"])
+		self.assertNotEqual(другой_секрет["login_hmac"], прежняя["login_hmac"])
+		self.assertEqual(без_секрета["login_unknown"], True)
+		self.assertNotIn("login_hmac", без_секрета)
+
 	def test_имя_входа_не_строкой(self):
 		self.запрос(path="/api/method/login", usr={"name": ["like", "%"]}, pwd="PWD-VALUE")
 		(запись,) = self.записи(
