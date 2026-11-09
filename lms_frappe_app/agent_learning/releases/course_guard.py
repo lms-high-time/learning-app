@@ -20,6 +20,12 @@
 редактора Learning — в `learning_editor`. Карточка курса (название, описание,
 публикация) правится как раньше.
 
+Переводы карточки (`course_translations`, learning-services#738) пишут только
+публикация и авторские методы с языком (`ПЕРЕВОД_АВТОРА`) — у любого курса.
+`Why:` у курса из релиза переводы приходят релизом и разошлись бы с ним, а у
+курса без релиза поле JSON — только для чтения в форме Desk, но
+`/api/resource` записал бы его мимо очистки текстов (`course_translations.в_json`).
+
 Домашки уроков и схема документа курса из релиза — проекции релиза, как главы
 и уроки (learning-services#526): хуки `validate` и `on_trash` у
 `Agent Lesson Homework` и `Agent Course Artifact` (`проверить_домашку`,
@@ -36,6 +42,7 @@
 
 import frappe
 
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, Отказ
 
@@ -45,6 +52,9 @@ from lms_frappe_app.agent_learning.errors import КУРС_ИЗ_РЕЛИЗА, О�
 #: публикации помечает свою запись.
 ИЗ_РЕЛИЗА = "from_release"
 ПОЛЯ_РЕЛИЗА = ("course_key", "active_release")
+#: Флаг записи курса, которым авторские методы (`update_course`) помечают
+#: правку переводов карточки курса без релиза.
+ПЕРЕВОД_АВТОРА = "translation_by_author"
 
 
 def проверить_курс(doc, method=None) -> None:
@@ -59,6 +69,13 @@ def проверить_курс(doc, method=None) -> None:
 				)
 		if прежний and _главы(doc) != _главы(прежний):
 			запретить_правку(doc.name)
+		if not doc.flags.get(ПЕРЕВОД_АВТОРА) and переводы_курса.разобрать(
+			doc.get(переводы_курса.ПОЛЕ)
+		) != переводы_курса.разобрать(прежний.get(переводы_курса.ПОЛЕ) if прежний else None):
+			frappe.throw(
+				frappe._("Переводы карточки пишут релиз курса и авторские методы с языком"),
+				title=frappe._("Переводы курса"),
+			)
 	релиз = doc.get("active_release")
 	if not релиз:
 		return

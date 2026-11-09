@@ -192,6 +192,8 @@ fixtures = [
 	# запись, второго основания доступа нет (learning-services#393).
 	# Ключ, действующий релиз и атрибуция курса, описание главы — из релиза
 	# (learning-services#500). Цели анонса — у курса без релиза (learning-services#512).
+	# Переводы карточки курса — JSON на курсе, пишут релиз и авторские методы
+	# (learning-services#738).
 	# Ключи глав и уроков из релиза — на самих записях (learning-services#514).
 	# Зачин, обещание и описание главы хранятся как есть, без очистки Frappe
 	# (`ignore_xss_filter`, learning-services#521), и скрыты из отчётов и печати
@@ -212,6 +214,7 @@ fixtures = [
 					"LMS Course-active_release",
 					"LMS Course-course_attribution",
 					"LMS Course-announce_objectives",
+					"LMS Course-course_translations",
 					"Course Chapter-chapter_description",
 					"Course Chapter-chapter_key",
 					"Course Lesson-lesson_key",

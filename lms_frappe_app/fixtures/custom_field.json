@@ -97,6 +97,21 @@
  },
  {
   "doctype": "Custom Field",
+  "name": "LMS Course-course_translations",
+  "dt": "LMS Course",
+  "fieldname": "course_translations",
+  "fieldtype": "JSON",
+  "label": "Переводы карточки",
+  "read_only": 1,
+  "no_copy": 1,
+  "description": "Карточка курса на других языках: {язык: {title, short_introduction, description, objectives}}. Пишут релиз и авторские методы с lang.",
+  "insert_after": "announce_objectives",
+  "module": "Agent Learning",
+  "report_hide": 1,
+  "print_hide": 1
+ },
+ {
+  "doctype": "Custom Field",
   "name": "Course Chapter-chapter_description",
   "dt": "Course Chapter",
   "fieldname": "chapter_description",

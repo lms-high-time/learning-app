@@ -4,8 +4,9 @@
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import get_html_for_route
+from frappe.utils import get_html_for_route, now_datetime
 
+from lms_frappe_app import languages
 from lms_frappe_app.connections import отпечаток
 from lms_frappe_app.tests.sample_data import создать_ученика
 from lms_frappe_app.tests.test_connections import завести_клиента, завести_сессию, завести_токен
@@ -42,6 +43,9 @@ class IntegrationTestConnectionsPage(IntegrationTestCase):
 		frappe.set_user(ученик)
 		другая = завести_сессию(ученик, user_agent="Mozilla/5.0 (X11; Linux x86_64) Firefox/142.0")
 
+		# Тексты страницы сверяются по-русски: исходник — английский (learning-services#767).
+		self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+		frappe.local.lang = "ru"
 		html = get_html_for_route("connections")
 
 		with self.subTest("агент и кнопка отключения"):
@@ -61,3 +65,12 @@ class IntegrationTestConnectionsPage(IntegrationTestCase):
 		with self.subTest("ни токена, ни sid"):
 			self.assertNotIn(токен, html)
 			self.assertNotIn(другая, html)
+		with self.subTest("en: разметка, тексты скрипта и даты — на языке страницы"):
+			# learning-services#767
+			frappe.local.lang = "en"
+			html = get_html_for_route("connections")
+			self.assertIn("<h1>Agents and sessions</h1>", html)
+			self.assertIn('<h2 id="agents-title" tabindex="-1">Connected agents</h2>', html)
+			self.assertIn("End all except this one", html)
+			self.assertIn('"no_agents": "No connected agents."', html)
+			self.assertIn(f"connected {languages.дата_время(now_datetime(), 'en')[:6]}", html)

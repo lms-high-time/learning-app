@@ -49,6 +49,7 @@ from pathlib import Path
 		"minimum",
 		"maximum",
 		"anyOf",
+		"not",
 		"propertyNames",
 	}
 )
@@ -76,6 +77,8 @@ def ошибки(значение, узел: dict | None = None, путь: str =
 		return [*найдено, _ошибка(путь, f"ожидается {узел['const']!r}")]
 	if "enum" in узел and значение not in узел["enum"]:
 		return [*найдено, _ошибка(путь, "одно из: " + ", ".join(map(str, узел["enum"])))]
+	if "not" in узел and not ошибки(значение, узел["not"], путь):
+		return [*найдено, _ошибка(путь, "запрещённое значение")]
 	if "type" in узел and not _тип_подходит(узел["type"], значение):
 		return [*найдено, _ошибка(путь, f"тип {узел['type']}")]
 	if isinstance(значение, str):

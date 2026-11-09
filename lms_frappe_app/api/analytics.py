@@ -10,10 +10,10 @@
 секрета. `Why:` хеш email без секрета подбирается по списку адресов, а
 случайный идентификатор пришлось бы где-то хранить и выдавать ещё одним полем.
 
-Сменится `encryption_key` сайта (восстановление без `site_config`, другой
-стенд) или учётная запись (смена email) — сменится и идентификатор, и в
-аналитике это будет новый человек. Ключ меняют редко: с ним ломаются и
-сохранённые пароли.
+Секрет — свой ключ `analytics_id_secret` в `site_config.json`, у него одна
+цель (`site_secrets`, learning-services#690). Сменится секрет или учётная
+запись (смена email) — сменится и идентификатор, и в аналитике это будет
+новый человек.
 
 Метод зовёт скрипт согласия сайта (`site/static/analytics.js`), агент его не
 зовёт.
@@ -23,19 +23,20 @@ import hashlib
 import hmac
 
 import frappe
-from frappe.utils.password import get_encryption_key
 
 from lms_frappe_app.api import контракт, текущий_пользователь
+from lms_frappe_app.site_secrets import АНАЛИТИКА
 
 #: Длина идентификатора в шестнадцатеричных знаках: 128 бит — без столкновений
 #: на любом мыслимом числе учеников.
 ДЛИНА = 32
 
-
 def идентификатор(user: str) -> str:
-	"""HMAC-SHA256 учётной записи на ключе, выведенном из секрета сайта."""
-	ключ = hashlib.sha256(b"cenda-analytics-id:" + get_encryption_key().encode()).digest()
-	return hmac.new(ключ, user.strip().lower().encode(), hashlib.sha256).hexdigest()[:ДЛИНА]
+	"""HMAC-SHA256 учётной записи на секрете идентификатора сайта."""
+	secret = frappe.conf.get(АНАЛИТИКА)
+	if not secret:
+		raise RuntimeError(f"нет {АНАЛИТИКА} в конфигурации сайта — его заводит bench migrate")
+	return hmac.new(secret.encode(), user.strip().lower().encode(), hashlib.sha256).hexdigest()[:ДЛИНА]
 
 
 @frappe.whitelist(methods=["GET"])
