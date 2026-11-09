@@ -12,6 +12,7 @@
 не видно ни в коде, ни в тестах поведения (learning-services#741).
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -29,19 +30,75 @@ from frappe.translate import get_translations_from_csv
 ПЛЕЙСХОЛДЕР = re.compile(r"\{\d+\}")
 КИРИЛЛИЦА = re.compile(r"[А-Яа-яЁё]")
 
-#: Страницы пути входа (learning-services#737): гость видит их на языке,
-#: выбранном на сайте, и русского в разметке быть не должно.
-СТРАНИЦЫ_ВХОДА = (
+#: Страницы, которые человек видит на языке, выбранном на сайте, — русского в
+#: разметке быть не должно: путь входа (learning-services#737), «Агенты и
+#: сессии» и «Мои документы» (learning-services#767). Кабинет автора остаётся
+#: русским — решение владельца.
+СТРАНИЦЫ_С_ПЕРЕВОДОМ = (
 	"www/consent.html",
 	"www/update-password.html",
 	"templates/includes/oauth_confirmation.html",
+	"www/connections.html",
+	"www/artifacts.html",
 )
+#: Модули, отказы которых человек видит в интерфейсе Learning: SPA показывает
+#: `error.message` как есть (learning-services#766). Значение — функции, в
+#: которых отказы интерфейса; `None` — весь модуль. Отказы только для агента
+#: (урок, квиз, релизы), авторинг и кабинет автора остаются русскими — их
+#: модулей и функций здесь нет.
+ОТКАЗЫ_ИНТЕРФЕЙСА: dict[str, tuple[str, ...] | None] = {
+	"api/__init__.py": None,
+	"api/team.py": None,
+	"api/review.py": None,
+	"api/manager.py": None,
+	"api/public.py": None,
+	"api/student.py": (
+		"enroll",
+		"notify_when_released",
+		"remember",
+		"forget",
+		"my_profile",
+		"submit_homework",
+		"_список_домашки",
+		"_требовать_доступ_к_курсу",
+		"_курс_урока",
+	),
+	"agent_learning/doctype/course_allocation/course_allocation.py": None,
+	"agent_learning/doctype/organization_membership/organization_membership.py": None,
+	"agent_learning/doctype/agent_lesson_homework/agent_lesson_homework.py": ("проверить_срок", "_дата"),
+	"agent_learning/browser_progress.py": None,
+	"agent_learning/homework.py": None,
+	"agent_learning/artifacts/data.py": None,
+	"agent_learning/artifacts/values.py": None,
+	"agent_learning/artifacts/write.py": None,
+	"agent_learning/artifacts/course.py": ("_действующая_схема", "_блок_схемы"),
+	"agent_learning/spaces.py": None,
+	"agent_learning/programs.py": None,
+	"agent_learning/write_limits.py": None,
+	"agent_learning/file_guard.py": None,
+	# «Агенты и сессии» и письма (learning-services#767, #768).
+	"api/account.py": None,
+	"connections.py": None,
+	"agent_learning/notices.py": None,
+	"agent_learning/homework_notices.py": None,
+	"agent_learning/leave.py": None,
+}
+#: Строки с кириллицей, которые не текст для человека: ключи и флаги — одно
+#: слово в нижнем регистре (`@частота("запись")`). Заголовки журнала ошибок —
+#: аргументы этих вызовов: их читает оператор, по-русски.
+ИМЯ_КЛЮЧА = re.compile(r"[а-яё_]+")
+ВЫЗОВЫ_ЖУРНАЛА = {"log_error", "_в_лог", "по_одной"}
 КОММЕНТАРИЙ = re.compile(r"\{#.*?#\}|<!--.*?-->", re.S)
 СКРИПТ = re.compile(r"(<script\b[^>]*>)(.*?)</script\b[^>]*>", re.S | re.I)
+#: Стили: комментарии CSS человек не видит, литералы (`content: "…"`) — видит.
+СТИЛЬ = re.compile(r"(<style\b[^>]*>)(.*?)</style\b[^>]*>", re.S | re.I)
+КОММЕНТАРИЙ_CSS = re.compile(r"/\*.*?\*/", re.S)
 ВЫРАЖЕНИЕ = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.S)
 #: Строковый литерал — в выражениях Jinja и в коде скриптов.
 ЛИТЕРАЛ = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\])*)\1""", re.S)
 КОММЕНТАРИЙ_JS = re.compile(r"/\*.*?\*/|(?<![:\\])//[^\n]*", re.S)
+#: `${…}` шаблонной строки JS — код, а не текст: кириллица в нём — имена.
+ПОДСТАНОВКА_JS = re.compile(r"\$\{[^}]*\}")
 
 
 def видимый_русский(разметка: str) -> list[str]:
@@ -50,9 +107,17 @@ def видимый_русский(разметка: str) -> list[str]:
 	кириллица в них — соглашение кода, а не текст интерфейса."""
 	разметка = КОММЕНТАРИЙ.sub("", разметка)
 	найдено = []
+	for _тег, стиль in СТИЛЬ.findall(разметка):
+		стиль = КОММЕНТАРИЙ_CSS.sub("", стиль)
+		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(стиль) if КИРИЛЛИЦА.search(строка)]
+	разметка = СТИЛЬ.sub("", разметка)
 	for _тег, код in СКРИПТ.findall(разметка):
 		код = КОММЕНТАРИЙ_JS.sub("", код)
-		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(код) if КИРИЛЛИЦА.search(строка)]
+		найдено += [
+			строка
+			for _к, строка in ЛИТЕРАЛ.findall(код)
+			if КИРИЛЛИЦА.search(ПОДСТАНОВКА_JS.sub("", строка))
+		]
 	разметка = СКРИПТ.sub("", разметка)
 	for выражение in ВЫРАЖЕНИЕ.findall(разметка):
 		найдено += [строка for _к, строка in ЛИТЕРАЛ.findall(выражение) if КИРИЛЛИЦА.search(строка)]
@@ -61,6 +126,89 @@ def видимый_русский(разметка: str) -> list[str]:
 	куски = re.split(r"[<>]", ВЫРАЖЕНИЕ.sub(" ", разметка))
 	найдено += [" ".join(кусок.split()) for кусок in куски if КИРИЛЛИЦА.search(кусок)]
 	return найдено
+
+
+def _имя_вызова(вызов: ast.Call) -> str | None:
+	if isinstance(вызов.func, ast.Name):
+		return вызов.func.id
+	if isinstance(вызов.func, ast.Attribute):
+		return вызов.func.attr
+	return None
+
+
+def _с_кириллицей(узел: ast.AST) -> bool:
+	"""Литерал, f-строка или склейка с русским текстом — не вызов `_()`."""
+	if isinstance(узел, ast.Call):
+		return False
+	return any(
+		isinstance(часть, ast.Constant) and isinstance(часть.value, str) and КИРИЛЛИЦА.search(часть.value)
+		for часть in ast.walk(узел)
+	)
+
+
+def русские_отказы(исходник: str, функции: tuple[str, ...] | None = None) -> list[str]:
+	"""Русский текст там, где его увидит человек: msgid `_()`, сообщение
+	`Отказ(код, …)` и `frappe.throw(…)`. `функции` — где искать отказы; `_()`
+	с русским msgid ищется во всём модуле."""
+	дерево = ast.parse(исходник)
+	области = (
+		[дерево]
+		if функции is None
+		else [
+			узел
+			for узел in ast.walk(дерево)
+			if isinstance(узел, ast.FunctionDef | ast.AsyncFunctionDef) and узел.name in функции
+		]
+	)
+	найдено = set()
+	for узел in ast.walk(дерево):
+		if isinstance(узел, ast.Call) and _имя_вызова(узел) == "_" and узел.args and _с_кириллицей(узел.args[0]):
+			найдено.add((узел.lineno, ast.unparse(узел)))
+	for область in области:
+		for узел in ast.walk(область):
+			if not isinstance(узел, ast.Call):
+				continue
+			имя = _имя_вызова(узел)
+			сообщение = (
+				узел.args[1]
+				if имя == "Отказ" and len(узел.args) > 1
+				else узел.args[0]
+				if имя == "throw" and узел.args
+				else None
+			)
+			if сообщение is not None and _с_кириллицей(сообщение):
+				найдено.add((узел.lineno, ast.unparse(сообщение)))
+	return [f"{строка}: {текст}" for строка, текст in sorted(найдено)]
+
+
+def русские_константы(исходник: str) -> list[str]:
+	"""Русский текст в любой строке модуля, кроме докстрингов, ключей и
+	заголовков журнала. `Why:` текст, вынесенный в константу модуля
+	(`ОТКАЗ = "…"; frappe.throw(ОТКАЗ)`, подпись `ЛИЧНОЕ = "Личное"`),
+	`русские_отказы` не видит — там вызов с именем, а не с литералом."""
+	дерево = ast.parse(исходник)
+	мимо = set()
+	for узел in ast.walk(дерево):
+		if isinstance(узел, ast.Expr) and isinstance(узел.value, ast.Constant):
+			мимо.add(id(узел.value))
+		if isinstance(узел, ast.Call) and _имя_вызова(узел) in ВЫЗОВЫ_ЖУРНАЛА:
+			for аргумент in [*узел.args, *(к.value for к in узел.keywords)]:
+				мимо |= {id(часть) for часть in ast.walk(аргумент)}
+	return [
+		f"{узел.lineno}: {узел.value}"
+		for узел in sorted(
+			(
+				у
+				for у in ast.walk(дерево)
+				if isinstance(у, ast.Constant)
+				and isinstance(у.value, str)
+				and id(у) not in мимо
+				and КИРИЛЛИЦА.search(у.value)
+				and not ИМЯ_КЛЮЧА.fullmatch(у.value)
+			),
+			key=lambda у: у.lineno,
+		)
+	]
 
 
 def русские_переводы() -> dict[str, str]:
@@ -126,8 +274,55 @@ class UnitTestTranslations(UnitTestCase):
 		}
 		self.assertEqual(разные, {})
 
-	def test_страницы_входа_без_зашитого_русского(self):
-		for имя in СТРАНИЦЫ_ВХОДА:
+	def test_отказы_интерфейса_с_английским_исходником(self):
+		"""Английский исходник, русский — перевод в `ru.csv` (learning-services#766)."""
+		for имя, функции in ОТКАЗЫ_ИНТЕРФЕЙСА.items():
+			with self.subTest(модуль=имя):
+				исходник = (ПРИЛОЖЕНИЕ / имя).read_text(encoding="utf-8")
+				if функции is not None:
+					определены = {
+						узел.name for узел in ast.walk(ast.parse(исходник)) if isinstance(узел, ast.FunctionDef)
+					}
+					self.assertEqual(set(функции) - определены, set(), "функции нет в модуле — поправьте список")
+				self.assertEqual(русские_отказы(исходник, функции), [], "текст — _() с английским исходником")
+				if функции is None:
+					self.assertEqual(русские_константы(исходник), [], "текст — _() с английским исходником")
+
+	def test_русские_отказы_находит_литерал_f_строку_и_msgid(self):
+		исходник = (
+			"def метод():\n"
+			'\traise Отказ("code", "Нет курса")\n'
+			'\traise Отказ("code", f"Нет {курс}")\n'
+			'\traise Отказ("code", _("No course"))\n'
+			'\tfrappe.throw(frappe._("Нет доступа"))\n'
+			'\tfrappe.throw("Нельзя")\n'
+			"def агенту():\n"
+			'\traise Отказ("code", "Только агенту")\n'
+		)
+		self.assertEqual(
+			русские_отказы(исходник, ("метод",)),
+			[
+				"2: 'Нет курса'",
+				"3: f'Нет {курс}'",
+				"5: frappe._('Нет доступа')",
+				"6: 'Нельзя'",
+			],
+		)
+
+	def test_русские_константы_мимо_ключей_журнала_и_докстрингов(self):
+		исходник = (
+			'"""Модуль."""\n'
+			'ОТКАЗ = "Нельзя"\n'
+			'ЛИЧНОЕ = "Личное"\n'
+			"def метод():\n"
+			'\t"""Докстринг."""\n'
+			'\tfrappe.log_error(title="Письмо не ушло")\n'
+			'\treturn частота("запись")\n'
+		)
+		self.assertEqual(русские_константы(исходник), ["2: Нельзя", "3: Личное"])
+
+	def test_страницы_без_зашитого_русского(self):
+		for имя in СТРАНИЦЫ_С_ПЕРЕВОДОМ:
 			with self.subTest(страница=имя):
 				строки = видимый_русский((ПРИЛОЖЕНИЕ / имя).read_text(encoding="utf-8"))
 				self.assertEqual(строки, [], "строки страницы — через _() с английским исходником")
@@ -136,6 +331,26 @@ class UnitTestTranslations(UnitTestCase):
 		разметка = (
 			'{# комментарий #}<h1>{{ агент or "агента" }}</h1>{% set имя = 1 %}<p>Привет</p>'
 			'<input placeholder="Почта">'
-			'<script>// комментарий\nconst текст = "Готово"; const ok = "ok";</script>'
+			'<script>// комментарий\nconst текст = "Готово"; const ok = "ok"; fetch(`/api/${пути[имя]}`);</script>'
+			'<style>/* тёмная тема */ .пусто::after { content: "Пусто"; }</style>'
 		)
-		self.assertEqual(видимый_русский(разметка), ["Готово", "агента", "Привет", 'input placeholder="Почта"'])
+		self.assertEqual(
+			видимый_русский(разметка), ["Пусто", "Готово", "агента", "Привет", 'input placeholder="Почта"']
+		)
+
+	def test_подписи_меню_и_сайдбара_переведены(self):
+		"""Подписи — константы, а переводятся при выводе: шапкой страниц
+		(`site_navigation`) и SPA Learning (`__()` заголовка заглушки,
+		learning-services#767). Литералов `_()` здесь нет, и общие ворота их
+		не видят."""
+		from lms_frappe_app import site_navigation
+		from lms_frappe_app.install import ПУНКТЫ_САЙДБАРА
+
+		перевод = русские_переводы()
+		подписи = [
+			*(подпись for подпись, _адрес in site_navigation.ПУНКТЫ),
+			site_navigation.КАБИНЕТ_АВТОРА[0],
+			site_navigation.АГЕНТЫ_И_СЕССИИ[0],
+			*(пункт["title"] for пункт in ПУНКТЫ_САЙДБАРА),
+		]
+		self.assertEqual([п for п in подписи if КИРИЛЛИЦА.search(п) or not перевод.get(п)], [])

@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 import frappe
+from frappe import _
 from frappe.auth import get_login_attempt_tracker
 from frappe.query_builder import Order
 from frappe.utils import get_datetime, now_datetime
@@ -167,18 +168,21 @@ def отключить(пользователь: str, подключение: st
 		if _тот_же(ключ, подключение or ""):
 			отозвать_подключение(пользователь, connection_token["client"], connection_token["family_token"])
 			return
-	raise Отказ(ПОДКЛЮЧЕНИЕ_НЕ_НАЙДЕНО, "Это подключение уже отключено")
+	raise Отказ(ПОДКЛЮЧЕНИЕ_НЕ_НАЙДЕНО, _("This connection has already been disconnected"))
 
 
 # --- сессии браузера ---
 
+#: Название Яндекс Браузера — по языку страницы (`устройство`), прочие —
+#: латиницей на любом языке.
+ЯНДЕКС = "Yandex Browser"
 #: Браузер и система по строке User-Agent: первое совпадение в порядке списка.
 #: Edge, Opera и Яндекс Браузер называют себя и Chrome — поэтому они раньше.
 БРАУЗЕРЫ = (
 	("Edg/", "Edge"),
 	("EdgiOS", "Edge"),
 	("OPR/", "Opera"),
-	("YaBrowser", "Яндекс Браузер"),
+	("YaBrowser", ЯНДЕКС),
 	("SamsungBrowser", "Samsung Internet"),
 	("Firefox/", "Firefox"),
 	("FxiOS", "Firefox"),
@@ -206,7 +210,9 @@ def устройство(user_agent: str | None) -> str:
 	ua = user_agent or ""
 	браузер = next((имя for признак, имя in БРАУЗЕРЫ if признак in ua), None)
 	система = next((имя for признак, имя in СИСТЕМЫ if признак in ua), None)
-	return ", ".join(ч for ч in (браузер, система) if ч) or "Неизвестное устройство"
+	if браузер == ЯНДЕКС:
+		браузер = _("Yandex Browser")
+	return ", ".join(ч for ч in (браузер, система) if ч) or _("Unknown device")
 
 
 def _действует(session_token_row, порог, сейчас: datetime) -> bool:
@@ -298,19 +304,19 @@ def подтвердить_паролем(пользователь: str, passwor
 	пароля — свой отказ и не в счётчик: ошибки ввода тут нет.
 	"""
 	if not есть_пароль(пользователь):
-		raise Отказ(ПАРОЛЯ_НЕТ, "У аккаунта нет пароля. Задайте его по ссылке из письма")
+		raise Отказ(ПАРОЛЯ_НЕТ, _("Your account has no password. Set one using the link in an email"))
 	if not password:
-		raise Отказ(НУЖЕН_ПАРОЛЬ, "Введите пароль, чтобы подтвердить")
+		raise Отказ(НУЖЕН_ПАРОЛЬ, _("Enter your password to confirm"))
 	счётчик = get_login_attempt_tracker(пользователь, raise_locked_exception=False)
 	if not счётчик.is_user_allowed():
-		raise Отказ(ПОПЫТКИ_КОНЧИЛИСЬ, "Слишком много неверных попыток. Попробуйте через несколько минут")
+		raise Отказ(ПОПЫТКИ_КОНЧИЛИСЬ, _("Too many incorrect attempts. Try again in a few minutes"))
 	try:
 		if len(password) > ПРЕДЕЛ_ПАРОЛЯ:
 			raise frappe.AuthenticationError
 		check_password(пользователь, password)
 	except frappe.AuthenticationError:
 		счётчик.add_failure_attempt()
-		raise Отказ(НЕВЕРНЫЙ_ПАРОЛЬ, "Неверный пароль") from None
+		raise Отказ(НЕВЕРНЫЙ_ПАРОЛЬ, _("Incorrect password")) from None
 	счётчик.add_success_attempt()
 
 
@@ -323,10 +329,10 @@ def завершить_сессию(пользователь: str, сессия:
 		if not _тот_же(отпечаток(session_token_row.sid), сессия or ""):
 			continue
 		if session_token_row.sid == current_session_token:
-			raise Отказ(ТЕКУЩАЯ_СЕССИЯ, "Эту сессию завершает «Выйти»")
+			raise Отказ(ТЕКУЩАЯ_СЕССИЯ, _("To end this session, use “Log out”"))
 		delete_session(session_token_row.sid, user=пользователь, reason=ПРИЧИНА_ЗАВЕРШЕНИЯ)
 		return
-	raise Отказ(СЕССИЯ_НЕ_НАЙДЕНА, "Эта сессия уже завершена")
+	raise Отказ(СЕССИЯ_НЕ_НАЙДЕНА, _("This session has already been ended"))
 
 
 def завершить_другие(пользователь: str, current_session_token: str | None) -> int:

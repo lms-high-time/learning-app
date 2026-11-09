@@ -1,11 +1,19 @@
+A copy of the documents you built in its space is attached.,"Копия документов, которые вы собирали в её пространстве, — во вложении."
+"A file's URL, thumbnail, and privacy can't be changed","Адрес, миниатюра и приватность файла не меняются"
+A fixed due date needs a date,Абсолютному сроку нужна дата
 A new account has been created for you at {0}.,Для вас создан аккаунт на {0}.
 A new batch '{0}' has been published that might interest you. Check it out!,"Опубликован новый поток «{0}», который может вас заинтересовать. Загляните!"
 A new course '{0}' has been published that might interest you. Check it out!,"Опубликован новый курс «{0}», который может вас заинтересовать. Загляните!"
 A new course has been published on {0},Новый курс опубликован на {0}
+A note key is required,Ключ заметки обязателен
+A note with this key already exists: replace it with a separate call without new_only,Заметка с этим ключом уже есть: замена — отдельным вызовом без new_only
 "A program on this computer ({0}) will get access. Only allow it if you started the connection yourself, for example, in Claude Code.","Доступ получит программа на&nbsp;этом компьютере ({0}). Разрешайте, только если сами запустили её подключение&nbsp;— например, в&nbsp;Claude&nbsp;Code."
+A relative due date needs a number of days greater than zero,Относительному сроку нужно число дней больше нуля
 A short summary of the course for search results.,Краткое описание курса для результатов поиска.
+A team with this name already exists,Команда с таким названием уже есть
 About this course,О курсе
 Accept and continue,Принять и продолжить
+Acceptance of your homework “{0}” for the lesson “{1}” in the course “{2}” has been canceled. What to change:,Вам отменили приём домашнего задания «{0}» к уроку «{1}» курса «{2}». Что доделать:
 "Access courses, join batches, and track learning progress","Доступ к курсам, участие в потоках и отслеживание прогресса"
 Account deletion,Удаление учётной записи
 Activate this Google Meet account for scheduling meetings.,Активировать этот аккаунт Google Meet для планирования встреч.
@@ -21,6 +29,8 @@ Add students to the batch to make an announcement,"Добавьте студен
 Add tag,Добавить тег
 Agent Connections,Подключения агентов
 Agent connection — Cenda,Подключение агента — Cenda
+Agent's website: {0},Сайт агента: {0}
+Agents and sessions,Агенты и сессии
 All Members,Все участники
 All that's left is to confirm your age and accept the terms.,Осталось подтвердить возраст и принять условия.
 Allow Job Posting,Разрешить публикацию вакансий
@@ -29,6 +39,10 @@ Allow this coupon to be used for discounts.,Разрешить использо�
 Allow users to enroll in this batch on their own.,Разрешить пользователям самостоятельно записываться на этот поток.
 Allow users to view their past quiz attempts.,Разрешить пользователям просматривать свои прошлые попытки прохождения теста.
 Also teaching,Также преподают
+An answer can have at most {0} files,В ответе не больше {0} файлов
+Another request is changing this submission right now — please try again,Сдачу сейчас меняет другой запрос — повторите
+Another request is saving this submission right now — please try again,Сдачу сейчас сохраняет другой запрос — повторите
+Another request is writing notes right now — please try again,Заметки сейчас пишет другой запрос — повторите
 Answer a few quick questions so we can set Frappe Learning up for you,"Ответьте на несколько коротких вопросов, чтобы мы настроили Frappe Learning под вас"
 "Are you sure you want to clear the demo data? This would delete the course ""A guide  to Frappe Learning"" along with all its associated data. This action cannot be undone.","Вы уверены, что хотите удалить демоданные? Будет удалён курс «A guide  to Frappe Learning» вместе со всеми связанными данными. Это действие нельзя отменить."
 Are you sure you want to submit the quiz?,"Вы уверены, что хотите отправить тест?"
@@ -36,7 +50,9 @@ As a part of this batch's curriculum you will have to complete the following cou
 Assignment Progress,Прогресс по заданиям
 Assignments deleted successfully,Задания успешно удалены
 At least {0} characters and no platform name. Tip: a few words strung together work well.,Не короче {0} символов и без названия платформы. Удобно — несколько слов подряд.
+At most {0} MB of files per save,За одно сохранение — не больше {0} МБ файлов
 Attempted Questions,Отвечено вопросов
+Author view,Кабинет автора
 Average Completion Rate,Средняя доля прохождения
 Average Watch Time (mins),Среднее время просмотра (мин)
 Award my first certificate,Выдать первый сертификат
@@ -53,7 +69,9 @@ Batch published,Поток опубликован
 Batch unpublished,Поток снят с публикации
 Batch updated successfully,Поток успешно обновлён
 Book a free onboarding session with the Frappe team,Записаться на бесплатную вводную встречу с командой Frappe
+"Browsers and devices where you're signed in to Cenda. To end a session, confirm your password.","Браузеры и устройства, где вы вошли в Cenda. Завершить сессию можно, подтвердив пароль."
 "Build and manage courses, chapters, and lessons","Создание и ведение курсов, глав и уроков"
+Can't reach the server. Please try again.,Нет связи с сервером. Попробуйте ещё раз.
 Cannot search for roles: {0},Не удалось выполнить поиск по ролям: {0}
 Canvas,Canvas
 Cenda is only available to people 18 or older. We will delete your account and the data associated with it.,"Cenda доступна только лицам, достигшим 18 лет. Мы удалим вашу учётную запись и данные, связанные с ней."
@@ -70,6 +88,8 @@ Check your email: we've sent you a message with a link.,Проверьте по�
 Checkout the batch,Перейти к потоку
 Checkout the course,Перейти к курсу
 Choose a payment provider to configure its credentials.,"Выберите платёжного провайдера, чтобы настроить его доступы."
+Clearing a section isn't allowed in fill-only mode,Очистка раздела — не дописывание
+"Clearing a section takes no values: pass either rows, delete_rows, fields, or clear","Очистка раздела не принимает значений: либо rows, delete_rows, fields, либо clear"
 Click the button below to complete your registration and set a new password.,"Нажмите кнопку ниже, чтобы завершить регистрацию и задать пароль."
 Click to upload an image.,"Нажмите, чтобы загрузить изображение."
 Close student view,Выйти из режима студента
@@ -79,6 +99,7 @@ Comma separated keywords,Ключевые слова через запятую
 Company and team,Компания и команда,Learner profile
 Company or Workplace,Компания или рабочее место
 Complete Registration,Завершить регистрацию
+Complete the course “{0}” first: the program “{1}” must be taken in order,Сначала пройдите курс «{0}»: программа «{1}» идёт по порядку
 Complete your profile,Заполните профиль
 Complete your registration,Завершите регистрацию
 Complete your sign-up,Завершите регистрацию
@@ -91,11 +112,14 @@ Configure the credentials and options for this payment gateway.,Настройт
 Confirm Cancellation?,Подтвердить отмену?
 Confirm Your Action,Подтвердите действие
 Confirm clearing demo data?,Удалить демоданные?
+Confirm it's you: enter your Cenda password.,"Подтвердите, что это вы: введите пароль от Cenda."
 Confirm password,Повторите пароль
 Connect a Google Meet account to schedule and host live classes.,"Подключите аккаунт Google Meet, чтобы планировать и проводить онлайн-уроки."
 Connect a Zoom account to schedule and host live classes.,"Подключите аккаунт Zoom, чтобы планировать и проводить онлайн-уроки."
 Connect an agent to Cenda?,Подключить агента к&nbsp;Cenda?
+Connect an assistant,Подключить ассистента
 Connect {0} to Cenda?,Подключить {0} к&nbsp;Cenda?
+Connected agents,Подключённые агенты
 Continue,Продолжить
 Could not create the course ZIP file. Please try again later. Error: {0},Не удалось создать ZIP-файл курса. Попробуйте позже. Ошибка: {0}
 Could not delete the quiz,Не удалось удалить тест
@@ -117,19 +141,25 @@ Course creator,Автор курса
 Course description,Описание курса
 Course details,Сведения о курсе
 Course editor,Редактор курса
+Course not found,Курс не найден
 Course or Batch is required to issue a certificate.,"Чтобы выдать сертификат, нужно указать курс или поток."
 Course overview,Обзор курса
 Course price,Цена курса
 Course published,Курс опубликован
 Course thumbnail,Обложка курса
 Course unpublished,Курс снят с публикации
+Course {0} is still being prepared,Курс {0} ещё готовится
+Course {0} isn't available to team {1},Курс {0} не открыт команде {1}
+Courses,Курсы
 Create Account,Создать аккаунт
 Create a reusable email template for your notifications.,Создайте многоразовый шаблон письма для ваших уведомлений.
 Create and manage reusable email templates for your notifications.,Создавайте и ведите многоразовые шаблоны писем для ваших уведомлений.
 Create chapter,Создать главу
+Curator,Куратор
 Current task,Задача сейчас,Learner profile
 Curriculum,Программа обучения
 Customer Academy,Академия для клиентов
+Date format: YYYY-MM-DD,Дата — ГГГГ-ММ-ДД
 Dear,"Здравствуйте,"
 Decline,Отказать
 Deduct marks for incorrect answers.,Снимать баллы за неверные ответы.
@@ -147,11 +177,16 @@ Demo data cleared successfully,Демоданные успешно удален�
 Details about this agent are published at {0}.,Сведения об&nbsp;агенте опубликованы на&nbsp;сайте {0}.
 Details cannot be empty.,Описание не может быть пустым.
 Didn't receive the link?,Не пришла ссылка?
+Disconnect,Отключить
+Disconnect “{0}”? The agent will lose access to Cenda.,Отключить «{0}»? Агент потеряет доступ к Cenda.
+"Disconnecting revokes the agent's access to Cenda. To use it again, reconnect it.","Отключение отзывает доступ агента к Cenda. Чтобы снова работать с ним, подключите его заново."
 Display correct answers after each question is attempted.,Показывать правильные ответы после каждого отвеченного вопроса.
 "Do not refresh the page or close this window. If you do, the quiz will be submitted automatically.",Не обновляйте страницу и не закрывайте это окно. Иначе тест будет отправлен автоматически.
 Don't have an account?,Нет аккаунта?
 "Drag and drop a ZIP file, or upload from your",Перетащите ZIP-файл или загрузите со своего
+Due date mode must be one of: {0},Срок: {0}
 Duplicate Template,Дублировать шаблон
+Each homework assignment can have only one due date in an assignment,У задания в назначении один срок
 Each user can only receive this badge one time.,Каждый пользователь может получить этот бейдж только один раз.
 Edit Google Meet Account,Изменить аккаунт Google Meet
 Edit Member,Изменить участника
@@ -166,6 +201,10 @@ Email is required,Укажите почту
 Email is required.,Укажите почту.
 Email service {0} is not supported,Почтовый сервис {0} не поддерживается
 Enable evaluations for batch participants.,Включить оценки для участников потока.
+End all except this one,"Завершить все, кроме этой"
+End all sessions except this one?,"Завершить все сессии, кроме этой?"
+End session,Завершить
+End the session “{0}”?,Завершить сессию «{0}»?
 Enforce Assignment Completion,Требовать выполнения заданий
 Enforce Quiz Completion,Требовать прохождения тестов
 Enforce Video Completion,Требовать полного просмотра видео
@@ -180,6 +219,7 @@ Enter Brand Name,Введите название бренда
 Enter a password.,Введите пароль.
 Enter your email and we'll send you a new one.,Отправим новую — укажите почту.
 Enter your email.,Укажите почту.
+Enter your password to confirm,"Введите пароль, чтобы подтвердить"
 Error Uploading File,Ошибка при загрузке файла
 Error creating Google Meet Account,Ошибка при создании аккаунта Google Meet
 Error creating batch,Ошибка при создании потока
@@ -197,6 +237,8 @@ Exercise deleted successfully,Упражнение успешно удалено
 Experience,Опыт в теме,Learner profile
 Failed to assign badge,Не удалось назначить бейдж
 Failed to refresh session,Не удалось обновить сессию
+Field,Поле,Document export
+Fields,Поля,Document export
 File type of {0} is not allowed in quiz answers.,Файлы типа {0} нельзя прикреплять к ответам на тест.
 File upload failed. Please try again.,Не удалось загрузить файл. Попробуйте ещё раз.
 Forgot Password?,Забыли пароль?
@@ -218,6 +260,9 @@ Hello Learner,Здравствуйте
 Here are the details:,Вот подробности:
 Highlight on the homepage.,Показывать на главной странице.
 Highlight what makes you unique and show your skills.,"Расскажите, чем вы уникальны, и покажите свои навыки."
+Homework submission files can only be added by saving the submission,Файлы сдачи домашки добавляет только её сохранение
+Homework submission files can't be deleted,Файлы сдачи домашки не удаляются
+Homework submission files can't be edited,Файлы сдачи домашки не правятся
 How I learn best,Как удобно учиться,Learner profile
 How to edit a lesson,Как редактировать урок
 I accept the {0}Terms of Use{1} and the {2}Privacy Policy{1},Я принимаю {0}Условия использования{1} и {2}Политику конфиденциальности{1}
@@ -228,11 +273,19 @@ I am under 18,Мне нет 18 лет
 "If this wasn't you, you don't need to do anything: the password can't be changed without this link.","Если регистрировались не вы, ничего делать не нужно: без этой ссылки пароль не поменять."
 "If this wasn't you, {0}. We'll send the link to this email address.","Если это сделали не вы, {0}: ссылка придёт на этот адрес."
 "If you did not request a password reset, please ignore this email. Your password will remain unchanged.","Если вы не просили сменить пароль, просто проигнорируйте письмо: пароль останется прежним."
+"If you rejoin the team, your documents will be back in place.","Если вернётесь в команду, документы снова будут на месте."
 "If you signed in with Google before, sign in the same way. Or {0} and sign in with your email.",Если вы входили через Google — войдите так же. Или {0} и входите по почте.
 Import via Data Import Tool,Импорт через Data Import Tool
 Import via ZIP,Импорт из ZIP
+"In courses you author, {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.","На проверке в курсах, где вы автор — {0} домашка: ученики сдали и ждут ответа."
+"In courses you author, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.","На проверке в курсах, где вы автор — {0} домашек: ученики сдали и ждут ответа."
+"In courses you author, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.","На проверке в курсах, где вы автор — {0} домашки: ученики сдали и ждут ответа.",few
+"In your teams, {0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.",На проверке в ваших командах — {0} домашка: ученики сдали и ждут ответа.
+"In your teams, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",На проверке в ваших командах — {0} домашек: ученики сдали и ждут ответа.
+"In your teams, {0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.",На проверке в ваших командах — {0} домашки: ученики сдали и ждут ответа.,few
 In-app,В приложении
 Include in preview,Включить в предпросмотр
+Incorrect password,Неверный пароль
 Industry,Отрасль,Learner profile
 Instructor notes,Заметки инструктора
 Invalid Email.,Проверьте адрес почты.
@@ -242,6 +295,7 @@ Invalid course ZIP: Missing course.json,Некорректный ZIP курса:
 Invalid course or chapter name,Некорректное название курса или главы
 "Invalid credentials, try again.",Неверная почта или пароль. Попробуйте ещё раз.
 Invalid document name,Некорректное имя документа
+Invalid file URL,Неверный адрес файла
 Invalid file path in package,Некорректный путь к файлу в пакете
 Invalid role filter.,Некорректный фильтр по ролям.
 Issue a free certificate when learners complete the course.,"Выдавать бесплатный сертификат тем, кто завершил курс."
@@ -260,8 +314,10 @@ Lesson Dwell Time must be at least 1 second.,Время на уроке долж
 Lesson Index,Порядок уроков
 Lesson Progress,Прогресс по урокам
 Lesson created,Урок создан
+Lesson not found,Урок не найден
 Lesson title,Название урока
 Lesson updated,Урок обновлён
+Lessons are completed in a session with an agent — in the platform's web chat or through your own agent,Урок закрывается на занятии с агентом — в веб-чате платформы или через вашего агента
 Let users enroll themselves.,Разрешить пользователям записываться самостоятельно.
 Let's setup your account.,Создайте аккаунт.
 Live answer checking is not enabled for this quiz.,Мгновенная проверка ответов для этого теста отключена.
@@ -281,6 +337,9 @@ Member added successfully,Участник успешно добавлен
 Member updated,Участник обновлён
 Meta keywords,Мета-ключевые слова
 Moodle,Moodle
+Must be no longer than {0} characters,Не длиннее {0} знаков
+My documents,Мои документы
+My sessions,Мои сессии
 New Google Meet Account,Новый аккаунт Google Meet
 New lesson,Новый урок
 New password,Новый пароль
@@ -290,7 +349,9 @@ No announcements have been made yet for this batch,В этом потоке по
 No assessments added to this batch,В этот поток не добавлено ни одной оценки
 No calendar is configured for the conferencing provider. Please set up a calendar to create events.,"Для сервиса видеосвязи не настроен календарь. Настройте календарь, чтобы создавать события."
 No chapters yet,Глав пока нет
+No connected agents.,Подключённых агентов нет.
 No courses added to this batch,В этот поток не добавлено ни одного курса
+No more than {0} rows,Не больше {0} строк
 No other published courses available,Других опубликованных курсов нет
 No read notifications,Нет прочитанных уведомлений
 No students enrolled yet,Пока никто не записан
@@ -298,22 +359,31 @@ No students match your search,Нет студентов по вашему зап
 No thumbnail,Обложки нет
 No unread notifications,Нет непрочитанных уведомлений
 Non-profit or Government,НКО или госсектор
+Not filled in.,Не заполнено.
 Not yet open for enrollment.,Запись пока не открыта.
+"Nothing to write: pass rows, delete_rows, fields, or clear","Нечего записывать: rows, delete_rows, fields или clear"
 Notification Sent,Уведомление отправлено
 Notifications you have read will appear here.,Здесь появятся прочитанные уведомления.
 Notion,Notion
+Observations and projects are recorded within a session: pass session,Наблюдение и проект записываются в рамках занятия: передайте session
 On demand course video,Видео курса в записи
 On site,В офисе
 Onboard my existing learners,Перевести своих учеников на платформу
 Only PDF files are allowed.,Можно загружать только файлы PDF.
+"Only PNG, JPEG, GIF, WebP, and AVIF images can be uploaded publicly","Публично загружаются только изображения PNG, JPEG, GIF, WebP и AVIF"
 Only ZIP files are allowed.,Можно загружать только файлы ZIP.
+Only a team admin can change roles,Менять роли может администратор команды
+Only a team lead can manage the team,Управлять командой может ведущий
 "Only allow it if you started the connection yourself in Claude, ChatGPT, or another agent.","Разрешайте, только если подключение начали вы сами&nbsp;— в&nbsp;Claude, ChatGPT или другом агенте."
 Only document file of type .doc or .docx are allowed.,Можно загружать только документы .doc или .docx.
 Only image data is allowed in quiz answers.,В ответах на тест можно использовать только изображения.
 Only show assignments from the current course,Показывать только задания текущего курса
 Only show batches that offer a certificate,Показывать только потоки с сертификатом
 Only show courses that offer a certificate,Показывать только курсы с сертификатом
+"Only the user themselves can do this, on the “Agents and sessions” page",Это может сделать только сам пользователь на странице «Агенты и сессии»
 Only {0} file is allowed.,Можно загружать только файлы {0}.
+Open the homework,Открыть задание
+Open the review queue,Открыть очередь
 Open to Work,Ищу работу
 Or copy and paste this link:,Или скопируйте ссылку в адресную строку:
 Org Admin,Администратор
@@ -322,6 +392,7 @@ Organization Course,Курс команды
 Organization Invite,Приглашение в команду
 Organization Manager,Ведущий команды
 Organization Membership,Участие в команде
+Other sessions ended: {0}.,Другие сессии завершены: {0}.
 "Oversee all users, content, and system settings","Контроль всех пользователей, контента и настроек системы"
 Paid certificate,Платный сертификат
 Paid course,Платный курс
@@ -339,6 +410,7 @@ Paste a YouTube link,Вставьте ссылку на YouTube
 Payment gateways deleted successfully,Платёжные шлюзы успешно удалены
 Payments app required,Нужно приложение Payments
 People,Люди
+Personal,Личное,Learning space
 Personal Business,Личный бизнес
 Please attach a SCORM package before saving this chapter.,"Прикрепите пакет SCORM, прежде чем сохранять эту главу."
 Please check your email.,Проверьте почту.
@@ -384,6 +456,7 @@ Save password,Сохранить пароль
 Saved — this format can't be previewed here.,Сохранено — этот формат здесь не показывается.
 Saving password…,Сохраняем…
 School,Школа
+Section,Раздел,Document export
 See less,Свернуть
 See more,Показать полностью
 Select a lesson on the right to start editing.,"Выберите урок справа, чтобы начать редактирование."
@@ -406,6 +479,7 @@ Send Payment Reminders for Course,Отправлять напоминания о
 Send a new link,Отправить новую ссылку
 Send login link,Отправить ссылку для входа
 Sent,Отправлено
+Session ended.,Сессия завершена.
 Session refreshed successfully,Сессия успешно обновлена
 Set a password,Задайте пароль
 "Set the discount, validity, and the courses or batches this coupon applies to.","Задайте скидку, срок действия и курсы или потоки, к которым применяется купон."
@@ -417,56 +491,134 @@ Sign Up,Регистрация
 Sign in,Войти
 Sign out,Выйти
 Sign up,Зарегистрироваться
+Sign-in required,Требуется вход
+Signed in with Google and don't know your password? {0}Set one using the link in an email{1}: changing your password automatically ends all your other sessions and disconnects your agents.,Входите через Google и не знаете пароля? {0}Задайте его по ссылке из письма{1}: смена пароля сама завершает все другие сессии и отключает агентов.
 Signup Disabled,Регистрация отключена
 Signups have been disabled for this website.,Регистрация на этом сайте отключена.
 Skip for now,Пропустить
 Slots,Слоты
+Some documents couldn't be put together — write to us and we'll send them separately.,"Некоторые документы собрать не удалось — напишите нам, пришлём их отдельно."
 "Someone tried to sign up with this address, but an account with it already exists.","На этот адрес пытались зарегистрироваться, но аккаунт с ним уже есть."
+Something went wrong. Please try again.,Не получилось. Попробуйте ещё раз.
 Sort by,Сортировать по
 Spreadsheets,Таблицы
 "Start connecting again from your agent. If the error happens again, email {0} and include the text below.","Начните подключение заново в&nbsp;агенте. Если ошибка повторится, напишите на&nbsp;{0} и&nbsp;приложите текст ниже."
 Starting level,Стартовый уровень,Learner profile
 Status/Percentage,Статус/Процент
+Student,Ученик,Homework history
 Student View,Режим студента
 Student enrolled successfully,Студент успешно записан
 Student is already enrolled in this course.,Студент уже записан на этот курс.
+Study in the browser,Заниматься в браузере
 Submissions,Отправленные работы
 Switch account,Сменить
 TalentLMS,TalentLMS
 Taught by,Преподают
 Taught by a team of {0},Преподаёт команда из {0}
 Teachable,Teachable
+Team {0} is suspended,Команда {0} приостановлена
 Thank you,Спасибо
 Thanks,Спасибо
+The Cenda web chat connects automatically when you open the chat. Disconnecting signs you out of the chat on all devices; it will connect again the next time you open it.,"Веб-чат Cenda подключается сам, когда вы открываете чат. Отключение выведет из чата на всех устройствах; при следующем открытии он подключится снова."
 The Google Meet account does not have a Google Calendar configured. Please set up a Google Calendar first.,Для аккаунта Google Meet не настроен Google Календарь. Сначала настройте Google Календарь.
 The agent,Агент
+The answer is empty: add text or a file,Ответ пустой: нужен текст или файл
+The answer text is too long,Текст ответа слишком длинный
+"The author has opened the course “{0}” to you before publication: it isn't in the catalog yet, and you're the first to test it.","Автор открыл вам курс «{0}» до публикации: его ещё нет в каталоге, и вы проверяете его первым."
+"The connector in the agent's own settings stays after you disconnect — remove it there if you no longer need it. “Last active” is when the agent last got access: while it's working, this happens once an hour.","Коннектор в настройках самого агента после отключения остаётся — уберите его там, если он больше не нужен. «Последняя активность» — когда агент в последний раз получил доступ: пока он работает, это происходит раз в час."
+The course is still being prepared and can't be assigned yet,"Курс ещё готовится, назначить его нельзя"
+The course “{0}” assigned by the team “{1}” is due in a few days.,"До срока курса «{0}», который назначила команда «{1}», осталось несколько дней."
+The course “{0}” assigned by the team “{1}” is due in a few days. Due date: {2}.,"До срока курса «{0}», который назначила команда «{1}», осталось несколько дней. Срок — {2}."
+The course “{0}” is due soon,Скоро срок курса «{0}»
+The course “{0}” is out,Курс «{0}» вышел
+The course “{0}” you asked to be notified about is now open for enrollment.,"Курс «{0}», о выходе которого вы просили сообщить, открыт для записи."
 The deadline to schedule evaluations has passed. Please contact the Instructor for assistance.,Срок записи на оценку истёк. Обратитесь за помощью к инструктору.
+The file is larger than allowed,Файл больше допустимого
+The file is missing or empty,Файл не передан или пуст
+The homework “{0}” for the lesson “{1}” in the course “{2}” is due {3}.,Срок домашнего задания «{0}» к уроку «{1}» курса «{2}» — {3}.
+The homework “{0}” is due soon,Скоро срок домашнего задания «{0}»
+The homework “{0}” needs changes,Домашнее задание «{0}» — на доработку
 The instructor has left a comment on your assignment {0},Инструктор оставил комментарий к вашему заданию {0}
 The last day to schedule your evaluation is {0}.,"Последний день, чтобы записаться на оценку, — {0}."
+The name must be 2 to 140 characters long,Название — от 2 до 140 знаков
 The new Terms of Use and Privacy Policy are now in effect.,Действуют новые Условия использования и Политика конфиденциальности.
 The new Terms of Use and Privacy Policy take effect on {0}.,С {0} действуют новые Условия использования и Политика конфиденциальности.
+The note is too long,Заметка слишком длинная
+The note key is too long,Ключ заметки слишком длинный
+"The note kind must be fact, observation, or project","Вид заметки — fact, observation или project"
+The note limit has been reached: replace a note under an existing key,Заметок уже предельно много: замените запись по существующему ключу
 The password for your account on {0} has been changed.,Пароль от вашего аккаунта на {0} изменён.
+The platform sets the file's thumbnail and hash,Миниатюру и отпечаток файла задаёт платформа
+The platform's learning app is open source under AGPL-3.0 — {0}source code{1},Учебное приложение платформы открыто под AGPL-3.0 — {0}исходный код{1}
 The selected Google Meet account does not have a Google Calendar configured.,Для выбранного аккаунта Google Meet не настроен Google Календарь.
 The selected Google Meet account is disabled. Please enable it or select another account.,Выбранный аккаунт Google Meet отключён. Включите его или выберите другой.
 The site {0} will get access.,Доступ получит сайт {0}.
+The student has saved a new version — take a look at it,Ученик сохранил новую версию — посмотрите её
+The team has no seats left,В команде не осталось мест
+The team hasn't assigned this course,Этот курс команда не назначала
+The team is currently suspended,Команда сейчас приостановлена
+The team must keep at least one admin,У команды должен остаться администратор
+The team “{1}” has assigned you the course “{0}”.,Команда «{1}» назначила вам курс «{0}».
+The team “{1}” has assigned you the course “{0}”. Due date: {2}.,Команда «{1}» назначила вам курс «{0}». Срок — {2}.
+The value must be text,Значение — текст
+There were no other sessions.,Других сессий не было.
+There's no such course assignment,Такого назначения нет
+There's no such lesson,Такого урока нет
+There's no such note,Такой заметки нет
+There's no such role,Такой роли нет
+There's no such row,Такой строки нет
+There's no such user,Такого пользователя нет
 These tags help search engines describe and rank your course in results.,Эти теги помогают поисковым системам описывать и ранжировать ваш курс в результатах поиска.
 Thinkific,Thinkific
 This batch is not associated with this course.,Этот поток не связан с этим курсом.
+This connection has already been disconnected,Это подключение уже отключено
+This course has no such document,В этом курсе нет такого документа
 This course includes:,Что входит в курс:
+This course isn't available right now,Этот курс сейчас недоступен
+This course isn't available to the team,Этот курс команде не открыт
+This course isn't coming soon,Этот курс не готовится к выходу
+This course isn't in the selected space,Этого курса нет в выбранном пространстве
+This document has no such section,В этом документе нет такого блока
 "This email address is linked to a different Google account on the platform. Sign in with the Google account you used before, or with your email and password.","Этот адрес почты на платформе привязан к другому аккаунту Google. Войдите тем аккаунтом Google, которым входили раньше, или по почте с паролем."
+This file can't be submitted,Такой файл сдать нельзя
+This file can't be submitted: its type isn't on the list or its content doesn't match the type. Accepted: {0},Такой файл сдать нельзя: тип не из списка или содержимое не того типа. Принимаются: {0}
+This file type can't be uploaded,Такой тип файла загрузить нельзя
+This homework has already been accepted and can no longer be edited,Домашку уже приняли — её больше не правят
+This homework is submitted as files,Это задание сдаётся файлами
+This homework is submitted as text,Это задание сдаётся текстом
+This homework isn't part of the assigned course,Это задание не из курса назначения
+This lesson has no homework,У этого урока нет домашнего задания
 This link has already been used or is invalid,Ссылка уже использована или недействительна
 This link has expired,Ссылка устарела
+This link is invalid or has been revoked,Ссылка недействительна или отозвана
+This page is out of date. Refresh it and try again.,Страница устарела. Обновите её и попробуйте снова.
 This password has appeared in data breaches. Choose a different one.,Этот пароль встречается в утечках данных — выберите другой.
 This permanently deletes the email account and cannot be undone.,"Почтовый аккаунт будет удалён навсегда, отменить это нельзя."
 This permanently deletes the email template and cannot be undone.,"Шаблон письма будет удалён навсегда, отменить это нельзя."
 This permanently deletes the user account and cannot be undone.,"Учётная запись пользователя будет удалена навсегда, отменить это нельзя."
+This person isn't a member of the team,Этот человек не состоит в команде
 This quiz has no questions available yet.,В этом тесте пока нет вопросов.
+This section has no such column,У раздела нет такой колонки
+This section has no such field,У раздела нет такого поля
+This section is filled in once: fields only,Раздел заполняется один раз: только fields
+This section is kept in rows: rows and delete_rows only,Раздел ведётся строками: только rows и delete_rows
+This session had already been ended.,Эта сессия уже была завершена.
+This session has already been ended,Эта сессия уже завершена
 This sign-in method isn't available on this platform. Sign in with Google or with your email and password.,Этот способ входа на платформе не используется. Войдите через Google или по почте с паролем.
+This student isn't on your team,Этот ученик не из вашей команды
+This submission doesn't exist,Такой сдачи нет
+This submission has already been reviewed,Сдачу уже проверили
+This submission is no longer active,Сдача больше не активна
 This user cannot be deleted.,Этого пользователя нельзя удалить.
 This video's codec can't be played in browsers (e.g. HEVC/H.265). Please upload an H.264 MP4 or a WebM.,"Кодек этого видео не воспроизводится в браузерах (например, HEVC/H.265). Загрузите MP4 с кодеком H.264 или WebM."
+"This write changes filled-in values or deletes rows — that's an edit, not fill-only","Запись меняет заполненное или удаляет строки — это правка, а не дописывание"
 Time per week,Время в неделю,Learner profile
 Title cannot be empty.,Заголовок не может быть пустым.
 "To continue, confirm your age and accept the terms.","Чтобы продолжить, подтвердите возраст и примите условия."
+"To end this session, use “Log out”",Эту сессию завершает «Выйти»
+Too many attempts. Wait a moment and try again.,Слишком много попыток. Подождите и попробуйте снова.
+Too many calls in a row — try again in {0} seconds,Слишком много вызовов подряд — повторите через {0} с
+Too many incorrect attempts. Try again in a few minutes,Слишком много неверных попыток. Попробуйте через несколько минут
 Tools and methods,Инструменты и методики,Learner profile
 Total Questions,Всего вопросов
 Transaction created successfully,Транзакция успешно создана
@@ -477,6 +629,7 @@ Unable to add member,Не удалось добавить участника
 Unable to create category,Не удалось создать категорию
 Unable to update member,Не удалось обновить участника
 Unattempted Questions,Без ответа
+Unknown device,Неизвестное устройство
 Unsafe file path detected,Обнаружен небезопасный путь к файлу
 Untitled Quiz,Тест без названия
 Untitled lesson,Урок без названия
@@ -492,6 +645,7 @@ Uploaded video — students see it on the course page. Remove it to use a YouTub
 Use HTML content for the email response,Использовать HTML в тексте письма
 User deleted,Пользователь удалён
 User does not have permission to access this user's profile details.,У пользователя нет прав на просмотр данных этого профиля.
+Value,Значение,Document export
 Video failed to load — this lesson will still be marked complete after you spend some time on it.,"Видео не загрузилось — урок всё равно будет отмечен как пройденный, когда вы проведёте на нём немного времени."
 View all reviews,Смотреть все отзывы
 Watch Time (mins),Время просмотра (мин)
@@ -506,9 +660,12 @@ What's the first milestone you'd like to achieve?,Какой первой цел
 "When on, anyone can preview this lesson without enrolling. Otherwise it is visible only to enrolled students.","Когда включено, любой может открыть этот урок без записи на курс. Иначе он доступен только записанным студентам."
 "When you feel ready, you can schedule an evaluation to get certified.","Когда почувствуете, что готовы, запишитесь на оценку, чтобы получить сертификат."
 Where will you be using Frappe Learning?,Где вы будете использовать Frappe Learning?
+Which agents are connected to your account and where you're signed in to Cenda. Disconnect what you no longer use and end sessions on devices you don't recognize.,"Какие агенты подключены к вашему аккаунту и где вы вошли в Cenda. Отключите то, чем больше не пользуетесь, и завершите сессии на устройствах, которых не узнаёте."
 Whole Organization,Вся команда
 Work,Работа
 Work context,Контекст работы,Learner profile
+Write what needs to be changed,"Напишите, что доделать"
+Yandex Browser,Яндекс Браузер
 You already have an account on {0},У вас уже есть аккаунт на {0}
 You are not authorized to view the assessments of this batch.,У вас нет прав на просмотр оценок этого потока.
 You are not authorized to view the chart data of this batch.,У вас нет прав на просмотр данных графиков этого потока.
@@ -519,9 +676,14 @@ You are not authorized to view the students of this batch.,У вас нет пр
 You are not authorized to view this quiz.,У вас нет прав на просмотр этого теста.
 You are not the assigned evaluator for this course and batch.,Вы не назначены оценщиком для этого курса и потока.
 You are signed in as,Вы вошли как
+You aren't a member of the team,Вы не состоите в команде
 You can only submit assignments for your own account.,Отправлять задания можно только от своего имени.
 You can only upload {0} files,Можно загружать только файлы {0}
 You can use it to sign in with your email.,С ним можно входить по почте.
+You can't create any more teams,Больше команд создать нельзя
+You can't enroll in this course,На этот курс записаться нельзя
+You can't view someone else's profile,Чужой профиль недоступен
+You can't view this submission,Эта сдача вам не видна
 You cannot book an evaluation for another user.,Нельзя записать на оценку другого пользователя.
 You do not have permission to access announcements for this batch.,У вас нет прав на доступ к объявлениям этого потока.
 You do not have permission to access badges.,У вас нет прав на доступ к бейджам.
@@ -543,40 +705,70 @@ You do not have permission to modify this role.,У вас нет прав на �
 You do not have permission to send confirmation emails for this enrollment.,У вас нет прав на отправку писем-подтверждений по этой записи.
 You do not have permission to set up calendar events for this evaluation.,У вас нет прав на создание событий календаря для этой оценки.
 You do not have permission to update this submission.,У вас нет прав на изменение этой отправленной работы.
+You don't have access to this team,Эта команда вам не открыта
+You don't have such a space,Такого пространства у вас нет
+You don't review this submission,Эту сдачу вы не проверяете
 You must be an Admin to assign badges to users.,Назначать бейджи пользователям может только администратор.
 You're all caught up! Check back later for updates.,Всё прочитано! Загляните позже за новостями.
 "You're enrolled and all set! The course content is ready, so you can start learning right away and go at your own pace.","Вы записаны, всё готово! Материалы курса уже доступны, поэтому вы можете начать учиться прямо сейчас и заниматься в своём темпе."
 You're enrolled in {0} – start whenever you're ready,"Вы записаны на {0} — начинайте, когда будете готовы"
+"You're no longer on the team “{0}”. The team can no longer see your documents, progress, or homework.","Вы больше не в команде «{0}». Команда больше не видит ваши документы, прогресс и домашние задания."
+You've been assigned the course “{0}”,Вам назначен курс «{0}»
+You've been invited to test the course “{0}”,Вас пригласили проверить курс «{0}»
+You've used up your file storage for the last 30 days — contact support,Место под файлы за последние 30 дней закончилось — напишите в поддержку
 YouTube link added — students see it embedded on the course page. Clear the field to upload a file instead.,"Ссылка на YouTube добавлена — студенты видят видео на странице курса. Очистите поле, чтобы вместо этого загрузить файл."
 Your account and the data associated with it have been deleted.,Учётная запись и связанные с ней данные удалены.
 "Your account has been closed. The data associated with it will be deleted within 30 days. If you clicked by mistake, email privacy@cenda.app.","Учётная запись закрыта. Связанные с ней данные будут удалены в течение 30 дней. Если вы нажали по ошибке, напишите на privacy@cenda.app."
+Your account has no password. Set one using the link in an email,У аккаунта нет пароля. Задайте его по ссылке из письма
+Your account has no password. {0}Set one using the link in an email{1} — changing your password will automatically end your other sessions.,У аккаунта нет пароля. {0}Задайте его по ссылке из письма{1} — смена пароля сама завершит другие сессии.
 Your browser does not support the video tag.,Ваш браузер не поддерживает тег video.
+Your documents from the team “{0}”,Ваши документы из команды «{0}»
 Your evaluation for the course {0} has been scheduled on {1} at {2} ({3} time).,Ваша оценка по курсу {0} назначена на {1} в {2} (время {3}).
+Your homework “{0}” for the lesson “{1}” in the course “{2}” has been sent back for changes. What to change:,Вам вернули домашнее задание «{0}» к уроку «{1}» курса «{2}». Что доделать:
 Your login ID is:,Ваш логин:
 Your password has expired. Set a new one.,Срок пароля истёк — задайте новый.
 Zoom,Zoom
 Zoom account deleted successfully,Аккаунт Zoom успешно удалён
+an administrator signed in as you,вход администратора от вашего имени
+calls itself “{0}”,называет себя «{0}»
+connected {0} · last active {1},подключён {0} · последняя активность {1}
 course must be a string,course должен быть строкой
 course rating,рейтинг курса
 data must be an object,data должен быть объектом
 e.g. Course Champion,"например, Мастер курса"
 e.g. WELCOME10,"например, WELCOME10"
 file_url must be a string,file_url должен быть строкой
+"files must be a list of objects { name, data }, and remove_files a list of file ids","files — список объектов { name, data }, remove_files — список id файлов"
+"homework_due must be a list of objects { homework, due_mode, … }","homework_due — список объектов { homework, due_mode, … }"
 jane@example.com,ivan@example.com
 name must be a string,name должен быть строкой
 sections,разделов
 service must be a string,service должен быть строкой
 set a new password,задайте новый пароль
 set a password,задайте пароль
+signed in {0} · active {1},вход {0} · активность {1}
 that might interest you!,"и, возможно, он вас заинтересует!"
+this session,эта сессия
 title must be a string,title должен быть строкой
 user must be a string,user должен быть строкой
 user rating,оценка
 user ratings,оценок
 {0} has published a new batch {1},{0} опубликовал новый поток {1}
 {0} has published a new course {1},{0} опубликовал новый курс {1}
+{0} homework assignment is awaiting review,{0} домашка ждёт проверки
+{0} homework assignment is awaiting review: students have submitted their work and are waiting for a response.,На проверке — {0} домашка: ученики сдали и ждут ответа.
+{0} homework assignments are awaiting review,{0} домашек ждут проверки
+{0} homework assignments are awaiting review,{0} домашки ждут проверки,few
+{0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.,На проверке — {0} домашек: ученики сдали и ждут ответа.
+{0} homework assignments are awaiting review: students have submitted their work and are waiting for a response.,На проверке — {0} домашки: ученики сдали и ждут ответа.,few
+{0} is already a member of team {1},{0} уже состоит в команде {1}
+{0} must be a list,{0} — список
 {0} must be a string,{0} должен быть строкой
+{0} must be an object,{0} — объект
 {0} replies,{0} ответов
 {0} reply,{0} ответ
 "{0} will be able to work in Cenda on your behalf — for example, running lessons from your courses and recording decisions in your working documents.","{0} сможет работать в&nbsp;Cenda от&nbsp;вашего имени&nbsp;— например, вести уроки по&nbsp;вашим курсам и&nbsp;записывать решения в&nbsp;рабочие документы."
 {0}% complete,пройдено {0}%
+{0}Open the course{1} — lessons run with a mentor: in the browser or with your agent.,{0}Открыть курс{1} — занятие идёт с наставником: в браузере или с вашим агентом.
+"{0}Open the course{1} — lessons run with a mentor: in the browser or with your agent. If something seems wrong or inconvenient, tell the mentor right in the lesson: they'll pass it on to the author.","{0}Открыть курс{1} — занятие идёт с наставником: в браузере или с вашим агентом. Что показалось неверным или неудобным, скажите наставнику прямо на занятии: он передаст это автору."
+“{0}” has been disconnected.,«{0}» отключён.

@@ -23,6 +23,7 @@ from frappe.utils.data import sha256_hash
 from frappe.website.utils import is_signup_disabled
 
 from lms_frappe_app.agent_learning.notices import почта_есть, ссылка
+from lms_frappe_app.languages import язык_пользователя
 from lms_frappe_app.passwords import проверить_пароль, сведения_пользователя
 from lms_frappe_app.agent_learning.oauth_client import отозвать_токены_пользователя
 
@@ -107,13 +108,6 @@ def состояние_ключа(key: str | None) -> str:
 
 def _название() -> str:
 	return frappe.db.get_single_value("Website Settings", "app_name") or get_url()
-
-
-def _язык(пользователь: str) -> str:
-	"""Язык письма — язык получателя, а не того, кто вызвал отправку."""
-	return frappe.db.get_value("User", пользователь, "language") or frappe.db.get_single_value(
-		"System Settings", "language"
-	)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -205,7 +199,7 @@ def accept_invitation(key: str) -> None:
 def _письмо_пароль_изменён(пользователь: str) -> None:
 	if not почта_есть():
 		return
-	язык = _язык(пользователь)
+	язык = язык_пользователя(пользователь)
 	ссылка_сброса = ссылка(get_url("/login#forgot"), _("set a new password", lang=язык))
 	абзацы = (
 		_("The password for your account on {0} has been changed.", lang=язык).format(
@@ -319,7 +313,7 @@ def _письмо_аккаунт_есть(пользователь: str) -> None
 	# подстрокам имён (`key`, `token`, `password`), кириллическое имя ушло бы в
 	# журнал как есть (learning-services#664).
 	reset_key_link = документ._reset_password()
-	язык = _язык(пользователь)
+	язык = язык_пользователя(пользователь)
 	задать = ссылка(reset_key_link, _("set a password", lang=язык))
 	абзацы = (
 		_("Someone tried to sign up with this address, but an account with it already exists.", lang=язык),

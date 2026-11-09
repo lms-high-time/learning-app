@@ -13,6 +13,7 @@ from collections.abc import Collection
 from urllib.parse import quote
 
 import frappe
+from frappe import _
 
 from lms_frappe_app.agent_learning import announcements, permissions, testers
 from lms_frappe_app.agent_learning import course_translations as переводы_курса
@@ -74,7 +75,7 @@ def course_map(course: str, space: str | None = None) -> dict:
 	if not открыт and not frappe.db.get_value("LMS Course", course, "published"):
 		# Непубликованный курс для постороннего не существует. Отказ доменный,
 		# а не 404: тем же кодом отвечают методы авторинга на чужой курс.
-		raise Отказ(КУРС_НЕ_НАЙДЕН, "Курс не найден", id=course)
+		raise Отказ(КУРС_НЕ_НАЙДЕН, _("Course not found"), id=course)
 	if not открыт and announcements.анонсирован(course):
 		return _анонс(course)
 
@@ -139,7 +140,7 @@ def course_programs(course: str) -> dict:
 	пройден целиком; прочим — `null`.
 	"""
 	if not _зачислен(course) and not frappe.db.get_value("LMS Course", course, "published"):
-		raise Отказ(КУРС_НЕ_НАЙДЕН, "Курс не найден", id=course)
+		raise Отказ(КУРС_НЕ_НАЙДЕН, _("Course not found"), id=course)
 	return {"course": course, "programs": программы.программы_курса(course, frappe.session.user)}
 
 
@@ -175,7 +176,7 @@ def lesson_entry(lesson: str | None = None, course: str | None = None, space: st
 	)
 	зачислен = bool(урок) and _зачислен(урок.course)
 	if not урок or not (зачислен or permissions.курс_открыт(урок.course)):
-		raise Отказ(УРОК_НЕ_НАЙДЕН, "Урок не найден", id=lesson or course)
+		raise Отказ(УРОК_НЕ_НАЙДЕН, _("Lesson not found"), id=lesson or course)
 
 	пройден = frappe.db.exists(
 		"LMS Course Progress", {"member": ученик, "lesson": lesson, "status": ПРОЙДЕН}

@@ -86,11 +86,18 @@ class IntegrationTestReviewQueue(IntegrationTestCase):
 			self.assertEqual([к["id"] for к in данные["courses"]], [self.курс])
 
 		with self.subTest("методист: личное подписано, практика — в очереди с признаком"):
+			# Подпись личного — на языке запроса (learning-services#766).
+			self.addCleanup(setattr, frappe.local, "lang", frappe.local.lang)
+			frappe.local.lang = "ru"
 			данные = self.очередь(self.методист, course=self.курс)
 			личная = данные["items"][0]
 			self.assertEqual((личная["organization"], личная["organization_title"]), ("personal", "Личное"))
 			self.assertFalse(личная["required"])
 			self.assertIn({"id": "personal", "title": "Личное"}, данные["organizations"])
+			frappe.local.lang = "en"
+			self.assertIn(
+				{"id": "personal", "title": "Personal"}, self.очередь(self.методист, course=self.курс)["organizations"]
+			)
 
 		отборы = {
 			"руководитель: личное": (self.менеджер, {"organization": "personal"}, []),

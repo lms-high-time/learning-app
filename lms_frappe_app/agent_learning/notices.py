@@ -12,13 +12,21 @@
 Каждое письмо уходит человеку по назначению один раз — это держит журнал
 `Allocation Notice`. На курс, который сотрудник взял сам из каталога
 организации, писем нет: он о нём знает.
+
+Тема и текст — на языке получателя (`languages.язык_пользователя`), и
+письмо собирается для каждого получателя своё (learning-services#768):
+отправку зовёт задача или запрос другого человека, и язык запроса тут чужой.
+Название курса — его перевод на этот язык, если он есть.
 """
 
 from __future__ import annotations
 
 import frappe
+from frappe import _
 from frappe.utils import add_days, cint, get_url, getdate, nowdate
 
+from lms_frappe_app import languages
+from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning.jobs import по_одной
 
 НАЗНАЧЕН = "assigned"
@@ -32,6 +40,23 @@ def ссылка(адрес: str, подпись: str) -> str:
 	и экранирует его только этот вызов. Подпись — текст письма, его пишет код.
 	"""
 	return f'<a href="{frappe.utils.escape_html(адрес)}">{подпись}</a>'
+
+
+def начало_ссылки(адрес: str) -> str:
+	"""Открывающий тег ссылки — для фразы, где подпись ссылки — её часть
+	(`{0}Открыть курс{1} — …`): фраза переводится целиком. Адрес — как у
+	`ссылка`."""
+	return f'<a href="{frappe.utils.escape_html(адрес)}">'
+
+
+def абзацы(*тексты: str) -> str:
+	return "".join(f"<p>{текст}</p>" for текст in тексты)
+
+
+def _как_заниматься(адрес: str, язык: str) -> str:
+	return _(
+		"{0}Open the course{1} — lessons run with a mentor: in the browser or with your agent.", lang=язык
+	).format(начало_ссылки(адрес), "</a>")
 
 
 def уведомить_о_назначении(назначение, адресаты: list[str]) -> int:
@@ -113,23 +138,22 @@ def уведомить_о_выходе(course: str) -> int:
 	)
 	if not подписки:
 		return 0
-	курс = frappe.db.get_value("LMS Course", course, "title") or course
 	адрес = get_url(f"/lms/courses/{course}")
-	тема = f"Курс «{курс}» вышел"
-	текст = (
-		f"<p>Курс «{frappe.utils.escape_html(курс)}», о выходе которого вы просили сообщить, "
-		f"открыт для записи.</p>"
-		f"<p>{ссылка(адрес, 'Открыть курс')} — занятие идёт с наставником: в браузере "
-		f"или с вашим агентом.</p>"
-	)
 	for подписка in подписки:
+		язык = languages.язык_пользователя(подписка.user)
+		курс = переводы_курса.название(course, languages.основной(язык))
 		# Отметка — до отправки, в той же транзакции: очередь писем Frappe
 		# отправляет только закоммиченное.
 		frappe.db.set_value("LMS Course Interest", подписка.name, "email_sent", 1)
 		frappe.sendmail(
 			recipients=[подписка.user],
-			subject=тема,
-			message=текст,
+			subject=_("The course “{0}” is out", lang=язык).format(курс),
+			message=абзацы(
+				_("The course “{0}” you asked to be notified about is now open for enrollment.", lang=язык).format(
+					frappe.utils.escape_html(курс)
+				),
+				_как_заниматься(адрес, язык),
+			),
 			reference_doctype="LMS Course",
 			reference_name=course,
 		)
@@ -145,17 +169,21 @@ def пригласить_тестера(course: str, user: str) -> bool:
 	"""
 	if not почта_есть():
 		return False
-	курс = frappe.db.get_value("LMS Course", course, "title") or course
+	язык = languages.язык_пользователя(user)
+	курс = переводы_курса.название(course, languages.основной(язык))
 	адрес = get_url(f"/lms/courses/{course}")
 	frappe.sendmail(
 		recipients=[user],
-		subject=f"Вас пригласили проверить курс «{курс}»",
-		message=(
-			f"<p>Автор открыл вам курс «{frappe.utils.escape_html(курс)}» до публикации: "
-			f"его ещё нет в каталоге, и вы проверяете его первым.</p>"
-			f"<p>{ссылка(адрес, 'Открыть курс')} — занятие идёт с наставником: в браузере "
-			f"или с вашим агентом. Что показалось неверным или неудобным, скажите наставнику "
-			f"прямо на занятии: он передаст это автору.</p>"
+		subject=_("You've been invited to test the course “{0}”", lang=язык).format(курс),
+		message=абзацы(
+			_(
+				"The author has opened the course “{0}” to you before publication: it isn't in the catalog yet, and you're the first to test it.",
+				lang=язык,
+			).format(frappe.utils.escape_html(курс)),
+			_(
+				"{0}Open the course{1} — lessons run with a mentor: in the browser or with your agent. If something seems wrong or inconvenient, tell the mentor right in the lesson: they'll pass it on to the author.",
+				lang=язык,
+			).format(начало_ссылки(адрес), "</a>"),
 		),
 		reference_doctype="LMS Course",
 		reference_name=course,
@@ -183,7 +211,7 @@ def _отправить(назначение, адресат: str, вид: str) 
 		"Allocation Notice", {"allocation": назначение.name, "user": адресат, "kind": вид}
 	):
 		return 0
-	тема, текст = _письмо(назначение, вид)
+	тема, текст = _письмо(назначение, вид, languages.язык_пользователя(адресат))
 	# Запись — до отправки, в той же транзакции: не записалось — письмо не
 	# уйдёт, очередь писем Frappe отправляет только закоммиченное.
 	frappe.get_doc(
@@ -199,27 +227,33 @@ def _отправить(назначение, адресат: str, вид: str) 
 	return 1
 
 
-def _письмо(назначение, вид: str) -> tuple[str, str]:
-	курс = frappe.db.get_value("LMS Course", назначение.course, "title") or назначение.course
+def _письмо(назначение, вид: str, язык: str) -> tuple[str, str]:
+	"""Тема и текст письма о назначении на языке получателя. Фраза со сроком
+	и без — разные msgid: переводится целое предложение."""
+	курс = переводы_курса.название(назначение.course, languages.основной(язык))
 	команда = (
 		frappe.db.get_value("Learning Organization", назначение.organization, "organization_name")
 		or назначение.organization
 	)
 	адрес = get_url(f"/lms/courses/{назначение.course}")
-	срок = (
-		f" Срок — {frappe.utils.formatdate(назначение.deadline, 'dd.MM.yyyy')}."
-		if назначение.deadline
-		else ""
-	)
+	имена = (frappe.utils.escape_html(курс), frappe.utils.escape_html(команда))
+	срок = frappe.utils.escape_html(languages.дата(назначение.deadline, язык))
 	if вид == СРОК:
-		тема = f"Скоро срок курса «{курс}»"
-		первая = f"До срока курса «{курс}», который назначила команда «{команда}», осталось несколько дней.{срок}"
+		тема = _("The course “{0}” is due soon", lang=язык).format(курс)
+		первая = (
+			_(
+				"The course “{0}” assigned by the team “{1}” is due in a few days. Due date: {2}.", lang=язык
+			).format(*имена, срок)
+			if срок
+			else _("The course “{0}” assigned by the team “{1}” is due in a few days.", lang=язык).format(*имена)
+		)
 	else:
-		тема = f"Вам назначен курс «{курс}»"
-		первая = f"Команда «{команда}» назначила вам курс «{курс}».{срок}"
-	текст = (
-		f"<p>{frappe.utils.escape_html(первая)}</p>"
-		f"<p>{ссылка(адрес, 'Открыть курс')} — занятие идёт с наставником: в браузере "
-		f"или с вашим агентом.</p>"
-	)
-	return тема, текст
+		тема = _("You've been assigned the course “{0}”", lang=язык).format(курс)
+		первая = (
+			_("The team “{1}” has assigned you the course “{0}”. Due date: {2}.", lang=язык).format(
+				*имена, срок
+			)
+			if срок
+			else _("The team “{1}” has assigned you the course “{0}”.", lang=язык).format(*имена)
+		)
+	return тема, абзацы(первая, _как_заниматься(адрес, язык))

@@ -10,6 +10,7 @@
 """
 
 import frappe
+from frappe import _
 from frappe.query_builder.functions import Min
 
 from lms_frappe_app.agent_learning.access import курсы_ученика
@@ -238,7 +239,7 @@ def student_detail(user: str) -> dict:
 	# доступ — одним запросом.
 	свои_организации = общие_организации(менеджер, user)
 	if not видит_всё(менеджер) and not свои_организации:
-		raise Отказ(ЧУЖОЙ_УЧЕНИК, "Этот ученик не из вашей команды", user=user)
+		raise Отказ(ЧУЖОЙ_УЧЕНИК, _("This student isn't on your team"), user=user)
 
 	# Только курсы, пришедшие от этих организаций: человек может состоять в
 	# нескольких компаниях, и назначения чужой руководителя не касаются, как

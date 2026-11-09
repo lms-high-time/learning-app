@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 import frappe
+from frappe import _
 
 from lms_frappe_app.agent_learning.artifacts import data, fill, schema
 from lms_frappe_app.agent_learning.artifacts.codes import ОЧИСТКА_С_ЗАПИСЬЮ, ПРАВКА_ЗАПОЛНЕННОГО
@@ -52,7 +53,7 @@ def записать_блок(
 	if очистка and только_дописать:
 		raise Отказ(
 			ПРАВКА_ЗАПОЛНЕННОГО,
-			"Очистка раздела — не дописывание",
+			_("Clearing a section isn't allowed in fill-only mode"),
 			artifact=схема.slug,
 			key=раздел["key"],
 			touched=["clear"],
@@ -61,7 +62,7 @@ def записать_блок(
 		if any(значение not in (None, "", [], {}) for значение in (rows, delete_rows, fields)):
 			raise Отказ(
 				ОЧИСТКА_С_ЗАПИСЬЮ,
-				"Очистка раздела не принимает значений: либо rows, delete_rows, fields, либо clear",
+				_("Clearing a section takes no values: pass either rows, delete_rows, fields, or clear"),
 				artifact=схема.slug,
 				key=раздел["key"],
 			)
@@ -72,7 +73,7 @@ def записать_блок(
 		if только_дописать and (затронуто := data.затронутое(раздел, прежние, новые)):
 			raise Отказ(
 				ПРАВКА_ЗАПОЛНЕННОГО,
-				"Запись меняет заполненное или удаляет строки — это правка, а не дописывание",
+				_("This write changes filled-in values or deletes rows — that's an edit, not fill-only"),
 				artifact=схема.slug,
 				key=раздел["key"],
 				touched=затронуто,

@@ -4,5 +4,5 @@
 
 {% block page_content %}
 {# Сюда не доходят: get_context переводит в SPA. Шаблон нужен Frappe, чтобы маршрут существовал. #}
-<p><a href="/lms/documents">Мои документы</a></p>
+<p><a href="/lms/documents">{{ _("My documents") }}</a></p>
 {% endblock %}
