@@ -555,7 +555,7 @@ def обеспечить_значения_настроек() -> None:
 #: исполняемые — нет. Свой, более узкий список у домашки, без SVG, —
 #: `uploads.ТИПЫ_ДОМАШКИ`.
 ТИПЫ_ФАЙЛОВ = (
-	"PNG", "JPG", "JPEG", "JPE", "GIF", "WEBP", "AVIF", "HEIC", "HEIF", "ICO", "BMP", "SVG",
+	"PNG", "JPG", "JPEG", "JPE", "JFIF", "GIF", "WEBP", "AVIF", "HEIC", "HEIF", "ICO", "BMP", "SVG",
 	"PDF", "DOC", "DOCX", "XLS", "XLSX", "PPT", "PPS", "PPTX", "ODT", "ODS", "ODP", "RTF",
 	"TXT", "MD", "MARKDOWN", "CSV", "VTT", "SRT",
 	"MP4", "M4V", "WEBM", "OGV", "MOV", "MKV", "MPV", "MP3", "OGG", "OGA", "OPUS", "FLAC", "WAV",

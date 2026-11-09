@@ -620,7 +620,6 @@ before_request = [
 	"lms_frappe_app.whitelist_guard.снять_подменённые",
 	"lms_frappe_app.whitelist_guard.снять_методы_payments",
 	"lms_frappe_app.password_hash.настроить",
-	"lms_frappe_app.agent_learning.write_limits.отклонить_части_загрузки",
 	"lms_frappe_app.agent_learning.consent.потребовать_согласие",
 ]
 # Отказы 401, 403, 429 и неудачный вход — в журнал событий безопасности
@@ -730,7 +729,10 @@ user_data_fields = [
 
 # Запрос с ключом API в заголовке — в журнал событий безопасности
 # (learning-services#680). Хук ничего не проверяет и никого не впускает.
-auth_hooks = ["lms_frappe_app.security_log.по_заголовку"]
+auth_hooks = [
+	"lms_frappe_app.security_log.по_заголовку",
+	"lms_frappe_app.agent_learning.write_limits.отклонить_части_загрузки",
+]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True

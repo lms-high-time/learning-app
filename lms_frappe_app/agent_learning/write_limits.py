@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import mimetypes
+import os
 from collections.abc import Callable
 
 import frappe
@@ -188,14 +189,31 @@ def проверить_файл(файл, method=None) -> None:
 		frappe.throw(отказ.сообщение, КвотаИсчерпана)
 
 
+def _незавершённая_загрузка() -> bool:
+	"""Запрос оставит на диске часть файла: идёт по частям или заявляет размер
+	больше присланного — так `upload_file` Frappe ждёт продолжения."""
+	if frappe.form_dict.get("chunk_index") is not None:
+		return True
+	файл = frappe.request.files.get("file") if frappe.request else None
+	if файл is None:
+		return False
+	файл.stream.seek(0, os.SEEK_END)
+	размер = файл.stream.tell()
+	файл.stream.seek(0)
+	return cint(frappe.form_dict.get("total_file_size")) > размер
+
+
 def отклонить_части_загрузки() -> None:
-	"""`before_request`: загрузка по частям — только вне квоты.
+	"""`auth_hooks`: загрузка по частям — только вне квоты.
 
 	`Why:` квота считается по записям `File`, а части пишутся на диск раньше неё
 	(learning-services#779). Формы Learning и методы платформы частями не
-	грузят, загрузчик desk остаётся авторам и администраторам.
+	грузят, загрузчик desk остаётся авторам и администраторам. Хук проверки
+	входа, а не `before_request`: тот идёт раньше входа по токену, и
+	пользователем был бы гость.
 	"""
-	if frappe.form_dict.get("chunk_index") is not None and под_квотой(frappe.session.user):
+	пользователь = frappe.session.user
+	if (пользователь == "Guest" or под_квотой(пользователь)) and _незавершённая_загрузка():
 		raise frappe.PermissionError
 
 
