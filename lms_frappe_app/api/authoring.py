@@ -27,6 +27,7 @@ from lms_frappe_app.agent_learning import (
 	testers,
 )
 from lms_frappe_app.agent_learning import course_translations as переводы_курса
+from lms_frappe_app.agent_learning.competencies import views as представления_карты
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import findings as находки_публикации
 from lms_frappe_app.agent_learning.releases import index as releases_index
@@ -766,6 +767,23 @@ def course_releases(course: str) -> dict:
 #: они инструкторы. Модератор — как в `can_modify_course` Learning, плюс
 #: администраторы платформы.
 ВИДЯТ_ВСЕ_ПРОХОЖДЕНИЯ = frozenset({"Moderator", "System Manager", "Administrator"})
+
+
+@frappe.whitelist()
+@контракт
+def competency_summary(course: str) -> dict:
+	"""Сводка по карте компетенций курса без имён учеников (learning-services#810, дизайн §11):
+	по компетенциям — свидетельства по исходам, форма заданий и подсказки у подтверждений,
+	выведенные пересмотром, открытые затруднения; по целям уроков — сколько прошли урок и у
+	скольких уровень не ниже цели. Права — как у `goal_runs`; курс без карты — пустые списки."""
+	пользователь = _автор()
+	сведения = frappe.db.get_value("LMS Course", course, ["name", "active_release"], as_dict=True)
+	if not сведения:
+		raise Отказ(КУРС_НЕ_НАЙДЕН, "LMS Course не найден", id=course)
+	_видит_прохождения(course, пользователь)
+	if not сведения.active_release:
+		raise Отказ(КУРС_БЕЗ_РЕЛИЗА, "У курса нет релиза: карта компетенций — в релизе", course=course)
+	return {"course": course, **представления_карты.для_автора(course, сведения.active_release)}
 
 
 @frappe.whitelist()

@@ -13,6 +13,7 @@ import frappe
 from frappe import _
 from frappe.query_builder.functions import Min
 
+from lms_frappe_app.agent_learning.competencies import views as представления_карты
 from lms_frappe_app.agent_learning.access import курсы_ученика
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
@@ -74,6 +75,12 @@ def org_report(
 			назначение.course, участники, назначение.organization
 		)
 		квизы = _квизы_по_участникам(назначение.course, участники)
+		# Только уровни по карте компетенций (learning-services#810) — постоянное число запросов на курс.
+		уровни = представления_карты.уровни_учеников(
+			назначение.course,
+			frappe.db.get_value("LMS Course", назначение.course, "active_release"),
+			участники,
+		)
 
 		for участник in участники:
 			строка = _строка_отчёта(
@@ -88,6 +95,7 @@ def org_report(
 					"blocks_filled": заполнено_блоков.get(участник, 0),
 				},
 				квиз=квизы.get(участник, {"passed": 0, "first_try": 0}),
+				компетенции=уровни.get(участник, []),
 			)
 			if status and строка["status"] != status:
 				continue
@@ -265,6 +273,21 @@ def student_detail(user: str) -> dict:
 	)
 	попытки = _попытки_в_пространствах(user, пространства)
 	покрытие = _цели_прохождений(user, занятия)
+	# Карта компетенций — только уровни, как у ученика (learning-services#810): ни тексты
+	# свидетельств, ни исходы руководителю не отдаются.
+	релизы = (
+		dict(
+			frappe.get_all(
+				"LMS Course",
+				filters={"name": ("in", [запись["course"] for запись in курсы])},
+				fields=["name", "active_release"],
+				as_list=True,
+			)
+		)
+		if курсы
+		else {}
+	)
+	уровни = представления_карты.уровни_по_курсам(user, релизы)
 	return {
 		"user": user,
 		"full_name": frappe.db.get_value("User", user, "full_name"),
@@ -275,6 +298,7 @@ def student_detail(user: str) -> dict:
 				"deadline": запись["deadline"],
 				"overdue": запись["overdue"],
 				"mandatory": запись["mandatory"],
+				"competencies": уровни.get(запись["course"], []),
 			}
 			for запись in курсы
 		],
@@ -391,6 +415,7 @@ def _строка_отчёта(
 	активность,
 	документ: dict,
 	квиз: dict,
+	компетенции: list[dict],
 ) -> dict:
 	from frappe.utils import getdate, nowdate
 
@@ -423,6 +448,7 @@ def _строка_отчёта(
 		"last_activity": активность.isoformat() if активность else None,
 		"document": документ,
 		"quiz": квиз,
+		"competencies": компетенции,
 	}
 
 
