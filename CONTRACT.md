@@ -1059,6 +1059,12 @@ learning-services#405).
   "diagrams": [ { "key": "task-flow", "title": "Куда отправить задачу",
                   "description": "Шаги: срок, зона, данные.",
                   "when": "когда ученик спрашивает, с чего начать" } ],
+  "competencies": [ { "key": "K5", "kind": "integrative", "title": "Обоснование устройства",
+                      "description": "Обосновываете устройство продукта целиком.", "target": 3,
+                      "parts": [ { "competency": "K1", "from_level": 1 } ], "text": "…" },
+                    { "key": "K1", "kind": "base", "title": "Выбор устройства",
+                      "description": "Выбираете устройство по задаче.", "target": null,
+                      "parts": [], "text": "…" } ],
   "course_frame": { "frame": "…",
                     "learn_about_student": [ { "key": "where_applies", "text": "…", "changes": false } ] },
   "history": {
@@ -1127,7 +1133,14 @@ learning-services#405).
 документа действующего релиза: публикация не пропускает другие. `diagrams` —
 схемы урока из того же среза (learning-services#644): ключ, название,
 описание для модели и `when` — когда показать (нет — ключа нет); без HTML —
-его отдаёт `lesson_diagram` по ключу. Схем нет — `[]`. `course_frame` — рамка
+его отдаёт `lesson_diagram` по ключу. Схем нет — `[]`. `competencies` —
+компетенции урока по карте релиза (learning-services#807): сначала с целью
+урока (`target` 1–4) в порядке релиза, затем составляющие его интеграционных,
+у которых цели в уроке нет (`target: null`) — по ним агент разбирает неудачу
+целостной задачи. Поля — из `competencies` релиза (`kind`, `title`,
+`description`, `parts` — `{competency, from_level}`, у базовой `[]`); `text` —
+текст агенту из среза (`competencies.<ключ>`: признаки уровней), нет — `null`.
+У урока без карты — `[]`. `course_frame` — рамка
 пакета (`frame`, `learn_about_student`, какие есть) — только при `frame:
 true`; при `false` ключа нет. **Пакет агента отдаёт только этот метод**,
 подробности пункта — `lesson_item`: ученик и руководитель его не видят ни в

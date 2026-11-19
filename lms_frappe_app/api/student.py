@@ -81,6 +81,7 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 	ЧУЖОЕ_ЗАНЯТИЕ,
 )
+from lms_frappe_app.agent_learning.competencies import lesson as компетенции_урока
 from lms_frappe_app.agent_learning.releases import diagrams as схемы
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -453,6 +454,9 @@ def start_lesson(
 		"section_hints": _подсказки_разделов(пакет),
 		# Без HTML: его отдаёт `lesson_diagram` по ключу (learning-services#644).
 		"diagrams": схемы.список(пакет),
+		# Компетенции урока с целью и составляющие его интеграционных; у урока без
+		# карты — [] (learning-services#807).
+		"competencies": компетенции_урока.для_старта(релиз, ключ, пакет),
 		"history": {
 			"lessons": история,
 			"notes": _заметки_по_ключам(ученик, курс, index.ключи_рамки(рамка)),

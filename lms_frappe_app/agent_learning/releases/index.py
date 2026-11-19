@@ -116,6 +116,7 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 				"section_keys": в_json(у["sections"]),
 				"homework": в_json(у["homework"]) if у["homework"] else None,
 				"agent": в_json(срезы_уроков[у["key"]]),
+				"competencies": в_json(у.get("competencies") or []),
 			}
 		)
 		for ц in у["objectives"]:
@@ -157,6 +158,7 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 			}
 		)
 	таблицы["agent_frame"] = в_json(рамка_курса)
+	таблицы["competency_map"] = в_json(релиз.get("competencies") or [])
 	return таблицы
 
 
@@ -466,6 +468,27 @@ def пакеты_уроков(релиз: str, ключи: list[str]) -> dict[st
 			fields=["lesson_key", "agent"],
 		)
 	}
+
+
+def _список_json(значение) -> list:
+	"""Значение JSON-поля индекса — список; пусто или не список — `[]`."""
+	if isinstance(значение, str):
+		значение = json.loads(значение) if значение else None
+	return значение if isinstance(значение, list) else []
+
+
+def карта_компетенций(релиз: str) -> list[dict]:
+	"""Компетенции релиза по порядку (`competencies`, learning-services#807): `{key, kind, title,
+	description, parts?}`; нет карты или версия освобождена — `[]`."""
+	return _список_json(frappe.db.get_value(РЕЛИЗ, релиз, "competency_map"))
+
+
+def компетенции_урока(релиз: str, ключ: str) -> list[dict]:
+	"""Цели урока по компетенциям (`lessons[].competencies`): `{competency, target}` по порядку
+	релиза; у урока без карты — `[]`."""
+	return _список_json(
+		frappe.db.get_value(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}, "competencies")
+	)
 
 
 def рамка(релиз: str) -> dict:
