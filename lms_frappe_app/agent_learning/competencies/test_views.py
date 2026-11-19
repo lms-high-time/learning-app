@@ -208,7 +208,10 @@ class IntegrationTestПредставленияРуководителяИАвт�
 			{"key": "B2", "title": "Цена ошибочного действия", "status": "locked", "level": None},
 			{"key": "I1", "title": "Обоснование устройства", "status": "locked", "level": None},
 		]
-		строка = next(с for с in manager.org_report()["data"]["rows"] if с["course"] == курс)
+		# Руководитель — тоже участник организации: строка ученика — по пользователю.
+		строка = next(
+			с for с in manager.org_report()["data"]["rows"] if с["course"] == курс and с["user"] == ученик
+		)
 		self.assertEqual(строка["competencies"], ожидаемое)
 		курс_ученика = next(к for к in manager.student_detail(ученик)["data"]["courses"] if к["id"] == курс)
 		self.assertEqual(курс_ученика["competencies"], ожидаемое)
