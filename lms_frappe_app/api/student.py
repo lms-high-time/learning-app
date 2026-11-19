@@ -61,6 +61,7 @@ from lms_frappe_app.agent_learning.constants import (
 	ЧЛЕНСТВО_ДЕЙСТВУЕТ,
 	СОБЫТИЕ_ДИРЕКТИВА_ВЫДАНА,
 	СОБЫТИЕ_ЗАКРЫТИЕ_ОТКАЗАНО,
+	СОБЫТИЕ_ОЧЕРЕДЬ_ПРЕДЛОЖЕНА,
 	СТАТУСЫ_РЕПОРТОВ,
 )
 from lms_frappe_app.agent_learning.doctype.agent_learning_session.agent_learning_session import (
@@ -85,6 +86,7 @@ from lms_frappe_app.agent_learning.errors import (
 from lms_frappe_app.agent_learning.competencies import closing as закрытие_по_компетенциям
 from lms_frappe_app.agent_learning.competencies import evidence as свидетельства
 from lms_frappe_app.agent_learning.competencies import lesson as компетенции_урока
+from lms_frappe_app.agent_learning.competencies import queue as очередь_компетенций
 from lms_frappe_app.agent_learning.releases import diagrams as схемы
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -100,6 +102,7 @@ from lms_frappe_app.api import контракт, текущий_пользова
 #: Урок с картой компетенций без квиза (learning-services#809).
 КВИЗА_НЕТ = "quiz_not_used"
 КОМПЕТЕНЦИИ_НЕ_ПРОВЕРЕНЫ = "competencies_open"
+ОЧЕРЕДЬ_НЕ_ПУСТА = "course_queue_open"
 ПУНКТЫ_ОТКРЫТЫ = "goals_open"
 ЧУЖОЙ_ПРОФИЛЬ = "not_your_profile"
 ПОЛЬЗОВАТЕЛЬ_НЕ_НАЙДЕН = "user_not_found"
@@ -428,6 +431,7 @@ def start_lesson(
 	политика = политика_квиза_для_курса(ученик, курс, назначения)
 	сведения = доступные[курс]
 	пакет, цели_компетенций = index.пакет_и_компетенции_урока(релиз, ключ)
+	карта_ученика = очередь_компетенций.карта_ученика(ученик, курс, релиз, ключ)
 	# В уроке с картой компетенций квиза нет: урок закрывается по свидетельствам
 	# (learning-services#809).
 	есть_квиз = index.есть_вопросы(релиз, ключ) and not цели_компетенций
@@ -464,9 +468,11 @@ def start_lesson(
 		"section_hints": _подсказки_разделов(пакет),
 		# Без HTML: его отдаёт `lesson_diagram` по ключу (learning-services#644).
 		"diagrams": схемы.список(пакет),
-		# Компетенции урока с целью и составляющие его интеграционных; у урока без
-		# карты — [] (learning-services#807).
-		"competencies": компетенции_урока.для_старта(релиз, цели_компетенций, пакет),
+		# Компетенции урока с целью и составляющие его интеграционных — с состоянием у ученика
+		# и открытым уровнем; у урока без карты — [] (learning-services#807, #810).
+		"competencies": _компетенции_старта(релиз, цели_компетенций, пакет, карта_ученика),
+		# Что стоит посмотреть по курсу при естественном поводе (learning-services#810).
+		"competency_queue": карта_ученика["queue"] if карта_ученика else [],
 		"history": {
 			"lessons": история,
 			"notes": _заметки_по_ключам(ученик, курс, index.ключи_рамки(рамка)),
@@ -505,6 +511,17 @@ def start_lesson(
 	# ученика, так и не дойдя до агента.
 	_отметить_показанные(итоги)
 	return ответ
+
+
+def _компетенции_старта(релиз: str, цели: list[dict], пакет: dict, карта_ученика: dict | None) -> list[dict]:
+	"""Компетенции урока для старта (`competencies.lesson`) с `state` — подтверждённый уровень и
+	последний исход у ученика — и `open_level` — до какого уровня курс их открыл (дизайн §4, §7)."""
+	компетенции = компетенции_урока.для_старта(релиз, цели, пакет)
+	if карта_ученика:
+		for к in компетенции:
+			к["state"] = карта_ученика["state"].get(к["key"], свидетельства.ПУСТО)
+			к["open_level"] = карта_ученика["open_levels"].get(к["key"], 0)
+	return компетенции
 
 
 def _прохождение_и_занятие(ученик: str, курс: str, ключ: str, lesson: str, пространство: str | None):
@@ -1556,6 +1573,7 @@ def complete_lesson(session: str) -> dict:
 		_требовать_проверенные_компетенции(занятие, релиз, ключ)
 		if _квиз_обязателен(занятие.student, занятие.course, релиз, ключ):
 			raise Отказ(НУЖЕН_КВИЗ, "Этот урок закрывается только сдачей квиза", session=session)
+		_предложить_очередь(занятие, релиз, ключ, run.name)
 		quiz.отметить_урок_пройденным(занятие)
 		занятие.status = ЗАНЯТИЕ_ЗАВЕРШЕНО
 		занятие.save(ignore_permissions=True)
@@ -1612,6 +1630,33 @@ def _требовать_проверенные_компетенции(занят
 		КОМПЕТЕНЦИИ_НЕ_ПРОВЕРЕНЫ,
 		"Не каждая компетенция урока проверена: запишите свидетельство или отказ ученика — record_evidence",
 		competencies=_с_названиями(релиз, непроверенные),
+	)
+
+
+def _предложить_очередь(занятие, релиз: str, ключ: str, run: str) -> None:
+	"""Перед закрытием последнего незакрытого урока курса — один мягкий отказ `course_queue_open`
+	с очередью агента, если она не пуста (дизайн §8, learning-services#810).
+
+	`Why:` у последних уроков следующего повода посмотреть пропущенное нет. Отказ один: факт
+	предложения — событие журнала занятия, и повторный вызов по прохождению урока закрывает его.
+	Ученик может отказаться — это исход «пропущено», курс завершается. Курс без карты — без
+	отказа, одним запросом.
+	"""
+	карта = очередь_компетенций.карта_ученика(занятие.student, занятие.course, релиз, ключ)
+	if not карта or not карта["queue"]:
+		return
+	статусы = карта["lesson_status"]
+	if any(статусы.get(урок) != очередь_компетенций.ПРОЙДЕН for урок in index.ключи(релиз)["lessons"] if урок != ключ):
+		return
+	занятия = frappe.get_all("Agent Learning Session", filters={"run": run}, pluck="name")
+	if frappe.db.exists("Agent Session Event", {"session": ("in", занятия), "kind": СОБЫТИЕ_ОЧЕРЕДЬ_ПРЕДЛОЖЕНА}):
+		return
+	занятие.записать_событие(СОБЫТИЕ_ОЧЕРЕДЬ_ПРЕДЛОЖЕНА, "перед закрытием последнего урока курса")
+	raise Отказ(
+		ОЧЕРЕДЬ_НЕ_ПУСТА,
+		"Это последний урок курса: один раз предложите ученику посмотреть оставшееся — "
+		"отказ ученика записывается как skipped, повторный complete_lesson закроет урок",
+		competencies=карта["queue"],
 	)
 
 

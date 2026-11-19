@@ -456,6 +456,21 @@ def пакет_урока(релиз: str, ключ: str) -> dict:
 	)
 
 
+def цели_уроков(релиз: str) -> dict[str, list[dict]]:
+	"""Цели по компетенциям всех уроков релиза одной выборкой: ключ урока → `{competency, target}`;
+	уроки без целей не входят (learning-services#810)."""
+	return {
+		у.lesson_key: цели
+		for у in frappe.get_all(
+			УРОК,
+			filters={"parenttype": РЕЛИЗ, "parent": релиз},
+			fields=["lesson_key", "competencies"],
+			order_by="idx asc",
+		)
+		if (цели := _список_json(у.competencies))
+	}
+
+
 def пакет_и_компетенции_урока(релиз: str, ключ: str) -> tuple[dict, list[dict]]:
 	"""Срез пакета агента и цели по компетенциям урока одной выборкой строки урока — для старта
 	урока; нет урока — `({}, [])`."""
