@@ -21,7 +21,7 @@ from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.leak_guards import проверить_ответ
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
@@ -246,6 +246,8 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 #: `lesson_diagram`, HTML — только `lesson_diagram`.
 ОПИСАНИЕ_СХЕМЫ = "Описание схемы из пакета агента"
 HTML_СХЕМЫ = "<p>HTML схемы из пакета агента</p>"
+#: Признаки уровней компетенции (learning-services#807) — пакет агента, отдаёт только `start_lesson`.
+ПРИЗНАКИ_КОМПЕТЕНЦИИ = "Признаки уровней компетенции из пакета агента"
 #: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
 ЗАКРЫТОЕ_РЕЛИЗА = (
 	ПОЯСНЕНИЕ_РЕЛИЗА,
@@ -255,6 +257,7 @@ HTML_СХЕМЫ = "<p>HTML схемы из пакета агента</p>"
 	ТЕКСТ_ПУНКТА,
 	ОПИСАНИЕ_СХЕМЫ,
 	HTML_СХЕМЫ,
+	ПРИЗНАКИ_КОМПЕТЕНЦИИ,
 	КАРТА_КУРСА,
 	СВИДЕТЕЛЬСТВО,
 )
@@ -282,7 +285,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		релиз = пример_релиза(f"leak-{суффикс}")
+		релиз = с_компетенциями(пример_релиза(f"leak-{суффикс}"))
 		for урок in релиз["lessons"]:
 			for ответ in урок["quiz"]["answers"].values():
 				ответ["explanation"] = ПОЯСНЕНИЕ_РЕЛИЗА
@@ -305,6 +308,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 					"directive": ПАКЕТ_АГЕНТА,
 					"items": {"term:T1": ТЕКСТ_ПУНКТА},
 					"sections": {"log": ПОДСКАЗКА_РАЗДЕЛА},
+					"competencies": {"B1": ПРИЗНАКИ_КОМПЕТЕНЦИИ},
 					"diagrams": [
 						{"key": "flow", "title": "Схема", "description": ОПИСАНИЕ_СХЕМЫ, "html": HTML_СХЕМЫ}
 					],
@@ -349,12 +353,16 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.assertTrue(урок["ok"], урок)
 		# Пакет агента — только агентским методам, и старт отдаёт его урок
 		# (learning-services#506); ответы, карта и свидетельство — никому.
-		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА, ОПИСАНИЕ_СХЕМЫ)
+		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА, ОПИСАНИЕ_СХЕМЫ, ПРИЗНАКИ_КОМПЕТЕНЦИИ)
 		выдано = проверить_ответ(
-			self, урок, "start_lesson", запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные)
+			self,
+			урок,
+			"start_lesson",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т not in законные),
 		)
 		self.assertIn(ПАКЕТ_АГЕНТА, выдано)
 		self.assertIn(ПОДСКАЗКА_РАЗДЕЛА, выдано)
+		self.assertIn(ПРИЗНАКИ_КОМПЕТЕНЦИИ, выдано)
 		занятие = урок["data"]["session"]
 		# Подробности пункта — тоже пакет агента, но только своего пункта.
 		выдано = проверить_ответ(

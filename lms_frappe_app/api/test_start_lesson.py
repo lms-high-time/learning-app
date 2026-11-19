@@ -127,7 +127,8 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 		self.assertEqual(данные["competencies"], [])
 
 	def test_компетенции_урока_и_составляющие(self):
-		"""Урок l-3 с целями по B2 и I1: B1 — составляющая I1 без цели; текст агенту — из среза."""
+		"""Проводка: старт отдаёт компетенции урока по индексу и срезу; порядок и поля —
+		`competencies.test_lesson`."""
 		релиз = с_компетенциями(пример_релиза(f"start-comp-{frappe.generate_hash(length=6)}"))
 		релиз["agent"]["lessons"]["l-3"]["competencies"] = {"I1": "Признаки уровней I1."}
 		frappe.set_user("Administrator")
@@ -143,8 +144,6 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 			[(к["key"], к["target"], к["text"]) for к in данные["competencies"]],
 			[("B2", 2, None), ("I1", 3, "Признаки уровней I1."), ("B1", None, None)],
 		)
-		self.assertEqual(данные["competencies"][1]["parts"], релиз["competencies"][2]["parts"])
-		self.assertEqual(данные["competencies"][2]["description"], "Выбираете устройство по задаче.")
 
 	def test_срез_без_директивы_материала_и_подсказок_пустой(self):
 		_, релиз, урок = self.свой_курс()
