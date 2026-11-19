@@ -385,6 +385,8 @@ def _пустые_тексты(р: dict, п: list) -> None:
 	пусто(р["course"]["description"], "course.description")
 	for г in р["chapters"]:
 		пусто(г["description"], f"chapters[{г['key']}].description")
+	for к in р.get("competencies") or []:
+		пусто(к["description"], f"competencies[{к['key']}].description")
 	if р["document"]:
 		пусто(р["document"]["purpose"], "document.purpose")
 		for с in р["document"]["sections"]:

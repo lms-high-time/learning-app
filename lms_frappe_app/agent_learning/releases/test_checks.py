@@ -62,6 +62,7 @@ class TestПроверкиРелиза(unittest.TestCase):
 					"key": "I2",
 					"kind": "integrative",
 					"title": "Устройство в бюджете",
+					"description": "Обосновываете устройство в пределах бюджета.",
 					"parts": [{"competency": "I1", "from_level": 3}, {"competency": "B2", "from_level": 3}],
 				}
 			),
@@ -130,6 +131,7 @@ class TestПроверкиРелиза(unittest.TestCase):
 					"key": "I2",
 					"kind": "integrative",
 					"title": "Круг",
+					"description": "Круг.",
 					"parts": [{"competency": "I1", "from_level": 3}, {"competency": "B2", "from_level": 1}],
 				}
 			)
@@ -137,7 +139,9 @@ class TestПроверкиРелиза(unittest.TestCase):
 		for случай, правка, проблема in (
 			(
 				"повтор ключа компетенции",
-				lambda р: р["competencies"].append({"key": "B1", "kind": "base", "title": "Повтор"}),
+				lambda р: р["competencies"].append(
+					{"key": "B1", "kind": "base", "title": "Повтор", "description": "Повтор."}
+				),
 				{"code": "duplicate_key", "where": "competencies", "key": "B1"},
 			),
 			(
@@ -333,14 +337,19 @@ class TestПроверкиРелиза(unittest.TestCase):
 		)
 
 	def test_пустые_тексты_ученику_предупреждения(self):
-		р = пример_релиза()
+		р = с_компетенциями(пример_релиза())
 		р["course"]["summary"] = ""
 		р["chapters"][0]["description"] = ""
+		р["competencies"][0]["description"] = " "
 		критичные, предупреждения = checks.проблемы(р)
 		self.assertEqual(критичные, [])
 		self.assertEqual(
 			[(п["code"], п["where"]) for п in предупреждения],
-			[("public_text_empty", "course.summary"), ("public_text_empty", "chapters[ch-1].description")],
+			[
+				("public_text_empty", "course.summary"),
+				("public_text_empty", "chapters[ch-1].description"),
+				("public_text_empty", "competencies[B1].description"),
+			],
 		)
 
 	def test_ответы_квиза_в_пакете_агента(self):
