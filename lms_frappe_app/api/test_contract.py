@@ -321,6 +321,9 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
 		релиз = с_компетенциями(пример_релиза(f"contract-{self.суффикс}"))
+		# Урок l-1 обходится квизом: у урока с целями по компетенциям квиза нет
+		# (learning-services#809), а свидетельства пишутся по карте курса и без целей урока.
+		del релиз["lessons"][0]["competencies"]
 		курс = self.сверить(
 			"authoring.publish_release",
 			authoring.publish_release(release=релиз, instructors=[self.куратор], commit="ab" * 20),

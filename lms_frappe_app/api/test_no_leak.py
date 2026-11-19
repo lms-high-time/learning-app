@@ -286,6 +286,9 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
 		релиз = с_компетенциями(пример_релиза(f"leak-{суффикс}"))
+		# Цели по компетенциям — у второго урока: в первом проверяется квиз, а урок с
+		# картой квиза не открывает (learning-services#809).
+		релиз["lessons"][1]["competencies"] = релиз["lessons"][0].pop("competencies")
 		for урок in релиз["lessons"]:
 			for ответ in урок["quiz"]["answers"].values():
 				ответ["explanation"] = ПОЯСНЕНИЕ_РЕЛИЗА
@@ -308,11 +311,11 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 					"directive": ПАКЕТ_АГЕНТА,
 					"items": {"term:T1": ТЕКСТ_ПУНКТА},
 					"sections": {"log": ПОДСКАЗКА_РАЗДЕЛА},
-					"competencies": {"B1": ПРИЗНАКИ_КОМПЕТЕНЦИИ},
 					"diagrams": [
 						{"key": "flow", "title": "Схема", "description": ОПИСАНИЕ_СХЕМЫ, "html": HTML_СХЕМЫ}
 					],
-				}
+				},
+				"l-2": {"competencies": {"B1": ПРИЗНАКИ_КОМПЕТЕНЦИИ}},
 			}
 		}
 		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
@@ -353,7 +356,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.assertTrue(урок["ok"], урок)
 		# Пакет агента — только агентским методам, и старт отдаёт его урок
 		# (learning-services#506); ответы, карта и свидетельство — никому.
-		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА, ОПИСАНИЕ_СХЕМЫ, ПРИЗНАКИ_КОМПЕТЕНЦИИ)
+		законные = (ПАКЕТ_АГЕНТА, ПОДСКАЗКА_РАЗДЕЛА, ОПИСАНИЕ_СХЕМЫ)
 		выдано = проверить_ответ(
 			self,
 			урок,
@@ -362,6 +365,14 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		)
 		self.assertIn(ПАКЕТ_АГЕНТА, выдано)
 		self.assertIn(ПОДСКАЗКА_РАЗДЕЛА, выдано)
+		# Признаки уровней — старту урока с целями по компетенциям, и только ему.
+		второй = frappe.db.get_value("Course Lesson", {"course": self.курс, "title": "Урок второй"})
+		выдано = проверить_ответ(
+			self,
+			student.start_lesson(lesson=второй),
+			"start_lesson второго урока",
+			запрещённые_тексты=tuple(т for т in ЗАКРЫТОЕ_РЕЛИЗА if т != ПРИЗНАКИ_КОМПЕТЕНЦИИ),
+		)
 		self.assertIn(ПРИЗНАКИ_КОМПЕТЕНЦИИ, выдано)
 		занятие = урок["data"]["session"]
 		# Подробности пункта — тоже пакет агента, но только своего пункта.
