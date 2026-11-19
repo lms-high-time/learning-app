@@ -54,6 +54,15 @@ class TestНепроверенные(UnitTestCase):
 				["B2", "I1"],
 			),
 			("затруднение в другом уроке", [запись("e1", "B2", "difficulty", 2, урок="l-1")], ["B2", "I1"]),
+			# Проверка в уроке была — засчитывается, даже если пересмотр потом вывел подтверждение.
+			(
+				"подтверждение из этого урока выведено пересмотром",
+				[
+					запись("e1", "B2", "confirmed", 2),
+					запись("r1", "B2", None, 1, вид="Revision", выведено=["e1"]),
+				],
+				["I1"],
+			),
 			(
 				"подтверждение из другого урока выведено пересмотром",
 				[
@@ -141,3 +150,50 @@ class IntegrationTestЗакрытиеУрока(IntegrationTestCase):
 		закрыт = self.student.complete_lesson(self.занятие)
 		self.assertTrue(закрыт["ok"], закрыт)
 		self.assertEqual(закрыт["data"]["session_status"], "Completed")
+
+	def test_шаг_компетенции_вместо_закрытия(self):
+		"""Пункты закрыты, компетенции нет — `next_step` ведёт к свидетельствам, а не к закрытию."""
+		from lms_frappe_app.tests.sample_data import отметить_все_пункты, урок_релиза
+
+		run = frappe.db.get_value("Agent Learning Session", self.занятие, "run")
+		отметить_все_пункты(run, self.занятие)
+		шаг = self.student.start_lesson(lesson=урок_релиза(self.курс, "l-3"))["data"]["next_step"]
+		self.assertEqual(шаг["kind"], "competencies")
+		self.assertEqual([ц["competency"] for ц in шаг["competencies"]], ["B2", "I1"])
+
+
+class IntegrationTestПопыткаПриКарте(IntegrationTestCase):
+	def test_публикация_карты_аннулирует_открытую_попытку(self):
+		"""Урок получил цели по компетенциям — открытая попытка аннулирована: сданная закрыла бы
+		урок мимо проверки компетенций."""
+		from lms_frappe_app.agent_learning.releases import service
+		from lms_frappe_app.api import student
+		from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+		from lms_frappe_app.tests.sample_data import (
+			зачислить_на_курс,
+			курс_из_релиза,
+			отметить_все_пункты,
+			политика_по_умолчанию,
+			создать_ученика,
+			урок_релиза,
+		)
+
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		политика_по_умолчанию()
+		ключ = f"closing-quiz-{frappe.generate_hash(length=6)}"
+		курс, _ = курс_из_релиза(релиз=пример_релиза(ключ))
+		ученик = создать_ученика(f"{ключ}@example.com")
+		зачислить_на_курс(ученик, курс)
+		frappe.set_user(ученик)
+		занятие = student.start_lesson(lesson=урок_релиза(курс, "l-1"))["data"]["session"]
+		отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"), занятие)
+		попытка = student.request_quiz(занятие)["data"]["attempt"]
+
+		frappe.set_user("Administrator")
+		service.опубликовать(с_компетенциями(пример_релиза(ключ)), None, "Administrator")
+
+		self.assertEqual(
+			frappe.db.get_value("Agent Quiz Attempt", попытка, ["status", "cancel_reason"]),
+			("Cancelled", "quiz_not_used"),
+		)
