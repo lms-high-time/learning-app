@@ -770,9 +770,10 @@ def course_releases(course: str) -> dict:
 ВИДЯТ_ВСЕ_ПРОХОЖДЕНИЯ = frozenset({"Moderator", "System Manager", "Administrator"})
 
 
-#: Кто пишет и читает аудит карты компетенций (learning-services#811): команда платформы и
-#: служебная роль. Не методист курса и не ученик: тексты свидетельств — работа ученика.
-АУДИТОРЫ = frozenset({"Moderator", "System Manager", "Administrator", "Agent Service"})
+#: Кто пишет и читает аудит карты компетенций (learning-services#811): команда платформы. Не
+#: методист курса и не ученик: тексты свидетельств — работа ученика. Служебной роли сервиса
+#: здесь нет, пока нет автоматического аудитора: на пилоте аудит ручной.
+АУДИТОРЫ = frozenset({"Moderator", "System Manager", "Administrator"})
 
 
 def _аудитор() -> str:

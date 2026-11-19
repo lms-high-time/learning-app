@@ -401,6 +401,7 @@ def _записи(ученик: str, курс: str, компетенция: str 
 			"lesson_key",
 			"assessment",
 			"conclusion",
+			"audited",
 		],
 		order_by="creation asc, name asc",
 	)

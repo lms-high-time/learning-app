@@ -8,15 +8,18 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
-from lms_frappe_app.agent_learning.competencies import audit, queue
+from lms_frappe_app.agent_learning.competencies import queue
 
 
 class _Запись(dict):
 	__getattr__ = dict.get
 
 
-def запись(имя, компетенция, исход=None, уровень=0, вид="Evidence", выведено=None, заключение=None):
+def запись(
+	имя, компетенция, исход=None, уровень=0, вид="Evidence", выведено=None, заключение=None, проверено="e1"
+):
 	return _Запись(
+		audited=проверено,
 		name=имя,
 		kind=вид,
 		competency=компетенция,
@@ -64,6 +67,44 @@ class TestСомненияАудита(UnitTestCase):
 				{},
 			),
 			(
+				"затруднение на уровне не выше — повторная проверка была",
+				[
+					запись("a1", "B1", уровень=3, вид="Audit", заключение="contradiction", выведено=["e1"]),
+					запись("e2", "B1", "difficulty", 3),
+				],
+				{},
+			),
+			(
+				"пересмотр закрывает",
+				[
+					запись("a1", "B1", уровень=3, вид="Audit", заключение="insufficient"),
+					запись("r1", "B1", уровень=0, вид="Revision"),
+				],
+				{},
+			),
+			(
+				"открыто несколько — наивысшее, позднее подтверждение низкого не снимает высокое",
+				[
+					запись("a1", "B1", уровень=3, вид="Audit", заключение="insufficient", проверено="e1"),
+					запись("a2", "B1", уровень=1, вид="Audit", заключение="insufficient", проверено="e0"),
+					запись("e2", "B1", "confirmed", 1),
+				],
+				{"B1": ("audit_doubt", 3)},
+			),
+			(
+				"позднее «достаточно» по той же записи снимает прежнее",
+				[
+					запись("a1", "B1", уровень=3, вид="Audit", заключение="insufficient", проверено="e1"),
+					запись("a2", "B1", уровень=3, вид="Audit", заключение="sufficient", проверено="e1"),
+				],
+				{},
+			),
+			(
+				"противоречие без отмены (затруднение, пересмотр) — сомнение, а не отмена",
+				[запись("a1", "B1", уровень=2, вид="Audit", заключение="contradiction", проверено="r1")],
+				{"B1": ("audit_doubt", 2)},
+			),
+			(
 				"подтверждение ниже — не закрывает",
 				[
 					запись("a1", "B1", уровень=3, вид="Audit", заключение="insufficient"),
@@ -78,16 +119,20 @@ class TestСомненияАудита(UnitTestCase):
 				)
 
 
-class TestПриоритет(UnitTestCase):
-	def test_порядок_выборки(self):
-		записи = [
-			_Запись(outcome="confirmed", level=2),
-			_Запись(outcome="confirmed", level=2, hints=1),
-			_Запись(outcome="confirmed", level=2, indirect=1),
-			_Запись(outcome="confirmed", level=2, after_refusal=1),
-			_Запись(outcome="confirmed", level=4),
-		]
-		self.assertEqual([audit._приоритет(з) for з in записи], [4, 3, 2, 1, 0])
+class TestУровниЦелыми(UnitTestCase):
+	def test_дробный_уровень_в_индексе_целый(self):
+		"""Схема принимает `3.0` за целое; в индекс уровень ложится целым."""
+		from lms_frappe_app.agent_learning.releases import index
+
+		self.assertEqual(
+			index._цели_целыми([{"competency": "K1", "target": 3.0}]), [{"competency": "K1", "target": 3}]
+		)
+		self.assertEqual(
+			index._карта_целыми(
+				[{"key": "K5", "parts": [{"competency": "K1", "from_level": 2.0}]}, {"key": "K1"}]
+			),
+			[{"key": "K5", "parts": [{"competency": "K1", "from_level": 2}]}, {"key": "K1"}],
+		)
 
 
 class IntegrationTestАудит(IntegrationTestCase):
@@ -122,9 +167,20 @@ class IntegrationTestАудит(IntegrationTestCase):
 		первое = student.record_evidence(занятие, "B1", "confirmed", "a-1", level=1, **поля)["data"]["event"]
 		второе = student.record_evidence(занятие, "B1", "confirmed", "a-2", level=3, **поля)["data"]["event"]
 
-		# Ученик своим токеном аудит не пишет.
+		# Ученик своим токеном аудит не пишет; методист — тоже: тексты свидетельств — работа ученика.
 		with self.assertRaises(frappe.PermissionError):
 			authoring.audit_evidence(event=второе, conclusion="contradiction", reason="Сам себе")
+		from lms_frappe_app.tests.sample_data import создать_куратора
+
+		frappe.set_user("Administrator")
+		методист = создать_куратора(f"{ключ}-author@example.com")
+		frappe.set_user(методист)
+		for имя, вызов in {
+			"выборка": lambda: authoring.audit_sample(course=курс),
+			"заключение": lambda: authoring.audit_evidence(event=второе, conclusion="sufficient"),
+		}.items():
+			with self.subTest(имя), self.assertRaises(frappe.PermissionError):
+				вызов()
 
 		frappe.set_user("Administrator")
 		self.assertEqual(

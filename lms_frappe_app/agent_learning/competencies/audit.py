@@ -142,62 +142,50 @@ def заключить(событие: str, заключение: str, прич�
 	}
 
 
-def _приоритет(з) -> int:
-	"""Чем меньше, тем раньше в выборке (дизайн §13): уровень 4, записанное при отказе в закрытии,
-	косвенное, с подсказкой или исправлением, остальное."""
-	if з.outcome == evidence.ПОДТВЕРЖДЕНО and з.level == 4:
-		return 0
-	if з.after_refusal:
-		return 1
-	if з.indirect:
-		return 2
-	if з.hints or з.corrected:
-		return 3
-	return 4
-
-
 def выборка(курс: str | None, предел: int) -> list[dict]:
-	"""Свидетельства на аудит — ещё не проверенные, по приоритету, затем новые первыми; пересмотры
-	уровня — первыми из всех: у пересмотра нет проверки на сервере, кроме «только вниз».
+	"""Свидетельства и пересмотры на аудит — ещё не проверенные, по приоритету (дизайн §13), внутри —
+	новые первыми: пересмотры уровня (у них нет проверки на сервере, кроме «только вниз»), уровень 4,
+	записанное при отказе в закрытии, косвенное, с подсказкой или исправлением, остальное.
 
-	Отдаёт тексты записи: аудитор проверяет, следует ли уровень из неё. Имени ученика нет —
-	только его ключ; архив сброса не входит.
+	Проверенные исключаются и порядок считается в самом запросе: иначе после первой тысячи
+	разобранных выборка опустела бы, а старые пересмотры не попали бы в неё никогда. Отдаёт тексты
+	записи — аудитор проверяет, следует ли уровень из неё; ученика в ответе нет, архив сброса не входит.
 	"""
-	фильтр = {"student": ("is", "set"), **({"course": курс} if курс else {})}
-	проверенные = set(
-		frappe.get_all(evidence.ЖУРНАЛ, filters={**фильтр, "kind": evidence.АУДИТ}, pluck="audited")
+	кандидаты = frappe.db.sql(
+		f"""
+		select e.name, e.kind, e.course, e.lesson_key, e.competency, e.outcome, e.level,
+			e.task, e.student_action, e.assessment, e.uncertainties,
+			e.transfer_difference, e.transfer_adaptation,
+			e.task_form, e.hints, e.corrected, e.indirect, e.after_refusal, e.withdrawn, e.occurred_at
+		from `tab{evidence.ЖУРНАЛ}` e
+		where e.student is not null
+			and e.kind in (%(evidence)s, %(revision)s)
+			{"and e.course = %(course)s" if курс else ""}
+			and not exists (
+				select 1 from `tab{evidence.ЖУРНАЛ}` a
+				where a.kind = %(audit)s and a.audited = e.name
+			)
+		order by
+			case
+				when e.kind = %(revision)s then 0
+				when e.outcome = 'confirmed' and e.level = 4 then 1
+				when e.after_refusal = 1 then 2
+				when e.indirect = 1 then 3
+				when e.hints = 1 or e.corrected = 1 then 4
+				else 5
+			end,
+			e.occurred_at desc, e.name desc
+		limit %(limit)s
+		""",
+		{
+			"evidence": evidence.СВИДЕТЕЛЬСТВО,
+			"revision": evidence.ПЕРЕСМОТР,
+			"audit": evidence.АУДИТ,
+			"course": курс,
+			"limit": предел,
+		},
+		as_dict=True,
 	)
-	поля = [
-		"name",
-		"kind",
-		"course",
-		"lesson_key",
-		"competency",
-		"outcome",
-		"level",
-		"task",
-		"student_action",
-		"assessment",
-		"uncertainties",
-		"transfer_difference",
-		"transfer_adaptation",
-		"task_form",
-		"hints",
-		"corrected",
-		"indirect",
-		"after_refusal",
-		"withdrawn",
-		"occurred_at",
-	]
-	записи = frappe.get_all(
-		evidence.ЖУРНАЛ,
-		filters={**фильтр, "kind": ("in", [evidence.СВИДЕТЕЛЬСТВО, evidence.ПЕРЕСМОТР])},
-		fields=поля,
-		order_by="occurred_at desc",
-		limit=ВЫБОРКА_НЕ_БОЛЬШЕ * 10,
-	)
-	кандидаты = [з for з in записи if з.name not in проверенные]
-	кандидаты.sort(key=lambda з: -1 if з.kind == evidence.ПЕРЕСМОТР else _приоритет(з))
 	return [
 		{
 			"event": з.name,
@@ -223,5 +211,5 @@ def выборка(курс: str | None, предел: int) -> list[dict]:
 			"withdrawn": json.loads(з.withdrawn) if з.withdrawn else [],
 			"recorded_at": з.occurred_at.isoformat() if з.occurred_at else None,
 		}
-		for з in кандидаты[:предел]
+		for з in кандидаты
 	]

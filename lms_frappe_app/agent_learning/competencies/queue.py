@@ -76,29 +76,41 @@ def затруднения_после(записи: list) -> dict[str, dict]:
 def сомнения_аудита(записи: list) -> dict[str, dict]:
 	"""Компетенция → открытое заключение аудита `{reason, level, assessment}`, по журналу по порядку.
 
-	«Недостаточно оснований» и отмена подтверждения ставят компетенцию на повторную проверку на
-	уровне проверенного свидетельства; закрывает пункт подтверждение не ниже этого уровня,
-	записанное после заключения (дизайн §13). Без базы.
+	«Недостаточно оснований» и противоречие ставят компетенцию на повторную проверку на уровне
+	проверенного (дизайн §13). Заключения держатся по проверенной записи: позднее `sufficient`
+	или `unverifiable` по той же записи снимает прежнее. Пункт закрывает любой итог повторной
+	проверки, записанный после заключения: подтверждение не ниже его уровня, затруднение на
+	уровне не выше его или пересмотр уровня. Открытых несколько — отдаётся заключение
+	наивысшего уровня. Без базы.
 	"""
 	выведено = evidence._выведенные(записи)
-	открыто: dict[str, dict] = {}
+	открыто: dict[str, dict[str, dict]] = {}
 	for з in записи:
 		к = з.competency
-		if з.kind == evidence.АУДИТ and з.conclusion in ("insufficient", "contradiction"):
-			открыто[к] = {
-				"reason": СОМНЕНИЕ_АУДИТА if з.conclusion == "insufficient" else ОТМЕНА_АУДИТОМ,
-				"level": з.level or None,
-				"assessment": з.assessment or None,
-			}
-		elif (
-			з.kind == evidence.СВИДЕТЕЛЬСТВО
-			and з.outcome == evidence.ПОДТВЕРЖДЕНО
-			and з.name not in выведено
-			and к in открыто
-			and з.level >= (открыто[к]["level"] or 0)
-		):
-			del открыто[к]
-	return открыто
+		свои = открыто.setdefault(к, {})
+		if з.kind == evidence.АУДИТ:
+			if з.conclusion in ("insufficient", "contradiction"):
+				свои[з.audited] = {
+					"reason": ОТМЕНА_АУДИТОМ if з.withdrawn else СОМНЕНИЕ_АУДИТА,
+					"level": з.level or 0,
+					"assessment": з.assessment or None,
+				}
+			else:
+				свои.pop(з.audited, None)
+		elif з.kind == evidence.ПЕРЕСМОТР:
+			свои.clear()
+		elif з.outcome == evidence.ПОДТВЕРЖДЕНО and з.name not in выведено:
+			for ключ in [к_ for к_, п in свои.items() if з.level >= п["level"]]:
+				del свои[ключ]
+		elif з.outcome == evidence.ЗАТРУДНЕНИЕ and з.level:
+			for ключ in [к_ for к_, п in свои.items() if з.level <= п["level"]]:
+				del свои[ключ]
+	итог = {}
+	for к, свои in открыто.items():
+		if свои:
+			п = max(свои.values(), key=lambda п: п["level"])
+			итог[к] = {**п, "level": п["level"] or None}
+	return итог
 
 
 def очередь_по_данным(
