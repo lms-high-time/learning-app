@@ -6,7 +6,7 @@
 import unittest
 
 from lms_frappe_app.agent_learning.releases import checks
-from lms_frappe_app.tests.release_sample import перевести, пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза, с_компетенциями
 
 
 def _коды(релиз) -> list[str]:
@@ -36,6 +36,23 @@ def _пакет_неполный(р) -> None:
 	р["agent"]["lessons"]["l-3"] = "срез строкой"
 
 
+def _круг_из_трёх(р) -> None:
+	"""I1 → I2 → I3 → I1, у каждой ещё базовая: составляющих по две."""
+	for ключ, следующая in (("I2", "I3"), ("I3", "I1")):
+		р["competencies"].append(
+			{
+				"key": ключ,
+				"kind": "integrative",
+				"title": ключ,
+				"description": ключ,
+				"parts": [{"competency": следующая, "from_level": 3}, {"competency": "B1", "from_level": 1}],
+			}
+		)
+	next(к for к in р["competencies"] if к["key"] == "I1")["parts"].append(
+		{"competency": "I2", "from_level": 3}
+	)
+
+
 class TestПроверкиРелиза(unittest.TestCase):
 	def test_релиз_без_проблем(self):
 		"""Правки, после которых релиз чист: ни критичных проблем, ни предупреждений."""
@@ -55,6 +72,17 @@ class TestПроверкиРелиза(unittest.TestCase):
 			),
 			"релиз без пакета агента": lambda р: р.pop("agent"),
 			"перевод карточки и всех глав": перевести,
+			"карта компетенций": с_компетенциями,
+			# Интеграционная из интеграционной — без круга.
+			"интеграционная опирается на интеграционную": lambda р: с_компетенциями(р)["competencies"].append(
+				{
+					"key": "I2",
+					"kind": "integrative",
+					"title": "Устройство в бюджете",
+					"description": "Обосновываете устройство в пределах бюджета.",
+					"parts": [{"competency": "I1", "from_level": 3}, {"competency": "B2", "from_level": 3}],
+				}
+			),
 		}.items():
 			with self.subTest(случай):
 				р = пример_релиза()
@@ -107,6 +135,113 @@ class TestПроверкиРелиза(unittest.TestCase):
 				правка(р)
 				self.assertIn(код, _коды(р))
 
+	def test_карта_компетенций_по_правке(self):
+		"""Ошибки карты компетенций — проблема с местом; релиз без карты чист (случай выше)."""
+
+		def комп(р, ключ):
+			return next(к for к in р["competencies"] if к["key"] == ключ)
+
+		def круг(р):
+			комп(р, "I1")["parts"].append({"competency": "I2", "from_level": 3})
+			р["competencies"].append(
+				{
+					"key": "I2",
+					"kind": "integrative",
+					"title": "Круг",
+					"description": "Круг.",
+					"parts": [{"competency": "I1", "from_level": 3}, {"competency": "B2", "from_level": 1}],
+				}
+			)
+
+		for случай, правка, проблема in (
+			(
+				"повтор ключа компетенции",
+				lambda р: р["competencies"].append(
+					{"key": "B1", "kind": "base", "title": "Повтор", "description": "Повтор."}
+				),
+				{"code": "duplicate_key", "where": "competencies", "key": "B1"},
+			),
+			(
+				"составляющая не из карты",
+				lambda р: комп(р, "I1")["parts"].append({"competency": "B9", "from_level": 2}),
+				{"code": "broken_ref", "where": "competencies[I1].parts", "key": "B9"},
+			),
+			(
+				"цель урока по компетенции не из карты",
+				lambda р: р["lessons"][1].update(competencies=[{"competency": "B9", "target": 1}]),
+				{"code": "broken_ref", "where": "lessons[l-2].competencies", "key": "B9"},
+			),
+			(
+				"компетенция дважды в уроке",
+				lambda р: р["lessons"][0]["competencies"].append({"competency": "B1", "target": 3}),
+				{"code": "duplicate_key", "where": "lessons[l-1].competencies", "key": "B1"},
+			),
+			(
+				"связь между базовыми",
+				lambda р: комп(р, "B2").update(parts=[{"competency": "B1", "from_level": 1}]),
+				{
+					"code": "competency_parts",
+					"where": "competencies[B2].parts",
+					"message": "у базовой компетенции нет составляющих",
+				},
+			),
+			(
+				"интеграционная из одной составляющей",
+				lambda р: комп(р, "I1").update(parts=[{"competency": "B1", "from_level": 1}]),
+				{
+					"code": "competency_parts",
+					"where": "competencies[I1].parts",
+					"message": "у интеграционной не меньше двух составляющих",
+				},
+			),
+			(
+				"круг между интеграционными",
+				круг,
+				{"code": "competency_cycle", "where": "competencies", "keys": ["I1", "I2", "I1"]},
+			),
+			(
+				# Петля на себя — только competency_parts, круга из неё не выходит.
+				"компетенция — своя составляющая",
+				lambda р: комп(р, "I1")["parts"].append({"competency": "I1", "from_level": 3}),
+				{
+					"code": "competency_parts",
+					"where": "competencies[I1].parts",
+					"message": "компетенция — своя составляющая",
+				},
+			),
+			(
+				"составляющая дважды",
+				lambda р: комп(р, "I1")["parts"].append({"competency": "B1", "from_level": 2}),
+				{"code": "duplicate_key", "where": "competencies[I1].parts", "key": "B1"},
+			),
+			(
+				"интеграционная без составляющих",
+				lambda р: комп(р, "I1").pop("parts"),
+				{
+					"code": "competency_parts",
+					"where": "competencies[I1].parts",
+					"message": "у интеграционной не меньше двух составляющих",
+				},
+			),
+			(
+				"круг через три компетенции",
+				_круг_из_трёх,
+				{"code": "competency_cycle", "where": "competencies", "keys": ["I1", "I2", "I3", "I1"]},
+			),
+		):
+			with self.subTest(случай):
+				р = с_компетенциями(пример_релиза())
+				правка(р)
+				self.assertEqual(checks.проблемы(р)[0], [проблема])
+
+	def test_компетенции_урока_без_карты(self):
+		"""Цель урока по компетенции в релизе без карты — битая ссылка."""
+		р = пример_релиза()
+		р["lessons"][0]["competencies"] = [{"competency": "B1", "target": 2}]
+		self.assertEqual(
+			checks.проблемы(р)[0], [{"code": "broken_ref", "where": "lessons[l-1].competencies", "key": "B1"}]
+		)
+
 	def test_битая_ссылка_пакета_агента(self):
 		"""Ссылка пакета, которой нет в релизе, — `broken_ref` с местом и ключом."""
 		for случай, правка, проблема in (
@@ -122,6 +257,11 @@ class TestПроверкиРелиза(unittest.TestCase):
 					{"l-2-D1/V1": "Подробности пункта другого урока."}
 				),
 				{"code": "broken_ref", "where": "agent.lessons.l-1.items", "key": "l-2-D1/V1"},
+			),
+			(
+				"признаки компетенции, которой нет в карте",
+				lambda р: р["agent"]["lessons"]["l-1"].update(competencies={"B9": "Признаки уровней."}),
+				{"code": "broken_ref", "where": "agent.lessons.l-1.competencies", "key": "B9"},
 			),
 			(
 				"запись раздела в срезе не из документа",
@@ -243,14 +383,19 @@ class TestПроверкиРелиза(unittest.TestCase):
 		)
 
 	def test_пустые_тексты_ученику_предупреждения(self):
-		р = пример_релиза()
+		р = с_компетенциями(пример_релиза())
 		р["course"]["summary"] = ""
 		р["chapters"][0]["description"] = ""
+		р["competencies"][0]["description"] = " "
 		критичные, предупреждения = checks.проблемы(р)
 		self.assertEqual(критичные, [])
 		self.assertEqual(
 			[(п["code"], п["where"]) for п in предупреждения],
-			[("public_text_empty", "course.summary"), ("public_text_empty", "chapters[ch-1].description")],
+			[
+				("public_text_empty", "course.summary"),
+				("public_text_empty", "chapters[ch-1].description"),
+				("public_text_empty", "competencies[B1].description"),
+			],
 		)
 
 	def test_ответы_квиза_в_пакете_агента(self):

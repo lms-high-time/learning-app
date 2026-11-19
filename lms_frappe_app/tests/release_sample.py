@@ -182,6 +182,28 @@ def перевести(релиз: dict, главы: int | None = None) -> dict:
 	return релиз
 
 
+def с_компетенциями(релиз: dict) -> dict:
+	"""Карта компетенций в релизе (learning-services#802): две базовые, одна
+	интеграционная из них, цели уроков `l-1` и `l-3`. Правит и возвращает тот же релиз."""
+	релиз["competencies"] = [
+		{"key": "B1", "kind": "base", "title": "Выбор устройства", "description": "Выбираете устройство по задаче."},
+		{"key": "B2", "kind": "base", "title": "Цена ошибочного действия", "description": "Оцениваете цену ошибки."},
+		{
+			"key": "I1",
+			"kind": "integrative",
+			"title": "Обоснование устройства",
+			"description": "Обосновываете устройство целиком.",
+			"parts": [{"competency": "B1", "from_level": 1}, {"competency": "B2", "from_level": 3}],
+		},
+	]
+	релиз["lessons"][0]["competencies"] = [{"competency": "B1", "target": 2}]
+	релиз["lessons"][2]["competencies"] = [
+		{"competency": "B2", "target": 2},
+		{"competency": "I1", "target": 3},
+	]
+	return релиз
+
+
 def пример_карты(хвост: str = "") -> dict:
 	"""Карта курса в форме компилятора — заглушки (learning-services#560).
 
