@@ -6,7 +6,7 @@
 import unittest
 
 from lms_frappe_app.agent_learning.releases import schema
-from lms_frappe_app.tests.release_sample import перевести, пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза, с_компетенциями
 
 
 def _слова(узел, найдено: set) -> set:
@@ -92,6 +92,8 @@ class TestСхемаНаПримере(unittest.TestCase):
 			"перевод карточки без описаний": lambda релиз: релиз["course"].update(
 				translations={"en": {"title": "Sample"}, "de": {"title": "Beispiel", "summary": ""}}
 			),
+			# learning-services#802: карта компетенций необязательна.
+			"карта компетенций": с_компетенциями,
 		}.items():
 			with self.subTest(случай):
 				релиз = пример_релиза()
@@ -129,6 +131,16 @@ class TestСхемаНаПримере(unittest.TestCase):
 				"вариант с null отдаёт ошибки самого значения",
 				lambda релиз: релиз["document"]["sections"][0]["columns"][0].update(hint="подсказка"),
 				{"path": "$.document.sections[0].columns[0].hint", "message": "лишнее поле"},
+			),
+			(
+				"цель урока по компетенции вне шкалы",
+				lambda релиз: с_компетенциями(релиз)["lessons"][0]["competencies"][0].update(target=5),
+				{"path": "$.lessons[0].competencies[0].target", "message": "больше 4"},
+			),
+			(
+				"неизвестный вид компетенции",
+				lambda релиз: с_компетенциями(релиз)["competencies"][0].update(kind="core"),
+				{"path": "$.competencies[0].kind", "message": "одно из: base, integrative"},
 			),
 			(
 				"отрицательный срок домашки",
