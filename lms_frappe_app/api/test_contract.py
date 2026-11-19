@@ -32,7 +32,7 @@ import lms_frappe_app.api
 from lms_frappe_app.agent_learning.releases import schema as схема_релиза
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.api import analytics, authoring, manager, public, review, student
-from lms_frappe_app.tests.release_sample import пример_релиза
+from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	политика_по_умолчанию,
@@ -320,7 +320,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
-		релиз = пример_релиза(f"contract-{self.суффикс}")
+		релиз = с_компетенциями(пример_релиза(f"contract-{self.суффикс}"))
 		курс = self.сверить(
 			"authoring.publish_release",
 			authoring.publish_release(release=релиз, instructors=[self.куратор], commit="ab" * 20),
@@ -516,6 +516,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		занятие = старт["session"]
 		self.сверить("student.lesson_item", student.lesson_item(session=занятие, goal="term:T1"))
 		self.сверить("student.lesson_diagram", student.lesson_diagram(session=занятие, key="task-flow"))
+		self._записать_свидетельства(занятие)
 		self._отметить_обязательные(занятие, старт["lesson_map"])
 		прежняя = self.сверить("student.request_quiz", student.request_quiz(session=занятие))["attempt"]
 		self._гонка_с_публикацией(курс, прежняя)
@@ -547,6 +548,34 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self._отметить_обязательные(старт["session"], старт["lesson_map"])
 		self.сверить("student.complete_lesson", student.complete_lesson(session=старт["session"]))
 		return занятие
+
+	def _записать_свидетельства(self, занятие: str) -> None:
+		"""Свидетельство и пересмотр вниз (learning-services#808)."""
+		поля = {
+			"session": занятие,
+			"competency": "B1",
+			"outcome": "confirmed",
+			"level": 2,
+			"task": "Объяснить выбор устройства",
+			"student_action": "Назвал свойства задачи",
+			"assessment": "Обоснование своими словами",
+			"task_form": "free",
+			"hints": False,
+			"corrected": False,
+			"indirect": False,
+			"request_key": f"contract-{self.суффикс}",
+		}
+		self.сверить("student.record_evidence", student.record_evidence(**поля))
+		self.сверить(
+			"student.revise_level",
+			student.revise_level(
+				session=занятие,
+				competency="B1",
+				level=1,
+				reason="Затруднение повторилось",
+				request_key=f"contract-rev-{self.суффикс}",
+			),
+		)
 
 	def _гонка_с_публикацией(self, курс: str, попытка: str) -> None:
 		"""Попытка — как заведённая в гонке с публикацией: на версии курса,
