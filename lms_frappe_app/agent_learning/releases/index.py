@@ -456,6 +456,13 @@ def пакет_урока(релиз: str, ключ: str) -> dict:
 	)
 
 
+def ключи_уроков(релиз: str) -> list[str]:
+	"""Ключи уроков релиза по порядку — одной выборкой, без глав."""
+	return frappe.get_all(
+		УРОК, filters={"parenttype": РЕЛИЗ, "parent": релиз}, pluck="lesson_key", order_by="idx asc"
+	)
+
+
 def цели_уроков(релиз: str) -> dict[str, list[dict]]:
 	"""Цели по компетенциям всех уроков релиза одной выборкой: ключ урока → `{competency, target}`;
 	уроки без целей не входят (learning-services#810)."""

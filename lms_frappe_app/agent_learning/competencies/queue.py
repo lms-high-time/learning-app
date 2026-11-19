@@ -22,10 +22,9 @@
 приложение: MCP его не пересчитывает.
 """
 
-import frappe
-
 from lms_frappe_app.agent_learning.competencies import evidence
 from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.agent_learning.runs import service as прохождения
 
 НЕ_ПОДТВЕРЖДЕНА = "unconfirmed"
 ЗАТРУДНЕНИЕ_ПОСЛЕ = "difficulty_after_confirmation"
@@ -42,15 +41,15 @@ def открытые_уровни(цели_уроков: dict[str, list[dict]], 
 	return итог
 
 
-def затруднения_после(записи: list) -> dict[str, int]:
-	"""Компетенция → уровень открытого затруднения после подтверждения, по журналу по порядку.
+def затруднения_после(записи: list) -> dict[str, dict]:
+	"""Компетенция → запись открытого затруднения после подтверждения, по журналу по порядку.
 
 	Затруднение на уровне не выше уже действующего подтверждения открывает пункт; подтверждение
 	не ниже его уровня или пересмотр — закрывают. Без базы.
 	"""
 	выведено = evidence._выведенные(записи)
 	подтверждено: dict[str, int] = {}
-	открыто: dict[str, int] = {}
+	открыто: dict[str, dict] = {}
 	for з in записи:
 		к = з.competency
 		if з.kind == evidence.ПЕРЕСМОТР:
@@ -60,10 +59,10 @@ def затруднения_после(записи: list) -> dict[str, int]:
 			continue
 		if з.outcome == evidence.ПОДТВЕРЖДЕНО and з.name not in выведено:
 			подтверждено[к] = max(подтверждено.get(к, 0), з.level)
-			if к in открыто and з.level >= открыто[к]:
+			if к in открыто and з.level >= открыто[к].level:
 				del открыто[к]
 		elif з.outcome == evidence.ЗАТРУДНЕНИЕ and 0 < (з.level or 0) <= подтверждено.get(к, 0):
-			открыто[к] = з.level
+			открыто[к] = з
 	return открыто
 
 
@@ -74,11 +73,11 @@ def очередь_по_данным(
 	записи: list,
 	текущий_урок: str | None = None,
 ) -> list[dict]:
-	"""Очередь агента: `{competency, title, reason, level, last_outcome}` по порядку — сначала
-	связанные с текущим уроком, затем по порядку карты. Без базы.
+	"""Очередь агента: `{competency, title, reason, level, last_outcome, assessment}` по порядку —
+	сначала связанные с текущим уроком, затем по порядку карты. Без базы.
 
-	`статусы` — ключ урока → статус прохождения ученика; `level` у затруднения — его уровень,
-	у неподтверждённой — `None`.
+	`статусы` — ключ урока → статус прохождения ученика; `level` и `assessment` у затруднения —
+	уровень и суть затруднения из его записи (дизайн §10), у неподтверждённой — `None`.
 	"""
 	состояние = evidence.состояние_по_записям(записи)
 	затруднения = затруднения_после(записи)
@@ -90,9 +89,17 @@ def очередь_по_данным(
 	for к in названия:
 		с = состояние.get(к, evidence.ПУСТО)
 		if к in затруднения:
-			пункты.append({"competency": к, "reason": ЗАТРУДНЕНИЕ_ПОСЛЕ, "level": затруднения[к]})
+			з = затруднения[к]
+			пункты.append(
+				{
+					"competency": к,
+					"reason": ЗАТРУДНЕНИЕ_ПОСЛЕ,
+					"level": з.level,
+					"assessment": з.assessment or None,
+				}
+			)
 		elif к in пройденные and с["level"] is None:
-			пункты.append({"competency": к, "reason": НЕ_ПОДТВЕРЖДЕНА, "level": None})
+			пункты.append({"competency": к, "reason": НЕ_ПОДТВЕРЖДЕНА, "level": None, "assessment": None})
 	связанные = _связанные(карта, цели_уроков.get(текущий_урок) or [])
 	пункты.sort(key=lambda п: п["competency"] not in связанные)
 	return [
@@ -116,16 +123,6 @@ def _связанные(карта: list[dict], цели: list[dict]) -> set[str
 	return свои | части
 
 
-def статусы_уроков(ученик: str, курс: str) -> dict[str, str]:
-	"""Ключ урока → статус прохождения ученика по курсу; урок без прохождения не начат."""
-	return {
-		р.lesson_key: р.status
-		for р in frappe.get_all(
-			"Agent Lesson Run", filters={"student": ученик, "course": курс}, fields=["lesson_key", "status"]
-		)
-	}
-
-
 def карта_ученика(ученик: str, курс: str, релиз: str, текущий_урок: str | None = None) -> dict | None:
 	"""Карта компетенций ученика по курсу: `{open_levels, state, queue, lesson_status}`; курс без
 	карты — `None` одним запросом.
@@ -136,7 +133,7 @@ def карта_ученика(ученик: str, курс: str, релиз: str,
 	if not карта:
 		return None
 	цели = index.цели_уроков(релиз)
-	статусы = статусы_уроков(ученик, курс)
+	статусы = прохождения.статусы_уроков(ученик, курс)
 	записи = evidence._записи(ученик, курс)
 	return {
 		"open_levels": открытые_уровни(цели, set(статусы)),

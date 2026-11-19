@@ -24,6 +24,7 @@ def запись(имя, компетенция, исход, уровень=0, �
 		outcome=исход,
 		level=уровень,
 		lesson_key="l-1",
+		assessment=f"суть {имя}",
 		withdrawn=json.dumps(выведено) if выведено is not None else None,
 	)
 
@@ -99,7 +100,7 @@ class TestЗатрудненияПосле(UnitTestCase):
 			),
 		):
 			with self.subTest(случай):
-				self.assertEqual(queue.затруднения_после(записи), итог)
+				self.assertEqual({к: з.level for к, з in queue.затруднения_после(записи).items()}, итог)
 
 
 class TestОчередь(UnitTestCase):
@@ -119,6 +120,8 @@ class TestОчередь(UnitTestCase):
 				("B2", "difficulty_after_confirmation", 1, "difficulty"),
 			],
 		)
+		# Суть затруднения — из его записи: через несколько сессий агенту есть что разбирать.
+		self.assertEqual([п["assessment"] for п in очередь], [None, "суть e2"])
 		self.assertEqual(очередь[0]["title"], "Выбор устройства")
 		# Связанное с текущим уроком поднимается над прочим, даже если в карте оно позже.
 		карта = [*КАРТА, {"key": "B3", "kind": "base", "title": "Третья"}]
@@ -183,3 +186,5 @@ class IntegrationTestПредложениеОчереди(IntegrationTestCase):
 		self.assertEqual([п["competency"] for п in отказ["error"]["competencies"]], ["B1"])
 		# Предложено один раз: повторный вызов закрывает урок.
 		self.assertTrue(student.complete_lesson(последний["занятие"])["ok"])
+		# Возврат к пройденному уроку предложения не повторяет — курс уже завершён.
+		self.assertTrue(пройти("l-1", [])["закрытие"]["ok"])
