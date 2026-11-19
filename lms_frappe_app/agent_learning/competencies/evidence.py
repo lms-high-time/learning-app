@@ -391,7 +391,7 @@ def _записи(ученик: str, курс: str, компетенция: str 
 	return frappe.get_all(
 		ЖУРНАЛ,
 		filters=фильтр,
-		fields=["name", "kind", "competency", "outcome", "level", "withdrawn", "lesson_key"],
+		fields=["name", "kind", "competency", "outcome", "level", "withdrawn", "lesson_key", "assessment"],
 		order_by="creation asc, name asc",
 	)
 

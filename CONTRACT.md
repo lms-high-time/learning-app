@@ -1062,10 +1062,18 @@ learning-services#405).
   "competencies": [ { "key": "K5", "kind": "integrative", "title": "Обоснование устройства",
                       "description": "Обосновываете устройство продукта целиком.", "target": 3,
                       "parts": [ { "competency": "K1", "from_level": 1 },
-                                 { "competency": "K4", "from_level": 3 } ], "text": "…" },
+                                 { "competency": "K4", "from_level": 3 } ], "text": "…",
+                      "state": { "level": null, "last_outcome": null, "last_level": null },
+                      "open_level": 3 },
                     { "key": "K1", "kind": "base", "title": "Выбор устройства",
                       "description": "Выбираете устройство по задаче.", "target": null,
-                      "parts": [], "text": "…" } ],
+                      "parts": [], "text": "…",
+                      "state": { "level": 2, "last_outcome": "difficulty", "last_level": 2 },
+                      "open_level": 2 } ],
+  "competency_queue": [ { "competency": "K1", "title": "Выбор устройства",
+                          "reason": "difficulty_after_confirmation", "level": 2,
+                          "last_outcome": "difficulty",
+                          "assessment": "Путает сложность текста и неизвестность шагов" } ],
   "course_frame": { "frame": "…",
                     "learn_about_student": [ { "key": "where_applies", "text": "…", "changes": false } ] },
   "history": {
@@ -1142,7 +1150,23 @@ learning-services#405).
 целостной задачи. Поля — из `competencies` релиза (`kind`, `title`,
 `description`, `parts` — `{competency, from_level}`, у базовой `[]`); `text` —
 текст агенту из среза (`competencies.<ключ>`: признаки уровней), нет — `null`.
-У урока без карты — `[]`. `course_frame` — рамка
+`state` — состояние компетенции у ученика, как у `record_evidence`; `open_level`
+— до какого уровня курс её открыл: наивысшая цель среди начатых уроков (0 —
+заблокирована). Уровень выше открытого агент специально не проверяет, кроме
+диагностики интеграционной; показанный ученику уровень — меньшее из
+подтверждённого и открытого (learning-services#810). У урока без карты — `[]`.
+
+`competency_queue` — что стоит посмотреть по курсу при естественном поводе,
+без отдельного опроса (learning-services#810): `reason: unconfirmed` —
+компетенция пройденного урока без подтверждения (`level: null`), `reason:
+difficulty_after_confirmation` — затруднение на уровне не выше
+подтверждённого (`level` и `assessment` — уровень и суть затруднения из его
+записи; у `unconfirmed` — `null`). Подтверждённое ниже цели
+урока в очередь не идёт. Первыми — компетенции этого урока и составляющие
+его интеграционных. Пункт уходит из очереди, когда записано подтверждение
+(у затруднения — не ниже его уровня) или пересмотр уровня; пропуск не
+снимает. У курса без карты — `[]`. Очередь отдаёт только `start_lesson`;
+в ответах с `next_step` (`mark_goal`, квиз) её пока нет. `course_frame` — рамка
 пакета (`frame`, `learn_about_student`, какие есть) — только при `frame:
 true`; при `false` ключа нет. **Пакет агента отдаёт только этот метод**,
 подробности пункта — `lesson_item`: ученик и руководитель его не видят ни в
@@ -1639,7 +1663,11 @@ learning-services#296).
 `request_quiz`); `competencies_open` (с `competencies` — `{competency,
 target, title}` по порядку целей урока) — не каждая компетенция урока
 проверена: агент дописывает свидетельство или проводит проверку
-(`record_evidence`); `quiz_required` — квиз урока обязателен, и закрыть урок можно
+(`record_evidence`); `course_queue_open` (с `competencies` — очередь, как
+`competency_queue` у `start_lesson`) — урок последний незакрытый в курсе с
+картой компетенций, а очередь не пуста: один раз на ученика и курс агент
+предлагает ученику посмотреть оставшееся (learning-services#810), отказ ученика — свидетельство `skipped`;
+повторный вызов урок закрывает; `quiz_required` — квиз урока обязателен, и закрыть урок можно
 только сдачей; `busy` (с `session`) — прохождение этого урока в этот момент
 меняет другой запрос, урок не закрыт: повторите вызов.
 
@@ -1668,6 +1696,11 @@ target, title}` по порядку целей урока) — не каждая
                              { "id": "a41e7c90d5f3", "text": "…" } ],
                 "index": 1, "total": 5 } } }
 ```
+
+Последний незакрытый урок курса с картой компетенций при непустой очереди
+агента — один отказ `course_queue_open` (с `competencies`), как у
+`complete_lesson`: урок без целей по компетенциям бывает закрыт квизом
+последним (learning-services#810).
 
 В уроке с целями по компетенциям квиза нет — отказ `quiz_not_used` (с
 `session`) до всякой записи: сданный квиз закрыл бы урок мимо проверки
