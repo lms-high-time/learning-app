@@ -36,6 +36,23 @@ def _пакет_неполный(р) -> None:
 	р["agent"]["lessons"]["l-3"] = "срез строкой"
 
 
+def _круг_из_трёх(р) -> None:
+	"""I1 → I2 → I3 → I1, у каждой ещё базовая: составляющих по две."""
+	for ключ, следующая in (("I2", "I3"), ("I3", "I1")):
+		р["competencies"].append(
+			{
+				"key": ключ,
+				"kind": "integrative",
+				"title": ключ,
+				"description": ключ,
+				"parts": [{"competency": следующая, "from_level": 3}, {"competency": "B1", "from_level": 1}],
+			}
+		)
+	next(к for к in р["competencies"] if к["key"] == "I1")["parts"].append(
+		{"competency": "I2", "from_level": 3}
+	)
+
+
 class TestПроверкиРелиза(unittest.TestCase):
 	def test_релиз_без_проблем(self):
 		"""Правки, после которых релиз чист: ни критичных проблем, ни предупреждений."""
@@ -181,6 +198,35 @@ class TestПроверкиРелиза(unittest.TestCase):
 				"круг между интеграционными",
 				круг,
 				{"code": "competency_cycle", "where": "competencies", "keys": ["I1", "I2", "I1"]},
+			),
+			(
+				# Петля на себя — только competency_parts, круга из неё не выходит.
+				"компетенция — своя составляющая",
+				lambda р: комп(р, "I1")["parts"].append({"competency": "I1", "from_level": 3}),
+				{
+					"code": "competency_parts",
+					"where": "competencies[I1].parts",
+					"message": "компетенция — своя составляющая",
+				},
+			),
+			(
+				"составляющая дважды",
+				lambda р: комп(р, "I1")["parts"].append({"competency": "B1", "from_level": 2}),
+				{"code": "duplicate_key", "where": "competencies[I1].parts", "key": "B1"},
+			),
+			(
+				"интеграционная без составляющих",
+				lambda р: комп(р, "I1").pop("parts"),
+				{
+					"code": "competency_parts",
+					"where": "competencies[I1].parts",
+					"message": "у интеграционной не меньше двух составляющих",
+				},
+			),
+			(
+				"круг через три компетенции",
+				_круг_из_трёх,
+				{"code": "competency_cycle", "where": "competencies", "keys": ["I1", "I2", "I3", "I1"]},
 			),
 		):
 			with self.subTest(случай):
