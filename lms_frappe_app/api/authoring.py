@@ -27,6 +27,7 @@ from lms_frappe_app.agent_learning import (
 	testers,
 )
 from lms_frappe_app.agent_learning import course_translations as переводы_курса
+from lms_frappe_app.agent_learning.competencies import audit as аудит_карты
 from lms_frappe_app.agent_learning.competencies import views as представления_карты
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
 from lms_frappe_app.agent_learning.releases import findings as находки_публикации
@@ -767,6 +768,40 @@ def course_releases(course: str) -> dict:
 #: они инструкторы. Модератор — как в `can_modify_course` Learning, плюс
 #: администраторы платформы.
 ВИДЯТ_ВСЕ_ПРОХОЖДЕНИЯ = frozenset({"Moderator", "System Manager", "Administrator"})
+
+
+#: Кто пишет и читает аудит карты компетенций (learning-services#811): команда платформы. Не
+#: методист курса и не ученик: тексты свидетельств — работа ученика. Служебной роли сервиса
+#: здесь нет, пока нет автоматического аудитора: на пилоте аудит ручной.
+АУДИТОРЫ = frozenset({"Moderator", "System Manager", "Administrator"})
+
+
+def _аудитор() -> str:
+	пользователь = frappe.session.user
+	if not set(frappe.get_roles(пользователь)) & АУДИТОРЫ:
+		frappe.throw(frappe._("Аудит карты компетенций ведёт команда платформы"), frappe.PermissionError)
+	return пользователь
+
+
+@frappe.whitelist()
+@контракт
+def audit_sample(course: str | None = None, limit=None) -> dict:
+	"""Свидетельства на ручной аудит, ещё не проверенные, по приоритету (learning-services#811):
+	пересмотры уровня, уровень 4, записанное при отказе в закрытии, косвенное, с подсказкой или
+	исправлением, остальное. С текстами записи — только команде платформы."""
+	_аудитор()
+	предел = min(_целое(limit, 20, "limit", 1), аудит_карты.ВЫБОРКА_НЕ_БОЛЬШЕ)
+	return {"course": course or None, "events": аудит_карты.выборка(course or None, предел)}
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def audit_evidence(event: str, conclusion: str, reason: str | None = "") -> dict:
+	"""Заключение аудита по свидетельству или пересмотру уровня (learning-services#811, дизайн §13):
+	`sufficient`, `insufficient` (повторная проверка), `unverifiable`, `contradiction` (отмена
+	подтверждения). Пишет команда платформы; ученик своим токеном — нет."""
+	_аудитор()
+	return аудит_карты.заключить(event, conclusion, reason)
 
 
 @frappe.whitelist()

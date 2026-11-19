@@ -56,6 +56,7 @@ from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТ�
 	("Agent Quiz Attempt", "session"): УДАЛИТЬ,
 	("Agent Quiz Event", "session"): УДАЛИТЬ,
 	("Agent Competency Event", "session"): УДАЛИТЬ,
+	("Agent Competency Event", "audited"): УДАЛИТЬ,
 	("Agent Session Event", "session"): УДАЛИТЬ,
 	("Agent Quiz Answer", "attempt"): УДАЛИТЬ,
 	("Agent Quiz Event", "attempt"): УДАЛИТЬ,
