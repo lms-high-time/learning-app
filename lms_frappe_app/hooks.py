@@ -704,6 +704,8 @@ user_data_fields = [
 	{"doctype": "Agent Quiz Attempt", "filter_by": "archived_student", "mode": _удалить},
 	{"doctype": "Agent Quiz Event", "filter_by": "student", "mode": _удалить},
 	{"doctype": "Agent Quiz Event", "filter_by": "archived_student", "mode": _удалить},
+	{"doctype": "Agent Competency Event", "filter_by": "student", "mode": _удалить},
+	{"doctype": "Agent Competency Event", "filter_by": "archived_student", "mode": _удалить},
 	{"doctype": "Agent Homework Submission", "filter_by": "member", "mode": _удалить},
 	{"doctype": "Agent Homework Submission", "filter_by": "archived_student", "mode": _удалить},
 	{"doctype": "Homework Notice", "filter_by": "recipient", "mode": _удалить},

@@ -81,6 +81,7 @@ from lms_frappe_app.agent_learning.errors import (
 	УРОК_НЕ_НАЙДЕН,
 	ЧУЖОЕ_ЗАНЯТИЕ,
 )
+from lms_frappe_app.agent_learning.competencies import evidence as свидетельства
 from lms_frappe_app.agent_learning.competencies import lesson as компетенции_урока
 from lms_frappe_app.agent_learning.releases import diagrams as схемы
 from lms_frappe_app.agent_learning.releases import index
@@ -1409,6 +1410,83 @@ def report_issue(
 	).insert(ignore_permissions=True)
 
 	return {"report": репорт.name, "kind": имя_вида}
+
+
+@frappe.whitelist(methods=["POST"])
+@частота("запись")
+@контракт
+def record_evidence(
+	session: str,
+	competency: str,
+	outcome: str,
+	request_key: str,
+	level: int | str | None = None,
+	task: str | None = "",
+	student_action: str | None = "",
+	assessment: str | None = "",
+	uncertainties: str | None = "",
+	task_form: str | None = "",
+	hints: bool | str | None = None,
+	corrected: bool | str | None = None,
+	indirect: bool | str | None = None,
+	transfer_difference: str | None = "",
+	transfer_adaptation: str | None = "",
+) -> dict:
+	"""Свидетельство об освоении компетенции по занятию (learning-services#808).
+
+	Правила записи — `competencies.evidence`; компетенция — любая из карты курса: косвенное
+	свидетельство бывает и по компетенции другого урока. Двигает активность занятия, как
+	`mark_goal`. Отказы — до записи.
+	"""
+	занятие, релиз, ключ = _открытое_занятие(session)
+	ответ = свидетельства.записать(
+		занятие,
+		релиз,
+		ключ,
+		competency,
+		outcome,
+		level,
+		{
+			"task": task,
+			"student_action": student_action,
+			"assessment": assessment,
+			"uncertainties": uncertainties,
+			"transfer_difference": transfer_difference,
+			"transfer_adaptation": transfer_adaptation,
+		},
+		task_form,
+		{"hints": hints, "corrected": corrected, "indirect": indirect},
+		request_key,
+	)
+	занятие.отметить_активность()
+	return ответ
+
+
+@frappe.whitelist(methods=["POST"])
+@частота("запись")
+@контракт
+def revise_level(session: str, competency: str, level: int | str, reason: str, request_key: str) -> dict:
+	"""Пересмотр уровня компетенции вниз по занятию (learning-services#808): новый уровень 0–3
+	ниже текущего и причина; подтверждения выше нового уровня выходят из расчёта."""
+	занятие, релиз, ключ = _открытое_занятие(session)
+	ответ = свидетельства.пересмотреть(занятие, релиз, ключ, competency, level, reason, request_key)
+	занятие.отметить_активность()
+	return ответ
+
+
+def _открытое_занятие(session: str):
+	"""Своё незакрытое занятие курса из релиза с доступом: (занятие, релиз, ключ урока) — или отказ."""
+	занятие = _своё_занятие(session)
+	релиз, ключ = _урок_занятия(занятие)
+	_требовать_доступ_к_курсу(занятие.student, занятие.course)
+	if занятие.status in ЗАВЕРШЁННЫЕ:
+		raise Отказ(
+			ЗАНЯТИЕ_ЗАКРЫТО,
+			"Это занятие уже закрыто — начните урок заново: start_lesson",
+			session=session,
+			status=занятие.status,
+		)
+	return занятие, релиз, ключ
 
 
 @frappe.whitelist(methods=["POST"])

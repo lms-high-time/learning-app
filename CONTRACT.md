@@ -1371,6 +1371,92 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 — урок снят из действующего релиза; `busy` (с `session`) — прохождение в эту
 минуту меняет другой запрос: ничего не записано, вызов стоит повторить.
 
+## `lms_frappe_app.api.student.record_evidence`
+
+Свидетельство об освоении компетенции по занятию (learning-services#808).
+Уровень ставит агент, и только свидетельством: что ученик сделал и в каких
+условиях. Сервер держит форму записи и формальные правила, смысл текста не
+оценивает. Пишет запись журнала карты компетенций (`Agent Competency Event`)
+и двигает активность занятия.
+
+**Параметры:** `session`; `competency` — ключ компетенции из карты курса
+(любой: косвенное свидетельство бывает и по компетенции другого урока);
+`outcome` — `confirmed` (подтверждено), `difficulty` (найдено затруднение),
+`insufficient` (данных недостаточно), `skipped` (пропущено по просьбе
+ученика); `request_key` — ключ запроса, до 80 знаков: повтор с тем же
+ключом записи не создаёт; `level` — 1–4; `task`, `student_action`,
+`assessment`, `uncertainties`, `transfer_difference`, `transfer_adaptation`
+— тексты, каждый до 1000 знаков; `task_form` — `choice` (выбор из
+вариантов), `free` (свободный ответ), `work` (работа: документ, таблица);
+`hints`, `corrected`, `indirect` — отметки да/нет: были подсказки,
+исправлял после обратной связи, косвенно.
+
+Обязательно по исходу:
+
+| Исход | Обязательно |
+|---|---|
+| `confirmed` | `level`, `task`, `student_action`, `assessment`, `task_form`, `hints`, `corrected`; у уровня 4 — `transfer_difference`, `transfer_adaptation` |
+| `difficulty` | `level` (уровень попытки), `task`, `student_action`, `assessment`, `task_form`, `hints`, `corrected` |
+| `insufficient` | `task`, `assessment` (почему данных не хватило) |
+| `skipped` | `task` (что предлагали); `level` не передаётся |
+
+Только у `confirmed`: `task_form: choice` — не выше уровня 1, `hints` или
+`corrected` — не выше 2.
+
+```json
+{ "ok": true, "data": {
+  "event": "a1b2c3d4e5", "kind": "evidence", "competency": "K1", "duplicate": false,
+  "state": { "level": 2, "last_outcome": "confirmed", "last_level": 2 } } }
+```
+
+`state` — состояние компетенции у ученика после записи: `level` — наивысший
+уровень действующих подтверждений (нет — `null`), `last_outcome` и
+`last_level` — исход и уровень последнего свидетельства. Уровень ученика
+выводится из журнала: свидетельства не переписываются. Повтор ключа запроса
+отвечает прежней записью с `duplicate: true` и ничего не пишет — даже если
+поля другие. Свидетельство выше цели урока допустимо. Записи читают
+администраторы платформы; ученику, руководителю и автору — представления
+карты (learning-services#810).
+
+**Отказы** — все до записи: `not_your_session`, `course_not_released`,
+`not_enrolled`, `organization_suspended`, `session_closed` — как у
+`mark_goal`; `request_key_invalid` (с `limit`); `competency_unknown` (с
+`competency`) — нет в карте действующего релиза; `outcome_unknown` (с
+`outcome`, `allowed`); `level_invalid` (с `level`) — не целое 1–4;
+`task_form_unknown` (с `task_form`, `allowed`); `evidence_too_long` (с
+`field`, `limit`, `length`); `evidence_field_required` (с `field`,
+`outcome`, у уровня 4 — `level`); `evidence_field_not_allowed` (с `field`)
+— уровень у пропуска; `level_capped` (с `level`, `cap`, `reason` —
+`task_form`, `hints` или `corrected`) — отметка не пускает уровень: для
+выше нужна новая задача без неё.
+
+## `lms_frappe_app.api.student.revise_level`
+
+Пересмотр уровня компетенции вниз по занятию (learning-services#808): когда
+затруднение после подтверждения повторилось в другом занятии. Подтверждения
+выше нового уровня выходят из расчёта — их перечисляет сама запись
+пересмотра, сервер выбирает их сам. Поднять уровень пересмотром нельзя —
+только новым свидетельством `confirmed`, и правила `record_evidence` на него
+действуют.
+
+**Параметры:** `session`; `competency`; `level` — новый уровень 0–3, ниже
+текущего (0 — нет уровня); `reason` — причина: какие затруднения, до 1000
+знаков; `request_key` — как у `record_evidence`.
+
+```json
+{ "ok": true, "data": {
+  "event": "f6e5d4c3b2", "kind": "revision", "competency": "K1", "duplicate": false,
+  "state": { "level": 1, "last_outcome": "difficulty", "last_level": 2 } } }
+```
+
+Записи пересмотра — в том же журнале. Подтверждение, записанное после
+пересмотра, им не затрагивается.
+
+**Отказы** — все до записи: те же, что у `record_evidence`, для занятия,
+ключа и компетенции; `evidence_field_required` (с `field` — `level` или
+`reason`); `level_invalid`; `evidence_too_long`; `revision_not_lower` (с
+`level`, `current_level`; нет уровня — `null`).
+
 ## `lms_frappe_app.api.student.study_options`
 
 Что продолжать: урок, который открыл бы `start_lesson` без аргументов, и
@@ -3061,12 +3147,14 @@ false` — практика, без срока; в дайджест она не 
 { "ok": true, "data": {
   "student": "ivanov@example.com", "course": "course-basics",
   "sessions_archived": 2, "attempts_archived": 1, "quiz_events_archived": 3,
+  "competency_events_archived": 2,
   "artifacts_archived": 1, "notes_archived": 1, "homework_archived": 1, "runs_archived": 1,
   "progress_deleted": 1, "enrolled_again": false } }
 ```
 
 Занятия, попытки квиза и их журнал проверки (`Agent Quiz Event` — в нём слова
-ученика), документы курса, заметки агента, сдачи домашки и прохождения уроков
+ученика), журнал карты компетенций (`Agent Competency Event` — свидетельства
+и пересмотры уровня, learning-services#808), документы курса, заметки агента, сдачи домашки и прохождения уроков
 по курсу уходят в архив: ученик переносится в
 `archived_student` с датой `archived_at`, поле «Ученик» очищается. Методы
 учебного потока ищут по ученику и архив не видят — следующее занятие по курсу

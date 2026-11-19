@@ -83,6 +83,14 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 			update_modified=False,
 		)
 
+	# Журнал карты компетенций — как журнал проверки: свидетельства описывают
+	# работу ученика, а повторное прохождение начинается без уровней
+	# (learning-services#808). UPDATE по отбору — по той же причине.
+	свидетельства = frappe.db.count("Agent Competency Event", {"student": ученик, "course": курс})
+	frappe.db.set_value(
+		"Agent Competency Event", {"student": ученик, "course": курс}, архив, update_modified=False
+	)
+
 	документы = frappe.get_all(
 		"Agent Student Artifact", filters={"student": ученик, "course": курс}, pluck="name"
 	)
@@ -144,6 +152,7 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 		"sessions_archived": len(занятия),
 		"attempts_archived": len(попытки),
 		"quiz_events_archived": len(события),
+		"competency_events_archived": свидетельства,
 		"artifacts_archived": len(документы),
 		"notes_archived": len(заметки),
 		"homework_archived": len(сдачи),

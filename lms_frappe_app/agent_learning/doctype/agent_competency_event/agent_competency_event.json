@@ -1,0 +1,268 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-11-19 23:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "kind",
+  "occurred_at",
+  "student",
+  "course",
+  "lesson",
+  "lesson_key",
+  "session",
+  "release",
+  "competency",
+  "request_key",
+  "sb_evidence",
+  "outcome",
+  "level",
+  "task",
+  "student_action",
+  "assessment",
+  "uncertainties",
+  "transfer_difference",
+  "transfer_adaptation",
+  "sb_marks",
+  "task_form",
+  "hints",
+  "corrected",
+  "indirect",
+  "withdrawn",
+  "sb_archive",
+  "archived_student",
+  "archived_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Событие",
+   "options": "Evidence\nRevision",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "label": "Когда",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Ученик",
+   "options": "User",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Курс",
+   "options": "LMS Course",
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "lesson",
+   "fieldtype": "Link",
+   "label": "Урок",
+   "options": "Course Lesson",
+   "read_only": 1
+  },
+  {
+   "fieldname": "lesson_key",
+   "fieldtype": "Data",
+   "label": "Ключ урока",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session",
+   "fieldtype": "Link",
+   "label": "Занятие",
+   "options": "Agent Learning Session",
+   "read_only": 1
+  },
+  {
+   "fieldname": "release",
+   "fieldtype": "Link",
+   "label": "Релиз",
+   "options": "Agent Course Release",
+   "read_only": 1,
+   "description": "Действующий релиз курса на момент записи: по его критериям поставлен уровень."
+  },
+  {
+   "fieldname": "competency",
+   "fieldtype": "Data",
+   "label": "Компетенция",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "request_key",
+   "fieldtype": "Data",
+   "label": "Ключ запроса",
+   "read_only": 1,
+   "description": "Ключ идемпотентности от агента: повтор с тем же ключом не создаёт записи."
+  },
+  {
+   "fieldname": "sb_evidence",
+   "fieldtype": "Section Break",
+   "label": "Свидетельство"
+  },
+  {
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "label": "Исход",
+   "options": "\nconfirmed\ndifficulty\ninsufficient\nskipped",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "level",
+   "fieldtype": "Int",
+   "label": "Уровень",
+   "read_only": 1,
+   "description": "Подтверждённый уровень или уровень попытки 1–4; у пересмотра — новый уровень; 0 — нет уровня."
+  },
+  {
+   "fieldname": "task",
+   "fieldtype": "Small Text",
+   "label": "Задание",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student_action",
+   "fieldtype": "Small Text",
+   "label": "Что сделал ученик",
+   "read_only": 1
+  },
+  {
+   "fieldname": "assessment",
+   "fieldtype": "Small Text",
+   "label": "Оценка",
+   "read_only": 1,
+   "description": "У пересмотра — причина."
+  },
+  {
+   "fieldname": "uncertainties",
+   "fieldtype": "Small Text",
+   "label": "Что не проверялось",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transfer_difference",
+   "fieldtype": "Small Text",
+   "label": "Чем условия новые",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transfer_adaptation",
+   "fieldtype": "Small Text",
+   "label": "Как изменил решение",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_marks",
+   "fieldtype": "Section Break",
+   "label": "Отметки"
+  },
+  {
+   "fieldname": "task_form",
+   "fieldtype": "Select",
+   "label": "Форма задания",
+   "options": "\nchoice\nfree\nwork",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hints",
+   "fieldtype": "Check",
+   "label": "Были подсказки",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "corrected",
+   "fieldtype": "Check",
+   "label": "Исправлял после обратной связи",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "indirect",
+   "fieldtype": "Check",
+   "label": "Косвенно",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "withdrawn",
+   "fieldtype": "JSON",
+   "label": "Выведены из расчёта",
+   "read_only": 1,
+   "description": "У пересмотра: свидетельства «подтверждено» выше нового уровня, которые он вывел из расчёта.",
+   "report_hide": 1,
+   "print_hide": 1,
+   "hidden": 0
+  },
+  {
+   "fieldname": "sb_archive",
+   "fieldtype": "Section Break",
+   "label": "Архив",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "archived_student",
+   "fieldtype": "Link",
+   "label": "Ученик до сброса",
+   "options": "User",
+   "read_only": 1,
+   "description": "Событие заархивировано сбросом прогресса: ученик перенесён сюда, поле «Ученик» пусто."
+  },
+  {
+   "fieldname": "archived_at",
+   "fieldtype": "Datetime",
+   "label": "Сброшено",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-11-19 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Competency Event",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "occurred_at",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "competency"
+}
