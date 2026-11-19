@@ -248,6 +248,10 @@ class IntegrationTestNoLeakOutsideQuiz(IntegrationTestCase):
 HTML_СХЕМЫ = "<p>HTML схемы из пакета агента</p>"
 #: Признаки уровней компетенции (learning-services#807) — пакет агента, отдаёт только `start_lesson`.
 ПРИЗНАКИ_КОМПЕТЕНЦИИ = "Признаки уровней компетенции из пакета агента"
+#: Свидетельство карты компетенций (learning-services#810): тексты и исход — ученику в основании,
+#: руководителю — никогда (только уровни); поля переноса не уходят и ученику.
+ТЕКСТ_СВИДЕТЕЛЬСТВА_КОМПЕТЕНЦИИ = "Оценка свидетельства компетенции"
+ПЕРЕНОС_КОМПЕТЕНЦИИ = "Чем новы условия переноса"
 #: Всё закрытое из релиза и прохождения — одним списком на все проверки класса.
 ЗАКРЫТОЕ_РЕЛИЗА = (
 	ПОЯСНЕНИЕ_РЕЛИЗА,
@@ -335,6 +339,24 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		# Прохождение с отметкой: свидетельство не должно уйти ни в один ответ.
 		self.run = прохождения.прохождение(self.ученик, self.курс, "l-1")
 		прохождения.отметить(self.run.name, "term:T1", "done", СВИДЕТЕЛЬСТВО)
+		# Затруднение по компетенции с текстами: руководителю — ни текстов, ни исхода.
+		frappe.get_doc(
+			{
+				"doctype": "Agent Competency Event",
+				"kind": "Evidence",
+				"student": self.ученик,
+				"course": self.курс,
+				"lesson_key": "l-1",
+				"competency": "B1",
+				"outcome": "difficulty",
+				"level": 2,
+				"task": "Задание свидетельства компетенции",
+				"student_action": "Действие ученика по компетенции",
+				"assessment": ТЕКСТ_СВИДЕТЕЛЬСТВА_КОМПЕТЕНЦИИ,
+				"transfer_difference": ПЕРЕНОС_КОМПЕТЕНЦИИ,
+				"request_key": f"leak-{суффикс}",
+			}
+		).insert(ignore_permissions=True)
 
 	def проверить(self, что: str, ответ, *ещё: str) -> str:
 		return проверить_ответ(self, ответ, что, запрещённые_тексты=(*ЗАКРЫТОЕ_РЕЛИЗА, *ещё))
@@ -424,9 +446,15 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 		self.проверить("artifact", student.artifact(self.курс))
 		проверить_ответ(self, student.artifact(self.курс, "notebook"), "artifact", запрещённые_тексты=ЗАКРЫТОЕ_РЕЛИЗА)
 
+		# Ученику — основание своими словами, но без полей переноса.
+		self.проверить("my_competencies", student.my_competencies(course=self.курс), ПЕРЕНОС_КОМПЕТЕНЦИИ)
+
 		frappe.set_user(self.менеджер)
-		self.проверить("org_report", manager.org_report())
-		отчёт = self.проверить("student_detail", manager.student_detail(self.ученик), *ПУНКТЫ_РЕЛИЗА)
+		свидетельство = (ТЕКСТ_СВИДЕТЕЛЬСТВА_КОМПЕТЕНЦИИ, ПЕРЕНОС_КОМПЕТЕНЦИИ, "Действие ученика по компетенции", "difficulty")
+		self.проверить("org_report", manager.org_report(), *свидетельство)
+		отчёт = self.проверить(
+			"student_detail", manager.student_detail(self.ученик), *ПУНКТЫ_РЕЛИЗА, *свидетельство
+		)
 		self.assertIn("Цель урока «Урок первый»", отчёт)
 
 	def test_репорты_ученику_без_занятия_вопроса_и_владельца(self):

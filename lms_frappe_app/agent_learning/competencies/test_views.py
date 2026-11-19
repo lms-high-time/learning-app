@@ -72,6 +72,24 @@ class TestОснование(UnitTestCase):
 			основание, {"outcome": "confirmed", "task": "задание e1", "student_action": "действие e1"}
 		)
 
+	def test_после_пересмотра_основание_причина_а_не_выведенное(self):
+		записи = [
+			запись("e1", "B1", "confirmed", 2),
+			запись("r1", "B1", None, 0, вид="Revision", выведено=["e1"]),
+		]
+		self.assertEqual(
+			views.основание(self.уровень("no_info"), записи),
+			{"outcome": "revised", "assessment": "оценка r1"},
+		)
+
+	def test_скрытое_наименьшее_а_при_равных_последнее(self):
+		записи = [
+			запись("e1", "B1", "confirmed", 4),
+			запись("e2", "B1", "confirmed", 3),
+			запись("e3", "B1", "confirmed", 3),
+		]
+		self.assertEqual(views.основание(self.уровень("level", 2), записи)["task"], "задание e3")
+
 	def test_нет_информации_последнее_и_заблокировано(self):
 		записи = [запись("e1", "B1", "skipped"), запись("e2", "B1", "difficulty", 2)]
 		основание = views.основание(self.уровень("no_info"), записи)
@@ -135,3 +153,71 @@ class IntegrationTestКартаУченика(IntegrationTestCase):
 			(по_ключу["B1"]["status"], по_ключу["B1"]["basis"]["outcome"]), ("no_info", "skipped")
 		)
 		self.assertEqual(по_ключу["I1"]["status"], "locked")
+
+
+class IntegrationTestПредставленияРуководителяИАвтора(IntegrationTestCase):
+	def test_руководителю_только_уровни_автору_сводка(self):
+		from lms_frappe_app.api import authoring, manager, student
+		from lms_frappe_app.tests.sample_data import (
+			добавить_в_организацию,
+			зачислить_на_курс,
+			курс_из_релиза,
+			создать_куратора,
+			создать_менеджера,
+			создать_организацию,
+			создать_ученика,
+			урок_релиза,
+		)
+
+		self.addCleanup(frappe.set_user, "Administrator")
+		frappe.set_user("Administrator")
+		ключ = f"views-mg-{frappe.generate_hash(length=6)}"
+		курс, _ = курс_из_релиза(релиз=с_компетенциями(пример_релиза(ключ)))
+		организация = создать_организацию(f"Карта {ключ}")
+		ученик = создать_ученика(f"{ключ}@example.com")
+		добавить_в_организацию(ученик, организация)
+		# Как в воротах утечек: зачисление, затем назначение курса организацией.
+		зачислить_на_курс(ученик, курс)
+		frappe.get_doc({"doctype": "Course Allocation", "organization": организация, "course": курс}).insert(
+			ignore_permissions=True
+		)
+		менеджер = создать_менеджера(f"{ключ}-mg@example.com", организация)
+		чужой_автор = создать_куратора(f"{ключ}-author@example.com")
+
+		frappe.set_user(ученик)
+		занятие = student.start_lesson(lesson=урок_релиза(курс, "l-1"))["data"]["session"]
+		ответ = student.record_evidence(
+			занятие,
+			"B1",
+			"confirmed",
+			"mg-1",
+			level=2,
+			task="Объяснить выбор",
+			student_action="Назвал свойства задачи",
+			assessment="Своими словами",
+			task_form="free",
+			hints=False,
+			corrected=False,
+			indirect=False,
+		)
+		self.assertTrue(ответ["ok"], ответ)
+
+		frappe.set_user(менеджер)
+		ожидаемое = [
+			{"key": "B1", "title": "Выбор устройства", "status": "level", "level": 2},
+			{"key": "B2", "title": "Цена ошибочного действия", "status": "locked", "level": None},
+			{"key": "I1", "title": "Обоснование устройства", "status": "locked", "level": None},
+		]
+		строка = next(с for с in manager.org_report()["data"]["rows"] if с["course"] == курс)
+		self.assertEqual(строка["competencies"], ожидаемое)
+		курс_ученика = next(к for к in manager.student_detail(ученик)["data"]["courses"] if к["id"] == курс)
+		self.assertEqual(курс_ученика["competencies"], ожидаемое)
+
+		frappe.set_user("Administrator")
+		сводка = authoring.competency_summary(course=курс)["data"]
+		b1 = next(к for к in сводка["competencies"] if к["key"] == "B1")
+		self.assertEqual((b1["evidence"]["confirmed"], b1["students"], b1["students_closed"]), (1, 1, 1))
+		# Автор не своего курса — 403, как у прохождений.
+		frappe.set_user(чужой_автор)
+		with self.assertRaises(frappe.PermissionError):
+			authoring.competency_summary(course=курс)

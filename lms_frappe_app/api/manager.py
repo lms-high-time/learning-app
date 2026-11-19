@@ -287,6 +287,7 @@ def student_detail(user: str) -> dict:
 		if курсы
 		else {}
 	)
+	уровни = представления_карты.уровни_по_курсам(user, релизы)
 	return {
 		"user": user,
 		"full_name": frappe.db.get_value("User", user, "full_name"),
@@ -297,9 +298,7 @@ def student_detail(user: str) -> dict:
 				"deadline": запись["deadline"],
 				"overdue": запись["overdue"],
 				"mandatory": запись["mandatory"],
-				"competencies": представления_карты.уровни_учеников(
-					запись["course"], релизы.get(запись["course"]), [user]
-				).get(user, []),
+				"competencies": уровни.get(запись["course"], []),
 			}
 			for запись in курсы
 		],

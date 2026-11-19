@@ -17,6 +17,8 @@
   после исправления, где свидетельства бывают только с выбором из вариантов.
 """
 
+import json
+
 import frappe
 
 from lms_frappe_app.agent_learning.competencies import evidence
@@ -57,11 +59,17 @@ def основание(уровень: dict, записи: list) -> dict | None:
 	"""Основание показанного состояния компетенции по записям журнала с текстами. Без базы."""
 	if уровень["status"] == ЗАБЛОКИРОВАНО:
 		return None
-	свои = [з for з in записи if з.competency == уровень["key"] and з.kind == evidence.СВИДЕТЕЛЬСТВО]
+	выведено = evidence._выведенные(записи)
+	# Порядковый номер — чтобы при равных уровнях брать последнее по времени.
+	все = [(н, з) for н, з in enumerate(записи) if з.competency == уровень["key"]]
 	if уровень["status"] == НЕТ_ИНФОРМАЦИИ:
-		if not свои:
+		# Последнее, что действует: пересмотр — его причина, выведенное подтверждение — нет.
+		действует = [з for _, з in все if з.kind == evidence.ПЕРЕСМОТР or з.name not in выведено]
+		if not действует:
 			return None
-		з = свои[-1]
+		з = действует[-1]
+		if з.kind == evidence.ПЕРЕСМОТР:
+			return {"outcome": "revised", "assessment": з.assessment or None}
 		return {
 			"outcome": з.outcome,
 			"task": з.task or None,
@@ -69,11 +77,14 @@ def основание(уровень: dict, записи: list) -> dict | None:
 			"assessment": з.assessment or None,
 			"uncertainties": з.uncertainties or None,
 		}
-	выведено = evidence._выведенные(записи)
-	действующие = [з for з in свои if з.outcome == evidence.ПОДТВЕРЖДЕНО and з.name not in выведено]
-	видимые = [з for з in действующие if з.level <= уровень["level"]]
+	действующие = [
+		(н, з)
+		for н, з in все
+		if з.kind == evidence.СВИДЕТЕЛЬСТВО and з.outcome == evidence.ПОДТВЕРЖДЕНО and з.name not in выведено
+	]
+	видимые = [(н, з) for н, з in действующие if з.level <= уровень["level"]]
 	if видимые:
-		з = max(видимые, key=lambda з: з.level)
+		_, з = max(видимые, key=lambda п: (п[1].level, п[0]))
 		return {
 			"outcome": з.outcome,
 			"level": з.level,
@@ -81,8 +92,9 @@ def основание(уровень: dict, записи: list) -> dict | None:
 			"student_action": з.student_action or None,
 			"uncertainties": з.uncertainties or None,
 		}
-	# Подтверждение только на скрытом уровне: без оценки и полей переноса — они назвали бы его.
-	з = max(действующие, key=lambda з: з.level)
+	# Подтверждение только на скрытом уровне: без оценки и полей переноса — они назвали бы его;
+	# наименьшее скрытое — самое близкое к открытому, при равных — последнее.
+	_, з = min(действующие, key=lambda п: (п[1].level, -п[0]))
 	return {"outcome": з.outcome, "task": з.task or None, "student_action": з.student_action or None}
 
 
@@ -158,6 +170,61 @@ def уровни_учеников(курс: str, релиз: str, ученики
 	}
 
 
+def уровни_по_курсам(ученик: str, релизы: dict[str, str | None]) -> dict[str, list[dict]]:
+	"""Уровни одного ученика по нескольким курсам — `{курс: [{key, title, status, level}]}`; курсы
+	без карты не входят. Постоянное число запросов на всю выдачу, а не на курс: карты релизов,
+	цели их уроков, прохождения и журнал — по выборке."""
+	релизы = {курс: р for курс, р in релизы.items() if р}
+	if not релизы:
+		return {}
+	карты = {
+		р.name: _список(р.competency_map)
+		for р in frappe.get_all(
+			index.РЕЛИЗ, filters={"name": ("in", list(релизы.values()))}, fields=["name", "competency_map"]
+		)
+	}
+	с_картой = {курс: р for курс, р in релизы.items() if карты.get(р)}
+	if not с_картой:
+		return {}
+	цели: dict[str, dict[str, list[dict]]] = {р: {} for р in с_картой.values()}
+	for у in frappe.get_all(
+		index.УРОК,
+		filters={"parenttype": index.РЕЛИЗ, "parent": ("in", list(с_картой.values()))},
+		fields=["parent", "lesson_key", "competencies"],
+		order_by="idx asc",
+	):
+		if список := _список(у.competencies):
+			цели[у.parent][у.lesson_key] = список
+	статусы: dict[str, dict[str, str]] = {курс: {} for курс in с_картой}
+	for р in frappe.get_all(
+		"Agent Lesson Run",
+		filters={"student": ученик, "course": ("in", list(с_картой))},
+		fields=["course", "lesson_key", "status"],
+	):
+		статусы[р.course][р.lesson_key] = р.status
+	записи: dict[str, list] = {курс: [] for курс in с_картой}
+	for з in frappe.get_all(
+		evidence.ЖУРНАЛ,
+		filters={"student": ученик, "course": ("in", list(с_картой))},
+		fields=["name", "course", "kind", "competency", "outcome", "level", "withdrawn"],
+		order_by="creation asc, name asc",
+	):
+		записи[з.course].append(з)
+	return {
+		курс: [
+			{"key": о["key"], "title": о["title"], "status": о["status"], "level": о["level"]}
+			for о in уровни_по_данным(карты[р], цели[р], статусы[курс], записи[курс])
+		]
+		for курс, р in с_картой.items()
+	}
+
+
+def _список(значение) -> list:
+	if isinstance(значение, str):
+		значение = json.loads(значение) if значение else None
+	return значение if isinstance(значение, list) else []
+
+
 def сводка_по_данным(
 	карта: list[dict], цели_уроков: dict[str, list[dict]], прохождения: list, записи: list
 ) -> dict:
@@ -175,9 +242,18 @@ def сводка_по_данным(
 	состояния = {у: evidence.состояние_по_записям(з) for у, з in по_ученикам.items()}
 	затруднения = {у: очередь.затруднения_после(з) for у, з in по_ученикам.items()}
 	выведено = evidence._выведенные(записи)
+	# Один проход по журналу: записи по компетенциям, а не перебор журнала на каждую.
+	по_компетенциям: dict[str, list] = {}
+	for з in записи:
+		if з.kind == evidence.СВИДЕТЕЛЬСТВО:
+			по_компетенциям.setdefault(з.competency, []).append(з)
+	итоговая_цель: dict[str, int] = {}
+	for список in цели_уроков.values():
+		for ц in список:
+			итоговая_цель[ц["competency"]] = max(итоговая_цель.get(ц["competency"], 0), ц["target"])
 	компетенции = []
 	for к in карта:
-		свои = [з for з in записи if з.competency == к["key"] and з.kind == evidence.СВИДЕТЕЛЬСТВО]
+		свои = по_компетенциям.get(к["key"], [])
 		подтверждения = [з for з in свои if з.outcome == evidence.ПОДТВЕРЖДЕНО]
 		компетенции.append(
 			{
@@ -191,6 +267,12 @@ def сводка_по_данным(
 				"withdrawn": sum(з.name in выведено for з in подтверждения),
 				"students": len({з.student for з in свои}),
 				"open_difficulties": sum(к["key"] in з for з in затруднения.values()),
+				# Компетенция закрыта (дизайн §3): уровень не ниже наивысшей цели курса.
+				"students_closed": sum(
+					bool(итоговая_цель.get(к["key"]))
+					and (с.get(к["key"], evidence.ПУСТО)["level"] or 0) >= итоговая_цель[к["key"]]
+					for с in состояния.values()
+				),
 			}
 		)
 	прошли: dict[str, set[str]] = {}
