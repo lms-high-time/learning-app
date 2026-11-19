@@ -550,7 +550,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		return занятие
 
 	def _записать_свидетельства(self, занятие: str) -> None:
-		"""Свидетельство, повтор по ключу и пересмотр вниз (learning-services#808)."""
+		"""Свидетельство и пересмотр вниз (learning-services#808)."""
 		поля = {
 			"session": занятие,
 			"competency": "B1",
@@ -562,10 +562,10 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			"task_form": "free",
 			"hints": False,
 			"corrected": False,
+			"indirect": False,
 			"request_key": f"contract-{self.суффикс}",
 		}
 		self.сверить("student.record_evidence", student.record_evidence(**поля))
-		self.assertTrue(self.сверить("student.record_evidence", student.record_evidence(**поля))["duplicate"])
 		self.сверить(
 			"student.revise_level",
 			student.revise_level(

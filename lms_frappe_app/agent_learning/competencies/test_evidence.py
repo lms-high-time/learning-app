@@ -16,7 +16,7 @@ from lms_frappe_app.agent_learning.errors import Отказ
 	"student_action": "Назвал свойства задачи",
 	"assessment": "Своими словами",
 }
-ОТМЕТКИ = {"hints": False, "corrected": False}
+ОТМЕТКИ = {"hints": False, "corrected": False, "indirect": False}
 
 
 def _код(вызов) -> tuple[str, dict]:
@@ -57,7 +57,8 @@ class TestФормаСвидетельства(UnitTestCase):
 			with self.subTest(случай):
 				уровень, тексты, _, отметки = evidence.форма_свидетельства(*аргументы)
 				self.assertEqual(уровень, итог_уровень)
-				self.assertIs(отметки["indirect"], False)
+				# У «недостаточно» и пропуска отметок нет — не переданы.
+				self.assertIn(отметки["indirect"], (False, None))
 
 	def test_отказы_формы(self):
 		for случай, аргументы, код, подробность in (
@@ -141,6 +142,15 @@ class TestФормаСвидетельства(UnitTestCase):
 				код_, подробности = _код(lambda: evidence.форма_свидетельства(*аргументы))
 				self.assertEqual(код_, код)
 				self.assertEqual(подробности[подробность[0]], подробность[1])
+
+
+class TestКлючЗапроса(UnitTestCase):
+	def test_ключ_запроса(self):
+		self.assertEqual(evidence._ключ_запроса("  k-1 "), "k-1")
+		# Скобка — нет: поле хранится очищенным от HTML, и повтор не нашёл бы ключ.
+		for ключ in (None, " ", "к" * 81, "a<b", "a>b"):
+			with self.subTest(ключ=ключ):
+				self.assertEqual(_код(lambda: evidence._ключ_запроса(ключ))[0], "request_key_invalid")
 
 
 class _Запись(dict):
@@ -249,14 +259,8 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		)
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 2)
 
-	def test_отказы_до_записи(self):
-		for случай, вызов, код in (
-			("без ключа", lambda: self.записать(" "), "request_key_invalid"),
-			("компетенции нет в карте", lambda: self.записать("x-1", компетенция="B9"), "competency_unknown"),
-			("выбор выше 1", lambda: self.записать("x-2", форма="choice"), "level_capped"),
-		):
-			with self.subTest(случай):
-				self.assertEqual(_код(вызов)[0], код)
+	def test_компетенция_не_из_карты_ничего_не_пишет(self):
+		self.assertEqual(_код(lambda: self.записать("x-1", компетенция="B9"))[0], "competency_unknown")
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 0)
 
 	def test_пересмотр_только_вниз(self):

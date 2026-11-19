@@ -1383,8 +1383,8 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 (любой: косвенное свидетельство бывает и по компетенции другого урока);
 `outcome` — `confirmed` (подтверждено), `difficulty` (найдено затруднение),
 `insufficient` (данных недостаточно), `skipped` (пропущено по просьбе
-ученика); `request_key` — ключ запроса, до 80 знаков: повтор с тем же
-ключом записи не создаёт; `level` — 1–4; `task`, `student_action`,
+ученика); `request_key` — ключ запроса, до 80 знаков, без `<` и `>`:
+повтор с тем же ключом записи не создаёт; `level` — 1–4; `task`, `student_action`,
 `assessment`, `uncertainties`, `transfer_difference`, `transfer_adaptation`
 — тексты, каждый до 1000 знаков; `task_form` — `choice` (выбор из
 вариантов), `free` (свободный ответ), `work` (работа: документ, таблица);
@@ -1395,13 +1395,16 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 
 | Исход | Обязательно |
 |---|---|
-| `confirmed` | `level`, `task`, `student_action`, `assessment`, `task_form`, `hints`, `corrected`; у уровня 4 — `transfer_difference`, `transfer_adaptation` |
-| `difficulty` | `level` (уровень попытки), `task`, `student_action`, `assessment`, `task_form`, `hints`, `corrected` |
+| `confirmed` | `level`, `task`, `student_action`, `assessment`, `task_form`, `hints`, `corrected`, `indirect`; у уровня 4 — `transfer_difference`, `transfer_adaptation` |
+| `difficulty` | `level` (уровень попытки), `task`, `student_action`, `assessment`, `task_form`, `hints`, `corrected`, `indirect` |
 | `insufficient` | `task`, `assessment` (почему данных не хватило) |
 | `skipped` | `task` (что предлагали); `level` не передаётся |
 
 Только у `confirmed`: `task_form: choice` — не выше уровня 1, `hints` или
-`corrected` — не выше 2.
+`corrected` — не выше 2. Отметки — только у `confirmed` и `difficulty`, и
+передаются явно: молчание о подсказке обходило бы ограничение. У
+`insufficient` и `skipped` проверки не было — отметки не пишутся (в журнале
+0), аналитика по отметкам их не считает.
 
 ```json
 { "ok": true, "data": {
@@ -1414,7 +1417,9 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 `last_level` — исход и уровень последнего свидетельства. Уровень ученика
 выводится из журнала: свидетельства не переписываются. Повтор ключа запроса
 отвечает прежней записью с `duplicate: true` и ничего не пишет — даже если
-поля другие. Свидетельство выше цели урока допустимо. Записи читают
+поля другие, и даже когда занятие уже закрыто: ответ мог потеряться, а
+занятие — закрыться после записи. Ищется повтор сразу после проверки
+хозяина занятия. Свидетельство выше цели урока допустимо. Записи читают
 администраторы платформы; ученику, руководителю и автору — представления
 карты (learning-services#810).
 
@@ -1428,7 +1433,9 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 `outcome`, у уровня 4 — `level`); `evidence_field_not_allowed` (с `field`)
 — уровень у пропуска; `level_capped` (с `level`, `cap`, `reason` —
 `task_form`, `hints` или `corrected`) — отметка не пускает уровень: для
-выше нужна новая задача без неё.
+выше нужна новая задача без неё; `busy` (с `session`) — запись с тем же
+ключом в эту минуту пишет другой запрос: ничего не записано, вызов стоит
+повторить — повтор найдёт запись.
 
 ## `lms_frappe_app.api.student.revise_level`
 
@@ -1455,7 +1462,8 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 **Отказы** — все до записи: те же, что у `record_evidence`, для занятия,
 ключа и компетенции; `evidence_field_required` (с `field` — `level` или
 `reason`); `level_invalid`; `evidence_too_long`; `revision_not_lower` (с
-`level`, `current_level`; нет уровня — `null`).
+`level`, `current_level`; нет уровня — `null`); `busy` — как у
+`record_evidence`.
 
 ## `lms_frappe_app.api.student.study_options`
 

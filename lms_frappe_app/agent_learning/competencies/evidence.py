@@ -47,11 +47,30 @@ from lms_frappe_app.agent_learning.releases import index
 	"transfer_difference",
 	"transfer_adaptation",
 )
-ОТМЕТКИ_ДА_НЕТ = ("hints", "corrected")
-#: Обязательное у исхода (дизайн карты компетенций, §5): уровень, тексты, отметки.
+#: Обязательное у исхода (дизайн карты компетенций, §5): уровень, тексты, отметки. Отметки — только у
+#: «подтверждено» и «затруднения»: у «недостаточно» и пропуска проверки не было, и их отметки не
+#: пишутся (в журнале — 0); аналитика по отметкам считает только эти два исхода.
 ОБЯЗАТЕЛЬНО = {
-	ПОДТВЕРЖДЕНО: ("level", "task", "student_action", "assessment", "task_form", "hints", "corrected"),
-	ЗАТРУДНЕНИЕ: ("level", "task", "student_action", "assessment", "task_form", "hints", "corrected"),
+	ПОДТВЕРЖДЕНО: (
+		"level",
+		"task",
+		"student_action",
+		"assessment",
+		"task_form",
+		"hints",
+		"corrected",
+		"indirect",
+	),
+	ЗАТРУДНЕНИЕ: (
+		"level",
+		"task",
+		"student_action",
+		"assessment",
+		"task_form",
+		"hints",
+		"corrected",
+		"indirect",
+	),
 	НЕДОСТАТОЧНО: ("task", "assessment"),
 	ПРОПУЩЕНО: ("task",),
 }
@@ -102,11 +121,16 @@ def _да_нет(значение) -> bool | None:
 
 
 def _ключ_запроса(ключ) -> str:
+	"""Ключ запроса — непустая строка до `ПРЕДЕЛ_КЛЮЧА` знаков без `<` и `>`.
+
+	`Why:` текстовые поля хранятся очищенными от HTML (`html_text.очистить`):
+	ключ со скобкой лёг бы в журнал другим, и повтор его не нашёл бы.
+	"""
 	ключ = _текст(ключ)
-	if not ключ or len(ключ) > ПРЕДЕЛ_КЛЮЧА:
+	if not ключ or len(ключ) > ПРЕДЕЛ_КЛЮЧА or "<" in ключ or ">" in ключ:
 		raise Отказ(
 			КЛЮЧ_НЕВЕРНЫЙ,
-			f"Нужен ключ запроса — непустая строка до {ПРЕДЕЛ_КЛЮЧА} знаков: повтор с тем же ключом записи не создаёт",
+			f"Нужен ключ запроса — непустая строка до {ПРЕДЕЛ_КЛЮЧА} знаков без < и >: повтор с тем же ключом записи не создаёт",
 			limit=ПРЕДЕЛ_КЛЮЧА,
 		)
 	return ключ
@@ -145,7 +169,7 @@ def форма_свидетельства(
 	отметки = {
 		"hints": _да_нет(отметки.get("hints")),
 		"corrected": _да_нет(отметки.get("corrected")),
-		"indirect": bool(_да_нет(отметки.get("indirect"))),
+		"indirect": _да_нет(отметки.get("indirect")),
 	}
 	есть = {"level": уровень, "task_form": форма_задания, **тексты, **отметки}
 	for поле in ОБЯЗАТЕЛЬНО[исход]:
@@ -204,8 +228,21 @@ def _компетенция(релиз: str, компетенция: str) -> str
 	return компетенция
 
 
-def _уже(ученик: str, ключ: str) -> str | None:
-	return frappe.db.get_value(ЖУРНАЛ, {"student": ученик, "request_key": ключ}, "name")
+def _уже(ученик: str, ключ: str, for_update: bool = False) -> str | None:
+	return frappe.db.get_value(
+		ЖУРНАЛ, {"student": ученик, "request_key": ключ}, "name", for_update=for_update
+	)
+
+
+def повтор(ученик: str, ключ_запроса) -> dict | None:
+	"""Ответ на прежнюю запись ученика с этим ключом запроса — или `None`, записи нет.
+
+	Метод зовёт до проверок занятия: запись прошла, ответ потерялся, занятие закрылось —
+	повтор всё равно узнаёт, что запись есть. Ключ уникален в пределах ученика, чужого
+	не выдаёт.
+	"""
+	имя = _уже(ученик, _ключ_запроса(ключ_запроса))
+	return _ответ(имя, True) if имя else None
 
 
 def _ответ(имя: str, повтор: bool) -> dict:
@@ -233,7 +270,9 @@ def _вставить(запись: dict) -> str:
 	except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
 		frappe.db.rollback(save_point="competency_event")
 		frappe.clear_last_message()
-		имя = _уже(запись["student"], запись["request_key"])
+		# Блокирующее чтение видит строку, зафиксированную параллельным вызовом после
+		# начала транзакции; на стенде гонка приходит взаимоблокировкой — метод отвечает `busy`.
+		имя = _уже(запись["student"], запись["request_key"], for_update=True)
 		if not имя:
 			raise
 		return имя
@@ -286,7 +325,7 @@ def записать(
 			"task_form": форма_задания or "",
 			"hints": int(bool(отметки["hints"])),
 			"corrected": int(bool(отметки["corrected"])),
-			"indirect": int(отметки["indirect"]),
+			"indirect": int(bool(отметки["indirect"])),
 		}
 	)
 	return _ответ(имя, False)
@@ -302,7 +341,7 @@ def пересмотреть(
 	if имя := _уже(занятие.student, ключ):
 		return _ответ(имя, True)
 	компетенция = _компетенция(релиз, компетенция)
-	новый = 0 if уровень in (0, "0") else _уровень(уровень)
+	новый = 0 if (уровень == 0 and not isinstance(уровень, bool)) or уровень == "0" else _уровень(уровень)
 	if новый is None:
 		raise Отказ(ПОЛЕ_ОБЯЗАТЕЛЬНО, "Нужен новый уровень: 0–3, ниже текущего", field="level")
 	причина = _текст(причина)

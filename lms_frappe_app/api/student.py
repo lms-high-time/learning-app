@@ -661,18 +661,7 @@ def mark_goal(
 	Блокировки — прохождение, затем занятие.
 	"""
 	занятие = _своё_занятие(session)
-	релиз, ключ = _урок_занятия(занятие)
-	_требовать_доступ_к_курсу(занятие.student, занятие.course)
-	# Why: занятие, брошенное по бездействию или закрытое, отметок не
-	# принимает — агент со старым номером занятия уходит в новый
-	# `start_lesson`, а не пишет пункты в закрытое.
-	if занятие.status in ЗАВЕРШЁННЫЕ:
-		raise Отказ(
-			ЗАНЯТИЕ_ЗАКРЫТО,
-			"Это занятие уже закрыто — начните урок заново: start_lesson",
-			session=session,
-			status=занятие.status,
-		)
+	релиз, ключ = _открытое_занятие(занятие)
 	прохождения.форма_отметки(status, evidence, resume_from)
 	квиз_обязателен = _квиз_обязателен(занятие.student, занятие.course, релиз, ключ)
 	try:
@@ -1438,25 +1427,24 @@ def record_evidence(
 	свидетельство бывает и по компетенции другого урока. Двигает активность занятия, как
 	`mark_goal`. Отказы — до записи.
 	"""
-	занятие, релиз, ключ = _открытое_занятие(session)
-	ответ = свидетельства.записать(
-		занятие,
-		релиз,
-		ключ,
-		competency,
-		outcome,
-		level,
-		{
-			"task": task,
-			"student_action": student_action,
-			"assessment": assessment,
-			"uncertainties": uncertainties,
-			"transfer_difference": transfer_difference,
-			"transfer_adaptation": transfer_adaptation,
-		},
-		task_form,
-		{"hints": hints, "corrected": corrected, "indirect": indirect},
-		request_key,
+	занятие = _своё_занятие(session)
+	if прежний := свидетельства.повтор(занятие.student, request_key):
+		return прежний
+	релиз, ключ = _открытое_занятие(занятие)
+	тексты = {
+		"task": task,
+		"student_action": student_action,
+		"assessment": assessment,
+		"uncertainties": uncertainties,
+		"transfer_difference": transfer_difference,
+		"transfer_adaptation": transfer_adaptation,
+	}
+	отметки = {"hints": hints, "corrected": corrected, "indirect": indirect}
+	ответ = _без_гонки(
+		session,
+		lambda: свидетельства.записать(
+			занятие, релиз, ключ, competency, outcome, level, тексты, task_form, отметки, request_key
+		),
 	)
 	занятие.отметить_активность()
 	return ответ
@@ -1468,25 +1456,50 @@ def record_evidence(
 def revise_level(session: str, competency: str, level: int | str, reason: str, request_key: str) -> dict:
 	"""Пересмотр уровня компетенции вниз по занятию (learning-services#808): новый уровень 0–3
 	ниже текущего и причина; подтверждения выше нового уровня выходят из расчёта."""
-	занятие, релиз, ключ = _открытое_занятие(session)
-	ответ = свидетельства.пересмотреть(занятие, релиз, ключ, competency, level, reason, request_key)
+	занятие = _своё_занятие(session)
+	if прежний := свидетельства.повтор(занятие.student, request_key):
+		return прежний
+	релиз, ключ = _открытое_занятие(занятие)
+	ответ = _без_гонки(
+		session,
+		lambda: свидетельства.пересмотреть(занятие, релиз, ключ, competency, level, reason, request_key),
+	)
 	занятие.отметить_активность()
 	return ответ
 
 
-def _открытое_занятие(session: str):
-	"""Своё незакрытое занятие курса из релиза с доступом: (занятие, релиз, ключ урока) — или отказ."""
-	занятие = _своё_занятие(session)
+def _без_гонки(session: str, запись):
+	"""Запись журнала карты компетенций; гонка двух вызовов с одним ключом — отказ `busy`.
+
+	`Why:` дубль держит уникальный индекс, а повтор перечитывает запись с
+	блокировкой; MariaDB стенда отвечает на такую гонку взаимоблокировкой и
+	портит транзакцию — откат и «повторите», как у `mark_goal`: повтор найдёт
+	запись по ключу.
+	"""
+	try:
+		return запись()
+	except (frappe.QueryDeadlockError, frappe.UniqueValidationError, frappe.DuplicateEntryError):
+		frappe.db.rollback()
+		raise Отказ(ЗАНЯТО, "Свидетельство сейчас пишет другой запрос — повторите", session=session) from None
+
+
+def _открытое_занятие(занятие) -> tuple[str, str]:
+	"""Действующий релиз и ключ урока своего незакрытого занятия с доступом к курсу — или отказ.
+
+	`Why:` занятие, брошенное по бездействию или закрытое, записей не принимает —
+	агент со старым номером занятия уходит в новый `start_lesson`, а не пишет в
+	закрытое. Один путь для отметки пункта и записей карты компетенций.
+	"""
 	релиз, ключ = _урок_занятия(занятие)
 	_требовать_доступ_к_курсу(занятие.student, занятие.course)
 	if занятие.status in ЗАВЕРШЁННЫЕ:
 		raise Отказ(
 			ЗАНЯТИЕ_ЗАКРЫТО,
 			"Это занятие уже закрыто — начните урок заново: start_lesson",
-			session=session,
+			session=занятие.name,
 			status=занятие.status,
 		)
-	return занятие, релиз, ключ
+	return релиз, ключ
 
 
 @frappe.whitelist(methods=["POST"])
