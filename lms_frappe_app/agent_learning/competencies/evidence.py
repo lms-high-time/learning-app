@@ -27,6 +27,7 @@ import json
 
 import frappe
 
+from lms_frappe_app.agent_learning.constants import СОБЫТИЕ_ЗАКРЫТИЕ_ОТКАЗАНО
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index
 
@@ -326,6 +327,14 @@ def записать(
 			"hints": int(bool(отметки["hints"])),
 			"corrected": int(bool(отметки["corrected"])),
 			"indirect": int(bool(отметки["indirect"])),
+			# Сигнал аудиту (дизайн §7): свидетельство дописано после отказа в закрытии урока.
+			"after_refusal": int(
+				bool(
+					frappe.db.exists(
+						"Agent Session Event", {"session": занятие.name, "kind": СОБЫТИЕ_ЗАКРЫТИЕ_ОТКАЗАНО}
+					)
+				)
+			),
 		}
 	)
 	return _ответ(имя, False)
@@ -382,7 +391,7 @@ def _записи(ученик: str, курс: str, компетенция: str 
 	return frappe.get_all(
 		ЖУРНАЛ,
 		filters=фильтр,
-		fields=["name", "kind", "competency", "outcome", "level", "withdrawn"],
+		fields=["name", "kind", "competency", "outcome", "level", "withdrawn", "lesson_key"],
 		order_by="creation asc, name asc",
 	)
 

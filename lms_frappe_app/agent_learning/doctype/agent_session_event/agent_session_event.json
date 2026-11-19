@@ -21,14 +21,15 @@
    "label": "Занятие",
    "options": "Agent Learning Session",
    "read_only": 1,
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "kind",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Событие",
-   "options": "Directive Issued\nQuiz Started\nVerdict Returned\nSession Abandoned",
+   "options": "Directive Issued\nQuiz Started\nVerdict Returned\nSession Abandoned\nClosing Refused",
    "read_only": 1,
    "reqd": 1
   },
@@ -49,7 +50,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-08 18:00:00.000000",
+ "modified": "2026-11-20 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Session Event",
