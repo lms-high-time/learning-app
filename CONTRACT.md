@@ -1400,6 +1400,52 @@ true`; при `false` ключа нет. **Пакет агента отдаёт 
 — урок снят из действующего релиза; `busy` (с `session`) — прохождение в эту
 минуту меняет другой запрос: ничего не записано, вызов стоит повторить.
 
+## `lms_frappe_app.api.student.my_competencies`
+
+Карта компетенций ученика по курсу (learning-services#810): как прокачка
+персонажа — какие умения есть, на каком уровне и что откроется дальше.
+
+**Параметры:** `course`.
+
+```json
+{ "ok": true, "data": { "course": "course-basics", "competencies": [
+  { "key": "K1", "title": "Выбор устройства", "kind": "base",
+    "description": "Выбираете устройство по задаче.",
+    "status": "level", "level": 2, "open_level": 3,
+    "basis": { "outcome": "confirmed", "level": 2,
+               "task": "Объяснить, нужен ли агент для отчёта",
+               "student_action": "Назвал, что шаги известны заранее",
+               "uncertainties": "Самостоятельный выбор без вариантов не проверялся" } },
+  { "key": "K2", "title": "Цена ошибочного действия", "kind": "base",
+    "description": "Оцениваете, во что обойдётся ошибка агента.",
+    "status": "no_info", "level": null, "open_level": 2,
+    "basis": { "outcome": "skipped", "task": "Предложил оценить цену ошибки",
+               "student_action": null, "assessment": null, "uncertainties": null } },
+  { "key": "K5", "title": "Обоснование устройства", "kind": "integrative",
+    "description": "Обосновываете устройство продукта целиком.",
+    "status": "locked", "level": null, "open_level": 0, "basis": null } ] } }
+```
+
+`status` — одно из трёх: `level` — подтверждённый уровень, показанный не выше
+открытого (`level` — меньшее из подтверждённого и открытого); `no_info` —
+подтверждения нет (проверку пропустили, её не было или нашли затруднение);
+`locked` — курс компетенцию ещё не открыл. `open_level` — отметка цели на
+шкале из четырёх делений: наивысшая цель среди начатых уроков. Процентов,
+оценок, слов «ошибся» и «не справился» нет.
+
+`basis` — основание своими словами, по нажатию: у `level` — свидетельство,
+по которому подтверждён показанный уровень (`outcome`, `level`, `task`,
+`student_action`, `uncertainties` — что не проверялось); если подтверждение
+есть только на скрытом уровне — только `outcome`, `task` и `student_action`,
+без уровня и оценки, чтобы не раскрыть скрытое. У `no_info` — последнее
+свидетельство (`outcome`, `task`, `student_action`, `assessment`,
+`uncertainties`); разница между пропуском, затруднением и отсутствием
+проверки видна только здесь. Проверки не было — `null`; у `locked` — `null`.
+У курса без карты — `[]`.
+
+**Отказы:** `not_enrolled`, `organization_suspended`; `course_not_released`
+(с `course`) — у курса нет действующего релиза.
+
 ## `lms_frappe_app.api.student.record_evidence`
 
 Свидетельство об освоении компетенции по занятию (learning-services#808).
@@ -2608,8 +2654,18 @@ MCP-сервис из окна загрузки в чате). Убранный �
     "deadline": "2026-09-15", "mandatory": true, "overdue": false,
     "last_activity": "2026-09-01T12:20:00",
     "document": { "blocks_total": 11, "blocks_filled": 7 },
-    "quiz": { "passed": 4, "first_try": 3 } } ] } }
+    "quiz": { "passed": 4, "first_try": 3 },
+    "competencies": [ { "key": "K1", "title": "Выбор устройства", "status": "level", "level": 2 },
+                      { "key": "K5", "title": "Обоснование устройства", "status": "locked",
+                        "level": null } ] } ] } }
 ```
+
+`competencies` — уровни ученика по карте компетенций курса, те же, что видит
+ученик (`my_competencies`), но **только уровни**: `status` — `no_info`,
+`level` или `locked`, `level` — показанный уровень или `null`. Ни тексты
+свидетельств, ни исходы вроде «затруднения» руководителю не отдаются: в них
+описаны работа ученика и его рабочая ситуация (learning-services#810). Сводку
+по команде складывает потребитель из строк. У курса без карты — `[]`.
 
 `document` — сколько блоков во всех документах курса и сколько из них заполнил
 ученик в пространстве этой организации: личный документ по тому же курсу не
@@ -2638,7 +2694,9 @@ MCP-сервис из окна загрузки в чате). Убранный �
 { "ok": true, "data": {
   "user": "ivanov@example.com", "full_name": "Иван Иванов",
   "courses": [ { "id": "course-basics", "title": "Основы",
-                 "deadline": "2026-09-15", "overdue": false, "mandatory": true } ],
+                 "deadline": "2026-09-15", "overdue": false, "mandatory": true,
+                 "competencies": [ { "key": "K1", "title": "Выбор устройства",
+                                     "status": "level", "level": 2 } ] } ],
   "sessions": [ { "lesson": "lesson-6", "course": "course-basics",
                   "status": "Completed",
                   "started_at": "2026-09-01T12:20:00",
@@ -3938,6 +3996,38 @@ HTTP 417 с текстом «Курс собран из релиза: домаш
 трогает. У курса без релиза `releases` пуст.
 
 **Отказы:** `course_not_found`.
+
+## `lms_frappe_app.api.authoring.competency_summary`
+
+Сводка по карте компетенций курса — без имён учеников, про курс, а не про
+людей (learning-services#810).
+
+**Параметры:** `course`.
+
+```json
+{ "ok": true, "data": { "course": "course-basics",
+  "competencies": [ { "key": "K1", "title": "Выбор устройства",
+    "evidence": { "confirmed": 12, "difficulty": 3, "insufficient": 1, "skipped": 2 },
+    "confirmed_forms": { "choice": 9, "free": 3, "work": 0 },
+    "confirmed_with_hints": 4, "confirmed_corrected": 1, "confirmed_indirect": 2,
+    "withdrawn": 1, "students": 10, "open_difficulties": 2 } ],
+  "targets": [ { "lesson": "l-2", "competency": "K1", "target": 2,
+                 "passed": 8, "reached": 3 } ] } }
+```
+
+По компетенции: свидетельства каждого исхода; у подтверждений — форма
+задания, с подсказкой, после исправления, косвенные; подтверждения,
+выведенные пересмотром; сколько учеников с хоть одним свидетельством; у
+скольких открыто затруднение после подтверждения. По цели урока: сколько
+учеников прошли урок (`passed`) и у скольких из них подтверждённый уровень не
+ниже цели (`reached`). Так видно, где цель почти не достигается, где уровни
+ставятся с подсказкой или после исправления и где подтверждают только
+выбором из вариантов. Архив сброса прогресса не считается. Тексты
+свидетельств не отдаются. У курса без карты — пустые списки.
+
+**Права и отказы** — как у `goal_runs`: инструктор курса, модератор,
+администратор; `course_not_found` (с `id`), `course_not_released` (с
+`course`) — у курса нет релиза.
 
 ## `lms_frappe_app.api.authoring.goal_runs`
 

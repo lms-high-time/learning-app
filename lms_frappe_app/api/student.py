@@ -87,6 +87,7 @@ from lms_frappe_app.agent_learning.competencies import closing as закрыти
 from lms_frappe_app.agent_learning.competencies import evidence as свидетельства
 from lms_frappe_app.agent_learning.competencies import lesson as компетенции_урока
 from lms_frappe_app.agent_learning.competencies import queue as очередь_компетенций
+from lms_frappe_app.agent_learning.competencies import views as представления_карты
 from lms_frappe_app.agent_learning.releases import diagrams as схемы
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -1435,6 +1436,20 @@ def report_issue(
 	).insert(ignore_permissions=True)
 
 	return {"report": репорт.name, "kind": имя_вида}
+
+
+@frappe.whitelist()
+@контракт
+def my_competencies(course: str) -> dict:
+	"""Карта компетенций ученика по курсу (learning-services#810, дизайн §11): по каждой
+	компетенции — нет информации, уровень 1–4 или заблокировано, и основание своими словами.
+	Курс без карты — пустой список."""
+	ученик = текущий_пользователь()
+	_требовать_доступ_к_курсу(ученик, course)
+	релиз = прохождения.действующий(course)
+	if not релиз:
+		raise Отказ(КУРС_НЕ_В_РЕЛИЗЕ, "У курса нет действующего релиза", course=course)
+	return {"course": course, "competencies": представления_карты.для_ученика(ученик, course, релиз)}
 
 
 @frappe.whitelist(methods=["POST"])

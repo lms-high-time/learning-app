@@ -579,6 +579,8 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 				request_key=f"contract-rev-{self.суффикс}",
 			),
 		)
+		курс = frappe.db.get_value("Agent Learning Session", занятие, "course")
+		self.сверить("student.my_competencies", student.my_competencies(course=курс))
 
 	def _гонка_с_публикацией(self, курс: str, попытка: str) -> None:
 		"""Попытка — как заведённая в гонке с публикацией: на версии курса,
@@ -609,6 +611,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		прохождения = self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс))["runs"]
 		self.assertTrue(прохождения, "у ученика нет прохождений — сверять нечего")
 		self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс, lesson="l-1", start=0, limit=1))
+		self.сверить("authoring.competency_summary", authoring.competency_summary(course=курс))
 
 	# --- репорт: разбор и итог ---
 
