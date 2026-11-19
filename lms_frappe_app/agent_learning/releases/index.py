@@ -116,7 +116,7 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 				"section_keys": в_json(у["sections"]),
 				"homework": в_json(у["homework"]) if у["homework"] else None,
 				"agent": в_json(срезы_уроков[у["key"]]),
-				"competencies": в_json(у.get("competencies") or []),
+				"competencies": в_json(_цели_целыми(у.get("competencies") or [])),
 			}
 		)
 		for ц in у["objectives"]:
@@ -158,8 +158,28 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 			}
 		)
 	таблицы["agent_frame"] = в_json(рамка_курса)
-	таблицы["competency_map"] = в_json(релиз.get("competencies") or [])
+	таблицы["competency_map"] = в_json(_карта_целыми(релиз.get("competencies") or []))
 	return таблицы
+
+
+def _цели_целыми(цели: list[dict]) -> list[dict]:
+	"""Цели урока по компетенциям с целым уровнем: схема принимает `3.0` за целое (learning-services#811)."""
+	return [{**ц, "target": int(ц["target"])} for ц in цели]
+
+
+def _карта_целыми(карта: list[dict]) -> list[dict]:
+	"""Карта компетенций с целыми уровнями составляющих — как `_цели_целыми`."""
+	return [
+		{
+			**к,
+			**(
+				{"parts": [{**ч, "from_level": int(ч["from_level"])} for ч in к["parts"]]}
+				if "parts" in к
+				else {}
+			),
+		}
+		for к in карта
+	]
 
 
 def ключи(релиз: str | None) -> dict[str, list[str]]:

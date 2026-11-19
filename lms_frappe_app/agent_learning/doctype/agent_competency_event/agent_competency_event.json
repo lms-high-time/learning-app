@@ -16,6 +16,8 @@
   "release",
   "competency",
   "request_key",
+  "audited",
+  "conclusion",
   "sb_evidence",
   "outcome",
   "level",
@@ -41,7 +43,7 @@
    "fieldname": "kind",
    "fieldtype": "Select",
    "label": "Событие",
-   "options": "Evidence\nRevision",
+   "options": "Evidence\nRevision\nAudit",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "read_only": 1,
@@ -115,6 +117,21 @@
    "label": "Ключ запроса",
    "read_only": 1,
    "description": "Ключ идемпотентности от агента: повтор с тем же ключом не создаёт записи."
+  },
+  {
+   "fieldname": "audited",
+   "fieldtype": "Link",
+   "label": "Свидетельство под аудитом",
+   "options": "Agent Competency Event",
+   "read_only": 1,
+   "description": "У заключения аудита — какое свидетельство проверено."
+  },
+  {
+   "fieldname": "conclusion",
+   "fieldtype": "Select",
+   "label": "Заключение аудита",
+   "options": "\nsufficient\ninsufficient\nunverifiable\ncontradiction",
+   "read_only": 1
   },
   {
    "fieldname": "sb_evidence",
@@ -219,7 +236,7 @@
    "fieldtype": "JSON",
    "label": "Выведены из расчёта",
    "read_only": 1,
-   "description": "У пересмотра: свидетельства «подтверждено» выше нового уровня, которые он вывел из расчёта.",
+   "description": "У пересмотра — подтверждения выше нового уровня, у отмены аудитом — отменённое свидетельство: выведены из расчёта.",
    "report_hide": 1,
    "print_hide": 1,
    "hidden": 0
@@ -247,7 +264,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-11-20 00:00:00.000000",
+ "modified": "2026-11-20 02:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Competency Event",

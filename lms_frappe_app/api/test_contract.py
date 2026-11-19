@@ -612,6 +612,15 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self.assertTrue(прохождения, "у ученика нет прохождений — сверять нечего")
 		self.сверить("authoring.goal_runs", authoring.goal_runs(course=курс, lesson="l-1", start=0, limit=1))
 		self.сверить("authoring.competency_summary", authoring.competency_summary(course=курс))
+		# Аудит карты — команда платформы (learning-services#811).
+		frappe.set_user("Administrator")
+		выборка = self.сверить("authoring.audit_sample", authoring.audit_sample(course=курс))["events"]
+		self.assertTrue(выборка, "свидетельств на аудит нет — сверять нечего")
+		self.сверить(
+			"authoring.audit_evidence",
+			authoring.audit_evidence(event=выборка[0]["event"], conclusion="sufficient"),
+		)
+		frappe.set_user(self.куратор)
 
 	# --- репорт: разбор и итог ---
 

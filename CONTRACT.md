@@ -252,7 +252,7 @@ AVIF), иначе HTTP 417; приватный — любой разрешённ
 | Карта компетенций с основанием (`my_competencies`) | — | своя | своя | своя | своя | своя | своя |
 | Уровни по карте компетенций (`org_report`, `student_detail` — `competencies`)⁶ | — | — | — | пространство, только уровни | — | — | все¹ |
 | Сводка по карте компетенций без имён (`competency_summary`) | — | — | — | — | свои курсы³ | все | все |
-| Журнал карты компетенций — тексты свидетельств (`Agent Competency Event`) | — | — | — | — | — | Desk⁴ | Desk⁴ |
+| Журнал карты компетенций — тексты свидетельств (`Agent Competency Event`), аудит (`audit_sample`, `audit_evidence`) | — | — | — | — | — | все, Desk⁴ | все, Desk⁴ |
 | Сброс прогресса ученика (`reset_student_progress`) | — | — | — | — | свои курсы³ | все | все |
 | Подключения агентов и сессии браузера (`/connections`) | — | свои, из браузера | свои | свои | свои | свои | свои |
 | Организации, приглашения с их токенами, уведомления о назначениях (`Learning Organization`, `Organization Invite`, `Allocation Notice`) | — | — | — | методами команды — своя | — | все, Desk⁴ | все, Desk⁴ |
@@ -1167,7 +1167,10 @@ learning-services#405).
 подтверждённого и открытого (learning-services#810). У урока без карты — `[]`.
 
 `competency_queue` — что стоит посмотреть по курсу при естественном поводе,
-без отдельного опроса (learning-services#810): `reason: unconfirmed` —
+без отдельного опроса (learning-services#810): `reason: audit_doubt` и
+`audit_withdrawn` — аудит записал «недостаточно оснований» или отменил
+подтверждение (learning-services#811; `level` — уровень проверенного,
+`assessment` — причина заключения); `reason: unconfirmed` —
 компетенция пройденного урока без подтверждения (`level: null`), `reason:
 difficulty_after_confirmation` — затруднение на уровне не выше
 подтверждённого (`level` и `assessment` — уровень и суть затруднения из его
@@ -4010,6 +4013,73 @@ HTTP 417 с текстом «Курс собран из релиза: домаш
 трогает. У курса без релиза `releases` пуст.
 
 **Отказы:** `course_not_found`.
+
+## `lms_frappe_app.api.authoring.audit_sample`
+
+Свидетельства карты компетенций на ручной аудит — ещё не проверенные
+(learning-services#811). Аудитор проверяет, следует ли заявленный уровень из
+записи: переписки у Cenda нет, и проверить, было ли всё так в разговоре,
+нельзя.
+
+**Параметры:** `course` (необязательный) — только этот курс; `limit` — до
+100, по умолчанию 20.
+
+```json
+{ "ok": true, "data": { "course": "course-basics", "events": [
+  { "event": "a1b2c3d4e5", "kind": "evidence", "course": "course-basics", "lesson": "l-3",
+    "competency": "K5", "outcome": "confirmed", "level": 4,
+    "task": "…", "student_action": "…", "assessment": "…", "uncertainties": null,
+    "transfer_difference": "…", "transfer_adaptation": "…",
+    "marks": { "task_form": "work", "hints": false, "corrected": false,
+               "indirect": false, "after_refusal": false },
+    "withdrawn": [], "recorded_at": "2026-11-20T10:00:00" } ] } }
+```
+
+Порядок — приоритет выборки (дизайн §13): пересмотры уровня (у них нет
+проверки на сервере, кроме «только вниз»; `withdrawn` — снятые
+подтверждения), затем подтверждения уровня 4, записанное при отказе в
+закрытии урока, косвенное, с подсказкой или исправлением, остальное; внутри
+— новые первыми. Имени ученика нет; архив сброса не входит.
+
+**Права:** команда платформы — модератор, администратор, служебная роль
+`Agent Service`; остальным — ошибка прав Frappe. **Отказы:** `invalid_page`
+(с `where`).
+
+## `lms_frappe_app.api.authoring.audit_evidence`
+
+Заключение аудита по свидетельству или пересмотру уровня
+(learning-services#811, дизайн §13). Отдельная запись журнала (`Audit`) с
+причиной и ссылкой: история не стирается.
+
+**Параметры:** `event` — свидетельство или пересмотр из `audit_sample`;
+`conclusion` — `sufficient`, `insufficient`, `unverifiable`,
+`contradiction`; `reason` — что не следует из записи, обязательна у всех,
+кроме `sufficient`, до 1000 знаков.
+
+```json
+{ "ok": true, "data": { "audit": "f6e5d4c3b2", "event": "a1b2c3d4e5",
+  "conclusion": "contradiction", "withdrawn": true,
+  "state": { "level": 2, "last_outcome": "confirmed", "last_level": 4 } } }
+```
+
+| Заключение | Что происходит |
+|---|---|
+| `sufficient`, `unverifiable` | ничего |
+| `insufficient` | уровень сохраняется; компетенция — в очередь агента (`competency_queue`, `reason: audit_doubt`) на уровне проверенного |
+| `contradiction` | подтверждение выводится из расчёта (`withdrawn: true`), карта пересчитывается по оставшимся; компетенция — в очередь (`reason: audit_withdrawn`) |
+
+Пункт очереди уходит, когда записано подтверждение не ниже уровня
+проверенного. У пересмотра уровня заключение уровень не возвращает:
+`insufficient` и `contradiction` ставят компетенцию в очередь на уровне
+снятых подтверждений, и новое подтверждение вернёт его по обычным правилам.
+Отмена не открывает закрытый урок и не отменяет завершение курса. Ученик
+отдельного сообщения не получает: основание его карты пересчитывается.
+
+**Права** — как у `audit_sample`. **Отказы:** `audit_conclusion_unknown` (с
+`conclusion`, `allowed`); `evidence_not_found` (с `event`) — нет такого
+свидетельства или пересмотра, оно архивное или это прежнее заключение;
+`audit_reason_required` (с `conclusion`); `evidence_too_long` (с `field`,
+`limit`).
 
 ## `lms_frappe_app.api.authoring.competency_summary`
 

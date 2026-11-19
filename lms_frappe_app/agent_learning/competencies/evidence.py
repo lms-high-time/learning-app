@@ -32,7 +32,7 @@ from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index
 
 ЖУРНАЛ = "Agent Competency Event"
-СВИДЕТЕЛЬСТВО, ПЕРЕСМОТР = "Evidence", "Revision"
+СВИДЕТЕЛЬСТВО, ПЕРЕСМОТР, АУДИТ = "Evidence", "Revision", "Audit"
 
 ПОДТВЕРЖДЕНО, ЗАТРУДНЕНИЕ, НЕДОСТАТОЧНО, ПРОПУЩЕНО = "confirmed", "difficulty", "insufficient", "skipped"
 ИСХОДЫ = (ПОДТВЕРЖДЕНО, ЗАТРУДНЕНИЕ, НЕДОСТАТОЧНО, ПРОПУЩЕНО)
@@ -391,15 +391,26 @@ def _записи(ученик: str, курс: str, компетенция: str 
 	return frappe.get_all(
 		ЖУРНАЛ,
 		filters=фильтр,
-		fields=["name", "kind", "competency", "outcome", "level", "withdrawn", "lesson_key", "assessment"],
+		fields=[
+			"name",
+			"kind",
+			"competency",
+			"outcome",
+			"level",
+			"withdrawn",
+			"lesson_key",
+			"assessment",
+			"conclusion",
+		],
 		order_by="creation asc, name asc",
 	)
 
 
 def _выведенные(записи: list) -> set[str]:
+	"""Свидетельства, выведенные из расчёта пересмотром уровня или отменой аудита (`withdrawn`)."""
 	выведено: set[str] = set()
 	for з in записи:
-		if з.kind == ПЕРЕСМОТР and з.withdrawn:
+		if з.kind in (ПЕРЕСМОТР, АУДИТ) and з.withdrawn:
 			значение = json.loads(з.withdrawn) if isinstance(з.withdrawn, str) else з.withdrawn
 			выведено.update(значение or [])
 	return выведено

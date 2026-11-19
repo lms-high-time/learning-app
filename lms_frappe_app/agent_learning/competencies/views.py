@@ -64,7 +64,11 @@ def основание(уровень: dict, записи: list) -> dict | None:
 	все = [(н, з) for н, з in enumerate(записи) if з.competency == уровень["key"]]
 	if уровень["status"] == НЕТ_ИНФОРМАЦИИ:
 		# Последнее, что действует: пересмотр — его причина, выведенное подтверждение — нет.
-		действует = [з for _, з in все if з.kind == evidence.ПЕРЕСМОТР or з.name not in выведено]
+		действует = [
+			з
+			for _, з in все
+			if з.kind == evidence.ПЕРЕСМОТР or (з.kind == evidence.СВИДЕТЕЛЬСТВО and з.name not in выведено)
+		]
 		if not действует:
 			return None
 		з = действует[-1]
