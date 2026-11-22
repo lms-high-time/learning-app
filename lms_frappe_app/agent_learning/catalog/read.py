@@ -20,7 +20,13 @@ import frappe
 
 ВЫПУСК = "Agent Competency Catalog Release"
 КОМПЕТЕНЦИЯ = "Agent Competency"
-ОБЛАСТЬ = "Agent Competency Area"
+СХЕМА_КЛАССИФИКАЦИИ = "Agent Competency Classification"
+#: Класс схемы классификации — строка её таблицы `classes`.
+КЛАСС_СХЕМЫ = "Agent Competency Classification Class"
+#: Класс компетенции `{classification, class_key}` — строка таблицы `classes` компетенции.
+КЛАСС = "Agent Competency Class Assignment"
+#: Похожая компетенция — строка таблицы `similar` компетенции.
+ПОХОЖАЯ = "Agent Competency Similar"
 
 
 #: Поля компетенции каталога, которые отдаёт карта курса.
@@ -29,7 +35,6 @@ import frappe
 	"title",
 	"description",
 	"kind",
-	"area",
 	"version",
 	"level_1",
 	"level_2",
@@ -155,12 +160,12 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 	релиза (`index.цели_уроков`). Карта курса — компетенции целей в порядке первого
 	появления, за ними их составляющие по каталогу и составляющие составляющих:
 	как у карты в релизе, где составляющая обязана быть в карте. Компетенция — в
-	форме карты релиза `{key, kind, title, description, parts}` и сверх неё `area`,
-	`version`, `similar` и `levels` — признаки уровней `{"1": …, "4": …}`. Слага,
-	которого в каталоге нет, в карте нет.
+	форме карты релиза `{key, kind, title, description, parts}` и сверх неё `classes` —
+	`{схема: класс}`, `version`, `similar` и `levels` — признаки уровней `{"1": …,
+	"4": …}`. Слага, которого в каталоге нет, в карте нет.
 
-	Три выборки на все релизы: составляющие всего каталога, компетенции карт и их
-	похожие. Без релизов и целей — ни одной.
+	Три выборки на все релизы: составляющие всего каталога, компетенции карт, их
+	похожие вместе с классами (`_похожие_и_классы`). Без релизов и целей — ни одной.
 	"""
 	порядки = {
 		релиз: порядок
@@ -172,14 +177,7 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 	части = _части_каталога()
 	порядки = {релиз: _замкнуть(порядок, части) for релиз, порядок in порядки.items()}
 	ключи = list({к for порядок in порядки.values() for к in порядок})
-	похожие: dict[str, list[str]] = {}
-	for п in frappe.get_all(
-		"Agent Competency Similar",
-		filters={"parenttype": КОМПЕТЕНЦИЯ, "parent": ("in", ключи)},
-		fields=["parent", "competency"],
-		order_by="parent asc, idx asc",
-	):
-		похожие.setdefault(п.parent, []).append(п.competency)
+	похожие, классы = _похожие_и_классы(ключи)
 	определения = {
 		к.name: {
 			"key": к.name,
@@ -187,7 +185,7 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 			"title": к.title,
 			"description": к.description or "",
 			"parts": части.get(к.name, []),
-			"area": к.area,
+			"classes": классы.get(к.name, {}),
 			"version": к.version,
 			"similar": похожие.get(к.name, []),
 			"levels": {str(уровень): к.get(f"level_{уровень}") for уровень in range(1, 5)},
@@ -197,6 +195,30 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 	return {
 		релиз: [определения[к] for к in порядок if к in определения] for релиз, порядок in порядки.items()
 	}
+
+
+def _похожие_и_классы(ключи: list[str]) -> tuple[dict[str, list[str]], dict[str, dict[str, str]]]:
+	"""Похожие компетенций `ключи` по порядку каталога и их классы `{схема: класс}` — одной
+	выборкой из двух таблиц. `Why:` карту курса читает старт урока, и отдельная выборка
+	классов была бы ещё одним запросом на каждый старт (`api/test_query_budget`)."""
+	похожие: dict[str, list[str]] = {}
+	классы: dict[str, dict[str, str]] = {}
+	# Ветка объединения — по метке `kind`: строка похожих и строка класса различаются ею, а не
+	# пустотой столбцов.
+	for вид, родитель, _, похожая, схема, класс in frappe.db.sql(
+		f"""(select 'similar' as kind, parent, idx, competency, null as classification, null as class_key
+			from `tab{ПОХОЖАЯ}` where parenttype = %(тип)s and parent in %(ключи)s)
+		union all
+		(select 'class', parent, idx, null, classification, class_key
+			from `tab{КЛАСС}` where parenttype = %(тип)s and parent in %(ключи)s)
+		order by parent, idx""",
+		{"тип": КОМПЕТЕНЦИЯ, "ключи": tuple(ключи)},
+	):
+		if вид == "similar":
+			похожие.setdefault(родитель, []).append(похожая)
+		else:
+			классы.setdefault(родитель, {})[схема] = класс
+	return похожие, классы
 
 
 def последний() -> dict:

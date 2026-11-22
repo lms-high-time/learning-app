@@ -35,8 +35,14 @@ class IntegrationTestКаталогТолькоВыпуском(IntegrationTestC
 		super().setUpClass()
 		суффикс = frappe.generate_hash(length=6)
 		cls.выпуск = _вставить(_выпуск(900000 + int(суффикс, 16) % 99999))
-		cls.область = _вставить(
-			{"doctype": "Agent Competency Area", "area_key": f"area-{суффикс}", "title": "Область"}
+		cls.схема = _вставить(
+			{
+				"doctype": "Agent Competency Classification",
+				"classification_key": f"scheme-{суффикс}",
+				"title": "Схема",
+				"source": "https://example.com/scheme",
+				"classes": [{"class_key": f"class-{суффикс}", "title": "Класс"}],
+			}
 		)
 		cls.компетенция = _вставить(
 			{
@@ -45,7 +51,7 @@ class IntegrationTestКаталогТолькоВыпуском(IntegrationTestC
 				"title": "Умение",
 				"description": "Что делает",
 				"kind": "base",
-				"area": cls.область.name,
+				"classes": [{"classification": cls.схема.name, "class_key": f"class-{суффикс}"}],
 				"version": 1,
 				"version_release": cls.выпуск.name,
 				**{f"level_{н}": f"Признак {н}" for н in range(1, 5)},
@@ -53,13 +59,13 @@ class IntegrationTestКаталогТолькоВыпуском(IntegrationTestC
 		)
 
 	def test_правка_и_удаление_мимо_выпуска_отклоняются(self):
-		"""Даже администратором: ни правка компетенции, области и выпуска, ни удаление, ни
-		вставка компетенции и выпуска мимо публикации."""
+		"""Даже администратором: ни правка компетенции, схемы классификации и выпуска, ни
+		удаление, ни вставка компетенции, схемы и выпуска мимо публикации."""
 		self.assertEqual(self.компетенция.name, self.компетенция.competency_key)
 		self.assertEqual(self.выпуск.name, f"catalog-{self.выпуск.version}")
 		for doctype, имя, поле in (
 			("Agent Competency", self.компетенция.name, "title"),
-			("Agent Competency Area", self.область.name, "title"),
+			("Agent Competency Classification", self.схема.name, "title"),
 			("Agent Competency Catalog Release", self.выпуск.name, "snapshot"),
 		):
 			with self.subTest(f"{doctype}: правка"):
@@ -83,9 +89,26 @@ class IntegrationTestКаталогТолькоВыпуском(IntegrationTestC
 						"title": "Умение",
 						"description": "Что делает",
 						"kind": "base",
-						"area": self.область.name,
 						"version": 1,
 						"version_release": self.выпуск.name,
+					}
+				).insert(ignore_permissions=True)
+
+		with self.subTest("класс схемы мимо выпуска"):
+			схема = frappe.get_doc("Agent Competency Classification", self.схема.name)
+			схема.append("classes", {"class_key": f"{схема.name}-x", "title": "Класс"})
+			with self.assertRaises(frappe.ValidationError):
+				схема.save()
+			self.assertEqual(len(frappe.get_doc("Agent Competency Classification", схема.name).classes), 1)
+
+		with self.subTest("новая схема мимо выпуска"):
+			with self.assertRaises(frappe.ValidationError):
+				frappe.get_doc(
+					{
+						"doctype": "Agent Competency Classification",
+						"classification_key": f"{self.схема.name}-x",
+						"title": "Схема",
+						"source": "https://example.com/scheme",
 					}
 				).insert(ignore_permissions=True)
 

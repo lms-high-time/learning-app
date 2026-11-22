@@ -7,7 +7,6 @@
  "field_order": [
   "competency_key",
   "kind",
-  "area",
   "version",
   "version_release",
   "title",
@@ -18,6 +17,7 @@
   "level_3",
   "level_4",
   "sb_links",
+  "classes",
   "parts",
   "similar"
  ],
@@ -37,16 +37,6 @@
    "fieldtype": "Select",
    "label": "Тип",
    "options": "base\nintegrative",
-   "reqd": 1,
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "read_only": 1
-  },
-  {
-   "fieldname": "area",
-   "fieldtype": "Link",
-   "label": "Область",
-   "options": "Agent Competency Area",
    "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1,
@@ -135,6 +125,13 @@
    "label": "Связи"
   },
   {
+   "fieldname": "classes",
+   "fieldtype": "Table",
+   "label": "Классы",
+   "options": "Agent Competency Class Assignment",
+   "read_only": 1
+  },
+  {
    "fieldname": "parts",
    "fieldtype": "Table",
    "label": "Составляющие",
@@ -151,7 +148,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-11-22 12:00:00.000000",
+ "modified": "2026-11-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Competency",

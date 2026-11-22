@@ -1,0 +1,43 @@
+{
+ "actions": [],
+ "creation": "2026-11-23 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "classification",
+  "class_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "classification",
+   "fieldtype": "Link",
+   "label": "Схема",
+   "options": "Agent Competency Classification",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "class_key",
+   "fieldtype": "Data",
+   "label": "Класс",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1,
+   "description": "Ключ класса из списка схемы"
+  }
+ ],
+ "modified": "2026-11-23 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Competency Class Assignment",
+ "owner": "Administrator",
+ "links": [],
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 0
+}
