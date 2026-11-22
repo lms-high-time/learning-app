@@ -1,0 +1,126 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-11-22 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "version",
+  "catalog_format",
+  "digest",
+  "source_commit",
+  "published_by",
+  "published_at",
+  "changes",
+  "sb_snapshot",
+  "snapshot"
+ ],
+ "fields": [
+  {
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Версия",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "read_only": 1,
+   "description": "Следующий номер выпуска каталога"
+  },
+  {
+   "fieldname": "catalog_format",
+   "fieldtype": "Data",
+   "label": "Формат",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "digest",
+   "fieldtype": "Data",
+   "label": "Дайджест",
+   "reqd": 1,
+   "read_only": 1,
+   "description": "sha256 канонического JSON каталога: тот же каталог ещё раз — без нового выпуска"
+  },
+  {
+   "fieldname": "source_commit",
+   "fieldtype": "Data",
+   "label": "Коммит источника",
+   "read_only": 1,
+   "set_only_once": 1,
+   "description": "Коммит git, из которого собран каталог; пусто — публикатор его не передал"
+  },
+  {
+   "fieldname": "published_by",
+   "fieldtype": "Link",
+   "label": "Опубликовал",
+   "options": "User",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "published_at",
+   "fieldtype": "Datetime",
+   "label": "Опубликован",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "changes",
+   "fieldtype": "JSON",
+   "label": "Правки против прежнего выпуска",
+   "hidden": 1,
+   "read_only": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "description": "{added, substantive: [{key, version}], editorial}: ключи компетенций по виду правки; вычисляет сервер"
+  },
+  {
+   "fieldname": "sb_snapshot",
+   "fieldtype": "Section Break",
+   "label": "Снимок",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "snapshot",
+   "fieldtype": "Long Text",
+   "label": "Снимок каталога",
+   "hidden": 1,
+   "read_only": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "description": "Каталог целиком, как опубликован"
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-11-22 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Competency Catalog Release",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "autoname": "format:catalog-{version}"
+}

@@ -66,11 +66,12 @@ from frappe.utils.html_utils import acceptable_elements, mathml_elements, saniti
 #: Доктайпы Learning, в тексты которых пишут методы приложения: карточку
 #: курса — `create_course` и `update_course`, главы и уроки — публикация релиза.
 ДОКТАЙПЫ_LEARNING = frozenset({"LMS Course", "Course Chapter", "Course Lesson"})
-#: Текстовые поля, где код хранит JSON строкой: снимок релиза, состояние
-#: разговора и сценария.
+#: Текстовые поля, где код хранит JSON строкой: снимки релиза и выпуска
+#: каталога компетенций, состояние разговора и сценария.
 JSON_СТРОКОЙ = frozenset(
 	{
 		("Agent Course Release", "snapshot"),
+		("Agent Competency Catalog Release", "snapshot"),
 		("Agent Chat State", "state"),
 		("Agent Scenario State", "state"),
 	}

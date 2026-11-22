@@ -33,6 +33,7 @@ from frappe.utils import now_datetime
 
 from lms_frappe_app.agent_learning import course_translations as переводы_курса
 from lms_frappe_app.agent_learning import release_quiz, structure
+from lms_frappe_app.agent_learning.catalog import read as каталог
 from lms_frappe_app.agent_learning.doctype.agent_course_release.agent_course_release import УДАЛЯЕТСЯ_КУРС
 from lms_frappe_app.agent_learning.errors import КУРС_НЕ_НАЙДЕН, Отказ
 from lms_frappe_app.agent_learning.releases import (
@@ -156,6 +157,8 @@ def опубликовать(
 		frappe.db.rollback(save_point=ТОЧКА)
 		raise
 	frappe.db.release_savepoint(ТОЧКА)
+	# Прежние версии освобождены: их карты, прочитанные в этом запросе, устарели.
+	index.сбросить_кэш_карт()
 	if not создан:
 		_сверить_прохождения(курс)
 		_пересчитать_прогресс(курс)
@@ -307,6 +310,9 @@ def _проверить(релиз: dict) -> list[dict]:
 			total=len(найдено),
 		)
 	критичные, предупреждения = checks.проблемы(релиз)
+	if "catalog" in релиз:
+		# Сверка с опубликованным каталогом — по базе, после проверок без неё.
+		критичные += каталог.проблемы_релиза(релиз)
 	if критичные:
 		raise Отказ(
 			РЕЛИЗ_НЕ_СХОДИТСЯ,

@@ -14,6 +14,7 @@ import json
 
 import frappe
 
+from lms_frappe_app.agent_learning.catalog import read as каталог
 from lms_frappe_app.agent_learning.releases import document, index
 
 
@@ -82,8 +83,9 @@ def урок_релиза(курс: dict, релиз: str, ключ: str) -> dic
 
 def история(курс: str, действующий: str | None) -> list[dict]:
 	"""Релизы курса, свежие вперёд: версия, кто и когда опубликовал, дайджест,
-	коммит источника (`None` — публикатор его не передал), документ, число
-	находок и изменений публикации (`None` — не переданы)."""
+	коммит источника (`None` — публикатор его не передал), документ, версия
+	каталога компетенций, по которой собран релиз (`None` — релиз не на
+	каталоге), число находок и изменений публикации (`None` — не переданы)."""
 	return [
 		{
 			"release": р.name,
@@ -93,6 +95,7 @@ def история(курс: str, действующий: str | None) -> list[di
 			"digest": р.digest,
 			"commit": р.source_commit or None,
 			"document_key": р.document_key,
+			"catalog": каталог.версия_выпуска(р.competency_catalog),
 			"active": р.name == действующий,
 			"findings_count": р.findings_count,
 			"changes": _сводка_изменений(р),
@@ -118,7 +121,9 @@ def _без_документа(курс: dict) -> dict:
 	"""Карточка наружу: ключ документа отдаёт `document`, находки и изменения —
 	`релиз_целиком` отдельными полями."""
 	return {
-		поле: значение for поле, значение in курс.items() if поле not in ("document_key", "findings", "changes")
+		поле: значение
+		for поле, значение in курс.items()
+		if поле not in ("document_key", "findings", "changes")
 	}
 
 

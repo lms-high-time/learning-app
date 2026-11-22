@@ -32,6 +32,7 @@ import lms_frappe_app.api
 from lms_frappe_app.agent_learning.releases import schema as схема_релиза
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.api import analytics, authoring, manager, public, review, student
+from lms_frappe_app.tests.catalog_sample import поверх_опубликованного, пример_каталога
 from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
@@ -309,12 +310,24 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def test_ключи_ответов_совпадают_с_примерами_контракта(self):
 		курс, уроки = self._собрать_курс()
+		self._опубликовать_каталог()
 		курс_релиза = self._опубликовать_релиз()
 		репорт, сдача = self._пройти_курс(курс, уроки, курс_релиза)
 		self._посмотреть_прохождения(курс_релиза)
 		self._разобрать_репорт(курс_релиза, репорт)
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
+
+	# --- каталог компетенций ---
+
+	def _опубликовать_каталог(self) -> None:
+		frappe.set_user(self.куратор)
+		каталог = поверх_опубликованного(пример_каталога(f"contract-{self.суффикс}"))
+		self.сверить(
+			"authoring.publish_competency_catalog",
+			authoring.publish_competency_catalog(catalog=каталог, commit="cd" * 20),
+		)
+		self.сверить("authoring.competency_catalog", authoring.competency_catalog())
 
 	# --- релиз курса ---
 

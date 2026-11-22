@@ -47,6 +47,8 @@ import json
 
 import frappe
 
+from lms_frappe_app.agent_learning.catalog import read as каталог
+
 РЕЛИЗ = "Agent Course Release"
 ГЛАВА = "Agent Release Chapter"
 УРОК = "Agent Release Lesson"
@@ -159,6 +161,7 @@ def строки(релиз: dict, главы: dict[str, str], уроки: dict[
 		)
 	таблицы["agent_frame"] = в_json(рамка_курса)
 	таблицы["competency_map"] = в_json(_карта_целыми(релиз.get("competencies") or []))
+	таблицы["competency_catalog"] = каталог.имя_выпуска(релиз["catalog"]) if "catalog" in релиз else None
 	return таблицы
 
 
@@ -533,10 +536,36 @@ def _список_json(значение) -> list:
 	return значение if isinstance(значение, list) else []
 
 
+#: Ключ кэша карт релизов на каталоге в `frappe.local.request_cache`.
+КЭШ_КАРТ = "lms_competency_catalog_maps"
+
+
 def карта_компетенций(релиз: str) -> list[dict]:
 	"""Компетенции релиза по порядку (`competencies`, learning-services#807): `{key, kind, title,
-	description, parts?}`; нет карты или версия освобождена — `[]`."""
-	return _список_json(frappe.db.get_value(РЕЛИЗ, релиз, "competency_map"))
+	description, parts?}`; нет карты или версия освобождена — `[]`.
+
+	У релиза на каталоге (`competency_catalog`, learning-services#825) карта — из каталога по
+	целям уроков (`catalog.read.карты_по_целям`), у компетенции сверх того `area`, `version`,
+	`similar`, `levels`. Её выборки делаются один раз на запрос: карта кэшируется в
+	`frappe.local.request_cache` по имени релиза, и повторное чтение в том же запросе — без
+	обращений к базе. `Why:` старт урока читает карту курса до трёх раз (очередь, компетенции
+	урока, следующий шаг). Кэш сбрасывают публикации релиза и каталога (`сбросить_кэш_карт`).
+	Релиз с картой внутри — одна выборка, как раньше, без кэша."""
+	кэш = frappe.local.request_cache[КЭШ_КАРТ]
+	if релиз in кэш:
+		return кэш[релиз]
+	строка = frappe.db.get_value(РЕЛИЗ, релиз, ["competency_map", "competency_catalog"], as_dict=True)
+	if not строка:
+		return []
+	if строка.competency_catalog:
+		кэш[релиз] = каталог.карты_по_целям({релиз: цели_уроков(релиз)}).get(релиз, [])
+		return кэш[релиз]
+	return _список_json(строка.competency_map)
+
+
+def сбросить_кэш_карт() -> None:
+	"""Забыть карты релизов на каталоге, прочитанные в этом запросе (`карта_компетенций`)."""
+	frappe.local.request_cache.pop(КЭШ_КАРТ, None)
 
 
 def компетенции_урока(релиз: str, ключ: str) -> list[dict]:
@@ -579,6 +608,7 @@ def _ключ(значение) -> bool:
 	"digest",
 	"source_commit",
 	"document_key",
+	"competency_catalog",
 ]
 #: Находки и изменения публикации — JSON строкой; у большой публикации это
 #: сотни килобайт, поэтому их читает только тот, кому они нужны.

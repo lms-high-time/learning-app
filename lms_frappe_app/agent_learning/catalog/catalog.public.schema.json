@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lms-high-time/learning-app/master/lms_frappe_app/agent_learning/catalog/catalog.public.schema.json",
+  "title": "Каталог компетенций",
+  "description": "Компетенции на все курсы: признаки уровней, область, связи «часть» и «похожа»; области — закрытый список. Формат — CONTRACT.md, раздел «Каталог компетенций».",
+  "type": "object",
+  "required": ["format", "areas", "competencies"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "lms-competency-catalog/1"},
+    "areas": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/area"}},
+    "competencies": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/competency"}}
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$",
+      "description": "Постоянный ключ: не переименовывается и не переиспользуется."
+    },
+    "level": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "description": "Уровень освоения: 1 — узнаёт, 2 — объясняет, 3 — применяет, 4 — переносит."
+    },
+    "level_text": {"type": "string", "minLength": 1},
+    "area": {
+      "type": "object",
+      "required": ["key", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/slug"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 140}
+      }
+    },
+    "competency": {
+      "type": "object",
+      "required": ["key", "title", "description", "kind", "area", "levels"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/slug"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "description": {"type": "string", "minLength": 1, "description": "Что человек делает, когда владеет умением."},
+        "kind": {"enum": ["base", "integrative"]},
+        "area": {"$ref": "#/$defs/slug", "description": "Ключ области из areas."},
+        "levels": {
+          "type": "object",
+          "description": "Признаки уровней 1–4 — один набор на все курсы, без курсового контекста.",
+          "required": ["1", "2", "3", "4"],
+          "additionalProperties": false,
+          "properties": {
+            "1": {"$ref": "#/$defs/level_text"},
+            "2": {"$ref": "#/$defs/level_text"},
+            "3": {"$ref": "#/$defs/level_text"},
+            "4": {"$ref": "#/$defs/level_text"}
+          }
+        },
+        "parts": {
+          "type": "array",
+          "description": "Составляющие интегративной компетенции; у базовой их нет.",
+          "items": {
+            "type": "object",
+            "required": ["competency", "from_level"],
+            "additionalProperties": false,
+            "properties": {
+              "competency": {"$ref": "#/$defs/slug"},
+              "from_level": {"$ref": "#/$defs/level", "description": "С какого уровня интегративной нужна составляющая."}
+            }
+          }
+        },
+        "similar": {
+          "type": "array",
+          "description": "Компетенции про близкое умение.",
+          "items": {"$ref": "#/$defs/slug"}
+        }
+      }
+    }
+  }
+}

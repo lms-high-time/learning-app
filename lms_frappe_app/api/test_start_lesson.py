@@ -8,9 +8,12 @@ import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_to_date, now_datetime
 
+from lms_frappe_app.agent_learning.catalog import service as каталог
+from lms_frappe_app.agent_learning.competencies import evidence
 from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗА
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
+from lms_frappe_app.tests.catalog_sample import ключи_примера, поверх_опубликованного, пример_каталога
 from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей, с_компетенциями
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
@@ -144,6 +147,42 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 			[(к["key"], к["target"], к["text"]) for к in данные["competencies"]],
 			[("B2", 2, None), ("I1", 3, "Признаки уровней I1."), ("B1", None, None)],
 		)
+
+	def test_компетенции_урока_из_каталога(self):
+		"""Релиз на каталоге (learning-services#825): у компетенций урока признаки уровней и
+		версия — из каталога; у составляющих без цели в уроке — состояние и открытый уровень по
+		начатым урокам курса."""
+		суффикс = frappe.generate_hash(length=6)
+		к = ключи_примера(суффикс)
+		frappe.set_user("Administrator")
+		try:
+			выпуск = каталог.опубликовать(поверх_опубликованного(пример_каталога(суффикс)), "Administrator")
+			релиз = пример_релиза(f"start-cat-{суффикс}")
+			релиз["catalog"] = выпуск["version"]
+			релиз["lessons"][0]["competencies"] = [{"competency": к["a"], "target": 2}]
+			релиз["lessons"][2]["competencies"] = [{"competency": к["whole"], "target": 3}]
+			релиз["agent"]["lessons"]["l-3"]["competencies"] = {к["whole"]: "Контекст курса"}
+			курс, _ = курс_из_релиза(релиз=релиз)
+			зачислить_на_курс(self.ученик, курс)
+		finally:
+			frappe.set_user(self.ученик)
+		self.старт(lesson=урок_релиза(курс, "l-1"))
+
+		данные = self.старт(lesson=урок_релиза(курс, "l-3"))
+
+		self.assertEqual(
+			[
+				(с["key"], с["target"], с["text"], с["version"], с["state"], с["open_level"])
+				for с in данные["competencies"]
+			],
+			[
+				(к["whole"], 3, "Контекст курса", 1, evidence.ПУСТО, 3),
+				# Составляющие без цели в уроке: `a` открыта целью начатого урока `l-1`, `b` — нет.
+				(к["a"], None, None, 1, evidence.ПУСТО, 2),
+				(к["b"], None, None, 1, evidence.ПУСТО, 0),
+			],
+		)
+		self.assertEqual(данные["competencies"][0]["levels"]["4"], f"Признак уровня 4 для {к['whole']}")
 
 	def test_срез_без_директивы_материала_и_подсказок_пустой(self):
 		_, релиз, урок = self.свой_курс()

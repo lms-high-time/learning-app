@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/lms-high-time/learning-app/master/lms_frappe_app/agent_learning/releases/release.public.schema.json",
   "title": "Релиз курса: публичная и серверная часть",
-  "description": "То, что разбирает открытое приложение: курс, главы, уроки с целями, квизом и домашним заданием, документ курса, карта компетенций. Пакет agent раскладывается по урокам, его содержание и карта map не разбираются. Формат — CONTRACT.md, раздел «Релиз курса».",
+  "description": "То, что разбирает открытое приложение: курс, главы, уроки с целями, квизом и домашним заданием, документ курса, карта компетенций или ссылка на выпуск каталога компетенций. Пакет agent раскладывается по урокам, его содержание и карта map не разбираются. Формат — CONTRACT.md, раздел «Релиз курса».",
   "type": "object",
   "required": ["format", "course", "chapters", "lessons", "document"],
   "additionalProperties": false,
@@ -12,9 +12,14 @@
     "chapters": {"type": "array", "items": {"$ref": "#/$defs/chapter"}},
     "lessons": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/lesson"}},
     "document": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/document"}]},
+    "catalog": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Версия выпуска каталога компетенций, по которой собран релиз. Необязательно; с ним цели уроков lessons[].competencies — слаги компетенций опубликованного каталога, а карты competencies в релизе нет."
+    },
     "competencies": {
       "type": "array",
-      "description": "Карта компетенций курса: компетенции и связи. Необязательно; цели уроков по компетенциям — lessons[].competencies, признаки уровней — в пакете агента.",
+      "description": "Карта компетенций курса: компетенции и связи. Необязательно, не вместе с catalog; цели уроков по компетенциям — lessons[].competencies, признаки уровней — в пакете агента.",
       "items": {"$ref": "#/$defs/competency"}
     },
     "agent": {"type": "object", "description": "Пакет агента: приложение раскладывает его по ключам уроков в срезы индекса релиза, содержание срезов не разбирает."},
@@ -131,7 +136,7 @@
         "homework": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/homework"}]},
         "competencies": {
           "type": "array",
-          "description": "Компетенции урока с целевым уровнем. Необязательно.",
+          "description": "Компетенции урока с целевым уровнем: ключ из карты competencies или, у релиза с catalog, слаг компетенции каталога. Необязательно.",
           "items": {
             "type": "object",
             "required": ["competency", "target"],
