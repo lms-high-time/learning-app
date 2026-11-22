@@ -118,9 +118,16 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			frappe.get_all(
 				"Agent Session Event",
 				filters={"session": старт["session"], "kind": "Goal Credited"},
-				pluck="note",
+				fields=["credited_by", "competency", "target", "note"],
 			),
-			[f"{self.к['a']} не ниже 2: свидетельство {e1} курса {self.курс_а}, уровень 3"],
+			[
+				{
+					"credited_by": e1,
+					"competency": self.к["a"],
+					"target": 2,
+					"note": f"{self.к['a']} не ниже 2: свидетельство {e1} курса {self.курс_а}, уровень 3",
+				}
+			],
 		)
 		# Очередь и состояние — по всем курсам, открытый уровень — по курсу B.
 		карта = queue.карта_ученика(self.ученик, self.курс_б, self.релиз_б)

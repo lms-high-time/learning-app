@@ -75,10 +75,11 @@ class AgentLearningSession(Document):
 			self.doctype, self.name, "last_activity_at", now_datetime(), update_modified=False
 		)
 
-	def записать_событие(self, kind: str, note: str | None = None) -> Document:
-		"""Пишет событие занятия и двигает отметку активности."""
+	def записать_событие(self, kind: str, note: str | None = None, **поля) -> Document:
+		"""Пишет событие занятия и двигает отметку активности; `поля` — поля события своего вида
+		(у засчёта цели — `credited_by`, `competency`, `target`)."""
 		событие = frappe.get_doc(
-			{"doctype": "Agent Session Event", "session": self.name, "kind": kind, "note": note}
+			{"doctype": "Agent Session Event", "session": self.name, "kind": kind, "note": note, **поля}
 		).insert(ignore_permissions=True)
 		self.отметить_активность()
 		return событие
