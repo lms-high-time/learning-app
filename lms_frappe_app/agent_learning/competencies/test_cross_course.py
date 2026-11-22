@@ -142,6 +142,33 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			(3, [], {self.к["a"]: 2}),
 		)
 
+	def test_сброс_не_отменяет_пересмотр_других_курсов(self):
+		"""Пересмотр курса B, выведший подтверждение курса A, сбросом B не архивируется: снижение
+		уровня остаётся, подтверждение A по-прежнему не засчитывается."""
+		from lms_frappe_app.agent_learning.reset import сбросить_прогресс
+
+		e1 = self.подтвердить_в_а(3, "n-1")
+		занятие_б = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, self.курс_б, "l-1"))
+		пересмотр = evidence.пересмотреть(
+			занятие_б, self.релиз_б, "l-1", self.к["a"], 1, "Повторилось", "n-2"
+		)["event"]
+		свой = self.записать(self.курс_б, self.релиз_б, self.к["a"], "skipped", None, "n-3")["event"]
+
+		итог = сбросить_прогресс(self.ученик, self.курс_б, "Administrator")
+		self.assertEqual(итог["competency_events_archived"], 1)
+		self.assertEqual(
+			(
+				frappe.db.get_value(evidence.ЖУРНАЛ, пересмотр, "student"),
+				frappe.db.get_value(evidence.ЖУРНАЛ, свой, "student"),
+			),
+			(self.ученик, None),
+		)
+		self.assertIsNone(
+			evidence.состояние_компетенции(self.ученик, self.курс_а, self.к["a"], True)["level"]
+		)
+		self.assertEqual(self.проверка_б(), (self.цели, []))
+		self.assertEqual(json.loads(frappe.db.get_value(evidence.ЖУРНАЛ, пересмотр, "withdrawn")), [e1])
+
 	def test_пересмотр_и_аудит_во_всех_курсах(self):
 		e1 = self.подтвердить_в_а(3, "r-1")
 		занятие_б = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, self.курс_б, "l-1"))
