@@ -8,17 +8,18 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
-from lms_frappe_app.agent_learning.competencies.closing import непроверенные_по_записям
+from lms_frappe_app.agent_learning.competencies.closing import засчёты_по_записям, непроверенные_по_записям
 
 
 class _Запись(dict):
 	__getattr__ = dict.get
 
 
-def запись(имя, компетенция, исход, уровень=0, урок="l-3", вид="Evidence", выведено=None):
+def запись(имя, компетенция, исход, уровень=0, урок="l-3", вид="Evidence", выведено=None, курс="c"):
 	return _Запись(
 		name=имя,
 		kind=вид,
+		course=курс,
 		competency=компетенция,
 		outcome=исход,
 		level=уровень,
@@ -71,11 +72,64 @@ class TestНепроверенные(UnitTestCase):
 				],
 				["B2", "I1"],
 			),
+			# Журнал компетенции каталога — по всем курсам (learning-services#826): записи
+			# другого курса засчитываются только подтверждением не ниже цели.
+			(
+				"подтверждено не ниже цели в другом курсе",
+				[запись("e1", "I1", "confirmed", 3, курс="other")],
+				["B2"],
+			),
+			(
+				"затруднение и пропуск в одноимённом уроке другого курса",
+				[
+					запись("e1", "B2", "difficulty", 2, курс="other"),
+					запись("e2", "I1", "skipped", курс="other"),
+				],
+				["B2", "I1"],
+			),
+			(
+				"подтверждение другого курса выведено пересмотром в этом",
+				[
+					запись("e1", "I1", "confirmed", 3, курс="other"),
+					запись("r1", "I1", None, 1, вид="Revision", выведено=["e1"]),
+				],
+				["B2", "I1"],
+			),
 		):
 			with self.subTest(случай):
 				self.assertEqual(
-					[ц["competency"] for ц in непроверенные_по_записям(записи, "l-3", ЦЕЛИ)], осталось
+					[ц["competency"] for ц in непроверенные_по_записям(записи, "c", "l-3", ЦЕЛИ)], осталось
 				)
+
+
+class TestЗасчёты(UnitTestCase):
+	def test_засчёт_только_из_другого_курса(self):
+		for случай, записи, засчитано in (
+			("ничего нет", [], []),
+			("подтверждение этого курса", [запись("e1", "I1", "confirmed", 3, урок="l-1")], []),
+			("пропуск в уроке", [запись("e1", "I1", "skipped")], []),
+			(
+				"другой курс — последнее из закрывающих",
+				[
+					запись("e1", "I1", "confirmed", 4, курс="a"),
+					запись("e2", "I1", "confirmed", 2, курс="b"),
+					запись("e3", "I1", "confirmed", 3, курс="b"),
+				],
+				[{"competency": "I1", "target": 3, "evidence": "e3", "course": "b", "level": 3}],
+			),
+			(
+				"цель закрывает и запись этого курса",
+				[запись("e1", "I1", "confirmed", 3, курс="a"), запись("e2", "I1", "difficulty", 3)],
+				[],
+			),
+			(
+				"подтверждение другого курса ниже цели",
+				[запись("e1", "B2", "confirmed", 1, курс="a")],
+				[],
+			),
+		):
+			with self.subTest(случай):
+				self.assertEqual(засчёты_по_записям(записи, "c", "l-3", ЦЕЛИ), засчитано)
 
 
 class IntegrationTestЗакрытиеУрока(IntegrationTestCase):

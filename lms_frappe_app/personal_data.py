@@ -58,6 +58,8 @@ from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТ�
 	("Agent Competency Event", "session"): УДАЛИТЬ,
 	("Agent Competency Event", "audited"): УДАЛИТЬ,
 	("Agent Session Event", "session"): УДАЛИТЬ,
+	# Засчёт цели ссылается на подтверждение того же ученика из другого курса (learning-services#826).
+	("Agent Session Event", "credited_by"): УДАЛИТЬ,
 	("Agent Quiz Answer", "attempt"): УДАЛИТЬ,
 	("Agent Quiz Event", "attempt"): УДАЛИТЬ,
 	("Agent Learning Session", "run"): УДАЛИТЬ,

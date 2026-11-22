@@ -247,8 +247,16 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		)
 		запись = frappe.get_doc(evidence.ЖУРНАЛ, первое["event"])
 		self.assertEqual(
-			(запись.student, запись.course, запись.lesson_key, запись.session, запись.release),
-			(self.ученик, self.курс, "l-1", self.занятие.name, self.релиз),
+			(
+				запись.student,
+				запись.course,
+				запись.lesson_key,
+				запись.session,
+				запись.release,
+				запись.competency_version,
+			),
+			# У карты внутри релиза версии компетенции нет (learning-services#826).
+			(self.ученик, self.курс, "l-1", self.занятие.name, self.релиз, 0),
 		)
 		# Повтор ключа — та же запись, даже с другими полями.
 		повтор = self.записать("k-1", уровень=1)
@@ -295,5 +303,5 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		self.записать("r-1")
 		итог = сбросить_прогресс(self.ученик, self.курс, "Administrator")
 		self.assertEqual(итог["competency_events_archived"], 1)
-		self.assertEqual(evidence.состояние(self.ученик, self.курс), {})
+		self.assertEqual(evidence._записи(self.ученик, self.курс), [])
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"archived_student": self.ученик}), 1)

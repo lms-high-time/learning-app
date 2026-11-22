@@ -15,7 +15,7 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning.catalog import read
 from lms_frappe_app.agent_learning.catalog import service as каталог
-from lms_frappe_app.agent_learning.competencies import evidence, lesson, views
+from lms_frappe_app.agent_learning.competencies import lesson, views
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index, view
 from lms_frappe_app.agent_learning.releases import service as релизы
@@ -81,7 +81,6 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 			)
 			self.assertEqual(целое["levels"]["3"], f"Признак уровня 3 для {к['whole']}")
 			self.assertEqual(карта[0]["similar"], [к["b"]])
-			self.assertEqual(evidence.ключи_карты(релиз), {к["a"], к["whole"], к["b"]})
 
 		with self.subTest("старт урока: признаки из каталога, контекст из среза"):
 			пакет, цели = index.пакет_и_компетенции_урока(релиз, "l-3")

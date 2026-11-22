@@ -11,7 +11,10 @@
   "session",
   "kind",
   "occurred_at",
-  "note"
+  "note",
+  "credited_by",
+  "competency",
+  "target"
  ],
  "fields": [
   {
@@ -29,7 +32,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Событие",
-   "options": "Directive Issued\nQuiz Started\nVerdict Returned\nSession Abandoned\nClosing Refused\nQueue Offered",
+   "options": "Directive Issued\nQuiz Started\nVerdict Returned\nSession Abandoned\nClosing Refused\nQueue Offered\nGoal Credited",
    "read_only": 1,
    "reqd": 1
   },
@@ -45,12 +48,35 @@
    "fieldtype": "Small Text",
    "label": "Пометка",
    "read_only": 1
+  },
+  {
+   "fieldname": "credited_by",
+   "fieldtype": "Link",
+   "label": "Засчитано свидетельством",
+   "options": "Agent Competency Event",
+   "read_only": 1,
+   "search_index": 1,
+   "description": "У засчёта цели (Goal Credited) — подтверждение из другого курса, которое закрыло цель урока."
+  },
+  {
+   "fieldname": "competency",
+   "fieldtype": "Data",
+   "label": "Компетенция",
+   "read_only": 1,
+   "description": "У засчёта цели — компетенция цели урока."
+  },
+  {
+   "fieldname": "target",
+   "fieldtype": "Int",
+   "label": "Цель",
+   "read_only": 1,
+   "description": "У засчёта цели — целевой уровень урока по компетенции."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-20 01:00:00.000000",
+ "modified": "2026-11-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Session Event",
