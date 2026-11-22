@@ -99,10 +99,6 @@ from lms_frappe_app.agent_learning.releases import index
 ПЕРЕСМОТР_НЕ_ВНИЗ = "revision_not_lower"
 
 
-def ключи_карты(релиз: str) -> set[str]:
-	return {к["key"] for к in index.карта_компетенций(релиз) if isinstance(к, dict) and "key" in к}
-
-
 def сквозные(карта: list[dict]) -> list[str]:
 	"""Компетенции карты курса, журнал по которым читается во всех курсах ученика, — компетенции
 	каталога: у них есть версия (`catalog.read.карты_по_целям`). У карты внутри релиза версии нет,
