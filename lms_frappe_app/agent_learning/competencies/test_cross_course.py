@@ -72,8 +72,9 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 	def подтвердить_в_а(self, уровень: int, ключ: str) -> str:
 		return self.записать(self.курс_а, self.релиз_а, self.к["a"], "confirmed", уровень, ключ)["event"]
 
-	def закрыть_урок_б(self) -> dict:
-		"""Урок `l-1` курса B через API ученика: старт, все пункты, закрытие; ответ закрытия."""
+	def закрыть_урок_б(self, после_отказа=None) -> dict:
+		"""Урок `l-1` курса B через API ученика: старт, все пункты, закрытие; ответ закрытия.
+		С `после_отказа` — сначала отказ в закрытии `competencies_open`, затем этот вызов."""
 		from lms_frappe_app.api import student
 
 		frappe.set_user(self.ученик)
@@ -82,9 +83,17 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			отметить_все_пункты(
 				frappe.db.get_value("Agent Learning Session", старт["session"], "run"), старт["session"]
 			)
+			if после_отказа:
+				отказ = student.complete_lesson(старт["session"])
+				self.assertEqual(отказ["error"]["code"], "competencies_open", отказ)
+				после_отказа()
 			return {"start": старт, "complete": student.complete_lesson(старт["session"])}
 		finally:
 			frappe.set_user("Administrator")
+
+	@staticmethod
+	def в_аудите(событие: str) -> dict:
+		return next(з for з in audit.выборка(None, audit.ВЫБОРКА_НЕ_БОЛЬШЕ) if з["event"] == событие)
 
 	def проверка_б(self) -> tuple[list[dict], list[dict]]:
 		return closing.проверка(self.ученик, self.курс_б, self.релиз_б, "l-1", self.цели)
@@ -135,12 +144,22 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		)
 		self.assertNotIn(self.курс_а, заметка)
 		self.assertNotIn("уровень", заметка)
+		self.assertFalse(self.в_аудите(e1)["marks"]["credited_after_refusal"])
 		# Очередь и состояние — по всем курсам, открытый уровень — по курсу B.
 		карта = queue.карта_ученика(self.ученик, self.курс_б, self.релиз_б)
 		self.assertEqual(
 			(карта["state"][self.к["a"]]["level"], карта["queue"], карта["open_levels"]),
 			(3, [], {self.к["a"]: 2}),
 		)
+
+	def test_засчёт_после_отказа_поднимается_в_аудите(self):
+		"""Отказ в закрытии, затем подтверждение в другом курсе и засчёт — подтверждение идёт в
+		аудит как записанное при отказе: отметка `after_refusal` не обходится другим курсом."""
+		события = []
+		закрыт = self.закрыть_урок_б(после_отказа=lambda: события.append(self.подтвердить_в_а(3, "f-1")))
+		self.assertTrue(закрыт["complete"]["ok"], закрыт)
+		отметки = self.в_аудите(события[0])["marks"]
+		self.assertEqual((отметки["after_refusal"], отметки["credited_after_refusal"]), (False, True))
 
 	def test_сброс_не_отменяет_пересмотр_других_курсов(self):
 		"""Пересмотр курса B, выведший подтверждение курса A, сбросом B не архивируется: снижение
