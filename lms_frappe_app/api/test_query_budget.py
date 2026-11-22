@@ -48,6 +48,9 @@ from lms_frappe_app.tests.sample_data import (
 	схема_документа,
 )
 from lms_frappe_app.agent_learning import release_quiz
+from lms_frappe_app.agent_learning.catalog import service as каталог
+from lms_frappe_app.agent_learning.releases import index
+from lms_frappe_app.tests.catalog_sample import ключи_примера, поверх_опубликованного, пример_каталога
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import authoring, manager, public, review, student, team
 from lms_frappe_app.testing import сколько_запросов
@@ -210,6 +213,15 @@ from lms_frappe_app.testing import сколько_запросов
 	# картой квиза не открывает (learning-services#809); есть ли у курса карта —
 	# предложение очереди перед последним уроком (learning-services#810).
 	"request_quiz": 40,
+	# `start_lesson` на релизе на каталоге (learning-services#825), урок с целью по
+	# компетенции: сверх `start_lesson` — карта курса из каталога один раз на запрос
+	# (`index.карта_компетенций`, кэш запроса): запись релиза, цели уроков, составляющие
+	# каталога, компетенции карты и их похожие; цели уроков ещё раз — для открытых уровней;
+	# прохождения и журнал ученика для очереди. Повторные чтения карты — без обращений к базе.
+	"start_lesson_catalog": 55,
+	# Карта ученика по курсу на каталоге: доступ к курсу, действующий релиз, карта из
+	# каталога (как у `start_lesson_catalog`), цели уроков, прохождения и журнал ученика.
+	"my_competencies_catalog": 13,
 }
 
 
@@ -294,6 +306,21 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		# модуля и прогоном всего приложения.
 		урок = self._курс_релиза()[1]
 		self._старт_с_прогревом("start_lesson", урок)
+
+	def test_бюджет_start_lesson_на_каталоге(self):
+		"""Кэш карты остужается перед замером: настоящий запрос начинается без него."""
+		урок = self._курс_релиза(на_каталоге=True)[1]
+		self._старт_с_прогревом("start_lesson_catalog", урок, остудить=index.сбросить_кэш_карт)
+
+	def test_бюджет_my_competencies_на_каталоге(self):
+		урок = self._курс_релиза(на_каталоге=True)[1]
+		курс = frappe.db.get_value("Course Lesson", урок, "course")
+		student.start_lesson(lesson=урок)
+		self._ворота(
+			"my_competencies_catalog",
+			lambda: student.my_competencies(course=курс),
+			остудить=index.сбросить_кэш_карт,
+		)
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
@@ -593,11 +620,11 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 
 	# --- механика ворот ---
 
-	def _старт_с_прогревом(self, метод: str, урок: str) -> None:
+	def _старт_с_прогревом(self, метод: str, урок: str, остудить=None) -> None:
 		прогрев = student.start_lesson(lesson=урок)
 		self.assertTrue(прогрев["ok"], прогрев)
 		frappe.db.set_value("Agent Learning Session", прогрев["data"]["session"], "status", "Abandoned")
-		self._ворота(метод, lambda: student.start_lesson(lesson=урок), прогреть=False)
+		self._ворота(метод, lambda: student.start_lesson(lesson=урок), прогреть=False, остудить=остудить)
 
 	def _ворота(self, метод: str, вызов, *, прогреть: bool = True, остудить=None) -> None:
 		"""`остудить` — что сбросить после прогрева: кэш, который метод не
@@ -668,16 +695,28 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		возвращённая.append("history", {"event": "returned", "by_user": "Administrator", "comment": "Доделай"})
 		возвращённая.save(ignore_permissions=True)
 
-	def _курс_релиза(self, *, с_домашкой: bool = False, глав_больше: bool = False) -> tuple[str, str]:
+	def _курс_релиза(
+		self, *, с_домашкой: bool = False, глав_больше: bool = False, на_каталоге: bool = False
+	) -> tuple[str, str]:
 		"""Курс из релиза той же организации — две главы, три урока, документ с
 		блоками первых двух уроков, заполненный учеником; первый и второй уроки.
 
 		`start_lesson` открывает только курс из релиза (learning-services#506).
 		С `с_домашкой` задания есть у первых двух уроков; с `глав_больше` — ещё
-		третья глава с тремя уроками по образцу первого (`l-4`…`l-6`).
+		третья глава с тремя уроками по образцу первого (`l-4`…`l-6`). С `на_каталоге` —
+		релиз на свежем выпуске каталога: у первого урока цель по базовой компетенции, у
+		второго — по интегративной из двух базовых.
 		"""
 		frappe.set_user("Administrator")
 		релиз = пример_релиза(f"qb-{frappe.generate_hash(length=8)}")
+		if на_каталоге:
+			суффикс = frappe.generate_hash(length=6)
+			к = ключи_примера(суффикс)
+			релиз["catalog"] = каталог.опубликовать(
+				поверх_опубликованного(пример_каталога(суффикс)), "Administrator"
+			)["version"]
+			релиз["lessons"][0]["competencies"] = [{"competency": к["a"], "target": 2}]
+			релиз["lessons"][1]["competencies"] = [{"competency": к["whole"], "target": 3}]
 		if глав_больше:
 			новые = [f"l-{номер}" for номер in (4, 5, 6)]
 			релиз["chapters"].append(
