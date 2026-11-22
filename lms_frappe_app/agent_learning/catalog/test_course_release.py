@@ -19,7 +19,12 @@ from lms_frappe_app.agent_learning.competencies import evidence, lesson, views
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.releases import index, view
 from lms_frappe_app.agent_learning.releases import service as релизы
-from lms_frappe_app.tests.catalog_sample import ключи_примера, поверх_опубликованного, пример_каталога
+from lms_frappe_app.tests.catalog_sample import (
+	ключи_примера,
+	компетенция,
+	поверх_опубликованного,
+	пример_каталога,
+)
 from lms_frappe_app.tests.release_sample import пример_релиза
 
 
@@ -30,13 +35,19 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 		cls.суффикс = frappe.generate_hash(length=6)
 		cls.к = ключи_примера(cls.суффикс)
 		cls.каталог = поверх_опубликованного(пример_каталога(cls.суффикс))
+		# Компетенция каталога вне карты курса: ни цель урока, ни составляющая.
+		cls.каталог["competencies"].append(компетенция(f"lonely-{cls.суффикс}", cls.к["area"]))
 		cls.выпуск = каталог.опубликовать(cls.каталог, "Administrator")
+
+	@staticmethod
+	def последняя_версия() -> int:
+		return frappe.db.sql(f"select max(version) from `tab{read.ВЫПУСК}`")[0][0]
 
 	def релиз(self) -> dict:
 		"""Релиз курса на выпуске каталога: цели уроков `l-1` (базовая) и `l-3` (интегративная),
 		контекст курса по интегративной — в срезе урока `l-3`."""
 		р = пример_релиза(f"on-catalog-{frappe.generate_hash(length=6)}")
-		р["catalog"] = self.выпуск["version"]
+		р["catalog"] = self.последняя_версия()
 		р["lessons"][0]["competencies"] = [{"competency": self.к["a"], "target": 2}]
 		р["lessons"][2]["competencies"] = [{"competency": self.к["whole"], "target": 3}]
 		р["agent"]["lessons"]["l-3"]["competencies"] = {self.к["whole"]: "Контекст курса"}
@@ -95,6 +106,23 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 			self.assertEqual((свежая["title"], свежая["version"]), ("Новое название", 2))
 
 	def test_ссылки_на_каталог_проверяются(self):
+		# Новый выпуск каталога — редакторская правка компетенции вне курса: у релиза, собранного
+		# по прежнему выпуску, версия устарела.
+		одинокая = компетенция(f"lonely-{self.суффикс}", self.к["area"])
+		одинокая["title"] = "Другое название"
+		каталог.опубликовать(
+			поверх_опубликованного(
+				{"format": "lms-competency-catalog/1", "areas": [], "competencies": [одинокая]}
+			),
+			"Administrator",
+		)
+		последняя = self.последняя_версия()
+
+		with self.subTest("контекст по составляющей цели — из карты курса"):
+			р = self.релиз()
+			р["agent"]["lessons"]["l-3"]["competencies"][self.к["b"]] = "Контекст составляющей"
+			релизы.опубликовать(р, None, "Administrator")
+
 		def проблемы(правка) -> list[dict]:
 			р = self.релиз()
 			правка(р)
@@ -122,6 +150,32 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 				"контекст курса по компетенции не из каталога",
 				lambda р: р["agent"]["lessons"]["l-3"]["competencies"].update({"no-such-skill": "Контекст"}),
 				[{"code": "broken_ref", "where": "agent.lessons.l-3.competencies", "key": "no-such-skill"}],
+			),
+			(
+				"контекст курса по компетенции каталога вне карты курса",
+				lambda р: р["agent"]["lessons"]["l-3"]["competencies"].update(
+					{f"lonely-{self.суффикс}": "Контекст"}
+				),
+				[
+					{
+						"code": "broken_ref",
+						"where": "agent.lessons.l-3.competencies",
+						"key": f"lonely-{self.суффикс}",
+					}
+				],
+			),
+			(
+				"не последний выпуск каталога",
+				lambda р: р.update(catalog=последняя - 1),
+				[
+					{
+						"code": read.ВЕРСИЯ_УСТАРЕЛА,
+						"where": "catalog",
+						"version": последняя - 1,
+						"latest": последняя,
+						"message": "релиз собран не по последнему выпуску каталога",
+					}
+				],
 			),
 			(
 				"неопубликованная версия каталога",

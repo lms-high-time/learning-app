@@ -38,6 +38,7 @@ import frappe
 ]
 
 ВЕРСИЯ_НЕИЗВЕСТНА = "catalog_version_unknown"
+ВЕРСИЯ_УСТАРЕЛА = "catalog_version_stale"
 ПРЕФИКС_ИМЕНИ = "catalog-"
 
 
@@ -54,16 +55,21 @@ def версия_выпуска(имя: str | None) -> int | None:
 def проблемы_релиза(релиз: dict) -> list[dict]:
 	"""Ссылки релиза курса на каталог (`catalog`) — `[{code, where, …}]`, как у `releases.checks`.
 
-	Выпуск каталога версии `catalog` опубликован — иначе `catalog_version_unknown`;
-	слаг цели урока и ключ компетенции в срезе пакета агента
-	(`agent.lessons.<урок>.competencies`) — компетенция опубликованного каталога, иначе
-	`broken_ref`. Компетенции из каталога не уходят, поэтому компетенция выпуска
-	`catalog` есть и в последнем, и сверка идёт с текущими записями каталога. Две
-	выборки: выпуск и компетенции по ссылкам.
+	- `catalog` — версия последнего выпуска каталога: курс видит последнюю, и
+	  конвейер выпускает изменённый каталог перед курсом. Выпуска такой версии нет —
+	  `catalog_version_unknown`, есть выпуск новее — `catalog_version_stale` (`latest`).
+	- Слаг цели урока — компетенция опубликованного каталога, иначе `broken_ref`.
+	- Ключ контекста курса в срезе пакета агента (`agent.lessons.<урок>.competencies`) —
+	  компетенция карты курса: цель урока или её составляющая по каталогу, как у карты
+	  внутри релиза; иначе `broken_ref`.
+
+	Сравнение ключей — с учётом регистра. Три выборки: последняя версия, компетенции
+	целей, составляющие каталога.
 	"""
 	найдено: list[dict] = []
 	версия = int(релиз["catalog"])
-	if not frappe.db.exists(ВЫПУСК, имя_выпуска(версия)):
+	последняя = frappe.db.sql(f"select max(version) from `tab{ВЫПУСК}`")[0][0]
+	if not последняя or версия > последняя:
 		найдено.append(
 			{
 				"code": ВЕРСИЯ_НЕИЗВЕСТНА,
@@ -72,28 +78,74 @@ def проблемы_релиза(релиз: dict) -> list[dict]:
 				"message": "выпуск каталога этой версии не опубликован",
 			}
 		)
-	ссылки = [
+	elif версия < последняя:
+		найдено.append(
+			{
+				"code": ВЕРСИЯ_УСТАРЕЛА,
+				"where": "catalog",
+				"version": версия,
+				"latest": последняя,
+				"message": "релиз собран не по последнему выпуску каталога",
+			}
+		)
+	цели = [
 		(f"lessons[{у['key']}].competencies", ц["competency"])
 		for у in релиз["lessons"]
 		for ц in у.get("competencies") or []
 	]
+	контекст: list[tuple[str, str]] = []
 	пакет = релиз.get("agent")
 	срезы = пакет.get("lessons") if isinstance(пакет, dict) else None
 	# Пакет непрозрачен: сверяются только ключи частей-объектов, как в `releases.checks`.
 	for ключ, срез in срезы.items() if isinstance(срезы, dict) else []:
 		свои = срез.get("competencies") if isinstance(срез, dict) else None
 		if isinstance(свои, dict):
-			ссылки += [(f"agent.lessons.{ключ}.competencies", компетенция) for компетенция in свои]
-	if not ссылки:
+			контекст += [(f"agent.lessons.{ключ}.competencies", компетенция) for компетенция in свои]
+	if not цели and not контекст:
 		return найдено
 	# Сравнение — в Python: сравнение строк в MariaDB не различает регистр.
-	известные = set(
-		frappe.get_all(КОМПЕТЕНЦИЯ, filters={"name": ("in", list({к for _, к in ссылки}))}, pluck="name")
+	известные = (
+		set(frappe.get_all(КОМПЕТЕНЦИЯ, filters={"name": ("in", list({к for _, к in цели}))}, pluck="name"))
+		if цели
+		else set()
 	)
 	найдено += [
-		{"code": "broken_ref", "where": где, "key": ключ} for где, ключ in ссылки if ключ not in известные
+		{"code": "broken_ref", "where": где, "key": ключ} for где, ключ in цели if ключ not in известные
+	]
+	карта = set(
+		_замкнуть(list(dict.fromkeys(к for _, к in цели if к in известные)), _части_каталога())
+		if контекст
+		else ()
+	)
+	найдено += [
+		{"code": "broken_ref", "where": где, "key": ключ} for где, ключ in контекст if ключ not in карта
 	]
 	return найдено
+
+
+def _части_каталога() -> dict[str, list[dict]]:
+	"""Составляющие всех компетенций каталога: ключ → `[{competency, from_level}]` по порядку
+	каталога. Одна выборка: таблица связей мала."""
+	части: dict[str, list[dict]] = {}
+	for ч in frappe.get_all(
+		"Agent Competency Part",
+		filters={"parenttype": КОМПЕТЕНЦИЯ},
+		fields=["parent", "competency", "from_level"],
+		order_by="parent asc, idx asc",
+	):
+		части.setdefault(ч.parent, []).append({"competency": ч.competency, "from_level": ч.from_level})
+	return части
+
+
+def _замкнуть(порядок: list[str], части: dict[str, list[dict]]) -> list[str]:
+	"""`порядок`, за ним составляющие его компетенций, составляющие составляющих — без повторов."""
+	итог = list(порядок)
+	# Список растёт по ходу обхода: составляющие дописываются в конец и обходятся следом.
+	for ключ in итог:
+		for часть in части.get(ключ, []):
+			if часть["competency"] not in итог:
+				итог.append(часть["competency"])
+	return итог
 
 
 def карты_по_целям(цели_релизов: dict[str, dict[str, list[dict]]]) -> dict[str, list[dict]]:
@@ -110,27 +162,15 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 	Три выборки на все релизы: составляющие всего каталога, компетенции карт и их
 	похожие. Без релизов и целей — ни одной.
 	"""
-	порядки: dict[str, list[str]] = {}
-	for релиз, цели in цели_релизов.items():
-		порядок = list(dict.fromkeys(ц["competency"] for список in цели.values() for ц in список))
-		if порядок:
-			порядки[релиз] = порядок
+	порядки = {
+		релиз: порядок
+		for релиз, цели in цели_релизов.items()
+		if (порядок := list(dict.fromkeys(ц["competency"] for список in цели.values() for ц in список)))
+	}
 	if not порядки:
 		return {}
-	части: dict[str, list[dict]] = {}
-	for ч in frappe.get_all(
-		"Agent Competency Part",
-		filters={"parenttype": КОМПЕТЕНЦИЯ},
-		fields=["parent", "competency", "from_level"],
-		order_by="parent asc, idx asc",
-	):
-		части.setdefault(ч.parent, []).append({"competency": ч.competency, "from_level": ч.from_level})
-	for порядок in порядки.values():
-		# Порядок растёт по ходу обхода: составляющие дописываются в конец и обходятся следом.
-		for ключ in порядок:
-			for часть in части.get(ключ, []):
-				if часть["competency"] not in порядок:
-					порядок.append(часть["competency"])
+	части = _части_каталога()
+	порядки = {релиз: _замкнуть(порядок, части) for релиз, порядок in порядки.items()}
 	ключи = list({к for порядок in порядки.values() for к in порядок})
 	похожие: dict[str, list[str]] = {}
 	for п in frappe.get_all(
