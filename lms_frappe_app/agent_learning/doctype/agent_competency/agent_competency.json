@@ -1,0 +1,183 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-11-22 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "competency_key",
+  "kind",
+  "area",
+  "version",
+  "version_release",
+  "title",
+  "description",
+  "sb_levels",
+  "level_1",
+  "level_2",
+  "level_3",
+  "level_4",
+  "sb_links",
+  "parts",
+  "similar"
+ ],
+ "fields": [
+  {
+   "fieldname": "competency_key",
+   "fieldtype": "Data",
+   "label": "Ключ",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "read_only": 1,
+   "description": "Слаг: имя компетенции в журнале свидетельств; не переименовывается и не переиспользуется"
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Тип",
+   "options": "base\nintegrative",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "area",
+   "fieldtype": "Link",
+   "label": "Область",
+   "options": "Agent Competency Area",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Версия",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1,
+   "description": "Растёт, когда меняется признак хотя бы одного уровня"
+  },
+  {
+   "fieldname": "version_release",
+   "fieldtype": "Link",
+   "label": "Версия с выпуска",
+   "options": "Agent Competency Catalog Release",
+   "reqd": 1,
+   "read_only": 1,
+   "description": "Выпуск каталога, в котором появилась текущая версия"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Название",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Описание",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_levels",
+   "fieldtype": "Section Break",
+   "label": "Признаки уровней"
+  },
+  {
+   "fieldname": "level_1",
+   "fieldtype": "Text",
+   "label": "Уровень 1",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "level_2",
+   "fieldtype": "Text",
+   "label": "Уровень 2",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "level_3",
+   "fieldtype": "Text",
+   "label": "Уровень 3",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "level_4",
+   "fieldtype": "Text",
+   "label": "Уровень 4",
+   "ignore_xss_filter": 1,
+   "report_hide": 1,
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_links",
+   "fieldtype": "Section Break",
+   "label": "Связи"
+  },
+  {
+   "fieldname": "parts",
+   "fieldtype": "Table",
+   "label": "Составляющие",
+   "options": "Agent Competency Part",
+   "read_only": 1
+  },
+  {
+   "fieldname": "similar",
+   "fieldtype": "Table",
+   "label": "Похожие",
+   "options": "Agent Competency Similar",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "links": [],
+ "modified": "2026-11-22 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Agent Learning",
+ "name": "Agent Competency",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Moderator"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "autoname": "field:competency_key"
+}

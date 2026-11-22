@@ -81,6 +81,10 @@ from lms_frappe_app.agent_learning.constants import ЧЛЕНСТВО_ДЕЙСТ�
 		"в записи — ключ приглашения: выгрузка Frappe отправила бы его письмом",
 	),
 	("Agent Course Release", "published_by"): (None, "автор, опубликовавший релиз курса"),
+	("Agent Competency Catalog Release", "published_by"): (
+		None,
+		"автор или конвейер, опубликовавший выпуск каталога компетенций",
+	),
 	("Agent Note Reply", "author"): (None, "автор курса, ответивший на заметку"),
 }
 
