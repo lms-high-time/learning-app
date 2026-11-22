@@ -82,14 +82,35 @@ class UnitTestСхемаКаталога(UnitTestCase):
 				lambda с: с["classes"][0].pop("title"),
 				"$.classifications[0].classes[0]",
 			),
+			("название схемы длиннее 140", lambda с: с.update(title="я" * 141), "$.classifications[0].title"),
+			(
+				"название класса длиннее 140",
+				lambda с: с["classes"][1].update(title="я" * 141),
+				"$.classifications[0].classes[1].title",
+			),
+			(
+				"адрес длиннее 2000",
+				lambda с: с.update(source=["https://example.com/" + "a" * 1981]),
+				"$.classifications[0].source[0]",
+			),
+			(
+				"адрес с пробелом",
+				lambda с: с.update(source=["https://example.com/a b"]),
+				"$.classifications[0].source[0]",
+			),
 		):
 			with self.subTest(случай):
 				каталог = пример_каталога(С)
 				правка(каталог["classifications"][0])
 				self.assertEqual([о["path"] for о in checks.ошибки_схемы(каталог)], [путь])
 		каталог = пример_каталога(С)
-		self.assertEqual(каталог["classifications"][0]["source"], [])
+		self.assertEqual(каталог["classifications"][0]["source"], [], "своя схема — без первоисточника")
 		self.assertEqual(checks.ошибки_схемы(каталог), [])
+		with self.subTest("на границах: название 140, адрес 2000"):
+			каталог["classifications"][0]["title"] = "я" * 140
+			каталог["classifications"][0]["classes"][0]["title"] = "я" * 140
+			каталог["classifications"][0]["source"] = ["https://example.com/" + "a" * 1980]
+			self.assertEqual(checks.ошибки_схемы(каталог), [])
 
 	def test_каталог_без_схем_и_классов_проходит(self):
 		каталог = пример_каталога(С)
@@ -227,13 +248,14 @@ def _опубликованные(каталог: dict) -> dict:
 
 class UnitTestКанон(UnitTestCase):
 	def test_перестановка_и_пустые_связи_не_меняют_канон(self):
-		"""Порядок компетенций, схем, их классов, классов компетенции, составляющих и похожих,
-		пустые связи и `3.0` вместо `3` — тот же канонический вид, а значит тот же дайджест и
-		снимок. Порядок первоисточников — как записан."""
+		"""Порядок компетенций, схем, их классов и первоисточников, классов компетенции,
+		составляющих и похожих, пустые связи и `3.0` вместо `3` — тот же канонический вид, а
+		значит тот же дайджест и снимок."""
 		каталог = пример_каталога(С)
 		переставленный = copy.deepcopy(каталог)
 		переставленный["classifications"].reverse()
 		переставленный["classifications"][0]["classes"].reverse()
+		переставленный["classifications"][0]["source"].reverse()
 		переставленный["competencies"].reverse()
 		переставленный["competencies"][2]["classes"] = dict(
 			reversed(list(переставленный["competencies"][2]["classes"].items()))
@@ -246,9 +268,6 @@ class UnitTestКанон(UnitTestCase):
 		без_классов["competencies"][1].pop("classes")
 		self.assertEqual(checks.канон(переставленный), checks.канон(без_классов))
 		self.assertEqual(checks.канон(каталог), каталог, "образец — в каноническом виде")
-		источники = copy.deepcopy(каталог)
-		источники["classifications"][1]["source"].reverse()
-		self.assertNotEqual(checks.канон(источники), checks.канон(каталог))
 		self.assertEqual(
 			[к["key"] for к in checks.канон(каталог)["competencies"]],
 			sorted(К[к] for к in ("a", "b", "whole")),

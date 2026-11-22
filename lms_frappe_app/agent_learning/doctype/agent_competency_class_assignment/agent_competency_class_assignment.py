@@ -4,5 +4,5 @@
 from frappe.model.document import Document
 
 
-class AgentCompetencyClass(Document):
+class AgentCompetencyClassAssignment(Document):
 	"""Класс компетенции каталога в одной схеме классификации (learning-services#832)."""

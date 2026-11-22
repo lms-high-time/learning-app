@@ -128,7 +128,7 @@
    "fieldname": "classes",
    "fieldtype": "Table",
    "label": "Классы",
-   "options": "Agent Competency Class",
+   "options": "Agent Competency Class Assignment",
    "read_only": 1
   },
   {

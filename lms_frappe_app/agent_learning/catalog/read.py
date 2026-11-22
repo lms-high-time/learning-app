@@ -20,11 +20,13 @@ import frappe
 
 ВЫПУСК = "Agent Competency Catalog Release"
 КОМПЕТЕНЦИЯ = "Agent Competency"
-СХЕМА = "Agent Competency Classification"
+СХЕМА_КЛАССИФИКАЦИИ = "Agent Competency Classification"
 #: Класс схемы классификации — строка её таблицы `classes`.
 КЛАСС_СХЕМЫ = "Agent Competency Classification Class"
 #: Класс компетенции `{classification, class_key}` — строка таблицы `classes` компетенции.
-КЛАСС = "Agent Competency Class"
+КЛАСС = "Agent Competency Class Assignment"
+#: Похожая компетенция — строка таблицы `similar` компетенции.
+ПОХОЖАЯ = "Agent Competency Similar"
 
 
 #: Поля компетенции каталога, которые отдаёт карта курса.
@@ -201,16 +203,18 @@ def _похожие_и_классы(ключи: list[str]) -> tuple[dict[str, li
 	классов была бы ещё одним запросом на каждый старт (`api/test_query_budget`)."""
 	похожие: dict[str, list[str]] = {}
 	классы: dict[str, dict[str, str]] = {}
-	for родитель, _, похожая, схема, класс in frappe.db.sql(
-		f"""(select parent, idx, competency, null as classification, null as class_key
-			from `tabAgent Competency Similar` where parenttype = %(тип)s and parent in %(ключи)s)
+	# Ветка объединения — по метке `kind`: строка похожих и строка класса различаются ею, а не
+	# пустотой столбцов.
+	for вид, родитель, _, похожая, схема, класс in frappe.db.sql(
+		f"""(select 'similar' as kind, parent, idx, competency, null as classification, null as class_key
+			from `tab{ПОХОЖАЯ}` where parenttype = %(тип)s and parent in %(ключи)s)
 		union all
-		(select parent, idx, null, classification, class_key
+		(select 'class', parent, idx, null, classification, class_key
 			from `tab{КЛАСС}` where parenttype = %(тип)s and parent in %(ключи)s)
 		order by parent, idx""",
 		{"тип": КОМПЕТЕНЦИЯ, "ключи": tuple(ключи)},
 	):
-		if похожая is not None:
+		if вид == "similar":
 			похожие.setdefault(родитель, []).append(похожая)
 		else:
 			классы.setdefault(родитель, {})[схема] = класс

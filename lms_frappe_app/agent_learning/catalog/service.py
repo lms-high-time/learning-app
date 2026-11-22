@@ -137,7 +137,7 @@ def _опубликованные_схемы() -> dict[str, dict]:
 	классы: dict[str, list[dict]] = {}
 	for к in frappe.get_all(
 		read.КЛАСС_СХЕМЫ,
-		filters={"parenttype": read.СХЕМА},
+		filters={"parenttype": read.СХЕМА_КЛАССИФИКАЦИИ},
 		fields=["parent", "class_key", "title"],
 		order_by="parent asc, idx asc",
 	):
@@ -152,7 +152,7 @@ def _опубликованные_схемы() -> dict[str, dict]:
 				"classes": классы.get(с.name, []),
 			}
 		)
-		for с in frappe.get_all(read.СХЕМА, fields=["name", "title", "source", "required"])
+		for с in frappe.get_all(read.СХЕМА_КЛАССИФИКАЦИИ, fields=["name", "title", "source", "required"])
 	}
 
 
@@ -223,9 +223,11 @@ def _записать_схемы(схемы: list[dict], правки: dict) -> 
 	)
 	for схема in схемы:
 		if схема["key"] in новые:
-			документ = frappe.get_doc({"doctype": read.СХЕМА, "classification_key": схема["key"]})
+			документ = frappe.get_doc(
+				{"doctype": read.СХЕМА_КЛАССИФИКАЦИИ, "classification_key": схема["key"]}
+			)
 		elif схема["key"] in изменённые:
-			документ = frappe.get_doc(read.СХЕМА, схема["key"])
+			документ = frappe.get_doc(read.СХЕМА_КЛАССИФИКАЦИИ, схема["key"])
 		else:
 			continue
 		документ.update(

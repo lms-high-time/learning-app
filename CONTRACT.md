@@ -3678,7 +3678,7 @@ Learning: ученик всегда на действующем релизе, и
 ```json
 { "format": "lms-competency-catalog/1",
   "classifications": [
-    { "key": "direction", "title": "Направление",
+    { "key": "domain", "title": "Направление",
       "source": [], "required": true,
       "classes": [ { "key": "team-work", "title": "Командная работа" } ] },
     { "key": "nos", "title": "Функции руководителя",
@@ -3688,7 +3688,7 @@ Learning: ученик всегда на действующем релизе, и
     { "key": "handoff-agreement", "title": "Договорённость о передаче",
       "description": "Что человек делает, когда владеет умением.",
       "kind": "base",
-      "classes": { "direction": "team-work", "nos": "working-with-people" },
+      "classes": { "domain": "team-work", "nos": "working-with-people" },
       "levels": { "1": "…", "2": "…", "3": "…", "4": "…" },
       "parts": [], "similar": [ "task-brief" ] } ] }
 ```
@@ -3735,9 +3735,9 @@ Learning: ученик всегда на действующем релизе, и
   выпуска действует её версия (`version_release`).
 - **Канонический вид.** Дайджест, снимок выпуска и вид правки считаются по
   каноническому виду каталога: схемы, их классы, классы компетенции и
-  компетенции — по ключу, первоисточники схемы — как записаны, составляющие —
-  по ключу с целым уровнем, похожие — по алфавиту, пустых `classes`, `parts`
-  и `similar` нет. Перестановка в источнике — тот же каталог
+  компетенции — по ключу, первоисточники схемы и похожие — по алфавиту,
+  составляющие — по ключу с целым уровнем, пустых `classes`, `parts` и
+  `similar` нет. Перестановка в источнике — тот же каталог
   (`unchanged`); `competency_catalog` отдаёт снимок в каноническом виде.
 - **Сверх схемы сервер проверяет:** ключи компетенций и схем, классы в схеме
   и первоисточники схемы уникальны (`duplicate_key`, `where` — `competencies`,
@@ -4634,10 +4634,10 @@ HTML зависит от сети: внешний адрес в атрибуте
                "substantive": [ { "key": "handoff-agreement", "version": 3 } ],
                "editorial": [ { "key": "scope-cut", "fields": [ "kind", "parts" ] } ],
                "classifications": { "added": [ "nos" ],
-                 "changed": [ { "key": "direction", "fields": [ "title" ] } ],
-                 "classes": { "added": { "direction": [ "ai-product" ],
+                 "changed": [ { "key": "domain", "fields": [ "title" ] } ],
+                 "classes": { "added": { "domain": [ "ai-product" ],
                                          "nos": [ "working-with-people" ] },
-                              "renamed": { "direction": [ "team-work" ] } } } } } }
+                              "renamed": { "domain": [ "team-work" ] } } } } } }
 ```
 
 `changes` — правки этой публикации против опубликованного каталога:

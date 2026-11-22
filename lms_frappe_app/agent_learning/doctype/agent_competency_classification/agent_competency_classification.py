@@ -11,7 +11,7 @@ class AgentCompetencyClassification(Document):
 	"""Схема классификации каталога компетенций: закрытый список классов (learning-services#832).
 
 	Слаг — имя записи; классы — таблица `classes`. Компетенция ссылается на класс
-	своей таблицей `classes` (`Agent Competency Class`)."""
+	своей таблицей `classes` (`Agent Competency Class Assignment`)."""
 
 	def validate(self):
 		только_из_каталога(self, frappe._("Схема классификации"))

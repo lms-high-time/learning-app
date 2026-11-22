@@ -43,7 +43,8 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 		"""Первый выпуск заводит всё; тот же каталог, переставленный, — `unchanged`;
 		редакторская правка — и правка классов компетенции — версию не трогает и называет
 		поля; новая схема, новый и переименованный класс видны в правках и в записях схем;
-		правка признака — следующая версия с этого выпуска."""
+		правка признака — следующая версия с этого выпуска; изменённые поля схемы ложатся в её
+		запись, а неизменённая схема не переписывается."""
 		каталог = поверх_опубликованного(пример_каталога(self.суффикс))
 		первый = self.опубликовать(каталог, коммит="ab" * 20)
 
@@ -73,7 +74,7 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 			self.assertEqual(
 				(классы[self.к["scheme"]], классы[self.к["nos"]]), (self.к["x"], self.к["people"])
 			)
-			схема = frappe.get_doc(read.СХЕМА, self.к["nos"])
+			схема = frappe.get_doc(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["nos"])
 			self.assertEqual(
 				(схема.title, схема.required, схема.source.splitlines()),
 				(f"Функции руководителя {self.суффикс}", 0, каталог_схема(каталог, self.к["nos"])["source"]),
@@ -85,7 +86,7 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 			# Своя схема без первоисточника публикуется; пустой список не читается из базы
 			# правкой — следующая публикация не называет её изменённой.
 			направление = frappe.db.get_value(
-				read.СХЕМА, self.к["scheme"], ["required", "source"], as_dict=True
+				read.СХЕМА_КЛАССИФИКАЦИИ, self.к["scheme"], ["required", "source"], as_dict=True
 			)
 			self.assertEqual((направление.required, направление.source or ""), (1, ""))
 			self.assertEqual(service._опубликованные_схемы()[self.к["scheme"]]["source"], [])
@@ -104,6 +105,7 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 		with self.subTest("тот же каталог в другом порядке — без выпуска"):
 			переставленный = copy.deepcopy(каталог)
 			переставленный["competencies"].reverse()
+			каталог_схема(переставленный, self.к["nos"])["source"].reverse()
 			повтор = self.опубликовать(переставленный)
 			self.assertTrue(повтор["unchanged"])
 			self.assertEqual(повтор["catalog_release"], первый["catalog_release"])
@@ -122,7 +124,13 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 			nos = каталог_схема(правка, self.к["nos"])
 			nos["classes"][1]["title"] = "Управлять собой и развитием"
 			nos["classes"].append({"key": f"tasks-{self.суффикс}", "title": "Достигать результата"})
+			направление_было = frappe.db.get_value(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["scheme"], "modified")
 			второй = self.опубликовать(правка)
+			self.assertEqual(
+				frappe.db.get_value(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["scheme"], "modified"),
+				направление_было,
+				"неизменённая схема не переписывается",
+			)
 			self.assertEqual(второй["version"], первый["version"] + 1)
 			self.assertEqual(
 				второй["changes"],
@@ -144,7 +152,10 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 				},
 			)
 			self.assertEqual(
-				[(к.class_key, к.title) for к in frappe.get_doc(read.СХЕМА, self.к["nos"]).classes],
+				[
+					(к.class_key, к.title)
+					for к in frappe.get_doc(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["nos"]).classes
+				],
 				[
 					(self.к["people"], "Работать с людьми"),
 					(self.к["self"], "Управлять собой и развитием"),
@@ -177,6 +188,36 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 			self.assertEqual(последний["catalog_release"], третий["catalog_release"])
 			self.assertEqual(последний["versions"][self.к["a"]], 2)
 			self.assertEqual(последний["catalog"], checks.канон(по_существу))
+
+		with self.subTest("поля схемы"):
+			схемы = copy.deepcopy(по_существу)
+			направление = каталог_схема(схемы, self.к["scheme"])
+			направление.update(
+				title="Предметная область",
+				source=["https://example.org/b", "https://example.com/a"],
+				required=False,
+			)
+			nos_было = frappe.db.get_value(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["nos"], "modified")
+			четвёртый = self.опубликовать(схемы)
+			self.assertEqual(
+				четвёртый["changes"]["classifications"],
+				{
+					"added": [],
+					"changed": [{"key": self.к["scheme"], "fields": ["title", "source", "required"]}],
+					"classes": {"added": {}, "renamed": {}},
+				},
+			)
+			запись = frappe.get_doc(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["scheme"])
+			self.assertEqual(
+				(запись.title, запись.source.splitlines(), запись.required),
+				("Предметная область", ["https://example.com/a", "https://example.org/b"], 0),
+			)
+			self.assertEqual([к.class_key for к in запись.classes], [self.к["x"], self.к["y"]])
+			self.assertEqual(
+				frappe.db.get_value(read.СХЕМА_КЛАССИФИКАЦИИ, self.к["nos"], "modified"),
+				nos_было,
+				"неизменённая схема не переписывается",
+			)
 
 	def test_отказы(self):
 		каталог = поверх_опубликованного(пример_каталога(self.суффикс))
