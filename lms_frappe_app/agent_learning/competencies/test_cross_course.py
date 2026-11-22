@@ -161,6 +161,21 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		отметки = self.в_аудите(события[0])["marks"]
 		self.assertEqual((отметки["after_refusal"], отметки["credited_after_refusal"]), (False, True))
 
+	def test_очередь_по_всем_курсам(self):
+		"""Затруднение после подтверждения и сомнение аудита из другого курса — в очереди курса B."""
+		e1 = self.подтвердить_в_а(3, "q-1")
+		self.записать(self.курс_а, self.релиз_а, self.к["a"], "difficulty", 2, "q-2")
+
+		def причины() -> list[tuple]:
+			return [
+				(п["competency"], п["reason"])
+				for п in queue.карта_ученика(self.ученик, self.курс_б, self.релиз_б)["queue"]
+			]
+
+		self.assertEqual(причины(), [(self.к["a"], queue.ЗАТРУДНЕНИЕ_ПОСЛЕ)])
+		audit.заключить(e1, audit.НЕДОСТАТОЧНО, "Уровень не следует из записи")
+		self.assertEqual(причины(), [(self.к["a"], queue.СОМНЕНИЕ_АУДИТА)])
+
 	def test_сброс_не_отменяет_пересмотр_других_курсов(self):
 		"""Пересмотр курса B, выведший подтверждение курса A, сбросом B не архивируется: снижение
 		уровня остаётся, подтверждение A по-прежнему не засчитывается."""
@@ -232,18 +247,26 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			),
 			queue.ПРОЙДЕН,
 		)
+		# Засчёт по `a` в B пропал, а событие засчёта ссылается на заархивированную запись.
 		self.assertEqual(self.проверка_б(), (self.цели, []))
+		засчитано = frappe.get_all(
+			"Agent Session Event", filters={"kind": "Goal Credited", "credited_by": e1}, pluck="credited_by"
+		)
+		self.assertEqual(засчитано, [e1, e1])
+		self.assertEqual(
+			frappe.db.get_value(evidence.ЖУРНАЛ, e1, ["student", "archived_student"]), (None, self.ученик)
+		)
 
 	def test_граница_ключей_карты_внутри_релиза(self):
 		"""Запись другого курса без версии компетенции — ключ карты внутри релиза — не засчитывается,
 		даже если совпала со слагом; курс с картой внутри релиза читает журнал только по себе."""
 
-		def вставить(курс: str, компетенция: str, версия: int) -> None:
+		def вставить(курс: str, компетенция: str, версия: int, ученик: str | None = None) -> None:
 			frappe.get_doc(
 				{
 					"doctype": evidence.ЖУРНАЛ,
 					"kind": evidence.СВИДЕТЕЛЬСТВО,
-					"student": self.ученик,
+					"student": ученик or self.ученик,
 					"course": курс,
 					"lesson_key": "l-1",
 					"competency": компетенция,
@@ -253,6 +276,11 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 					"request_key": frappe.generate_hash(length=10),
 				}
 			).insert(ignore_permissions=True)
+
+		with self.subTest("подтверждение другого ученика"):
+			другой = создать_ученика(f"cross-other-{frappe.generate_hash(length=6)}@example.com")
+			вставить(self.курс_а, self.к["a"], 1, другой)
+			self.assertEqual(self.проверка_б(), (self.цели, []))
 
 		with self.subTest("слаг в записи без версии"):
 			вставить(self.курс_а, self.к["a"], 0)
@@ -267,3 +295,9 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 				closing.непроверенные(self.ученик, курс, релиз, "l-1", [{"competency": "B1", "target": 2}]),
 				[{"competency": "B1", "target": 2}],
 			)
+
+		with self.subTest("пересмотр в курсе с картой внутри релиза"):
+			свой = self.записать(курс, релиз, "B1", "confirmed", 3, "m-1")["event"]
+			занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, курс, "l-1"))
+			пересмотр = evidence.пересмотреть(занятие, релиз, "l-1", "B1", 1, "Повторилось", "m-2")["event"]
+			self.assertEqual(json.loads(frappe.db.get_value(evidence.ЖУРНАЛ, пересмотр, "withdrawn")), [свой])
