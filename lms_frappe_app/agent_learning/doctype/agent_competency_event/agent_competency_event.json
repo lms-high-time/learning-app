@@ -133,6 +133,7 @@
    "label": "Свидетельство под аудитом",
    "options": "Agent Competency Event",
    "read_only": 1,
+   "search_index": 1,
    "description": "У заключения аудита — какое свидетельство проверено."
   },
   {
@@ -273,7 +274,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-11-23 12:00:00.000000",
+ "modified": "2026-11-23 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Competency Event",
