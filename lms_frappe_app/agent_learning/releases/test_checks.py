@@ -242,6 +242,29 @@ class TestПроверкиРелиза(unittest.TestCase):
 			checks.проблемы(р)[0], [{"code": "broken_ref", "where": "lessons[l-1].competencies", "key": "B1"}]
 		)
 
+	def test_релиз_на_каталоге(self):
+		"""С `catalog` (learning-services#825) цели уроков и компетенции срезов пакета — слаги
+		каталога: без базы сверяются только повторы, остальное — `catalog.read.проблемы_релиза`.
+		Карта рядом с `catalog` — проблема."""
+		р = пример_релиза()
+		р["catalog"] = 1
+		р["lessons"][0]["competencies"] = [{"competency": "handoff-agreement", "target": 2}]
+		р["agent"]["lessons"]["l-1"]["competencies"] = {"handoff-agreement": "Контекст курса"}
+		with self.subTest("слаги не из карты"):
+			self.assertEqual(checks.проблемы(р)[0], [])
+		with self.subTest("повтор в уроке"):
+			р["lessons"][0]["competencies"].append({"competency": "handoff-agreement", "target": 3})
+			self.assertEqual(
+				checks.проблемы(р)[0],
+				[{"code": "duplicate_key", "where": "lessons[l-1].competencies", "key": "handoff-agreement"}],
+			)
+		with self.subTest("карта рядом с catalog"):
+			с_картой = с_компетенциями(пример_релиза())
+			с_картой["catalog"] = 1
+			self.assertEqual(
+				[п["code"] for п in checks.проблемы(с_картой)[0]], ["competency_map_with_catalog"]
+			)
+
 	def test_битая_ссылка_пакета_агента(self):
 		"""Ссылка пакета, которой нет в релизе, — `broken_ref` с местом и ключом."""
 		for случай, правка, проблема in (

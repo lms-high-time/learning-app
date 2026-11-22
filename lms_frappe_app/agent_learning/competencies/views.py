@@ -21,6 +21,7 @@ import json
 
 import frappe
 
+from lms_frappe_app.agent_learning.catalog import read as каталог
 from lms_frappe_app.agent_learning.competencies import evidence
 from lms_frappe_app.agent_learning.competencies import queue as очередь
 from lms_frappe_app.agent_learning.releases import index
@@ -177,28 +178,39 @@ def уровни_учеников(курс: str, релиз: str, ученики
 def уровни_по_курсам(ученик: str, релизы: dict[str, str | None]) -> dict[str, list[dict]]:
 	"""Уровни одного ученика по нескольким курсам — `{курс: [{key, title, status, level}]}`; курсы
 	без карты не входят. Постоянное число запросов на всю выдачу, а не на курс: карты релизов,
-	цели их уроков, прохождения и журнал — по выборке."""
+	цели их уроков, прохождения и журнал — по выборке; карты релизов на каталоге — одним
+	обращением к каталогу на все (`catalog.read.карты_по_целям`)."""
 	релизы = {курс: р for курс, р in релизы.items() if р}
 	if not релизы:
 		return {}
-	карты = {
-		р.name: _список(р.competency_map)
-		for р in frappe.get_all(
-			index.РЕЛИЗ, filters={"name": ("in", list(релизы.values()))}, fields=["name", "competency_map"]
-		)
-	}
-	с_картой = {курс: р for курс, р in релизы.items() if карты.get(р)}
-	if not с_картой:
+	карты: dict[str, list[dict]] = {}
+	на_каталоге: set[str] = set()
+	for р in frappe.get_all(
+		index.РЕЛИЗ,
+		filters={"name": ("in", list(релизы.values()))},
+		fields=["name", "competency_map", "competency_catalog"],
+	):
+		if р.competency_catalog:
+			на_каталоге.add(р.name)
+		else:
+			карты[р.name] = _список(р.competency_map)
+	кандидаты = {курс: р for курс, р in релизы.items() if карты.get(р) or р in на_каталоге}
+	if not кандидаты:
 		return {}
-	цели: dict[str, dict[str, list[dict]]] = {р: {} for р in с_картой.values()}
+	цели: dict[str, dict[str, list[dict]]] = {р: {} for р in кандидаты.values()}
 	for у in frappe.get_all(
 		index.УРОК,
-		filters={"parenttype": index.РЕЛИЗ, "parent": ("in", list(с_картой.values()))},
+		filters={"parenttype": index.РЕЛИЗ, "parent": ("in", list(кандидаты.values()))},
 		fields=["parent", "lesson_key", "competencies"],
 		order_by="idx asc",
 	):
 		if список := _список(у.competencies):
 			цели[у.parent][у.lesson_key] = список
+	if на_каталоге:
+		карты |= каталог.карты_по_целям({р: цели[р] for р in на_каталоге if р in цели})
+	с_картой = {курс: р for курс, р in кандидаты.items() if карты.get(р)}
+	if not с_картой:
+		return {}
 	статусы: dict[str, dict[str, str]] = {курс: {} for курс in с_картой}
 	for р in frappe.get_all(
 		"Agent Lesson Run",
