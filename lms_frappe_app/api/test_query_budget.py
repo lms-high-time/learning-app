@@ -25,7 +25,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms_frappe_app.tests.release_sample import добавить_главу, пример_релиза, релиз_двух_целей
+from lms_frappe_app.tests.release_sample import добавить_главу, пример_релиза, релиз_двух_целей, с_компетенциями
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	курс_из_релиза,
@@ -232,6 +232,10 @@ from lms_frappe_app.testing import сколько_запросов
 	# ссылки на свидетельство (`credited_by`) и событие засчёта, без отметки активности; что
 	# дальше — следующий урок, пустые блоки, домашка.
 	"complete_lesson_credited": 76,
+	# Закрытие урока с целью по карте внутри релиза: цель закрыта пропуском в этом уроке.
+	# Признак каталога — той же выборкой, что цели урока: карта курса ради журнала не читается,
+	# журнал — только по курсу (learning-services#826).
+	"complete_lesson_map": 70,
 }
 
 
@@ -381,6 +385,32 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 			self.assertEqual(
 				frappe.db.count("Agent Session Event", {"session": занятие, "kind": "Goal Credited"}), 1
 			)
+
+	def test_бюджет_complete_lesson_старая_карта(self):
+		"""Урок с целью по карте внутри релиза закрыт пропуском в уроке. Прогрев — такое же
+		закрытие урока другого курса."""
+
+		def к_закрытию() -> str:
+			frappe.set_user("Administrator")
+			курс, релиз = курс_из_релиза(
+				релиз=с_компетенциями(пример_релиза(f"qb-map-{frappe.generate_hash(length=8)}"))
+			)
+			self._назначить(курс)
+			frappe.set_user(self.ученик)
+			занятие = student.start_lesson(lesson=урок_релиза(курс, "l-1"))["data"]["session"]
+			отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"), занятие)
+			ответ = student.record_evidence(занятие, "B1", "skipped", f"qb-{занятие}", task="Задание")
+			self.assertTrue(ответ["ok"], ответ)
+			return занятие
+
+		self.assertTrue(student.complete_lesson(к_закрытию())["ok"])
+		занятие = к_закрытию()
+		self._ворота(
+			"complete_lesson_map",
+			lambda: self.assertTrue(student.complete_lesson(занятие)["ok"]),
+			прогреть=False,
+			остудить=index.сбросить_кэш_карт,
+		)
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
