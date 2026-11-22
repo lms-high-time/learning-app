@@ -86,8 +86,8 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		finally:
 			frappe.set_user("Administrator")
 
-	def непроверенные_б(self) -> list[dict]:
-		return closing.непроверенные(self.ученик, self.курс_б, self.релиз_б, "l-1", self.цели)
+	def проверка_б(self) -> tuple[list[dict], list[dict]]:
+		return closing.проверка(self.ученик, self.курс_б, self.релиз_б, "l-1", self.цели)
 
 	def test_свидетельство_по_карте_курса_с_версией(self):
 		"""Компетенция — из карты курса: цели и их составляющие по каталогу; запись несёт версию
@@ -109,11 +109,19 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		self.assertEqual(в_б["state"], {"level": 3, "last_outcome": "insufficient", "last_level": None})
 
 	def test_засчёт_закрывает_урок_другого_курса(self):
-		self.подтвердить_в_а(3, "c-1")
+		e1 = self.подтвердить_в_а(3, "c-1")
 		итог = self.закрыть_урок_б()
 		старт, закрыт = итог["start"], итог["complete"]
 		self.assertEqual(старт["competencies"][0]["state"]["level"], 3)
 		self.assertTrue(закрыт["ok"], закрыт)
+		self.assertEqual(
+			frappe.get_all(
+				"Agent Session Event",
+				filters={"session": старт["session"], "kind": "Goal Credited"},
+				pluck="note",
+			),
+			[f"{self.к['a']} не ниже 2: свидетельство {e1} курса {self.курс_а}, уровень 3"],
+		)
 		# Очередь и состояние — по всем курсам, открытый уровень — по курсу B.
 		карта = queue.карта_ученика(self.ученик, self.курс_б, self.релиз_б)
 		self.assertEqual(
@@ -133,26 +141,26 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		self.assertIsNone(
 			evidence.состояние_компетенции(self.ученик, self.курс_а, self.к["a"], True)["level"]
 		)
-		self.assertEqual(self.непроверенные_б(), self.цели)
+		self.assertEqual(self.проверка_б(), (self.цели, []))
 
 		# Подтверждение после пересмотра засчитывается, отменённое аудитом — нет.
 		e2 = self.подтвердить_в_а(2, "r-3")
-		self.assertEqual(self.непроверенные_б(), [])
+		self.assertEqual(self.проверка_б()[1][0]["evidence"], e2)
 		заключение = audit.заключить(e2, audit.ПРОТИВОРЕЧИЕ, "Уровень не следует из записи")
 		self.assertEqual((заключение["withdrawn"], заключение["state"]["level"]), (True, None))
 		self.assertEqual(frappe.db.get_value(evidence.ЖУРНАЛ, заключение["audit"], "competency_version"), 1)
-		self.assertEqual(self.непроверенные_б(), self.цели)
+		self.assertEqual(self.проверка_б(), (self.цели, []))
 
 	def test_пересброс_курса(self):
 		"""Сброс архивирует только свидетельства своего курса: после сброса курса B подтверждение из
 		курса A засчитывается, а сброс курса A не открывает урок курса B, закрытый засчётом."""
 		from lms_frappe_app.agent_learning.reset import сбросить_прогресс
 
-		self.подтвердить_в_а(3, "s-1")
+		e1 = self.подтвердить_в_а(3, "s-1")
 		self.assertTrue(self.закрыть_урок_б()["complete"]["ok"])
 
 		сбросить_прогресс(self.ученик, self.курс_б, "Administrator")
-		self.assertEqual(self.непроверенные_б(), [])
+		self.assertEqual(self.проверка_б()[1][0]["evidence"], e1)
 		зачислить_на_курс(self.ученик, self.курс_б)
 		self.assertTrue(self.закрыть_урок_б()["complete"]["ok"])
 
@@ -165,7 +173,7 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			),
 			queue.ПРОЙДЕН,
 		)
-		self.assertEqual(self.непроверенные_б(), self.цели)
+		self.assertEqual(self.проверка_б(), (self.цели, []))
 
 	def test_граница_ключей_карты_внутри_релиза(self):
 		"""Запись другого курса без версии компетенции — ключ карты внутри релиза — не засчитывается,
@@ -189,7 +197,7 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 
 		with self.subTest("слаг в записи без версии"):
 			вставить(self.курс_а, self.к["a"], 0)
-			self.assertEqual(self.непроверенные_б(), self.цели)
+			self.assertEqual(self.проверка_б(), (self.цели, []))
 
 		with self.subTest("курс с картой внутри релиза"):
 			курс, релиз = курс_из_релиза(

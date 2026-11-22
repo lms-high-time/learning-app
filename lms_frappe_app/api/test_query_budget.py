@@ -49,6 +49,7 @@ from lms_frappe_app.tests.sample_data import (
 )
 from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.catalog import service as каталог
+from lms_frappe_app.agent_learning.competencies import evidence
 from lms_frappe_app.agent_learning.releases import index
 from lms_frappe_app.tests.catalog_sample import ключи_примера, поверх_опубликованного, пример_каталога
 from lms_frappe_app.agent_learning.runs import service as прохождения
@@ -222,6 +223,14 @@ from lms_frappe_app.testing import сколько_запросов
 	# Карта ученика по курсу на каталоге: доступ к курсу, действующий релиз, карта из
 	# каталога (как у `start_lesson_catalog`), цели уроков, прохождения и журнал ученика.
 	"my_competencies_catalog": 13,
+	# Закрытие урока курса на каталоге, цель закрыта засчётом подтверждения из другого курса
+	# (learning-services#826): занятие, доступ, прохождение с блокировкой и пункты; цели урока;
+	# карта курса из каталога один раз на запрос (запись релиза, цели уроков, составляющие,
+	# похожие, компетенции); журнал ученика по курсу и по компетенциям каталога из целей во всех
+	# курсах — одной выборкой, сколько бы курсов ни было; квиз, предложение очереди, зачёт урока
+	# с прогрессом Learning, занятие и событие вердикта; событие засчёта и активность занятия —
+	# на каждую засчитанную цель; что дальше — следующий урок, пустые блоки, домашка.
+	"complete_lesson_credited": 76,
 }
 
 
@@ -321,6 +330,49 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 			lambda: student.my_competencies(course=курс),
 			остудить=index.сбросить_кэш_карт,
 		)
+
+	def test_бюджет_complete_lesson_засчёт_не_растёт_с_курсами(self):
+		"""Урок курса на каталоге закрыт засчётом: подтверждения из одного другого курса и из двух —
+		бюджет один на оба. Прогрев — такое же закрытие урока ещё одного курса."""
+		frappe.set_user("Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		к = ключи_примера(суффикс)
+		версия = каталог.опубликовать(поверх_опубликованного(пример_каталога(суффикс)), "Administrator")[
+			"version"
+		]
+		frappe.set_user(self.ученик)
+
+		def подтвердить() -> None:
+			курс, релиз = self._курс_на_каталоге(версия, к["a"])
+			занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, курс, "l-1"))
+			тексты = {"task": "Задание", "student_action": "Сделал", "assessment": "Следует из работы"}
+			отметки = {"hints": False, "corrected": False, "indirect": False}
+			evidence.записать(
+				занятие, релиз, "l-1", к["a"], "confirmed", 3, тексты, "free", отметки, f"qb-{курс}"
+			)
+
+		def к_закрытию() -> str:
+			курс, _ = self._курс_на_каталоге(версия, к["a"])
+			занятие = student.start_lesson(lesson=урок_релиза(курс, "l-1"))["data"]["session"]
+			отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"), занятие)
+			return занятие
+
+		подтвердить()
+		self.assertTrue(student.complete_lesson(к_закрытию())["ok"])
+		for других in (1, 2):
+			if других == 2:
+				подтвердить()
+			занятие = к_закрытию()
+			with self.subTest(других_курсов=других):
+				self._ворота(
+					"complete_lesson_credited",
+					lambda занятие=занятие: self.assertTrue(student.complete_lesson(занятие)["ok"]),
+					прогреть=False,
+					остудить=index.сбросить_кэш_карт,
+				)
+			self.assertEqual(
+				frappe.db.count("Agent Session Event", {"session": занятие, "kind": "Goal Credited"}), 1
+			)
 
 	def test_бюджет_submit_answer(self):
 		попытка = self._попытка()
@@ -734,6 +786,18 @@ class IntegrationTestQueryBudget(IntegrationTestCase):
 		frappe.set_user(self.ученик)
 		student.update_artifact(курс, "notebook", "log", rows=[{"topic": "Первая встреча"}])
 		return урок_релиза(курс, "l-1"), урок_релиза(курс, "l-2")
+
+	def _курс_на_каталоге(self, версия: int, компетенция: str) -> tuple[str, str]:
+		"""Курс из релиза на выпуске каталога `версия` той же организации: у первого урока цель по
+		`компетенция` уровня 2; (курс, релиз)."""
+		frappe.set_user("Administrator")
+		релиз = пример_релиза(f"qb-cat-{frappe.generate_hash(length=8)}")
+		релиз["catalog"] = версия
+		релиз["lessons"][0]["competencies"] = [{"competency": компетенция, "target": 2}]
+		курс, имя = курс_из_релиза(релиз=релиз)
+		self._назначить(курс)
+		frappe.set_user(self.ученик)
+		return курс, имя
 
 	def _репорт(self, курс: str, ключ: str) -> None:
 		"""Репорт по уроку действующего релиза курса — с этим релизом."""

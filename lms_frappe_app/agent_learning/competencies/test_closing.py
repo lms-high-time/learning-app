@@ -8,7 +8,7 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
-from lms_frappe_app.agent_learning.competencies.closing import непроверенные_по_записям
+from lms_frappe_app.agent_learning.competencies.closing import засчёты_по_записям, непроверенные_по_записям
 
 
 class _Запись(dict):
@@ -100,6 +100,36 @@ class TestНепроверенные(UnitTestCase):
 				self.assertEqual(
 					[ц["competency"] for ц in непроверенные_по_записям(записи, "c", "l-3", ЦЕЛИ)], осталось
 				)
+
+
+class TestЗасчёты(UnitTestCase):
+	def test_засчёт_только_из_другого_курса(self):
+		for случай, записи, засчитано in (
+			("ничего нет", [], []),
+			("подтверждение этого курса", [запись("e1", "I1", "confirmed", 3, урок="l-1")], []),
+			("пропуск в уроке", [запись("e1", "I1", "skipped")], []),
+			(
+				"другой курс — последнее из закрывающих",
+				[
+					запись("e1", "I1", "confirmed", 4, курс="a"),
+					запись("e2", "I1", "confirmed", 2, курс="b"),
+					запись("e3", "I1", "confirmed", 3, курс="b"),
+				],
+				[{"competency": "I1", "target": 3, "evidence": "e3", "course": "b", "level": 3}],
+			),
+			(
+				"цель закрывает и запись этого курса",
+				[запись("e1", "I1", "confirmed", 3, курс="a"), запись("e2", "I1", "difficulty", 3)],
+				[],
+			),
+			(
+				"подтверждение другого курса ниже цели",
+				[запись("e1", "B2", "confirmed", 1, курс="a")],
+				[],
+			),
+		):
+			with self.subTest(случай):
+				self.assertEqual(засчёты_по_записям(записи, "c", "l-3", ЦЕЛИ), засчитано)
 
 
 class IntegrationTestЗакрытиеУрока(IntegrationTestCase):
