@@ -31,6 +31,7 @@ from __future__ import annotations
 import frappe
 from frappe.utils import now_datetime
 
+from lms_frappe_app.agent_learning.competencies import evidence as свидетельства_карты
 from lms_frappe_app.agent_learning.constants import (
 	ЗАНЯТИЕ_БРОШЕНО,
 	ОТКРЫТЫЕ,
@@ -86,10 +87,15 @@ def сбросить_прогресс(ученик: str, курс: str, кто: 
 	# Журнал карты компетенций — как журнал проверки: свидетельства описывают
 	# работу ученика, а повторное прохождение начинается без уровней
 	# (learning-services#808). UPDATE по отбору — по той же причине.
-	свидетельства = frappe.db.count("Agent Competency Event", {"student": ученик, "course": курс})
-	frappe.db.set_value(
-		"Agent Competency Event", {"student": ученик, "course": курс}, архив, update_modified=False
-	)
+	# Пересмотр и заключение аудита, которые вывели подтверждения других курсов,
+	# остаются действующими (learning-services#826). `Why:` журнал компетенции
+	# каталога общий на все курсы, и иначе сброс курса отменял бы снижение уровня,
+	# сделанное в нём, — подтверждения другого курса снова засчитывались бы.
+	отбор = {"student": ученик, "course": курс}
+	if остаются := свидетельства_карты.выводят_из_других_курсов(ученик, курс):
+		отбор["name"] = ("not in", остаются)
+	свидетельства = frappe.db.count("Agent Competency Event", отбор)
+	frappe.db.set_value("Agent Competency Event", отбор, архив, update_modified=False)
 
 	документы = frappe.get_all(
 		"Agent Student Artifact", filters={"student": ученик, "course": курс}, pluck="name"

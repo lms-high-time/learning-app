@@ -18,6 +18,10 @@ Cenda нет, и проверить, было ли всё так в разгов
 Заключение — отдельная запись журнала (`Audit`) с причиной и ссылкой на
 свидетельство: история не стирается. Отмена не открывает закрытый урок и не
 отменяет завершение курса — она меняет только уровень.
+
+Заключение по свидетельству компетенции каталога действует во всех курсах
+ученика (learning-services#826): запись аудита несёт версию компетенции
+проверенного свидетельства, и журнал других курсов её видит.
 """
 
 import json
@@ -25,6 +29,7 @@ import json
 import frappe
 
 from lms_frappe_app.agent_learning.competencies import evidence
+from lms_frappe_app.agent_learning.constants import СОБЫТИЕ_ЗАКРЫТИЕ_ОТКАЗАНО, СОБЫТИЕ_ЦЕЛЬ_ЗАСЧИТАНА
 from lms_frappe_app.agent_learning.errors import Отказ
 
 ДОСТАТОЧНО, НЕДОСТАТОЧНО, НЕЛЬЗЯ_ПРОВЕРИТЬ, ПРОТИВОРЕЧИЕ = (
@@ -75,6 +80,7 @@ def заключить(событие: str, заключение: str, прич�
 			"session",
 			"release",
 			"competency",
+			"competency_version",
 			"outcome",
 			"level",
 			"withdrawn",
@@ -103,13 +109,19 @@ def заключить(событие: str, заключение: str, прич�
 			frappe.get_all(evidence.ЖУРНАЛ, filters={"name": ("in", снятые or [""])}, pluck="level"),
 			default=0,
 		)
-	# Отменяется только действующее подтверждение: у затруднения уровня нет, а выведенное уже вне расчёта.
+	# Отменяется только действующее подтверждение: у затруднения уровня нет, а выведенное уже вне расчёта —
+	# у компетенции каталога и пересмотром в другом курсе.
+	сквозная = bool(запись.competency_version)
 	отменить = (
 		запись.kind == evidence.СВИДЕТЕЛЬСТВО
 		and заключение == ПРОТИВОРЕЧИЕ
 		and запись.outcome == evidence.ПОДТВЕРЖДЕНО
 		and запись.name
-		not in evidence._выведенные(evidence._записи(запись.student, запись.course, запись.competency))
+		not in evidence._выведенные(
+			evidence._записи(
+				запись.student, запись.course, запись.competency, [запись.competency] if сквозная else None
+			)
+		)
 	)
 	имя = (
 		frappe.get_doc(
@@ -123,6 +135,7 @@ def заключить(событие: str, заключение: str, прич�
 				"session": запись.session,
 				"release": запись.release,
 				"competency": запись.competency,
+				"competency_version": запись.competency_version,
 				"audited": запись.name,
 				"conclusion": заключение,
 				"level": уровень,
@@ -138,7 +151,7 @@ def заключить(событие: str, заключение: str, прич�
 		"event": запись.name,
 		"conclusion": заключение,
 		"withdrawn": отменить,
-		"state": evidence.состояние(запись.student, запись.course).get(запись.competency, evidence.ПУСТО),
+		"state": evidence.состояние_компетенции(запись.student, запись.course, запись.competency, сквозная),
 	}
 
 
@@ -147,16 +160,27 @@ def выборка(курс: str | None, предел: int) -> list[dict]:
 	новые первыми: пересмотры уровня (у них нет проверки на сервере, кроме «только вниз»), уровень 4,
 	записанное при отказе в закрытии, косвенное, с подсказкой или исправлением, остальное.
 
+	«При отказе в закрытии» — и подтверждение, которое засчитано в другом курсе (`Goal Credited`)
+	в занятии, где закрытие урока до того отказали (`credited_after_refusal`,
+	learning-services#826): иначе отметка `after_refusal` обходилась бы записью в другом курсе.
+
 	Проверенные исключаются и порядок считается в самом запросе: иначе после первой тысячи
 	разобранных выборка опустела бы, а старые пересмотры не попали бы в неё никогда. Отдаёт тексты
 	записи — аудитор проверяет, следует ли уровень из неё; ученика в ответе нет, архив сброса не входит.
 	"""
+	засчитано_после_отказа = """exists (
+			select 1 from `tabAgent Session Event` g
+			join `tabAgent Session Event` r
+				on r.session = g.session and r.kind = %(refused)s and r.creation <= g.creation
+			where g.kind = %(credited)s and g.credited_by = e.name
+		)"""
 	кандидаты = frappe.db.sql(
 		f"""
 		select e.name, e.kind, e.course, e.lesson_key, e.competency, e.outcome, e.level,
 			e.task, e.student_action, e.assessment, e.uncertainties,
 			e.transfer_difference, e.transfer_adaptation,
-			e.task_form, e.hints, e.corrected, e.indirect, e.after_refusal, e.withdrawn, e.occurred_at
+			e.task_form, e.hints, e.corrected, e.indirect, e.after_refusal, e.withdrawn, e.occurred_at,
+			{засчитано_после_отказа} as credited_after_refusal
 		from `tab{evidence.ЖУРНАЛ}` e
 		where e.student is not null
 			and e.kind in (%(evidence)s, %(revision)s)
@@ -169,7 +193,7 @@ def выборка(курс: str | None, предел: int) -> list[dict]:
 			case
 				when e.kind = %(revision)s then 0
 				when e.outcome = 'confirmed' and e.level = 4 then 1
-				when e.after_refusal = 1 then 2
+				when e.after_refusal = 1 or {засчитано_после_отказа} then 2
 				when e.indirect = 1 then 3
 				when e.hints = 1 or e.corrected = 1 then 4
 				else 5
@@ -181,6 +205,8 @@ def выборка(курс: str | None, предел: int) -> list[dict]:
 			"evidence": evidence.СВИДЕТЕЛЬСТВО,
 			"revision": evidence.ПЕРЕСМОТР,
 			"audit": evidence.АУДИТ,
+			"refused": СОБЫТИЕ_ЗАКРЫТИЕ_ОТКАЗАНО,
+			"credited": СОБЫТИЕ_ЦЕЛЬ_ЗАСЧИТАНА,
 			"course": курс,
 			"limit": предел,
 		},
@@ -207,6 +233,7 @@ def выборка(курс: str | None, предел: int) -> list[dict]:
 				"corrected": bool(з.corrected),
 				"indirect": bool(з.indirect),
 				"after_refusal": bool(з.after_refusal),
+				"credited_after_refusal": bool(з.credited_after_refusal),
 			},
 			"withdrawn": json.loads(з.withdrawn) if з.withdrawn else [],
 			"recorded_at": з.occurred_at.isoformat() if з.occurred_at else None,

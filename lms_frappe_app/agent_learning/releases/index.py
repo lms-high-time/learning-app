@@ -538,6 +538,8 @@ def _список_json(значение) -> list:
 
 #: Ключ кэша карт релизов на каталоге в `frappe.local.request_cache`.
 КЭШ_КАРТ = "lms_competency_catalog_maps"
+#: Ключ кэша признака «релиз на каталоге» в `frappe.local.request_cache` (`на_каталоге`).
+КЭШ_КАТАЛОГА = "lms_competency_catalog_flags"
 
 
 def карта_компетенций(релиз: str) -> list[dict]:
@@ -557,6 +559,7 @@ def карта_компетенций(релиз: str) -> list[dict]:
 	строка = frappe.db.get_value(РЕЛИЗ, релиз, ["competency_map", "competency_catalog"], as_dict=True)
 	if not строка:
 		return []
+	frappe.local.request_cache[КЭШ_КАТАЛОГА][релиз] = bool(строка.competency_catalog)
 	if строка.competency_catalog:
 		кэш[релиз] = каталог.карты_по_целям({релиз: цели_уроков(релиз)}).get(релиз, [])
 		return кэш[релиз]
@@ -564,16 +567,45 @@ def карта_компетенций(релиз: str) -> list[dict]:
 
 
 def сбросить_кэш_карт() -> None:
-	"""Забыть карты релизов на каталоге, прочитанные в этом запросе (`карта_компетенций`)."""
+	"""Забыть карты релизов на каталоге и признаки каталога, прочитанные в этом запросе
+	(`карта_компетенций`, `на_каталоге`)."""
 	frappe.local.request_cache.pop(КЭШ_КАРТ, None)
+	frappe.local.request_cache.pop(КЭШ_КАТАЛОГА, None)
+
+
+def на_каталоге(релиз: str) -> bool:
+	"""Релиз на каталоге компетенций (`competency_catalog`, learning-services#826).
+
+	Без запроса, если признак уже прочитан в этом запросе: карта курса
+	(`карта_компетенций`) или цели урока (`компетенции_урока`) читают его той же выборкой;
+	иначе — одной выборкой. Признак релиза не меняется: публикация пишет новый релиз.
+	"""
+	if релиз in frappe.local.request_cache[КЭШ_КАРТ]:
+		return True
+	признаки = frappe.local.request_cache[КЭШ_КАТАЛОГА]
+	if релиз not in признаки:
+		признаки[релиз] = bool(frappe.db.get_value(РЕЛИЗ, релиз, "competency_catalog"))
+	return признаки[релиз]
 
 
 def компетенции_урока(релиз: str, ключ: str) -> list[dict]:
 	"""Цели урока по компетенциям (`lessons[].competencies`): `{competency, target}` по порядку
-	релиза; у урока без карты — `[]`."""
-	return _список_json(
-		frappe.db.get_value(УРОК, {"parenttype": РЕЛИЗ, "parent": релиз, "lesson_key": ключ}, "competencies")
+	релиза; у урока без карты — `[]`. Той же выборкой — признак каталога релиза для
+	`на_каталоге`: закрытию урока он нужен, чтобы не читать карту курса со старой картой."""
+	у, р = frappe.qb.DocType(УРОК), frappe.qb.DocType(РЕЛИЗ)
+	строки = (
+		frappe.qb.from_(у)
+		.join(р)
+		.on(р.name == у.parent)
+		.select(у.competencies, р.competency_catalog)
+		.where((у.parenttype == РЕЛИЗ) & (у.parent == релиз) & (у.lesson_key == ключ))
+		.limit(1)
+		.run(as_dict=True)
 	)
+	if not строки:
+		return []
+	frappe.local.request_cache[КЭШ_КАТАЛОГА][релиз] = bool(строки[0].competency_catalog)
+	return _список_json(строки[0].competencies)
 
 
 def рамка(релиз: str) -> dict:
