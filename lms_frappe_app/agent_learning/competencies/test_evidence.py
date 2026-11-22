@@ -303,5 +303,5 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		self.записать("r-1")
 		итог = сбросить_прогресс(self.ученик, self.курс, "Administrator")
 		self.assertEqual(итог["competency_events_archived"], 1)
-		self.assertEqual(evidence.состояние(self.ученик, self.курс), {})
+		self.assertEqual(evidence._записи(self.ученик, self.курс), [])
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"archived_student": self.ученик}), 1)
