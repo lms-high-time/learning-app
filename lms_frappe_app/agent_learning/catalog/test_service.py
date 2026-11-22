@@ -20,6 +20,10 @@ from lms_frappe_app.tests.catalog_sample import (
 )
 
 
+def каталог_схема(каталог: dict, ключ: str) -> dict:
+	return next(с for с in каталог["classifications"] if с["key"] == ключ)
+
+
 class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 	def setUp(self):
 		self.суффикс = frappe.generate_hash(length=6)
@@ -37,8 +41,9 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 
 	def test_выпуски_и_версии(self):
 		"""Первый выпуск заводит всё; тот же каталог, переставленный, — `unchanged`;
-		редакторская правка версию не трогает и называет поля; правка признака —
-		следующая версия с этого выпуска."""
+		редакторская правка — и правка классов компетенции — версию не трогает и называет
+		поля; новая схема, новый и переименованный класс видны в правках и в записях схем;
+		правка признака — следующая версия с этого выпуска."""
 		каталог = поверх_опубликованного(пример_каталога(self.суффикс))
 		первый = self.опубликовать(каталог, коммит="ab" * 20)
 
@@ -47,11 +52,43 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 			self.assertEqual(первый["commit"], "ab" * 20)
 			self.assertEqual(первый["catalog_release"], read.имя_выпуска(первый["version"]))
 			self.assertEqual(первый["changes"]["added"], [self.к["a"], self.к["b"], self.к["whole"]])
+			self.assertEqual(
+				{
+					с: первый["changes"]["classifications"]["classes"]["added"][с]
+					for с in (self.к["scheme"], self.к["nos"])
+				},
+				{
+					self.к["scheme"]: [self.к["x"], self.к["y"]],
+					self.к["nos"]: [self.к["people"], self.к["self"]],
+				},
+			)
 			целое = frappe.get_doc(read.КОМПЕТЕНЦИЯ, self.к["whole"])
 			self.assertEqual(
-				(целое.kind, целое.area, целое.version, целое.version_release),
-				("integrative", self.к["area"], 1, первый["catalog_release"]),
+				(целое.kind, целое.version, целое.version_release),
+				("integrative", 1, первый["catalog_release"]),
 			)
+			классы = {
+				к.classification: к.class_key for к in frappe.get_doc(read.КОМПЕТЕНЦИЯ, self.к["a"]).classes
+			}
+			self.assertEqual(
+				(классы[self.к["scheme"]], классы[self.к["nos"]]), (self.к["x"], self.к["people"])
+			)
+			схема = frappe.get_doc(read.СХЕМА, self.к["nos"])
+			self.assertEqual(
+				(схема.title, схема.required, схема.source.splitlines()),
+				(f"Функции руководителя {self.суффикс}", 0, каталог_схема(каталог, self.к["nos"])["source"]),
+			)
+			self.assertEqual(
+				[(к.class_key, к.title) for к in схема.classes],
+				[(self.к["people"], "Работать с людьми"), (self.к["self"], "Управлять собой")],
+			)
+			# Своя схема без первоисточника публикуется; пустой список не читается из базы
+			# правкой — следующая публикация не называет её изменённой.
+			направление = frappe.db.get_value(
+				read.СХЕМА, self.к["scheme"], ["required", "source"], as_dict=True
+			)
+			self.assertEqual((направление.required, направление.source or ""), (1, ""))
+			self.assertEqual(service._опубликованные_схемы()[self.к["scheme"]]["source"], [])
 			self.assertEqual(
 				[(ч.competency, ч.from_level) for ч in целое.parts], [(self.к["a"], 1), (self.к["b"], 3)]
 			)
@@ -77,9 +114,14 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 			себя = next(к for к in правка["competencies"] if к["key"] == self.к["a"])
 			себя["title"] = "Новое название"
 			себя.pop("similar")
+			себя["classes"].pop(self.к["nos"])
+			себя["classes"][self.к["scheme"]] = self.к["y"]
 			целое = next(к for к in правка["competencies"] if к["key"] == self.к["whole"])
 			целое["kind"] = "base"
 			целое.pop("parts")
+			nos = каталог_схема(правка, self.к["nos"])
+			nos["classes"][1]["title"] = "Управлять собой и развитием"
+			nos["classes"].append({"key": f"tasks-{self.суффикс}", "title": "Достигать результата"})
 			второй = self.опубликовать(правка)
 			self.assertEqual(второй["version"], первый["version"] + 1)
 			self.assertEqual(
@@ -88,11 +130,26 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 					"added": [],
 					"substantive": [],
 					"editorial": [
-						{"key": self.к["a"], "fields": ["title", "similar"]},
+						{"key": self.к["a"], "fields": ["title", "classes", "similar"]},
 						{"key": self.к["whole"], "fields": ["kind", "parts"]},
 					],
-					"areas": {"added": [], "renamed": []},
+					"classifications": {
+						"added": [],
+						"changed": [],
+						"classes": {
+							"added": {self.к["nos"]: [f"tasks-{self.суффикс}"]},
+							"renamed": {self.к["nos"]: [self.к["self"]]},
+						},
+					},
 				},
+			)
+			self.assertEqual(
+				[(к.class_key, к.title) for к in frappe.get_doc(read.СХЕМА, self.к["nos"]).classes],
+				[
+					(self.к["people"], "Работать с людьми"),
+					(self.к["self"], "Управлять собой и развитием"),
+					(f"tasks-{self.суффикс}", "Достигать результата"),
+				],
 			)
 			целое = frappe.get_doc(read.КОМПЕТЕНЦИЯ, self.к["whole"])
 			self.assertEqual((целое.kind, целое.parts, целое.version), ("base", [], 1))
@@ -101,6 +158,9 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 				(запись.title, запись.similar, запись.version, запись.version_release),
 				("Новое название", [], 1, первый["catalog_release"]),
 			)
+			классы = {к.classification: к.class_key for к in запись.classes}
+			self.assertEqual(классы[self.к["scheme"]], self.к["y"])
+			self.assertNotIn(self.к["nos"], классы)
 
 		with self.subTest("правка по существу"):
 			по_существу = copy.deepcopy(правка)
@@ -120,16 +180,35 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 
 	def test_отказы(self):
 		каталог = поверх_опубликованного(пример_каталога(self.суффикс))
-		запасная = {"key": f"spare-{self.суффикс}", "title": "Запасная"}
-		каталог["areas"].append(запасная)
+		запасная = {
+			"key": f"spare-{self.суффикс}",
+			"title": "Запасная",
+			"source": ["https://example.com/spare"],
+			"required": False,
+			"classes": [{"key": f"spare-class-{self.суффикс}", "title": "Запасной"}],
+		}
+		каталог["classifications"].append(запасная)
 		self.опубликовать(каталог)
 
-		with self.subTest("область пропала"):
-			без_области = copy.deepcopy(каталог)
-			без_области["areas"].remove(запасная)
-			отказ = self.отказ(без_области)
+		with self.subTest("схема пропала"):
+			без_схемы = copy.deepcopy(каталог)
+			без_схемы["classifications"].remove(запасная)
+			отказ = self.отказ(без_схемы)
 			self.assertEqual(отказ.код, service.КЛЮЧИ_ПРОПАЛИ)
-			self.assertEqual(отказ.подробности, {"competencies": [], "areas": [запасная["key"]]})
+			self.assertEqual(
+				отказ.подробности, {"competencies": [], "classifications": [запасная["key"]], "classes": {}}
+			)
+
+		with self.subTest("класс пропал"):
+			без_класса = copy.deepcopy(каталог)
+			nos = каталог_схема(без_класса, self.к["nos"])
+			nos["classes"] = [к for к in nos["classes"] if к["key"] != self.к["self"]]
+			отказ = self.отказ(без_класса)
+			self.assertEqual(отказ.код, service.КЛЮЧИ_ПРОПАЛИ)
+			self.assertEqual(
+				отказ.подробности,
+				{"competencies": [], "classifications": [], "classes": {self.к["nos"]: [self.к["self"]]}},
+			)
 
 		with self.subTest("ключ пропал"):
 			без_компетенции = copy.deepcopy(каталог)
@@ -143,24 +222,36 @@ class IntegrationTestПубликацияКаталога(IntegrationTestCase):
 						{"competency": self.к["a"], "from_level": 1},
 						{"competency": "extra-" + self.суффикс, "from_level": 2},
 					]
-			без_компетенции["competencies"].append(компетенция("extra-" + self.суффикс, self.к["area"]))
+			# Классы — как у соседней: с обязательными схемами прошлых тестов (`поверх_опубликованного`).
+			классы = next(к for к in каталог["competencies"] if к["key"] == self.к["whole"])["classes"]
+			без_компетенции["competencies"].append(компетенция("extra-" + self.суффикс, классы))
 			отказ = self.отказ(без_компетенции)
 			self.assertEqual(отказ.код, service.КЛЮЧИ_ПРОПАЛИ)
-			self.assertEqual(отказ.подробности, {"competencies": [self.к["b"]], "areas": []})
+			self.assertEqual(
+				отказ.подробности, {"competencies": [self.к["b"]], "classifications": [], "classes": {}}
+			)
 			self.assertFalse(frappe.db.exists(read.КОМПЕТЕНЦИЯ, "extra-" + self.суффикс))
 
 		for случай, значение, код in (
 			("не JSON", "{", service.КАТАЛОГ_НЕВЕРЕН),
 			("формат", {**каталог, "format": "lms-competency-catalog/2"}, service.ФОРМАТ_НЕ_ТОТ),
-			("схема", {**каталог, "areas": []}, service.КАТАЛОГ_НЕВЕРЕН),
+			("схема", {**каталог, "classifications": None}, service.КАТАЛОГ_НЕВЕРЕН),
 			(
-				"ссылки",
+				"класс не из схемы",
 				{
 					**каталог,
 					"competencies": [
 						*каталог["competencies"],
-						компетенция("lost-" + self.суффикс, "nowhere"),
+						компетенция("lost-" + self.суффикс, {self.к["scheme"]: "nowhere"}),
 					],
+				},
+				service.КАТАЛОГ_НЕ_СХОДИТСЯ,
+			),
+			(
+				"нет класса в обязательной схеме",
+				{
+					**каталог,
+					"competencies": [*каталог["competencies"], компетенция("lost-" + self.суффикс)],
 				},
 				service.КАТАЛОГ_НЕ_СХОДИТСЯ,
 			),

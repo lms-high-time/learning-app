@@ -1,20 +1,18 @@
 {
  "actions": [],
- "allow_rename": 0,
- "creation": "2026-11-22 12:00:00.000000",
+ "creation": "2026-11-23 12:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "area_key",
+  "class_key",
   "title"
  ],
  "fields": [
   {
-   "fieldname": "area_key",
+   "fieldname": "class_key",
    "fieldtype": "Data",
    "label": "Ключ",
    "reqd": 1,
-   "unique": 1,
    "in_list_view": 1,
    "read_only": 1
   },
@@ -28,35 +26,17 @@
    "read_only": 1
   }
  ],
- "grid_page_length": 50,
- "links": [],
- "modified": "2026-11-22 12:00:00.000000",
+ "modified": "2026-11-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
- "name": "Agent Competency Area",
+ "name": "Agent Competency Classification Class",
  "owner": "Administrator",
- "permissions": [
-  {
-   "export": 1,
-   "read": 1,
-   "report": 1,
-   "role": "System Manager"
-  },
-  {
-   "read": 1,
-   "report": 1,
-   "role": "Course Creator"
-  },
-  {
-   "read": 1,
-   "report": 1,
-   "role": "Moderator"
-  }
- ],
+ "links": [],
+ "permissions": [],
  "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
- "track_changes": 0,
- "autoname": "field:area_key"
+ "istable": 1,
+ "editable_grid": 0
 }

@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/lms-high-time/learning-app/master/lms_frappe_app/agent_learning/catalog/catalog.public.schema.json",
   "title": "Каталог компетенций",
-  "description": "Компетенции на все курсы: признаки уровней, область, связи «часть» и «похожа»; области — закрытый список. Формат — CONTRACT.md, раздел «Каталог компетенций».",
+  "description": "Компетенции на все курсы: признаки уровней, классы по схемам классификации, связи «часть» и «похожа»; у схемы — закрытый список классов. Формат — CONTRACT.md, раздел «Каталог компетенций».",
   "type": "object",
-  "required": ["format", "areas", "competencies"],
+  "required": ["format", "classifications", "competencies"],
   "additionalProperties": false,
   "properties": {
     "format": {"const": "lms-competency-catalog/1"},
-    "areas": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/area"}},
+    "classifications": {"type": "array", "items": {"$ref": "#/$defs/classification"}},
     "competencies": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/competency"}}
   },
   "$defs": {
@@ -24,25 +24,51 @@
       "description": "Уровень освоения: 1 — узнаёт, 2 — объясняет, 3 — применяет, 4 — переносит."
     },
     "level_text": {"type": "string", "minLength": 1},
-    "area": {
+    "title": {"type": "string", "minLength": 1, "maxLength": 140},
+    "classification": {
       "type": "object",
-      "required": ["key", "title"],
+      "description": "Схема классификации компетенций: закрытый список классов и первоисточник.",
+      "required": ["key", "title", "source", "required", "classes"],
       "additionalProperties": false,
       "properties": {
         "key": {"$ref": "#/$defs/slug"},
-        "title": {"type": "string", "minLength": 1, "maxLength": 140}
+        "title": {"$ref": "#/$defs/title"},
+        "source": {
+          "type": "array",
+          "description": "Адреса первоисточника схемы; у своей схемы список пуст.",
+          "items": {"type": "string", "pattern": "^https?://[^\\s]+$", "maxLength": 2000}
+        },
+        "required": {"type": "boolean", "description": "Класс в этой схеме обязателен каждой компетенции."},
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["key", "title"],
+            "additionalProperties": false,
+            "properties": {
+              "key": {"$ref": "#/$defs/slug"},
+              "title": {"$ref": "#/$defs/title"}
+            }
+          }
+        }
       }
     },
     "competency": {
       "type": "object",
-      "required": ["key", "title", "description", "kind", "area", "levels"],
+      "required": ["key", "title", "description", "kind", "levels"],
       "additionalProperties": false,
       "properties": {
         "key": {"$ref": "#/$defs/slug"},
         "title": {"type": "string", "minLength": 1, "maxLength": 120},
         "description": {"type": "string", "minLength": 1, "description": "Что человек делает, когда владеет умением."},
         "kind": {"enum": ["base", "integrative"]},
-        "area": {"$ref": "#/$defs/slug", "description": "Ключ области из areas."},
+        "classes": {
+          "type": "object",
+          "description": "Класс компетенции в каждой схеме, где она классифицирована: ключ схемы → ключ класса из её списка.",
+          "propertyNames": {"$ref": "#/$defs/slug"},
+          "additionalProperties": {"$ref": "#/$defs/slug"}
+        },
         "levels": {
           "type": "object",
           "description": "Признаки уровней 1–4 — один набор на все курсы, без курсового контекста.",

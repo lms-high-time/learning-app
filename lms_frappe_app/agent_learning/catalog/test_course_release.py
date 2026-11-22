@@ -36,7 +36,7 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 		cls.к = ключи_примера(cls.суффикс)
 		cls.каталог = поверх_опубликованного(пример_каталога(cls.суффикс))
 		# Компетенция каталога вне карты курса: ни цель урока, ни составляющая.
-		cls.каталог["competencies"].append(компетенция(f"lonely-{cls.суффикс}", cls.к["area"]))
+		cls.каталог["competencies"].append(компетенция(f"lonely-{cls.суффикс}", cls.к["classes"]))
 		cls.выпуск = каталог.опубликовать(cls.каталог, "Administrator")
 
 	@staticmethod
@@ -71,10 +71,10 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 			self.assertEqual([к_["key"] for к_ in карта], [к["a"], к["whole"], к["b"]])
 			целое = карта[1]
 			self.assertEqual(
-				(целое["kind"], целое["area"], целое["version"], целое["parts"]),
+				(целое["kind"], целое["classes"][к["scheme"]], целое["version"], целое["parts"]),
 				(
 					"integrative",
-					к["area"],
+					к["x"],
 					1,
 					[{"competency": к["a"], "from_level": 1}, {"competency": к["b"], "from_level": 3}],
 				),
@@ -108,11 +108,11 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 	def test_ссылки_на_каталог_проверяются(self):
 		# Новый выпуск каталога — редакторская правка компетенции вне курса: у релиза, собранного
 		# по прежнему выпуску, версия устарела.
-		одинокая = компетенция(f"lonely-{self.суффикс}", self.к["area"])
+		одинокая = компетенция(f"lonely-{self.суффикс}", self.к["classes"])
 		одинокая["title"] = "Другое название"
 		каталог.опубликовать(
 			поверх_опубликованного(
-				{"format": "lms-competency-catalog/1", "areas": [], "competencies": [одинокая]}
+				{"format": "lms-competency-catalog/1", "classifications": [], "competencies": [одинокая]}
 			),
 			"Administrator",
 		)
