@@ -125,10 +125,16 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 					"credited_by": e1,
 					"competency": self.к["a"],
 					"target": 2,
-					"note": f"{self.к['a']} не ниже 2: свидетельство {e1} курса {self.курс_а}, уровень 3",
+					"note": f"{self.к['a']} не ниже 2: засчитано ранее",
 				}
 			],
 		)
+		# Журнал занятий читает руководитель организации: источник и уровень засчёта ему не видны.
+		заметка = frappe.db.get_value(
+			"Agent Session Event", {"session": старт["session"], "kind": "Goal Credited"}, "note"
+		)
+		self.assertNotIn(self.курс_а, заметка)
+		self.assertNotIn("уровень", заметка)
 		# Очередь и состояние — по всем курсам, открытый уровень — по курсу B.
 		карта = queue.карта_ученика(self.ученик, self.курс_б, self.релиз_б)
 		self.assertEqual(
