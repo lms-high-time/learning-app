@@ -428,8 +428,14 @@ class IntegrationTestReleasePublisher(IntegrationTestCase):
 		]
 		frappe.set_user(self.публикатор)
 		# Ворота: любой новый метод авторинга публикатору закрыт, пока его не
-		# добавят к трём открытым явно.
-		открытые = {"publish_release", "list_courses", "course_releases"}
+		# добавят к открытым явно.
+		открытые = {
+			"publish_release",
+			"list_courses",
+			"course_releases",
+			"publish_competency_catalog",
+			"competency_catalog",
+		}
 		методы = {
 			имя: функция
 			for имя, функция in vars(authoring).items()

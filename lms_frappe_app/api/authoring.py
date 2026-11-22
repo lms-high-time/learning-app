@@ -27,6 +27,8 @@ from lms_frappe_app.agent_learning import (
 	testers,
 )
 from lms_frappe_app.agent_learning import course_translations as переводы_курса
+from lms_frappe_app.agent_learning.catalog import read as чтение_каталога
+from lms_frappe_app.agent_learning.catalog import service as каталог
 from lms_frappe_app.agent_learning.competencies import audit as аудит_карты
 from lms_frappe_app.agent_learning.competencies import views as представления_карты
 from lms_frappe_app.agent_learning.releases import checks as проверки_релиза
@@ -61,9 +63,10 @@ from lms_frappe_app.api import контракт, текущий_пользова
 АВТОРСКИЕ_РОЛИ = frozenset({"Course Creator", "Moderator", "System Manager", "Administrator"})
 
 #: Роль служебной учётки конвейера курсов (learning-services#685): публикация
-#: релиза и то чтение, которым конвейер сверяет версию, — список курсов и
-#: история релизов (`_публикатор`). Прав на DocType у роли нет, авторских
-#: ролей у учётки — тоже; инструктором курса она не становится.
+#: релиза и каталога компетенций и то чтение, которым конвейер сверяет версию, —
+#: список курсов, история релизов и последний выпуск каталога (`_публикатор`).
+#: Прав на DocType у роли нет, авторских ролей у учётки — тоже; инструктором
+#: курса она не становится.
 РОЛЬ_ПУБЛИКАТОРА = "Release Publisher"
 
 НЕТ_ЦЕЛЕЙ_КУРСА = "course_objectives_missing"
@@ -690,6 +693,46 @@ def _инструкторы(значение, подробно: bool = True) -> 
 			users=не_авторы,
 		)
 	return имена
+
+
+# --- каталог компетенций (learning-services#825) ---
+
+
+@frappe.whitelist(methods=["POST"])
+@контракт
+def publish_competency_catalog(catalog, commit=None) -> dict:
+	"""Публикует каталог компетенций целиком — новым выпуском.
+
+	`catalog` — каталог от конвейера курсов (объект или строка JSON), формат —
+	`CONTRACT.md`, «Каталог компетенций». Проверяется схемой и правилами
+	сервера; компетенции и области ложатся в опубликованный каталог. Вид правки
+	каждой компетенции — новая, по существу (изменён признак уровня: версия
+	растёт) или редакторская — вычисляет сервер. Опубликованная компетенция или
+	область, которой нет в каталоге, — отказ `catalog_keys_removed`: ключи
+	постоянные. Тот же каталог ещё раз — `unchanged`.
+
+	`commit` — коммит git, из которого собран каталог (`_коммит`): пишется в
+	новый выпуск. Необязателен.
+	"""
+	автор = _публикатор()
+	коммит = None if commit is None else _коммит(commit)
+	try:
+		return каталог.опубликовать(catalog, автор, коммит)
+	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+		frappe.db.rollback()
+		raise Отказ(
+			ЗАНЯТО, "Каталог сейчас меняет другой запрос: публикация откатилась — повторите"
+		) from None
+
+
+@frappe.whitelist()
+@контракт
+def competency_catalog() -> dict:
+	"""Последний выпуск каталога компетенций: снимок, версия выпуска и текущие версии
+	компетенций. Открыт публикатору: по нему конвейер сверяет собранный каталог с
+	опубликованным."""
+	_публикатор()
+	return чтение_каталога.последний()
 
 
 # --- обзор и публикация ---

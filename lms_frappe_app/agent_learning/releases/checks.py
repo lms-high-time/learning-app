@@ -170,6 +170,20 @@ def _компетенции(р: dict, к: list) -> None:
 	"""
 	компетенции = {к_["key"]: к_ for к_ in р.get("competencies") or []}
 	_повторы([к_["key"] for к_ in р.get("competencies") or []], "competencies", к)
+	связи_компетенций(компетенции, к)
+	for у in р["lessons"]:
+		где = f"lessons[{у['key']}].competencies"
+		свои = [ц["competency"] for ц in у.get("competencies") or []]
+		_повторы(свои, где, к)
+		for ключ in свои:
+			if ключ not in компетенции:
+				_ссылка(к, где, ключ)
+
+
+def связи_компетенций(компетенции: dict[str, dict], к: list) -> None:
+	"""Составляющие компетенций `ключ → {kind, parts?}`: без повторов и из тех же
+	компетенций, у базовой их нет, у интеграционной — не меньше двух различных и не
+	она сама, связи — без кругов. Общая для карты релиза и каталога компетенций."""
 	рёбра: dict[str, list[str]] = {}
 	for ключ, комп in компетенции.items():
 		где = f"competencies[{ключ}].parts"
@@ -201,13 +215,6 @@ def _компетенции(р: dict, к: list) -> None:
 		рёбра[ключ] = [ч for ч in части if ч in компетенции and ч != ключ]
 	if круг := _круг(рёбра):
 		к.append({"code": "competency_cycle", "where": "competencies", "keys": круг})
-	for у in р["lessons"]:
-		где = f"lessons[{у['key']}].competencies"
-		свои = [ц["competency"] for ц in у.get("competencies") or []]
-		_повторы(свои, где, к)
-		for ключ in свои:
-			if ключ not in компетенции:
-				_ссылка(к, где, ключ)
 
 
 def _круг(рёбра: dict[str, list[str]]) -> list[str] | None:
