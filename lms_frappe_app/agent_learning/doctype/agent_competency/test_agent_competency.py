@@ -16,23 +16,25 @@ def _вставить(документ: dict):
 	return запись.insert(ignore_permissions=True)
 
 
+def _выпуск(версия: int) -> dict:
+	return {
+		"doctype": "Agent Competency Catalog Release",
+		# Номер вне диапазона настоящих выпусков: версия уникальна.
+		"version": версия,
+		"catalog_format": "lms-competency-catalog/1",
+		"digest": frappe.generate_hash(length=64),
+		"published_by": "Administrator",
+		"published_at": now_datetime(),
+		"snapshot": "{}",
+	}
+
+
 class IntegrationTestКаталогТолькоВыпуском(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
 		суффикс = frappe.generate_hash(length=6)
-		cls.выпуск = frappe.get_doc(
-			{
-				"doctype": "Agent Competency Catalog Release",
-				# Номер вне диапазона настоящих выпусков: версия уникальна.
-				"version": 900000 + int(суффикс, 16) % 99999,
-				"catalog_format": "lms-competency-catalog/1",
-				"digest": frappe.generate_hash(length=64),
-				"published_by": "Administrator",
-				"published_at": now_datetime(),
-				"snapshot": "{}",
-			}
-		).insert(ignore_permissions=True)
+		cls.выпуск = _вставить(_выпуск(900000 + int(суффикс, 16) % 99999))
 		cls.область = _вставить(
 			{"doctype": "Agent Competency Area", "area_key": f"area-{суффикс}", "title": "Область"}
 		)
@@ -51,7 +53,8 @@ class IntegrationTestКаталогТолькоВыпуском(IntegrationTestC
 		)
 
 	def test_правка_и_удаление_мимо_выпуска_отклоняются(self):
-		"""Даже администратором: ни правка компетенции, области и выпуска, ни удаление."""
+		"""Даже администратором: ни правка компетенции, области и выпуска, ни удаление, ни
+		вставка компетенции и выпуска мимо публикации."""
 		self.assertEqual(self.компетенция.name, self.компетенция.competency_key)
 		self.assertEqual(self.выпуск.name, f"catalog-{self.выпуск.version}")
 		for doctype, имя, поле in (
@@ -85,3 +88,7 @@ class IntegrationTestКаталогТолькоВыпуском(IntegrationTestC
 						"version_release": self.выпуск.name,
 					}
 				).insert(ignore_permissions=True)
+
+		with self.subTest("выпуск мимо публикации"):
+			with self.assertRaises(frappe.ValidationError):
+				frappe.get_doc(_выпуск(self.выпуск.version + 1)).insert(ignore_permissions=True)

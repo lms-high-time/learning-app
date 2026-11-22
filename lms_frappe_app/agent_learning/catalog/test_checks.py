@@ -128,62 +128,110 @@ class UnitTestСхемаКаталога(UnitTestCase):
 				self.assertEqual(проблемы(правка), ожидаемое)
 
 
+def _правки(added=(), substantive=(), editorial=(), areas_added=(), renamed=()) -> dict:
+	return {
+		"added": list(added),
+		"substantive": list(substantive),
+		"editorial": list(editorial),
+		"areas": {"added": list(areas_added), "renamed": list(renamed)},
+	}
+
+
+class UnitTestКанон(UnitTestCase):
+	def test_перестановка_и_пустые_связи_не_меняют_канон(self):
+		"""Порядок компетенций, областей, составляющих и похожих, пустые связи и `3.0` вместо
+		`3` — тот же канонический вид, а значит тот же дайджест и снимок."""
+		каталог = пример_каталога(С)
+		переставленный = copy.deepcopy(каталог)
+		переставленный["competencies"].reverse()
+		целое = переставленный["competencies"][0]
+		целое["parts"].reverse()
+		целое["parts"][0]["from_level"] = 3.0
+		переставленный["competencies"][1].update(parts=[], similar=[])
+		self.assertEqual(checks.канон(переставленный), checks.канон(каталог))
+		self.assertEqual(
+			[к["key"] for к in checks.канон(каталог)["competencies"]],
+			sorted(К[к] for к in ("a", "b", "whole")),
+		)
+		self.assertNotIn("parts", checks.канон(каталог)["competencies"][1])
+
+
 class UnitTestВидПравки(UnitTestCase):
-	"""Версия растёт только с признаком уровня; остальное — редакторская правка."""
+	"""Версия растёт только с признаком уровня; остальное — редакторская правка с её полями."""
 
 	def test_первый_выпуск_всё_новое(self):
 		self.assertEqual(
-			checks.правки(None, пример_каталога(С), {}),
-			{"added": [К["a"], К["b"], К["whole"]], "substantive": [], "editorial": []},
+			checks.правки(None, checks.канон(пример_каталога(С)), {}, {}),
+			_правки(added=[К["a"], К["b"], К["whole"]], areas_added=[К["area"]]),
+		)
+
+	def test_новая_по_базе_а_не_по_снимку(self):
+		"""Компетенция в базе, но не в прежнем снимке, — не новая: её запись уже есть, и вставка
+		упёрлась бы в ключ. Сравнить её не с чем — правка по существу."""
+		новый = checks.канон(пример_каталога(С))
+		прежний = copy.deepcopy(новый)
+		прежний["competencies"] = [к for к in прежний["competencies"] if к["key"] != К["b"]]
+		версии = {К["a"]: 1, К["b"]: 2, К["whole"]: 1}
+		self.assertEqual(
+			checks.правки(прежний, новый, версии, {К["area"]: f"Область {С}"}),
+			_правки(substantive=[{"key": К["b"], "version": 3}]),
 		)
 
 	def test_вид_правки_по_полю(self):
-		прежний = пример_каталога(С)
+		прежний = checks.канон(пример_каталога(С))
 		версии = {К["a"]: 3, К["b"]: 1, К["whole"]: 1}
+		области = {К["area"]: f"Область {С}"}
+
+		def комп(к, ключ):
+			return next(к_ for к_ in к["competencies"] if к_["key"] == К[ключ])
+
 		for случай, правка, ожидаемое in (
-			("без изменений", lambda к: None, {"added": [], "substantive": [], "editorial": []}),
+			("без изменений", lambda к: None, _правки()),
 			(
 				"признак уровня",
-				lambda к: к["competencies"][0]["levels"].update({"3": "Новый признак"}),
-				{"added": [], "substantive": [{"key": К["a"], "version": 4}], "editorial": []},
+				lambda к: комп(к, "a")["levels"].update({"3": "Новый признак"}),
+				_правки(substantive=[{"key": К["a"], "version": 4}]),
+			),
+			(
+				"признак уровня — только пробелы",
+				lambda к: комп(к, "a")["levels"].update(
+					{"3": "  " + комп(к, "a")["levels"]["3"].replace(" ", "\n ") + " "}
+				),
+				_правки(editorial=[{"key": К["a"], "fields": ["levels"]}]),
 			),
 			*(
-				(
-					f"редакторская: {поле}",
-					правка,
-					{"added": [], "substantive": [], "editorial": [К["a"]]},
-				)
+				(f"редакторская: {поле}", правка, _правки(editorial=[{"key": К["a"], "fields": [поле]}]))
 				for поле, правка in (
-					("название", lambda к: к["competencies"][0].update(title="Другое")),
-					("описание", lambda к: к["competencies"][0].update(description="Другое")),
-					("область", lambda к: к["competencies"][0].update(area="other-area")),
-					("похожие", lambda к: к["competencies"][0].pop("similar")),
+					("title", lambda к: комп(к, "a").update(title="Другое")),
+					("description", lambda к: комп(к, "a").update(description="Другое")),
+					("area", lambda к: комп(к, "a").update(area="other-area")),
+					("similar", lambda к: комп(к, "a").pop("similar")),
 				)
 			),
 			(
 				"редакторская: составляющие",
-				lambda к: к["competencies"][2]["parts"][1].update(from_level=2),
-				{"added": [], "substantive": [], "editorial": [К["whole"]]},
+				lambda к: комп(к, "whole")["parts"][1].update(from_level=2),
+				_правки(editorial=[{"key": К["whole"], "fields": ["parts"]}]),
 			),
 			(
-				# `3.0` — то же целое, что `3`: схема принимает его за целое.
-				"уровень составляющей 3.0",
-				lambda к: к["competencies"][2]["parts"][1].update(from_level=3.0),
-				{"added": [], "substantive": [], "editorial": []},
-			),
-			(
-				"пустые связи — то же, что их нет",
-				lambda к: к["competencies"][1].update(parts=[], similar=[]),
-				{"added": [], "substantive": [], "editorial": []},
+				"редакторская: тип и состав составляющих",
+				lambda к: комп(к, "whole").update(kind="base") or комп(к, "whole").pop("parts"),
+				_правки(editorial=[{"key": К["whole"], "fields": ["kind", "parts"]}]),
 			),
 			(
 				"новая рядом с правкой по существу",
 				lambda к: к["competencies"].append(компетенция("fresh-one", К["area"]))
-				or к["competencies"][1]["levels"].update({"1": "Новый"}),
-				{"added": ["fresh-one"], "substantive": [{"key": К["b"], "version": 2}], "editorial": []},
+				or комп(к, "b")["levels"].update({"1": "Новый"}),
+				_правки(added=["fresh-one"], substantive=[{"key": К["b"], "version": 2}]),
+			),
+			(
+				"области: новая и переименованная",
+				lambda к: к["areas"].append({"key": "fresh-area", "title": "Новая"})
+				or к["areas"][0].update(title="Другое название"),
+				_правки(areas_added=["fresh-area"], renamed=[К["area"]]),
 			),
 		):
 			with self.subTest(случай):
 				новый = copy.deepcopy(прежний)
 				правка(новый)
-				self.assertEqual(checks.правки(прежний, новый, версии), ожидаемое)
+				self.assertEqual(checks.правки(прежний, checks.канон(новый), версии, области), ожидаемое)
