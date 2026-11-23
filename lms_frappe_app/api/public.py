@@ -22,6 +22,7 @@ from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
 from lms_frappe_app.agent_learning.artifacts.document import _данные_курса, _заполненность, кратко
+from lms_frappe_app.agent_learning.catalog import read as каталог
 from lms_frappe_app.agent_learning.competencies import views as представления
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
@@ -95,7 +96,14 @@ def course_map(course: str, space: str | None = None) -> dict:
 	уроки_релиза = index.уроки(релиз) if релиз else []
 	цели_уроков = _цели_уроков(course, порядок, frappe.session.user if зачислен else None, релиз, уроки_релиза)
 	главы = _главы_карты(course, структура, релиз, уроки_релиза, frappe.session.user if зачислен else None)
-	компетенции = представления.для_витрины(index.карта_компетенций(релиз)) if релиз else []
+	# Карта курса — краткая, без похожих и классов, и только при целях по компетенциям: их
+	# несут уже прочитанные уроки релиза, и курс без целей не платит за неё ни запроса.
+	цели_компетенций = index.цели_из_строк(уроки_релиза)
+	компетенции = (
+		представления.для_витрины(каталог.карты_по_целям({релиз: цели_компетенций}, кратко=True)[релиз])
+		if цели_компетенций
+		else []
+	)
 	номера = {урок: номер for номер, урок in enumerate(порядок, start=1)}
 	документы, блоки_уроков = _документы_курса(course, frappe.session.user if зачислен else None, space)
 	ученику = {}
