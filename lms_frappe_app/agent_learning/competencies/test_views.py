@@ -143,6 +143,90 @@ class TestСводка(UnitTestCase):
 		)
 
 
+class TestВитрина(UnitTestCase):
+	"""Компетенции курса для его страницы (learning-services#843)."""
+
+	@staticmethod
+	def компетенция(ключ: str, *части: str) -> dict:
+		"""Компетенция карты: с `части` — интегративная, без — базовая; поля ученика и каталога,
+		которых витрина не отдаёт, — заглушки."""
+		return {
+			"key": ключ,
+			"kind": "integrative" if части else "base",
+			"title": f"Умение {ключ}",
+			"description": f"Описание {ключ}",
+			"parts": [{"competency": ч, "from_level": 1} for ч in части],
+			"classes": {"scheme": "x"},
+			"version": 1,
+			"similar": ["other"],
+			"levels": {"1": "признак"},
+		}
+
+	def test_интегративные_с_частями_затем_базовые_вне_их(self):
+		def кратко(ключ: str) -> dict:
+			к = self.компетенция(ключ)
+			return {"key": ключ, "kind": "base", "title": к["title"], "description": к["description"]}
+
+		with self.subTest("карта примера: обе базовые — части интегративной"):
+			self.assertEqual(
+				views.для_витрины(КАРТА),
+				[
+					{
+						"key": "whole-1",
+						"kind": "integrative",
+						"title": "Обоснование устройства",
+						"description": "Обосновываете устройство целиком.",
+						"parts": [
+							{
+								"key": "base-1",
+								"kind": "base",
+								"title": "Выбор устройства",
+								"description": "Выбираете устройство по задаче.",
+							},
+							{
+								"key": "base-2",
+								"kind": "base",
+								"title": "Цена ошибочного действия",
+								"description": "Оцениваете цену ошибки.",
+							},
+						],
+					}
+				],
+			)
+		with self.subTest("вложенная интегративная, часть вне карты, порядок карты"):
+			# Цели уроков — solo, b, outer; за ними составляющие по каталогу — inner, a. Части — по
+			# порядку карты, а не каталога; `gone` в каталоге нет — нет и в карте.
+			карта = [
+				self.компетенция("solo"),
+				self.компетенция("b"),
+				self.компетенция("outer", "a", "inner", "gone"),
+				self.компетенция("inner", "a", "b"),
+				self.компетенция("a"),
+			]
+			внутренняя = {
+				"key": "inner",
+				"kind": "integrative",
+				"title": "Умение inner",
+				"description": "Описание inner",
+			}
+			self.assertEqual(
+				views.для_витрины(карта),
+				[
+					{
+						"key": "outer",
+						"kind": "integrative",
+						"title": "Умение outer",
+						"description": "Описание outer",
+						"parts": [внутренняя, кратко("a")],
+					},
+					{**внутренняя, "parts": [кратко("b"), кратко("a")]},
+					кратко("solo"),
+				],
+			)
+		with self.subTest("пустая карта"):
+			self.assertEqual(views.для_витрины([]), [])
+
+
 class IntegrationTestКартаУченика(IntegrationTestCase):
 	def test_карта_ученика_через_метод(self):
 		from lms_frappe_app.api import student

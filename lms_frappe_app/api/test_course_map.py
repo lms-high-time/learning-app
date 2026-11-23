@@ -51,6 +51,7 @@ class IntegrationTestCourseMap(IntegrationTestCase):
 				self.assertEqual(урок["hook"], видит)
 				self.assertNotIn("completed", урок, "пройденность — только своя, у гостя ключа нет")
 				self.assertNotIn("next_lesson", карта)
+				self.assertEqual(карта["competencies"], [], "курс без релиза — без компетенций")
 
 	def test_зачисленный_видит_пройденность_и_следующий_урок(self):
 		"""У пройденного курса следующего урока нет; новый урок — следующий."""
@@ -158,3 +159,57 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		документ = карта["documents"][0]
 		self.assertEqual((документ["blocks_filled"], документ["blocks_total"]), (1, 2))
 		self.assertTrue(карта["chapters"][0]["lessons"][0]["blocks"][0]["filled"])
+
+
+class IntegrationTestCourseMapCompetencies(IntegrationTestCase):
+	"""Компетенции курса на каталоге — блок «Чему научитесь» на странице курса (learning-services#843).
+
+	Группировка и порядок — юнитом `views.для_витрины`; здесь проводка: карта курса по
+	действующему релизу, гостю.
+	"""
+
+	def test_гость_видит_интегративную_с_частями_и_отдельную_базовую(self):
+		from lms_frappe_app.agent_learning.catalog import service as каталог
+		from lms_frappe_app.tests.catalog_sample import (
+			ключи_примера,
+			компетенция,
+			поверх_опубликованного,
+			пример_каталога,
+		)
+		from lms_frappe_app.tests.release_sample import пример_релиза
+		from lms_frappe_app.tests.sample_data import курс_из_релиза
+
+		self.addCleanup(frappe.set_user, "Administrator")
+		суффикс = frappe.generate_hash(length=6)
+		к = ключи_примера(суффикс)
+		отдельная = f"solo-{суффикс}"
+		образец = пример_каталога(суффикс)
+		образец["competencies"].append(компетенция(отдельная, к["classes"]))
+		релиз = пример_релиза(f"map-cat-{суффикс}")
+		релиз["catalog"] = каталог.опубликовать(поверх_опубликованного(образец), "Administrator")["version"]
+		# Цели уроков: интегративная, отдельная базовая, вторая часть интегративной; первая часть —
+		# только составляющей по каталогу.
+		релиз["lessons"][0]["competencies"] = [{"competency": к["whole"], "target": 3}]
+		релиз["lessons"][1]["competencies"] = [{"competency": отдельная, "target": 2}]
+		релиз["lessons"][2]["competencies"] = [{"competency": к["b"], "target": 2}]
+		курс, _ = курс_из_релиза(релиз=релиз)
+		frappe.db.set_value("LMS Course", курс, "published", 1)
+		frappe.set_user("Guest")
+
+		компетенции = public.course_map(course=курс)["data"]["competencies"]
+
+		def кратко(ключ: str) -> dict:
+			return {
+				"key": ключ,
+				"kind": "base",
+				"title": f"Умение {ключ}",
+				"description": f"Что человек делает, владея умением {ключ}.",
+			}
+
+		self.assertEqual(
+			компетенции,
+			[
+				{**кратко(к["whole"]), "kind": "integrative", "parts": [кратко(к["b"]), кратко(к["a"])]},
+				кратко(отдельная),
+			],
+		)
