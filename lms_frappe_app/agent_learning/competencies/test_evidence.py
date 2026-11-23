@@ -280,21 +280,29 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		)
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 0)
 
-	def test_запись_журнала_только_с_ключом_каталога(self):
-		"""`competency` — ссылка на компетенцию каталога (learning-services#839): запись мимо сервиса
-		с ключом, которого в каталоге нет, база не принимает."""
-		with self.assertRaises(frappe.LinkValidationError):
-			frappe.get_doc(
-				{
-					"doctype": evidence.ЖУРНАЛ,
-					"kind": evidence.СВИДЕТЕЛЬСТВО,
-					"student": self.ученик,
-					"course": self.курс,
-					"competency": "no-such-skill",
-					"outcome": evidence.ПРОПУЩЕНО,
-					"request_key": "link-1",
-				}
-			).insert(ignore_permissions=True)
+	def test_запись_журнала_только_компетенция_каталога_с_версией(self):
+		"""Запись журнала — компетенция каталога и её версия (learning-services#839): мимо сервиса
+		база не принимает ни ключ не из каталога, ни запись без версии."""
+		for случай, компетенция, версия, отказ in (
+			("ключ не из каталога", "no-such-skill", 1, frappe.LinkValidationError),
+			("без версии", "base-1", 0, frappe.ValidationError),
+		):
+			with self.subTest(случай), self.assertRaises(отказ) as ошибка:
+				frappe.get_doc(
+					{
+						"doctype": evidence.ЖУРНАЛ,
+						"kind": evidence.СВИДЕТЕЛЬСТВО,
+						"student": self.ученик,
+						"course": self.курс,
+						"competency": компетенция,
+						"competency_version": версия,
+						"outcome": evidence.ПРОПУЩЕНО,
+						"request_key": f"link-{версия}",
+					}
+				).insert(ignore_permissions=True)
+			if версия == 0:
+				self.assertIn("нет версии компетенции каталога", str(ошибка.exception))
+		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 0)
 
 	def test_пересмотр_только_вниз(self):
 		self.записать("p-1", уровень=1)
