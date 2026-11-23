@@ -2,6 +2,7 @@
 # Patches added in this section will be executed before doctypes are migrated
 # Read docs to understand patches: https://frappeframework.com/docs/v14/user/en/database-migrations
 lms_frappe_app.patches.v0_1.document_single_model_check
+lms_frappe_app.patches.v0_1.competency_event_catalog_keys
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated

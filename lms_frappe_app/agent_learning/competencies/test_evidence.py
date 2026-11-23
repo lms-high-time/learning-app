@@ -280,6 +280,22 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		)
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 0)
 
+	def test_запись_журнала_только_с_ключом_каталога(self):
+		"""`competency` — ссылка на компетенцию каталога (learning-services#839): запись мимо сервиса
+		с ключом, которого в каталоге нет, база не принимает."""
+		with self.assertRaises(frappe.LinkValidationError):
+			frappe.get_doc(
+				{
+					"doctype": evidence.ЖУРНАЛ,
+					"kind": evidence.СВИДЕТЕЛЬСТВО,
+					"student": self.ученик,
+					"course": self.курс,
+					"competency": "no-such-skill",
+					"outcome": evidence.ПРОПУЩЕНО,
+					"request_key": "link-1",
+				}
+			).insert(ignore_permissions=True)
+
 	def test_пересмотр_только_вниз(self):
 		self.записать("p-1", уровень=1)
 		второе = self.записать("p-2", уровень=3, форма="work")

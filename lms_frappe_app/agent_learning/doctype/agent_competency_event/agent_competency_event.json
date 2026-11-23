@@ -101,12 +101,13 @@
    "label": "Релиз",
    "options": "Agent Course Release",
    "read_only": 1,
-   "description": "Действующий релиз курса на момент записи. У компетенции каталога уровень поставлен по признакам её версии (поле «Версия компетенции»), у карты внутри релиза — по критериям релиза."
+   "description": "Действующий релиз курса на момент записи. Уровень поставлен по признакам версии компетенции (поле «Версия компетенции»)."
   },
   {
    "fieldname": "competency",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "label": "Компетенция",
+   "options": "Agent Competency",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "read_only": 1,
@@ -117,8 +118,7 @@
    "fieldtype": "Int",
    "label": "Версия компетенции",
    "read_only": 1,
-   "default": "0",
-   "description": "Версия компетенции каталога на момент записи: по её признакам поставлен уровень. 0 — компетенция из карты внутри релиза курса."
+   "description": "Версия компетенции каталога на момент записи: по её признакам поставлен уровень."
   },
   {
    "fieldname": "request_key",
@@ -274,7 +274,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-11-23 20:00:00.000000",
+ "modified": "2026-11-23 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Competency Event",
