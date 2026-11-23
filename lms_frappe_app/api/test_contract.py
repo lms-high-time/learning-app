@@ -318,6 +318,31 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		self._посмотреть_отчёты()
 		self._проверить_домашку(сдача, уроки[0])
 
+	def test_отказ_очереди_в_конце_курса_совпадает_с_примером(self):
+		"""`course_queue_open` с подсказкой курса (learning-services#827): курс на каталоге, цель по
+		одной компетенции в каждом уроке, её проверку ученик пропускает."""
+		from lms_frappe_app.agent_learning.catalog import service as каталог
+		from lms_frappe_app.tests.catalog_sample import ключи_примера
+		from lms_frappe_app.tests.sample_data import курс_из_релиза, отметить_все_пункты
+
+		frappe.set_user("Administrator")
+		к = ключи_примера(f"cq-{self.суффикс}")
+		релиз = пример_релиза(f"contract-queue-{self.суффикс}")
+		релиз["catalog"] = каталог.опубликовать(
+			поверх_опубликованного(пример_каталога(f"cq-{self.суффикс}")), "Administrator"
+		)["version"]
+		for урок in релиз["lessons"]:
+			урок["competencies"] = [{"competency": к["a"], "target": 2}]
+		курс, _ = курс_из_релиза(релиз=релиз)
+		зачислить_на_курс(self.ученик, курс)
+		frappe.set_user(self.ученик)
+		for ключ in ("l-1", "l-2", "l-3"):
+			занятие = student.start_lesson(lesson=урок_релиза(курс, ключ))["data"]["session"]
+			отметить_все_пункты(frappe.db.get_value("Agent Learning Session", занятие, "run"), занятие)
+			student.record_evidence(занятие, к["a"], "skipped", f"cq-{ключ}-{self.суффикс}", task="Предложил")
+			ответ = student.complete_lesson(session=занятие)
+		self.сверить_отказ("student.complete_lesson", ответ, "course_queue_open")
+
 	# --- каталог компетенций ---
 
 	def _опубликовать_каталог(self) -> None:
@@ -594,6 +619,8 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		)
 		курс = frappe.db.get_value("Agent Learning Session", занятие, "course")
 		self.сверить("student.my_competencies", student.my_competencies(course=курс))
+		# Без курса — сквозная карта по компетенциям каталога (learning-services#827).
+		self.сверить("student.my_competencies", student.my_competencies())
 
 	def _гонка_с_публикацией(self, курс: str, попытка: str) -> None:
 		"""Попытка — как заведённая в гонке с публикацией: на версии курса,

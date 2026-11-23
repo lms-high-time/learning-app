@@ -412,7 +412,11 @@ class IntegrationTestAgentChain(IntegrationTestCase):
 		self.отметить_обязательные(занятие, старт["lesson_map"])
 		закрыто = self.данные(student.complete_lesson(занятие))
 
-		self.assertEqual(set(закрыто), {"lesson", "session_status", "next_lesson", "empty_blocks", "homework"})
+		self.assertEqual(
+			set(закрыто), {"lesson", "session_status", "next_lesson", "empty_blocks", "homework", "course_hints"}
+		)
+		# У курса без карты компетенций подсказки курса нет (learning-services#827).
+		self.assertEqual(закрыто["course_hints"], [])
 		self.assertIsNone(закрыто["homework"], "у урока нет задания")
 		self.assertEqual((закрыто["lesson"], закрыто["session_status"]), (урок, "Completed"))
 		self.assertEqual(self.прохождение(курс).status, прохождения.ПРОЙДЕН)
