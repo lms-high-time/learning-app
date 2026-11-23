@@ -166,14 +166,14 @@
         "description": {"$ref": "#/$defs/public_text", "description": "Что ученик делает, когда владеет умением: одна-две фразы на карте."},
         "parts": {
           "type": "array",
-          "description": "Составляющие интеграционной компетенции; у базовой их нет.",
+          "description": "Составляющие интегративной компетенции; у базовой их нет.",
           "items": {
             "type": "object",
             "required": ["competency", "from_level"],
             "additionalProperties": false,
             "properties": {
               "competency": {"$ref": "#/$defs/key"},
-              "from_level": {"$ref": "#/$defs/level", "description": "С какого уровня интеграционной нужна составляющая."}
+              "from_level": {"$ref": "#/$defs/level", "description": "С какого уровня интегративной нужна составляющая."}
             }
           }
         }
