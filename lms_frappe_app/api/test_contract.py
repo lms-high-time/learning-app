@@ -594,6 +594,8 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		)
 		курс = frappe.db.get_value("Agent Learning Session", занятие, "course")
 		self.сверить("student.my_competencies", student.my_competencies(course=курс))
+		# Без курса — сквозная карта по компетенциям каталога (learning-services#827).
+		self.сверить("student.my_competencies", student.my_competencies())
 
 	def _гонка_с_публикацией(self, курс: str, попытка: str) -> None:
 		"""Попытка — как заведённая в гонке с публикацией: на версии курса,

@@ -20,7 +20,7 @@ from lms_frappe_app.agent_learning.artifacts.course import _схемы_курс�
 from lms_frappe_app.agent_learning.artifacts.document import _заполненность
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.course_allocation.course_allocation import (
-	адресаты_назначения,
+	адресаты_назначений,
 )
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.agent_learning.structure import уроки_курса
@@ -46,17 +46,31 @@ def org_report(
 	Чужая — пустой отчёт, как у руководителя без организаций.
 	"""
 	менеджер = текущий_пользователь()
-	организации = организации_менеджера(менеджер)
+	все_организации = организации_менеджера(менеджер)
+	организации = все_организации
 	if organization:
 		организации = [organization] if organization in организации else []
 	if not организации:
 		return {"rows": []}
 
-	назначения = frappe.get_all(
+	# Назначения всех организаций руководителя, а не только отчёта: по ним решается, записи
+	# каких курсов дают уровни по компетенциям каталога (learning-services#827), — и от фильтров
+	# отчёта это не зависит. Адресаты — двумя запросами на весь список.
+	все_назначения = frappe.get_all(
 		"Course Allocation",
-		filters={"organization": ("in", организации), **({"course": course} if course else {})},
+		filters={"organization": ("in", все_организации)},
 		fields=["name", "organization", "course", "audience", "deadline", "mandatory"],
 	)
+	адресаты = адресаты_назначений(все_назначения)
+	назначенные: dict[str, set[str]] = {}
+	for назначение in все_назначения:
+		for участник in адресаты[назначение.name]:
+			назначенные.setdefault(участник, set()).add(назначение.course)
+	назначения = [
+		н
+		for н in все_назначения
+		if н.organization in организации and (not course or н.course == course)
+	]
 
 	строки = []
 	# Данные, общие для всех участников курса, читаются один раз: прежняя
@@ -64,7 +78,7 @@ def org_report(
 	# «назначение × участник», и организация на пятьсот человек с десятью
 	# курсами давала десятки тысяч запросов в одном вызове.
 	for назначение in назначения:
-		участники = _адресаты(назначение)
+		участники = адресаты[назначение.name]
 		if not участники:
 			continue
 		уроки = уроки_курса(назначение.course)
@@ -75,11 +89,13 @@ def org_report(
 			назначение.course, участники, назначение.organization
 		)
 		квизы = _квизы_по_участникам(назначение.course, участники)
-		# Только уровни по карте компетенций (learning-services#810) — постоянное число запросов на курс.
+		# Только уровни по карте компетенций (learning-services#810), у компетенций каталога — по
+		# назначенным курсам (learning-services#827); постоянное число запросов на курс.
 		уровни = представления_карты.уровни_учеников(
 			назначение.course,
 			frappe.db.get_value("LMS Course", назначение.course, "active_release"),
 			участники,
+			назначенные,
 		)
 
 		for участник in участники:
@@ -391,18 +407,6 @@ def _цели_прохождений(ученик: str, занятия: list) ->
 	):
 		цели.setdefault(с.parent, []).append({"key": с.objective_key, "text": с.text, "status": с.status})
 	return {занятие: цели.get(имя, []) for занятие, имя in прохождение.items() if имя}
-
-
-def _адресаты(назначение) -> list[str]:
-	"""Кому предназначено назначение — общим правилом, без загрузки документа.
-
-	Копия этого правила здесь уже разъезжалась с оригиналом. Правило одно, но
-	поднимать документ с дочерними таблицами на каждое назначение отчёту
-	незачем — ради этого и вынесена функция.
-	"""
-	return адресаты_назначения(
-		назначение.name, назначение.organization, назначение.audience
-	)
 
 
 def _строка_отчёта(
