@@ -16,7 +16,7 @@ from frappe.tests import IntegrationTestCase
 
 from lms_frappe_app.agent_learning import announcements, notices
 from lms_frappe_app.api import authoring, public, student, team
-from lms_frappe_app.tests.release_sample import перевести, пример_релиза
+from lms_frappe_app.tests.release_sample import перевести, пример_релиза, с_каталогом_компетенций
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	создать_куратора,
@@ -280,9 +280,10 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 
 	def test_курс_из_релиза_на_языке_запроса(self):
 		"""У курса из релиза перевод карточки и целей анонса приходит релизом.
-		Каталог агента остаётся русским."""
+		Каталог агента остаётся русским. Компетенций у анонса нет и на каталоге
+		(learning-services#843): они появляются с выходом курса."""
 		курс = self.опубликовать_релиз(
-			release=перевести(пример_релиза(f"an-{frappe.generate_hash(length=6)}"))
+			release=с_каталогом_компетенций(перевести(пример_релиза(f"an-{frappe.generate_hash(length=6)}")))
 		)["course"]
 		ответ = self.на_языке("ru", self.куратор, authoring.announce_course, course=курс, lang="en")
 		self.assertEqual(ответ["data"]["objectives"], ["Chapter 1", "Chapter 2"])
@@ -291,6 +292,7 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		self.assertEqual(
 			(данные["title"], данные["objectives"]), ("Sample course", ["Chapter 1", "Chapter 2"])
 		)
+		self.assertEqual(данные["competencies"], [])
 		каталог = self.на_языке("en", self.ученик, student.list_catalog)["data"]
 		self.assertEqual(
 			next(к for к in каталог["courses"] if к["id"] == курс)["objectives"],
@@ -298,9 +300,9 @@ class IntegrationTestAnnouncements(IntegrationTestCase):
 		)
 
 		self.от_имени(self.куратор, authoring.publish_course, course=курс)
-		self.assertEqual(
-			self.на_языке("en", "Guest", public.course_map, course=курс)["data"]["title"], "Sample course"
-		)
+		данные = self.на_языке("en", "Guest", public.course_map, course=курс)["data"]
+		self.assertEqual(данные["title"], "Sample course")
+		self.assertEqual([к["key"] for к in данные["competencies"]], ["whole-1"])
 
 	# --- руководитель ---
 

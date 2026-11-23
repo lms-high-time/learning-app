@@ -22,6 +22,8 @@ from lms_frappe_app.agent_learning import spaces as пространства
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
 from lms_frappe_app.agent_learning.artifacts.document import _данные_курса, _заполненность, кратко
+from lms_frappe_app.agent_learning.catalog import read as каталог
+from lms_frappe_app.agent_learning.competencies import views as представления
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
 	ПУТЬ_ЧАТА,
@@ -67,8 +69,15 @@ def course_map(course: str, space: str | None = None) -> dict:
 	У главы — описание из действующего релиза; зачисленному — ещё прогресс
 	главы, как у `course_outline` (learning-services#547).
 
+	`competencies` — компетенции курса на каталоге для блока «Чему научитесь»
+	(learning-services#843): интегративные карты курса со своими
+	составляющими, за ними базовые вне интегративных (`views.для_витрины`).
+	Видны всем и без уровней ученика; у курса без релиза, без каталога или без
+	целей по компетенциям — пустой список.
+
 	Название курса и цели анонса — на языке запроса, если у курса есть их
-	перевод (learning-services#738); главы, уроки и цели уроков — русские.
+	перевод (learning-services#738); главы, уроки, цели уроков и компетенции —
+	русские.
 	"""
 	зачислен = _зачислен(course)
 	открыт = зачислен or permissions.курс_открыт(course)
@@ -87,6 +96,14 @@ def course_map(course: str, space: str | None = None) -> dict:
 	уроки_релиза = index.уроки(релиз) if релиз else []
 	цели_уроков = _цели_уроков(course, порядок, frappe.session.user if зачислен else None, релиз, уроки_релиза)
 	главы = _главы_карты(course, структура, релиз, уроки_релиза, frappe.session.user if зачислен else None)
+	# Карта курса — краткая, без похожих и классов, и только при целях по компетенциям: их
+	# несут уже прочитанные уроки релиза, и курс без целей не платит за неё ни запроса.
+	цели_компетенций = index.цели_из_строк(уроки_релиза)
+	компетенции = (
+		представления.для_витрины(каталог.карты_по_целям({релиз: цели_компетенций}, кратко=True)[релиз])
+		if цели_компетенций
+		else []
+	)
 	номера = {урок: номер for номер, урок in enumerate(порядок, start=1)}
 	документы, блоки_уроков = _документы_курса(course, frappe.session.user if зачислен else None, space)
 	ученику = {}
@@ -117,6 +134,7 @@ def course_map(course: str, space: str | None = None) -> dict:
 		"title": _название(course),
 		**ученику,
 		"documents": документы,
+		"competencies": компетенции,
 		"chapters": [
 			{
 				"title": глава["title"],
@@ -278,8 +296,8 @@ def _название(course: str) -> str:
 def _анонс(course: str) -> dict:
 	"""Карта анонсированного курса: только цели курса, без программы.
 
-	Главы, уроки и документы анонса остаются закрытыми: курс ещё собирается,
-	и его состав меняется (learning-services#389). `notify` — подписан ли
+	Главы, уроки, документы и компетенции анонса остаются закрытыми: курс ещё
+	собирается, и его состав меняется (learning-services#389). `notify` — подписан ли
 	вызывающий на письмо о выходе; гостю ключа нет, как `status` у цели.
 	"""
 	данные = {
@@ -288,6 +306,7 @@ def _анонс(course: str) -> dict:
 		"upcoming": True,
 		"objectives": announcements.цели_курса(course, переводы_курса.язык_запроса()),
 		"documents": [],
+		"competencies": [],
 		"chapters": [],
 	}
 	if frappe.session.user != "Guest":

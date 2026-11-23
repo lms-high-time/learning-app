@@ -266,11 +266,13 @@ def разделы(релиз: str) -> dict[str, dict]:
 	"pass_percentage",
 	"section_keys",
 	"homework",
+	"competencies",
 ]
 
 
 def урок(релиз: str, ключ: str) -> dict | None:
-	"""Урок релиза по ключу: его запись Learning, глава, порог квиза, разделы, домашка."""
+	"""Урок релиза по ключу: его запись Learning, глава, порог квиза, разделы, домашка, цели по
+	компетенциям (`competencies`, JSON строкой)."""
 	return _урок(релиз, {"lesson_key": ключ})
 
 
@@ -473,16 +475,20 @@ def ключи_уроков(релиз: str) -> list[str]:
 def цели_уроков(релиз: str) -> dict[str, list[dict]]:
 	"""Цели по компетенциям всех уроков релиза одной выборкой: ключ урока → `{competency, target}`;
 	уроки без целей не входят (learning-services#810)."""
-	return {
-		у.lesson_key: цели
-		for у in frappe.get_all(
+	return цели_из_строк(
+		frappe.get_all(
 			УРОК,
 			filters={"parenttype": РЕЛИЗ, "parent": релиз},
 			fields=["lesson_key", "competencies"],
 			order_by="idx asc",
 		)
-		if (цели := _список_json(у.competencies))
-	}
+	)
+
+
+def цели_из_строк(строки: list) -> dict[str, list[dict]]:
+	"""`цели_уроков` по уже прочитанным строкам уроков релиза (`уроки` несут `competencies`) —
+	без запроса."""
+	return {у.lesson_key: цели for у in строки if (цели := _список_json(у.competencies))}
 
 
 def пакет_и_компетенции_урока(релиз: str, ключ: str) -> tuple[dict, list[dict]]:

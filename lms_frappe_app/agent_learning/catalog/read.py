@@ -41,6 +41,8 @@ import frappe
 	"level_3",
 	"level_4",
 ]
+#: Поля компетенции каталога, которые отдаёт краткая карта курса (`кратко`).
+ПОЛЯ_КРАТКО = ["name", "title", "description", "kind"]
 
 ВЕРСИЯ_НЕИЗВЕСТНА = "catalog_version_unknown"
 ВЕРСИЯ_УСТАРЕЛА = "catalog_version_stale"
@@ -153,7 +155,9 @@ def _замкнуть(порядок: list[str], части: dict[str, list[dict
 	return итог
 
 
-def карты_по_целям(цели_релизов: dict[str, dict[str, list[dict]]]) -> dict[str, list[dict]]:
+def карты_по_целям(
+	цели_релизов: dict[str, dict[str, list[dict]]], *, кратко: bool = False
+) -> dict[str, list[dict]]:
 	"""Карты курсов на каталоге по целям уроков их релизов — `{релиз: [компетенция]}`.
 
 	`цели_релизов` — релиз → ключ урока → цели `{competency, target}` по порядку
@@ -162,10 +166,11 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 	составляющая интегративной всегда в карте. Компетенция — `{key, kind, title,
 	description, parts, classes, version, similar, levels}`: `classes` — `{схема:
 	класс}`, `levels` — признаки уровней `{"1": …, "4": …}`. Слага, которого в каталоге
-	нет, в карте нет.
+	нет, в карте нет. `кратко` — только `{key, kind, title, description, parts}`.
 
 	Три выборки на все релизы: составляющие всего каталога, компетенции карт, их
-	похожие вместе с классами (`компетенции`). Без релизов и целей — ни одной.
+	похожие вместе с классами (`компетенции`); `кратко` — без похожих и классов, две.
+	Без релизов и целей — ни одной.
 	"""
 	порядки = {
 		релиз: порядок
@@ -176,35 +181,45 @@ def карты_по_целям(цели_релизов: dict[str, dict[str, list
 		return {}
 	части = _части_каталога()
 	порядки = {релиз: _замкнуть(порядок, части) for релиз, порядок in порядки.items()}
-	определения = компетенции(list({к for порядок in порядки.values() for к in порядок}), части)
+	определения = компетенции(
+		list({к for порядок in порядки.values() for к in порядок}), части, кратко=кратко
+	)
 	return {
 		релиз: [определения[к] for к in порядок if к in определения] for релиз, порядок in порядки.items()
 	}
 
 
-def компетенции(ключи: list[str], части: dict[str, list[dict]] | None = None) -> dict[str, dict]:
+def компетенции(
+	ключи: list[str], части: dict[str, list[dict]] | None = None, *, кратко: bool = False
+) -> dict[str, dict]:
 	"""Компетенции каталога `ключи` — `{ключ: {key, kind, title, description, parts, classes,
 	version, similar, levels}}`; слага, которого в каталоге нет, нет и здесь. `parts` — из
 	`части` (`_части_каталога`), без них — `[]`. Две выборки: похожие с классами и сами
-	компетенции; без ключей — ни одной."""
+	компетенции; без ключей — ни одной. `кратко` — только `{key, kind, title, description,
+	parts}` одной выборкой, без похожих и классов."""
 	if not ключи:
 		return {}
 	части = части or {}
-	похожие, классы = _похожие_и_классы(ключи)
-	return {
-		к.name: {
+	похожие, классы = ({}, {}) if кратко else _похожие_и_классы(ключи)
+	итог = {}
+	for к in frappe.get_all(
+		КОМПЕТЕНЦИЯ, filters={"name": ("in", ключи)}, fields=ПОЛЯ_КРАТКО if кратко else ПОЛЯ_КОМПЕТЕНЦИИ
+	):
+		итог[к.name] = {
 			"key": к.name,
 			"kind": к.kind,
 			"title": к.title,
 			"description": к.description or "",
 			"parts": части.get(к.name, []),
-			"classes": классы.get(к.name, {}),
-			"version": к.version,
-			"similar": похожие.get(к.name, []),
-			"levels": {str(уровень): к.get(f"level_{уровень}") for уровень in range(1, 5)},
 		}
-		for к in frappe.get_all(КОМПЕТЕНЦИЯ, filters={"name": ("in", ключи)}, fields=ПОЛЯ_КОМПЕТЕНЦИИ)
-	}
+		if not кратко:
+			итог[к.name].update(
+				classes=классы.get(к.name, {}),
+				version=к.version,
+				similar=похожие.get(к.name, []),
+				levels={str(уровень): к.get(f"level_{уровень}") for уровень in range(1, 5)},
+			)
+	return итог
 
 
 def названия_и_версии(ключи: list[str]) -> dict[str, dict]:

@@ -185,7 +185,10 @@ class IntegrationTestLessonReaders(IntegrationTestCase):
 		# Цели урока на его странице — те же, что у урока карты.
 		self.assertEqual(self.данные(public.lesson_entry(lesson=self.урок))["objectives"], первый["objectives"])
 		frappe.set_user("Guest")
-		гостю = self.данные(public.course_map(course=self.курс))["chapters"][0]
+		карта_гостю = self.данные(public.course_map(course=self.курс))
+		# Релиз не на каталоге компетенций — блока «Чему научитесь» нет (learning-services#843).
+		self.assertEqual(карта_гостю["competencies"], [])
+		гостю = карта_гостю["chapters"][0]
 		self.assertEqual(гостю["lessons"][0]["objectives"], [{"text": ЦЕЛЬ_1["text"]}])
 		self.assertEqual(
 			{к: в for к, в in гостю.items() if к != "lessons"},
