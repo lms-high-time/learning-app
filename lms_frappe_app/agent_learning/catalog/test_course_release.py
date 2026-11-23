@@ -80,7 +80,8 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 				),
 			)
 			self.assertEqual(целое["levels"]["3"], f"Признак уровня 3 для {к['whole']}")
-			self.assertEqual(карта[0]["similar"], [к["b"]])
+			# «Похожа» записана у `a`, а читается в обе стороны (learning-services#827).
+			self.assertEqual((карта[0]["similar"], карта[2]["similar"]), ([к["b"]], [к["a"]]))
 
 		with self.subTest("старт урока: признаки из каталога, контекст из среза"):
 			пакет, цели = index.пакет_и_компетенции_урока(релиз, "l-3")
