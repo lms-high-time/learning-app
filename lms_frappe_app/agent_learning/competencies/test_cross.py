@@ -78,6 +78,8 @@ class TestПодтверждения(UnitTestCase):
 			},
 		)
 		self.assertTrue(cross.подтверждение(з, 1, {})["current_version"])
+		# Компетенции нет в каталоге — текущей версии нет.
+		self.assertIsNone(cross.подтверждение(з, None, {})["current_version"])
 		# Карта внутри релиза: версии нет.
 		з.competency_version = 0
 		self.assertEqual(
@@ -139,6 +141,16 @@ class TestПоводыПодсказки(UnitTestCase):
 				{},
 				[],
 			),
+			"пересмотр не снимает": (
+				[
+					запись("e1", "a", "confirmed", 3),
+					запись("d1", "a", "difficulty", 2, занятие="s2"),
+					запись("r1", "a", None, 1, вид="Revision", выведено=["e1"]),
+					запись("d2", "a", "difficulty", 2, занятие="s3"),
+				],
+				{},
+				[{"competencies": ["a"], "level": 2}],
+			),
 			# «Похожа» записана у b, а связка находится и от a: читатель симметричен.
 			"связка похожих, записанных в одну сторону": (
 				[запись("d1", "a", "difficulty", 2), запись("d2", "b", "difficulty", 3, занятие="s2")],
@@ -195,11 +207,14 @@ class TestВидРуководителя(UnitTestCase):
 	def test_засчитано_ранее_и_записи_назначенных(self):
 		карта = [{"key": "a", "title": "A"}, {"key": "b", "title": "B"}]
 		цели = {"l-1": [{"competency": "a", "target": 2}, {"competency": "b", "target": 2}]}
-		записи = [запись("e1", "b", "confirmed", 2)]
-		уровни = views.уровни_по_данным(карта, цели, {"l-1": "passed"}, записи, {"a": 2, "b": 2})
+		карта.append({"key": "c", "title": "C"})
+		цели["l-1"].append({"competency": "c", "target": 2})
+		записи = [запись("e1", "b", "confirmed", 2), запись("e2", "c", "confirmed", 1)]
+		уровни = views.уровни_по_данным(карта, цели, {"l-1": "passed"}, записи, {"a": 2, "b": 2, "c": 2})
+		# Засчитано ранее — с уровнем по видимым записям, если он ниже цели; достиг — просто уровень.
 		self.assertEqual(
 			[(у["key"], у["status"], у["level"]) for у in уровни],
-			[("a", "credited", None), ("b", "level", 2)],
+			[("a", "credited", None), ("b", "level", 2), ("c", "credited", 1)],
 		)
 		записи = [
 			запись("e1", "a", "confirmed", 2, course="assigned", competency_version=1),
@@ -221,6 +236,13 @@ class TestВидРуководителя(UnitTestCase):
 
 
 class IntegrationTestСквозныеПредставления(IntegrationTestCase):
+	"""Курсы на одном выпуске каталога. Ученик записан на A и B.
+
+	- A: цель `a` (2) в каждом уроке; B: `a` (2) в первом, `whole` (3) в третьем;
+	- C, P: `b` (3), на витрине; Q: `a` (2) в первых двух уроках, третий закрывается квизом, на
+	  витрине; S: `a` (2), не опубликован; D: `b` (3), анонс.
+	"""
+
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
@@ -233,28 +255,37 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 			"version"
 		]
 
-		def релиз(ключ: str, цели: dict[int, list[dict]]) -> dict:
+		def курс(ключ: str, цели: dict[int, list[dict]]) -> tuple[str, str]:
 			р = пример_релиза(f"{ключ}-{суффикс}")
 			р["catalog"] = версия
 			for номер, свои in цели.items():
 				р["lessons"][номер]["competencies"] = свои
-			return р
+			return курс_из_релиза(релиз=р)
 
 		a, b, целое = cls.к["a"], cls.к["b"], cls.к["whole"]
+		по_a = [{"competency": a, "target": 2}]
+		по_b = [{"competency": b, "target": 3}]
 		# У A цель по `a` в каждом уроке: урок без целей закрывается квизом.
-		cls.курс_а, cls.релиз_а = курс_из_релиза(
-			релиз=релиз("xv-a", {номер: [{"competency": a, "target": 2}] for номер in range(3)})
-		)
-		cls.курс_б, cls.релиз_б = курс_из_релиза(
-			релиз=релиз(
-				"xv-b", {0: [{"competency": a, "target": 2}], 2: [{"competency": целое, "target": 3}]}
-			)
-		)
-		cls.курс_в, cls.релиз_в = курс_из_релиза(релиз=релиз("xv-c", {0: [{"competency": b, "target": 3}]}))
-		cls.релизы = {cls.курс_а: cls.релиз_а, cls.курс_б: cls.релиз_б, cls.курс_в: cls.релиз_в}
-		# Подсказка курса предлагает курсы витрины.
-		for курс in cls.релизы:
-			frappe.db.set_value("LMS Course", курс, "published", 1)
+		cls.курс_а, cls.релиз_а = курс("xv-a", {0: по_a, 1: по_a, 2: по_a})
+		cls.курс_б, cls.релиз_б = курс("xv-b", {0: по_a, 2: [{"competency": целое, "target": 3}]})
+		cls.курс_в, cls.релиз_в = курс("xv-c", {0: по_b})
+		cls.курс_п, cls.релиз_п = курс("xv-p", {0: по_b})
+		cls.курс_к, cls.релиз_к = курс("xv-q", {0: по_a, 1: по_a})
+		cls.курс_с, cls.релиз_с = курс("xv-s", {0: по_a})
+		cls.курс_д, _ = курс("xv-d", {0: по_b})
+		cls.релизы = {
+			cls.курс_а: cls.релиз_а,
+			cls.курс_б: cls.релиз_б,
+			cls.курс_в: cls.релиз_в,
+			cls.курс_п: cls.релиз_п,
+			cls.курс_к: cls.релиз_к,
+			cls.курс_с: cls.релиз_с,
+		}
+		# Подсказка курса предлагает курсы витрины: S не опубликован, D — анонс.
+		for к in (cls.курс_а, cls.курс_б, cls.курс_в, cls.курс_п, cls.курс_к, cls.курс_д):
+			frappe.db.set_value("LMS Course", к, "published", 1)
+		frappe.db.set_value("LMS Course", cls.курс_д, "upcoming", 1)
+		cls.цели_подсказки = {cls.курс_в: (b, 3), cls.курс_п: (b, 3), cls.курс_к: (a, 2)}
 
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
@@ -262,6 +293,22 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 		self.ученик = создать_ученика(f"xv-{frappe.generate_hash(length=6)}@example.com")
 		for курс in (self.курс_а, self.курс_б):
 			зачислить_на_курс(self.ученик, курс)
+
+	def курсы_подсказки(self, *курсы: str) -> list[dict]:
+		"""Ожидаемый `courses` подсказки: курсы в порядке названия и имени, с целями."""
+		return sorted(
+			(
+				{
+					"course": к,
+					"title": frappe.db.get_value("LMS Course", к, "title"),
+					"targets": [
+						{"competency": self.цели_подсказки[к][0], "target": self.цели_подсказки[к][1]}
+					],
+				}
+				for к in курсы
+			),
+			key=lambda к: (к["title"], к["course"]),
+		)
 
 	def записать(self, курс: str, компетенция: str, исход: str, уровень, урок: str = "l-1") -> dict:
 		"""Свидетельство в новом занятии урока `урок` курса `курс`."""
@@ -320,6 +367,29 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 		finally:
 			frappe.set_user("Administrator")
 
+	def свидетельство_api(self, исход: str, **поля):
+		"""`до_закрытия` для `пройти_урок`: свидетельство по `a` методом ученика."""
+		from lms_frappe_app.api import student
+
+		def записать(занятие: str) -> None:
+			ответ = student.record_evidence(занятие, self.к["a"], исход, f"xv-{исход}-{занятие}", **поля)
+			self.assertTrue(ответ["ok"], ответ)
+
+		return записать
+
+	def затруднение_api(self):
+		return self.свидетельство_api(
+			"difficulty",
+			level=2,
+			task="Задание",
+			student_action="Сделал",
+			assessment="Не вышло",
+			task_form="free",
+			hints=False,
+			corrected=False,
+			indirect=False,
+		)
+
 	def test_сквозная_карта_карта_курса_и_старт_урока(self):
 		from lms_frappe_app.api import student
 
@@ -361,16 +431,30 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 			)
 		self.assertEqual(карта["course_hints"], [])
 
-		with self.subTest("подсказка: затруднения из двух занятий на связке похожих"):
+		with self.subTest("подсказка: затруднения из двух занятий на связке похожих, полный состав курсов"):
+			# P пройден: запись на курс с долей 100.
+			frappe.db.set_value(
+				"LMS Enrollment",
+				зачислить_на_курс(self.ученик, self.курс_п),
+				"progress",
+				100,
+			)
 			self.записать(self.курс_а, a, "difficulty", 3)
 			подсказки = self.как_ученик(student.my_competencies)["course_hints"]
+			# A и B — записан, P — пройден, S — не опубликован, D — анонс.
 			self.assertEqual(
-				[(п["competencies"], п["level"]) for п in подсказки],
-				[([{"key": b, "title": f"Умение {b}"}, {"key": a, "title": f"Умение {a}"}], 2)],
+				подсказки,
+				[
+					{
+						"competencies": [
+							{"key": b, "title": f"Умение {b}"},
+							{"key": a, "title": f"Умение {a}"},
+						],
+						"level": 2,
+						"courses": self.курсы_подсказки(self.курс_в, self.курс_к),
+					}
+				],
 			)
-			курсы = {к["course"]: к["targets"] for к in подсказки[0]["courses"]}
-			self.assertEqual(курсы[self.курс_в], [{"competency": b, "target": 3}])
-			self.assertEqual(курсы[self.курс_б], [{"competency": a, "target": 2}])
 			# Подтверждение b после затруднения снимает его — у a затруднение одно, повода нет.
 			self.записать(self.курс_б, b, "confirmed", 2, урок="l-3")
 			self.assertEqual(self.как_ученик(student.my_competencies)["course_hints"], [])
@@ -383,8 +467,8 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 			}
 			self.assertEqual((карта_б[a]["status"], карта_б[a]["level"]), ("level", 2))
 
+		старт = self.как_ученик(student.start_lesson, lesson=урок_релиза(self.курс_б, "l-1"))
 		with self.subTest("старт урока: лучшее подтверждение, похожие, засчёт цели"):
-			старт = self.как_ученик(student.start_lesson, lesson=урок_релиза(self.курс_б, "l-1"))
 			к = next(к for к in старт["competencies"] if к["key"] == a)
 			self.assertEqual(
 				(к["confirmed"]["level"], к["confirmed"]["course"], к["credited"]), (3, self.курс_а, True)
@@ -394,11 +478,59 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 				[(b, 2, self.курс_б)],
 			)
 
-	def test_вид_руководителя_по_назначенным_курсам(self):
-		"""B назначен организацией, A — личный курс. Засчёт из A руководителю — «засчитано ранее»;
-		пересмотр в A уровень в его отчёте не снижает; назначенный A — уровни видны."""
-		from lms_frappe_app.api import manager
+		with self.subTest("после revise_level: подтверждение выведено, засчёта нет"):
+			self.как_ученик(
+				student.revise_level,
+				session=старт["session"],
+				competency=a,
+				level=1,
+				reason="Затруднение повторилось",
+				request_key=f"xv-rev-{self.суффикс}",
+			)
+			по_ключу = {
+				к["key"]: к
+				for г in self.как_ученик(student.my_competencies)["groups"]
+				for к in г["competencies"]
+			}
+			self.assertEqual((по_ключу[a]["level"], по_ключу[a]["confirmed"]), (None, None))
+			к = next(
+				к
+				for к in self.как_ученик(student.start_lesson, lesson=урок_релиза(self.курс_б, "l-1"))[
+					"competencies"
+				]
+				if к["key"] == a
+			)
+			self.assertEqual((к["confirmed"], к["credited"]), (None, False))
+			# Пересмотр затруднение не снимает, но оно у a одно — повода нет.
+			self.assertEqual(self.как_ученик(student.my_competencies)["course_hints"], [])
 
+	def test_старт_урока_по_карте_внутри_релиза(self):
+		"""Карта внутри релиза: подтверждение — из этого курса, без версии; похожих и засчёта нет."""
+		from lms_frappe_app.api import student
+		from lms_frappe_app.tests.release_sample import с_компетенциями
+
+		курс, релиз = курс_из_релиза(релиз=с_компетенциями(пример_релиза(f"xv-map-{self.суффикс}")))
+		зачислить_на_курс(self.ученик, курс)
+		занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, курс, "l-1"))
+		evidence.записать(
+			занятие, релиз, "l-1", "B1", "confirmed", 2, ТЕКСТЫ, "free", ОТМЕТКИ, f"xv-map-{self.суффикс}"
+		)
+		к = next(
+			к
+			for к in self.как_ученик(student.start_lesson, lesson=урок_релиза(курс, "l-1"))["competencies"]
+			if к["key"] == "B1"
+		)
+		self.assertEqual(
+			(к["confirmed"]["level"], к["confirmed"]["course"], к["confirmed"]["version"]), (2, курс, None)
+		)
+		self.assertEqual(
+			(к["confirmed"]["current_version"], к["version"], к["similar"], к["credited"]),
+			(None, None, [], False),
+		)
+
+	def test_вид_руководителя_по_назначенным_курсам(self):
+		"""B назначен организацией, A — личный курс. Засчёт из A руководителю — «засчитано ранее» с
+		видимым уровнем; пересмотр в A уровень в его отчёте не снижает; назначенный A виден."""
 		a = self.к["a"]
 		организация = создать_организацию(f"xv-org-{frappe.generate_hash(length=6)}")
 		добавить_в_организацию(self.ученик, организация)
@@ -409,105 +541,147 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 				{"doctype": "Course Allocation", "organization": организация, "course": курс}
 			).insert(ignore_permissions=True)
 
-		def уровень_а() -> tuple:
-			frappe.set_user(менеджер)
-			try:
-				строка = next(
-					с
-					for с in manager.org_report(course=self.курс_б)["data"]["rows"]
-					if с["user"] == self.ученик
-				)
-				курс = next(
-					к
-					for к in manager.student_detail(self.ученик)["data"]["courses"]
-					if к["id"] == self.курс_б
-				)
-			finally:
-				frappe.set_user("Administrator")
-			по_отчёту = next(к for к in строка["competencies"] if к["key"] == a)
-			по_ученику = next(к for к in курс["competencies"] if к["key"] == a)
-			self.assertEqual(по_отчёту, по_ученику)
-			return по_отчёту["status"], по_отчёту["level"]
-
 		назначить(self.курс_б)
 		self.записать(self.курс_а, a, "confirmed", 3)
 		закрыт = self.пройти_урок(self.курс_б, "l-1")
 		self.assertTrue(закрыт["complete"]["ok"], закрыт)
-		self.assertEqual(уровень_а(), ("credited", None))
+		self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("credited", None))
+
+		with self.subTest("засчитано ранее с меньшим видимым уровнем"):
+			self.записать(self.курс_б, a, "confirmed", 1)
+			self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("credited", 1))
 
 		with self.subTest("подтверждение в назначенном курсе, пересмотр в личном не виден"):
 			self.записать(self.курс_б, a, "confirmed", 2)
-			self.assertEqual(уровень_а(), ("level", 2))
+			self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("level", 2))
 			self.пересмотреть(self.курс_а, a, 1)
-			# У ученика уровня больше нет: пересмотр вывел подтверждения обоих курсов.
-			self.assertIsNone(evidence.состояние_компетенции(self.ученик, self.курс_б, a, True)["level"])
-			self.assertEqual(уровень_а(), ("level", 2))
+			self.assertEqual(evidence.состояние_компетенции(self.ученик, self.курс_б, a, True)["level"], 1)
+			self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("level", 2))
 
-		with self.subTest("курс назначен — его записи и пересмотры видны"):
+		with self.subTest("курс назначен — его записи и пересмотры видны, засчёта из него нет"):
 			назначить(self.курс_а)
-			self.assertEqual(уровень_а(), ("no_info", None))
+			self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("level", 1))
+
+	def уровень_у_руководителя(
+		self, менеджер: str, курс: str, компетенция: str, организация: str | None = None
+	) -> tuple:
+		"""(status, level) компетенции курса у ученика в `org_report` и в `student_detail` — одни."""
+		from lms_frappe_app.api import manager
+
+		frappe.set_user(менеджер)
+		try:
+			строка = next(
+				с
+				for с in manager.org_report(course=курс, organization=организация)["data"]["rows"]
+				if с["user"] == self.ученик
+			)
+			курс_ученика = next(
+				к for к in manager.student_detail(self.ученик)["data"]["courses"] if к["id"] == курс
+			)
+		finally:
+			frappe.set_user("Administrator")
+		по_отчёту = next(к for к in строка["competencies"] if к["key"] == компетенция)
+		по_ученику = next(к for к in курс_ученика["competencies"] if к["key"] == компетенция)
+		self.assertEqual(по_отчёту, по_ученику)
+		return по_отчёту["status"], по_отчёту["level"]
+
+	def test_назначенные_курсы_руководителя(self):
+		"""Руководитель двух организаций: B назначен первой, A — второй, Q — чужой организацией,
+		S — его приостановленной организацией. Уровни B — по записям B и A, и при фильтре отчёта
+		по первой организации тоже."""
+		from lms_frappe_app.tests.sample_data import добавить_в_организацию as добавить
+
+		a = self.к["a"]
+		хвост = frappe.generate_hash(length=6)
+		первая, вторая, чужая, приостановленная = (
+			создать_организацию(f"xv-{имя}-{хвост}") for имя in ("one", "two", "other", "frozen")
+		)
+		менеджер = создать_менеджера(f"xv-mg2-{хвост}@example.com", первая)
+		for организация in (вторая, приостановленная):
+			добавить(менеджер, организация, role="Manager")
+		создать_менеджера(f"xv-mg3-{хвост}@example.com", чужая)
+		for организация, курс in (
+			(первая, self.курс_б),
+			(вторая, self.курс_а),
+			(чужая, self.курс_к),
+			(приостановленная, self.курс_с),
+		):
+			добавить_в_организацию(self.ученик, организация)
+			frappe.get_doc(
+				{"doctype": "Course Allocation", "organization": организация, "course": курс}
+			).insert(ignore_permissions=True)
+		frappe.db.set_value("Learning Organization", приостановленная, "status", "Suspended")
+
+		# Урок B начат — `a` открыта до 2.
+		self.записать(self.курс_б, a, "skipped", None)
+		self.записать(self.курс_к, a, "confirmed", 2)
+		self.записать(self.курс_с, a, "confirmed", 2)
+		self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("no_info", None))
+		self.записать(self.курс_а, a, "confirmed", 1)
+		for организация in (None, первая):
+			with self.subTest(organization=организация):
+				self.assertEqual(
+					self.уровень_у_руководителя(менеджер, self.курс_б, a, организация), ("level", 1)
+				)
 
 	def test_подсказка_в_конце_курса(self):
 		"""Последний урок A: отказ `course_queue_open` и закрытие несут подсказку — курсы, где a или
-		похожая b в целях не ниже уровня затруднения, кроме самого A."""
+		похожая b в целях не ниже уровня затруднения, кроме A и курсов, на которые ученик записан."""
 		from lms_frappe_app.api import student
 
 		a, b = self.к["a"], self.к["b"]
 		self.записать(self.курс_б, b, "difficulty", 2)
-
-		def затруднение(занятие: str) -> None:
-			ответ = student.record_evidence(
-				занятие,
-				a,
-				"difficulty",
-				f"xv-end-{занятие}",
-				level=2,
-				task="Задание",
-				student_action="Сделал",
-				assessment="Не вышло",
-				task_form="free",
-				hints=False,
-				corrected=False,
-				indirect=False,
-			)
-			self.assertTrue(ответ["ok"], ответ)
-
-		def пропуск(занятие: str) -> None:
-			ответ = student.record_evidence(занятие, a, "skipped", f"xv-skip-{занятие}", task="Предложил")
-			self.assertTrue(ответ["ok"], ответ)
-
-		первый = self.пройти_урок(self.курс_а, "l-1", затруднение)
+		первый = self.пройти_урок(self.курс_а, "l-1", self.затруднение_api())
 		self.assertEqual(первый["complete"]["data"]["course_hints"], [])
-		второй = self.пройти_урок(self.курс_а, "l-2", пропуск)["complete"]
+		второй = self.пройти_урок(self.курс_а, "l-2", self.свидетельство_api("skipped", task="Предложил"))[
+			"complete"
+		]
 		self.assertTrue(второй["ok"], второй)
-		последний = self.пройти_урок(self.курс_а, "l-3", пропуск)
+		последний = self.пройти_урок(self.курс_а, "l-3", self.свидетельство_api("skipped", task="Предложил"))
 		отказ = последний["complete"]["error"]
 		self.assertEqual(отказ["code"], "course_queue_open", отказ)
 		ожидаемые = [
 			{
 				"competencies": [{"key": b, "title": f"Умение {b}"}, {"key": a, "title": f"Умение {a}"}],
 				"level": 2,
-				"courses": sorted(
-					[
-						{
-							"course": self.курс_б,
-							"title": frappe.db.get_value("LMS Course", self.курс_б, "title"),
-							"targets": [{"competency": a, "target": 2}],
-						},
-						{
-							"course": self.курс_в,
-							"title": frappe.db.get_value("LMS Course", self.курс_в, "title"),
-							"targets": [{"competency": b, "target": 3}],
-						},
-					],
-					key=lambda к: (к["title"], к["course"]),
-				),
+				"courses": self.курсы_подсказки(self.курс_в, self.курс_п, self.курс_к),
 			}
 		]
 		self.assertEqual(отказ["course_hints"], ожидаемые)
+		закрыт = self.как_ученик(student.complete_lesson, последний["session"])
+		self.assertEqual(закрыт["course_hints"], ожидаемые)
+
+	def test_подсказка_после_квиза_последнего_урока(self):
+		"""Q: третий урок без целей закрывается квизом. Отказ `course_queue_open` у `request_quiz` и
+		итог сданной попытки несут подсказку; итог — ту же форму, что `complete_lesson`."""
+		from lms_frappe_app.api import student
+
+		a, b = self.к["a"], self.к["b"]
+		зачислить_на_курс(self.ученик, self.курс_к)
+		self.записать(self.курс_б, b, "difficulty", 2)
+		self.assertTrue(self.пройти_урок(self.курс_к, "l-1", self.затруднение_api())["complete"]["ok"])
+		второй = self.пройти_урок(self.курс_к, "l-2", self.свидетельство_api("skipped", task="Предложил"))
+		self.assertEqual(второй["complete"]["data"]["course_hints"], [])
+		ожидаемые = [
+			{
+				"competencies": [{"key": b, "title": f"Умение {b}"}, {"key": a, "title": f"Умение {a}"}],
+				"level": 2,
+				"courses": self.курсы_подсказки(self.курс_в, self.курс_п),
+			}
+		]
 		frappe.set_user(self.ученик)
 		try:
-			закрыт = student.complete_lesson(последний["session"])
+			старт = student.start_lesson(lesson=урок_релиза(self.курс_к, "l-3"))["data"]
+			отметить_все_пункты(
+				frappe.db.get_value("Agent Learning Session", старт["session"], "run"), старт["session"]
+			)
+			отказ = student.request_quiz(старт["session"])
+			self.assertEqual(отказ["error"]["code"], "course_queue_open", отказ)
+			self.assertEqual(отказ["error"]["course_hints"], ожидаемые)
+			квиз = student.request_quiz(старт["session"])["data"]
+			итог = student.submit_answer(квиз["attempt"], квиз["question"]["id"], "Первый")["data"]["result"]
 		finally:
 			frappe.set_user("Administrator")
-		self.assertEqual(закрыт["data"]["course_hints"], ожидаемые)
+		self.assertTrue(итог["passed"], итог)
+		self.assertTrue({"next_lesson", "empty_blocks", "homework", "course_hints"} <= set(итог))
+		self.assertEqual(итог["course_hints"], ожидаемые)

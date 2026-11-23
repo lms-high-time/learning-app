@@ -1618,9 +1618,13 @@ def complete_lesson(session: str) -> dict:
 	return {
 		"lesson": занятие.lesson,
 		"session_status": занятие.status,
-		**_после_закрытия(занятие.student, занятие.course, занятие.lesson, занятие.organization),
-		# Подсказка курса — только у последнего урока курса (learning-services#827).
-		"course_hints": _подсказки_курса(занятие, релиз, последний),
+		**_после_закрытия(
+			занятие.student,
+			занятие.course,
+			занятие.lesson,
+			занятие.organization,
+			_подсказки_курса(занятие.student, занятие.course, релиз, последний),
+		),
 	}
 
 
@@ -1726,11 +1730,11 @@ def _предложить_очередь(занятие, релиз: str, клю
 		"Это последний урок курса: один раз предложите ученику посмотреть оставшееся — "
 		"отказ ученика записывается как skipped, повторный вызов продолжит урок",
 		competencies=карта["queue"],
-		course_hints=_подсказки_курса(занятие, релиз, карта),
+		course_hints=_подсказки_курса(занятие.student, занятие.course, релиз, карта),
 	)
 
 
-def _подсказки_курса(занятие, релиз: str, карта: dict | None) -> list[dict]:
+def _подсказки_курса(ученик: str, курс: str, релиз: str, карта: dict | None) -> list[dict]:
 	"""Подсказка курса в конце курса на каталоге (`competencies.cross.подсказки`): поводы — по
 	компетенциям карты курса и похожим на них, курсы — кроме этого. Карты нет (урок не
 	последний, курс без карты) или курс со старой картой — `[]` без запросов."""
@@ -1738,22 +1742,54 @@ def _подсказки_курса(занятие, релиз: str, карта: 
 		return []
 	компетенции = index.карта_компетенций(релиз)
 	return сквозные_компетенции.подсказки(
-		занятие.student,
+		ученик,
 		карта["records"],
 		{к["key"]: list(к.get("similar") or []) for к in компетенции},
 		{к["key"]: к["title"] for к in компетенции},
 		область={к["key"] for к in компетенции},
-		кроме=занятие.course,
+		кроме=курс,
 	)
 
 
-def _после_закрытия(ученик: str, курс: str, lesson: str, пространство: str | None) -> dict:
-	"""Что дальше после закрытого урока: `next_lesson`, `empty_blocks` — пустые блоки
-	документа урока — и `homework`, задание урока (`homework.к_закрытию`)."""
+def _подсказки_после_квиза(attempt: str, ученик: str, курс: str, релиз: str, ключ: str) -> list[dict]:
+	"""Подсказка курса, если сданная попытка закрыла последний незакрытый урок курса с картой
+	(learning-services#827): все уроки релиза пройдены, а этот — этой попыткой (прохождение
+	отмечено пройденным не раньше, чем она завершена). Повторная сдача пройденного урока
+	подсказки не несёт, как повторное закрытие у `complete_lesson`. Курс без карты — одна
+	выборка; урок не последний — выход без журнала."""
+	if not index.карта_компетенций(релиз) or not index.на_каталоге(релиз):
+		return []
+	прохождения_курса = {
+		р.lesson_key: р
+		for р in frappe.get_all(
+			"Agent Lesson Run",
+			filters={"student": ученик, "course": курс},
+			fields=["lesson_key", "status", "passed_at"],
+		)
+	}
+	if any(
+		getattr(прохождения_курса.get(урок), "status", None) != очередь_компетенций.ПРОЙДЕН
+		for урок in index.ключи_уроков(релиз)
+	):
+		return []
+	завершена = frappe.db.get_value("Agent Quiz Attempt", attempt, "finished_at")
+	if not (прохождения_курса[ключ].passed_at and завершена and прохождения_курса[ключ].passed_at >= завершена):
+		return []
+	карта = очередь_компетенций.карта_ученика(ученик, курс, релиз, ключ, с_похожими=True)
+	return _подсказки_курса(ученик, курс, релиз, карта)
+
+
+def _после_закрытия(
+	ученик: str, курс: str, lesson: str, пространство: str | None, подсказки: list[dict]
+) -> dict:
+	"""Что дальше после закрытого урока — одно на оба пути закрытия (`complete_lesson` и сданный
+	квиз): `next_lesson`, `empty_blocks` — пустые блоки документа урока, — `homework`, задание
+	урока (`homework.к_закрытию`), и `course_hints` — подсказка курса (learning-services#827)."""
 	return {
 		"next_lesson": _следующий_урок(ученик, курс),
 		"empty_blocks": _пустые_блоки_урока(ученик, курс, lesson, пространство or None),
 		"homework": домашка.к_закрытию(ученик, lesson, курс, пространство or None),
+		"course_hints": подсказки,
 	}
 
 
@@ -1803,10 +1839,13 @@ def submit_answer(
 	(learning-services#602).
 
 	Итог сданной попытки закрывает урок и несёт то же, что `complete_lesson`:
-	`next_lesson`, `empty_blocks` и `homework`.
+	`next_lesson`, `empty_blocks`, `homework` и `course_hints`.
 	"""
 	попытка = frappe.db.get_value(
-		"Agent Quiz Attempt", attempt, ["student", "course", "lesson", "session"], as_dict=True
+		"Agent Quiz Attempt",
+		attempt,
+		["student", "course", "lesson", "session", "release", "lesson_key"],
+		as_dict=True,
 	)
 	if not попытка:
 		raise frappe.DoesNotExistError(f"Agent Quiz Attempt {attempt} not found")
@@ -1828,7 +1867,17 @@ def submit_answer(
 	итог = ответ.get("result")
 	if итог and итог["passed"]:
 		пространство = frappe.db.get_value("Agent Learning Session", попытка.session, "organization")
-		итог.update(_после_закрытия(попытка.student, попытка.course, попытка.lesson, пространство))
+		итог.update(
+			_после_закрытия(
+				попытка.student,
+				попытка.course,
+				попытка.lesson,
+				пространство,
+				_подсказки_после_квиза(
+					attempt, попытка.student, попытка.course, попытка.release, попытка.lesson_key
+				),
+			)
+		)
 	return ответ
 
 

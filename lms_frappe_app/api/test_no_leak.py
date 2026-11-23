@@ -28,6 +28,7 @@ from lms_frappe_app.tests.sample_data import (
 	отметить_все_пункты,
 	создать_домашку,
 	создать_занятие,
+	создать_курс,
 	создать_менеджера,
 	создать_организацию,
 	создать_ученика,
@@ -579,6 +580,66 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 			for строки in ("Agent Lesson Run Goal", "Agent Lesson Run Objective"):
 				with self.assertRaises(frappe.PermissionError, msg=f"{кто}: {строки}"):
 					frappe.get_list(строки, parent_doctype=ПРОХОЖДЕНИЕ, fields=["name"])
+
+	def test_источник_засчёта_не_видит_руководитель(self):
+		"""Засчёт цели из личного курса (learning-services#827): событие журнала занятия своего
+		пространства руководитель читает, а курс и уровень засчитанного свидетельства — ни
+		ссылочными полями списка, ни через `/api/resource`. Frappe поля ссылки на доктайп без
+		права чтения из выборки молча убирает; отказ правами тоже годится."""
+		личный = создать_курс(f"Личный {frappe.generate_hash(length=6)}")
+		источник = frappe.get_doc(
+			{
+				"doctype": "Agent Competency Event",
+				"kind": "Evidence",
+				"student": self.ученик,
+				"course": личный,
+				"lesson_key": "l-1",
+				"competency": "B1",
+				"outcome": "confirmed",
+				"level": 3,
+				"task": "Задание",
+				"student_action": "Сделал",
+				"assessment": "Следует",
+				"request_key": f"leak-src-{frappe.generate_hash(length=6)}",
+			}
+		).insert(ignore_permissions=True)
+		занятие = создать_занятие(self.ученик, self.урок)
+		frappe.db.set_value("Agent Learning Session", занятие, "organization", self.организация)
+		событие = frappe.get_doc(
+			{
+				"doctype": "Agent Session Event",
+				"session": занятие,
+				"kind": "Goal Credited",
+				"note": "B1 не ниже 2: засчитано ранее",
+				"credited_by": источник.name,
+				"competency": "B1",
+				"target": 2,
+			}
+		).insert(ignore_permissions=True)
+
+		frappe.set_user(self.менеджер)
+		self.assertTrue(frappe.has_permission("Agent Session Event", "read", doc=событие.name))
+		self.assertFalse(frappe.has_permission("Agent Competency Event", "read", doc=источник.name))
+		поля = ["name", "credited_by.course", "credited_by.level"]
+		for путь, список in (
+			("get_list", lambda: frappe.get_list("Agent Session Event", filters={"session": занятие}, fields=поля)),
+			(
+				"/api/resource",
+				lambda: frappe.client.get_list(
+					"Agent Session Event", filters={"session": занятие}, fields=поля
+				),
+			),
+		):
+			with self.subTest(путь):
+				try:
+					строки = список()
+				except frappe.PermissionError:
+					continue
+				текст = json.dumps(строки, default=str)
+				self.assertNotIn(личный, текст)
+				self.assertFalse(
+					any(с.get("level") or с.get("credited_by.level") for с in строки), строки
+				)
 
 	def test_ответы_попытки_по_релизу_не_читает_руководитель(self):
 		"""Итог попытки руководителю виден, ответы — нет: в записи ответа лежит эталон."""

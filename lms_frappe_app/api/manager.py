@@ -14,7 +14,7 @@ from frappe import _
 from frappe.query_builder.functions import Min
 
 from lms_frappe_app.agent_learning.competencies import views as представления_карты
-from lms_frappe_app.agent_learning.access import курсы_ученика
+from lms_frappe_app.agent_learning.access import курсы_ученика, приостановленные_организации
 from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
 from lms_frappe_app.agent_learning.artifacts.document import _заполненность
@@ -55,22 +55,30 @@ def org_report(
 
 	# Назначения всех организаций руководителя, а не только отчёта: по ним решается, записи
 	# каких курсов дают уровни по компетенциям каталога (learning-services#827), — и от фильтров
-	# отчёта это не зависит. Адресаты — двумя запросами на весь список.
-	все_назначения = frappe.get_all(
-		"Course Allocation",
-		filters={"organization": ("in", все_организации)},
-		fields=["name", "organization", "course", "audience", "deadline", "mandatory"],
-	)
-	адресаты = адресаты_назначений(все_назначения)
-	назначенные: dict[str, set[str]] = {}
-	for назначение in все_назначения:
-		for участник in адресаты[назначение.name]:
-			назначенные.setdefault(участник, set()).add(назначение.course)
+	# отчёта это не зависит.
+	все_назначения, адресаты, назначенные = назначенные_курсы(все_организации)
 	назначения = [
 		н
 		for н in все_назначения
 		if н.organization in организации and (not course or н.course == course)
 	]
+	релизы = (
+		dict(
+			frappe.get_all(
+				"LMS Course",
+				filters={"name": ("in", list({н.course for н in назначения}))},
+				fields=["name", "active_release"],
+				as_list=True,
+			)
+		)
+		if назначения
+		else {}
+	)
+	# Только уровни по карте компетенций (learning-services#810), у компетенций каталога — по
+	# назначенным курсам; журнал участников — один раз на отчёт, а не на назначение.
+	уровни = представления_карты.уровни_отчёта(
+		[(н.course, релизы.get(н.course), адресаты[н.name]) for н in назначения], назначенные
+	)
 
 	строки = []
 	# Данные, общие для всех участников курса, читаются один раз: прежняя
@@ -89,14 +97,6 @@ def org_report(
 			назначение.course, участники, назначение.organization
 		)
 		квизы = _квизы_по_участникам(назначение.course, участники)
-		# Только уровни по карте компетенций (learning-services#810), у компетенций каталога — по
-		# назначенным курсам (learning-services#827); постоянное число запросов на курс.
-		уровни = представления_карты.уровни_учеников(
-			назначение.course,
-			frappe.db.get_value("LMS Course", назначение.course, "active_release"),
-			участники,
-			назначенные,
-		)
 
 		for участник in участники:
 			строка = _строка_отчёта(
@@ -111,12 +111,38 @@ def org_report(
 					"blocks_filled": заполнено_блоков.get(участник, 0),
 				},
 				квиз=квизы.get(участник, {"passed": 0, "first_try": 0}),
-				компетенции=уровни.get(участник, []),
+				компетенции=уровни.get((назначение.course, участник), []),
 			)
 			if status and строка["status"] != status:
 				continue
 			строки.append(строка)
 	return {"rows": строки}
+
+
+def назначенные_курсы(организации: list[str]) -> tuple[list, dict[str, list[str]], dict[str, set[str]]]:
+	"""Назначения организаций `организации`, их адресаты и ученик → курсы, назначенные ему этими
+	организациями (learning-services#827): по записям этих курсов руководитель видит уровни по
+	компетенциям каталога. Адресат — по общему правилу (`адресаты_назначений`): ушедший из
+	организации и не вписанный в поимённое назначение курса от неё не получает. Назначения
+	приостановленной организации курсом не считаются: курс от неё ученику закрыт, как в его
+	перечне курсов (`access.курсы_ученика`). Без организаций — ни одного запроса; иначе
+	назначения, адресаты и статус организаций — по выборке на весь список."""
+	if not организации:
+		return [], {}, {}
+	назначения = frappe.get_all(
+		"Course Allocation",
+		filters={"organization": ("in", организации)},
+		fields=["name", "organization", "course", "audience", "deadline", "mandatory"],
+	)
+	адресаты = адресаты_назначений(назначения)
+	приостановленные = приостановленные_организации(организации)
+	курсы: dict[str, set[str]] = {}
+	for назначение in назначения:
+		if назначение.organization in приостановленные:
+			continue
+		for участник in адресаты[назначение.name]:
+			курсы.setdefault(участник, set()).add(назначение.course)
+	return назначения, адресаты, курсы
 
 
 def _пройдено_по_участникам(
@@ -303,7 +329,9 @@ def student_detail(user: str) -> dict:
 		if курсы
 		else {}
 	)
-	уровни = представления_карты.уровни_по_курсам(user, релизы)
+	уровни = представления_карты.уровни_по_курсам(
+		user, релизы, lambda: назначенные_курсы(свои_организации)[2].get(user, set())
+	)
 	return {
 		"user": user,
 		"full_name": frappe.db.get_value("User", user, "full_name"),
