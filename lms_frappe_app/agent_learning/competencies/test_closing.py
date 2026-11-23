@@ -28,72 +28,80 @@ def запись(имя, компетенция, исход, уровень=0, �
 	)
 
 
-ЦЕЛИ = [{"competency": "B2", "target": 2}, {"competency": "I1", "target": 3}]
+ЦЕЛИ = [{"competency": "base-2", "target": 2}, {"competency": "whole-1", "target": 3}]
 
 
 class TestНепроверенные(UnitTestCase):
 	def test_что_засчитывается(self):
 		for случай, записи, осталось in (
-			("ничего нет", [], ["B2", "I1"]),
+			("ничего нет", [], ["base-2", "whole-1"]),
 			# В занятиях урока засчитывается проверка с любым исходом, кроме «недостаточно».
 			(
 				"затруднение и пропуск в уроке",
-				[запись("e1", "B2", "difficulty", 2), запись("e2", "I1", "skipped")],
+				[запись("e1", "base-2", "difficulty", 2), запись("e2", "whole-1", "skipped")],
 				[],
 			),
-			("недостаточно данных — не проверка", [запись("e1", "B2", "insufficient")], ["B2", "I1"]),
-			("подтверждено ниже цели в уроке", [запись("e1", "I1", "confirmed", 1)], ["B2"]),
+			(
+				"недостаточно данных — не проверка",
+				[запись("e1", "base-2", "insufficient")],
+				["base-2", "whole-1"],
+			),
+			("подтверждено ниже цели в уроке", [запись("e1", "whole-1", "confirmed", 1)], ["base-2"]),
 			# Из другого урока — только подтверждение не ниже цели.
 			(
 				"подтверждено не ниже цели в другом уроке",
-				[запись("e1", "I1", "confirmed", 3, урок="l-1")],
-				["B2"],
+				[запись("e1", "whole-1", "confirmed", 3, урок="l-1")],
+				["base-2"],
 			),
 			(
 				"подтверждено ниже цели в другом уроке",
-				[запись("e1", "I1", "confirmed", 2, урок="l-1")],
-				["B2", "I1"],
+				[запись("e1", "whole-1", "confirmed", 2, урок="l-1")],
+				["base-2", "whole-1"],
 			),
-			("затруднение в другом уроке", [запись("e1", "B2", "difficulty", 2, урок="l-1")], ["B2", "I1"]),
+			(
+				"затруднение в другом уроке",
+				[запись("e1", "base-2", "difficulty", 2, урок="l-1")],
+				["base-2", "whole-1"],
+			),
 			# Проверка в уроке была — засчитывается, даже если пересмотр потом вывел подтверждение.
 			(
 				"подтверждение из этого урока выведено пересмотром",
 				[
-					запись("e1", "B2", "confirmed", 2),
-					запись("r1", "B2", None, 1, вид="Revision", выведено=["e1"]),
+					запись("e1", "base-2", "confirmed", 2),
+					запись("r1", "base-2", None, 1, вид="Revision", выведено=["e1"]),
 				],
-				["I1"],
+				["whole-1"],
 			),
 			(
 				"подтверждение из другого урока выведено пересмотром",
 				[
-					запись("e1", "I1", "confirmed", 3, урок="l-1"),
-					запись("r1", "I1", None, 1, урок="l-1", вид="Revision", выведено=["e1"]),
+					запись("e1", "whole-1", "confirmed", 3, урок="l-1"),
+					запись("r1", "whole-1", None, 1, урок="l-1", вид="Revision", выведено=["e1"]),
 				],
-				["B2", "I1"],
+				["base-2", "whole-1"],
 			),
 			# Журнал компетенции каталога — по всем курсам (learning-services#826): записи
 			# другого курса засчитываются только подтверждением не ниже цели.
 			(
 				"подтверждено не ниже цели в другом курсе",
-				[запись("e1", "I1", "confirmed", 3, курс="other")],
-				["B2"],
+				[запись("e1", "whole-1", "confirmed", 3, курс="other")],
+				["base-2"],
 			),
 			(
 				"затруднение и пропуск в одноимённом уроке другого курса",
 				[
-					запись("e1", "B2", "difficulty", 2, курс="other"),
-					запись("e2", "I1", "skipped", курс="other"),
+					запись("e1", "base-2", "difficulty", 2, курс="other"),
+					запись("e2", "whole-1", "skipped", курс="other"),
 				],
-				["B2", "I1"],
+				["base-2", "whole-1"],
 			),
 			(
 				"подтверждение другого курса выведено пересмотром в этом",
 				[
-					запись("e1", "I1", "confirmed", 3, курс="other"),
-					запись("r1", "I1", None, 1, вид="Revision", выведено=["e1"]),
+					запись("e1", "whole-1", "confirmed", 3, курс="other"),
+					запись("r1", "whole-1", None, 1, вид="Revision", выведено=["e1"]),
 				],
-				["B2", "I1"],
+				["base-2", "whole-1"],
 			),
 		):
 			with self.subTest(случай):
@@ -106,25 +114,25 @@ class TestЗасчёты(UnitTestCase):
 	def test_засчёт_только_из_другого_курса(self):
 		for случай, записи, засчитано in (
 			("ничего нет", [], []),
-			("подтверждение этого курса", [запись("e1", "I1", "confirmed", 3, урок="l-1")], []),
-			("пропуск в уроке", [запись("e1", "I1", "skipped")], []),
+			("подтверждение этого курса", [запись("e1", "whole-1", "confirmed", 3, урок="l-1")], []),
+			("пропуск в уроке", [запись("e1", "whole-1", "skipped")], []),
 			(
 				"другой курс — последнее из закрывающих",
 				[
-					запись("e1", "I1", "confirmed", 4, курс="a"),
-					запись("e2", "I1", "confirmed", 2, курс="b"),
-					запись("e3", "I1", "confirmed", 3, курс="b"),
+					запись("e1", "whole-1", "confirmed", 4, курс="a"),
+					запись("e2", "whole-1", "confirmed", 2, курс="b"),
+					запись("e3", "whole-1", "confirmed", 3, курс="b"),
 				],
-				[{"competency": "I1", "target": 3, "evidence": "e3", "course": "b", "level": 3}],
+				[{"competency": "whole-1", "target": 3, "evidence": "e3", "course": "b", "level": 3}],
 			),
 			(
 				"цель закрывает и запись этого курса",
-				[запись("e1", "I1", "confirmed", 3, курс="a"), запись("e2", "I1", "difficulty", 3)],
+				[запись("e1", "whole-1", "confirmed", 3, курс="a"), запись("e2", "whole-1", "difficulty", 3)],
 				[],
 			),
 			(
 				"подтверждение другого курса ниже цели",
-				[запись("e1", "B2", "confirmed", 1, курс="a")],
+				[запись("e1", "base-2", "confirmed", 1, курс="a")],
 				[],
 			),
 		):
@@ -136,13 +144,13 @@ class IntegrationTestЗакрытиеУрока(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+		from lms_frappe_app.tests.release_sample import пример_релиза, с_каталогом_компетенций
 		from lms_frappe_app.tests.sample_data import курс_из_релиза, политика_по_умолчанию
 
 		frappe.set_user("Administrator")
 		политика_по_умолчанию()
 		cls.курс, cls.релиз = курс_из_релиза(
-			релиз=с_компетенциями(пример_релиза(f"closing-{frappe.generate_hash(length=6)}"))
+			релиз=с_каталогом_компетенций(пример_релиза(f"closing-{frappe.generate_hash(length=6)}"))
 		)
 
 	def setUp(self):
@@ -181,14 +189,14 @@ class IntegrationTestЗакрытиеУрока(IntegrationTestCase):
 		self.assertEqual(
 			отказ["error"]["competencies"],
 			[
-				{"competency": "B2", "target": 2, "title": "Цена ошибочного действия"},
-				{"competency": "I1", "target": 3, "title": "Обоснование устройства"},
+				{"competency": "base-2", "target": 2, "title": "Цена ошибочного действия"},
+				{"competency": "whole-1", "target": 3, "title": "Обоснование устройства"},
 			],
 		)
-		# Проверено — B2 отказом ученика, I1 затруднением; освоения не требуется.
-		пропуск = self.свидетельство("B2", "skipped", "c-1")
+		# Проверено — base-2 отказом ученика, whole-1 затруднением; освоения не требуется.
+		пропуск = self.свидетельство("base-2", "skipped", "c-1")
 		self.свидетельство(
-			"I1",
+			"whole-1",
 			"difficulty",
 			"c-2",
 			level=3,
@@ -213,7 +221,7 @@ class IntegrationTestЗакрытиеУрока(IntegrationTestCase):
 		отметить_все_пункты(run, self.занятие)
 		шаг = self.student.start_lesson(lesson=урок_релиза(self.курс, "l-3"))["data"]["next_step"]
 		self.assertEqual(шаг["kind"], "competencies")
-		self.assertEqual([ц["competency"] for ц in шаг["competencies"]], ["B2", "I1"])
+		self.assertEqual([ц["competency"] for ц in шаг["competencies"]], ["base-2", "whole-1"])
 
 
 class IntegrationTestПопыткаПриКарте(IntegrationTestCase):
@@ -222,7 +230,7 @@ class IntegrationTestПопыткаПриКарте(IntegrationTestCase):
 		урок мимо проверки компетенций."""
 		from lms_frappe_app.agent_learning.releases import service
 		from lms_frappe_app.api import student
-		from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+		from lms_frappe_app.tests.release_sample import пример_релиза, с_каталогом_компетенций
 		from lms_frappe_app.tests.sample_data import (
 			зачислить_на_курс,
 			курс_из_релиза,
@@ -245,7 +253,7 @@ class IntegrationTestПопыткаПриКарте(IntegrationTestCase):
 		попытка = student.request_quiz(занятие)["data"]["attempt"]
 
 		frappe.set_user("Administrator")
-		service.опубликовать(с_компетенциями(пример_релиза(ключ)), None, "Administrator")
+		service.опубликовать(с_каталогом_компетенций(пример_релиза(ключ)), None, "Administrator")
 
 		self.assertEqual(
 			frappe.db.get_value("Agent Quiz Attempt", попытка, ["status", "cancel_reason"]),

@@ -63,7 +63,7 @@
    "fieldtype": "Data",
    "label": "Компетенция",
    "read_only": 1,
-   "description": "У засчёта цели — компетенция цели урока."
+   "description": "У засчёта цели — компетенция цели урока. Строка, а не ссылка на Agent Competency: журнал занятий читает руководитель организации без права чтения каталога, и ссылку Frappe вырезал бы из get_list и REST."
   },
   {
    "fieldname": "target",
@@ -76,7 +76,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-23 20:00:00.000000",
+ "modified": "2026-11-23 22:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Session Event",

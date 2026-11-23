@@ -9,7 +9,7 @@ import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from lms_frappe_app.agent_learning.competencies import queue
-from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+from lms_frappe_app.tests.release_sample import карта_компетенций, пример_релиза, с_каталогом_компетенций
 
 
 class _Запись(dict):
@@ -29,17 +29,19 @@ def запись(имя, компетенция, исход, уровень=0, �
 	)
 
 
-КАРТА = с_компетенциями(пример_релиза())["competencies"]
+КАРТА = карта_компетенций()
 ЦЕЛИ = {
-	"l-1": [{"competency": "B1", "target": 2}],
-	"l-3": [{"competency": "B2", "target": 2}, {"competency": "I1", "target": 3}],
+	"l-1": [{"competency": "base-1", "target": 2}],
+	"l-3": [{"competency": "base-2", "target": 2}, {"competency": "whole-1", "target": 3}],
 }
 
 
 class TestУровни(UnitTestCase):
 	def test_открытые_уровни_по_начатым(self):
-		self.assertEqual(queue.открытые_уровни(ЦЕЛИ, {"l-1"}), {"B1": 2})
-		self.assertEqual(queue.открытые_уровни(ЦЕЛИ, {"l-1", "l-3"}), {"B1": 2, "B2": 2, "I1": 3})
+		self.assertEqual(queue.открытые_уровни(ЦЕЛИ, {"l-1"}), {"base-1": 2})
+		self.assertEqual(
+			queue.открытые_уровни(ЦЕЛИ, {"l-1", "l-3"}), {"base-1": 2, "base-2": 2, "whole-1": 3}
+		)
 		self.assertEqual(queue.открытые_уровни(ЦЕЛИ, set()), {})
 
 	def test_показанный_уровень(self):
@@ -51,50 +53,50 @@ class TestУровни(UnitTestCase):
 class TestЗатрудненияПосле(UnitTestCase):
 	def test_открытие_и_выход(self):
 		for случай, записи, итог in (
-			("затруднение без подтверждения — не «после»", [запись("e1", "B1", "difficulty", 2)], {}),
+			("затруднение без подтверждения — не «после»", [запись("e1", "base-1", "difficulty", 2)], {}),
 			(
 				"затруднение не выше подтверждённого",
-				[запись("e1", "B1", "confirmed", 3), запись("e2", "B1", "difficulty", 2)],
-				{"B1": 2},
+				[запись("e1", "base-1", "confirmed", 3), запись("e2", "base-1", "difficulty", 2)],
+				{"base-1": 2},
 			),
 			(
 				"затруднение выше подтверждённого — не противоречие",
-				[запись("e1", "B1", "confirmed", 1), запись("e2", "B1", "difficulty", 2)],
+				[запись("e1", "base-1", "confirmed", 1), запись("e2", "base-1", "difficulty", 2)],
 				{},
 			),
 			(
 				"подтверждение не ниже затруднения закрывает",
 				[
-					запись("e1", "B1", "confirmed", 3),
-					запись("e2", "B1", "difficulty", 2),
-					запись("e3", "B1", "confirmed", 2),
+					запись("e1", "base-1", "confirmed", 3),
+					запись("e2", "base-1", "difficulty", 2),
+					запись("e3", "base-1", "confirmed", 2),
 				],
 				{},
 			),
 			(
 				"подтверждение ниже затруднения не закрывает",
 				[
-					запись("e1", "B1", "confirmed", 3),
-					запись("e2", "B1", "difficulty", 3),
-					запись("e3", "B1", "confirmed", 2),
+					запись("e1", "base-1", "confirmed", 3),
+					запись("e2", "base-1", "difficulty", 3),
+					запись("e3", "base-1", "confirmed", 2),
 				],
-				{"B1": 3},
+				{"base-1": 3},
 			),
 			(
 				"пропуск не закрывает",
 				[
-					запись("e1", "B1", "confirmed", 3),
-					запись("e2", "B1", "difficulty", 2),
-					запись("e3", "B1", "skipped"),
+					запись("e1", "base-1", "confirmed", 3),
+					запись("e2", "base-1", "difficulty", 2),
+					запись("e3", "base-1", "skipped"),
 				],
-				{"B1": 2},
+				{"base-1": 2},
 			),
 			(
 				"пересмотр закрывает",
 				[
-					запись("e1", "B1", "confirmed", 3),
-					запись("e2", "B1", "difficulty", 2),
-					запись("r1", "B1", None, 1, вид="Revision", выведено=["e1"]),
+					запись("e1", "base-1", "confirmed", 3),
+					запись("e2", "base-1", "difficulty", 2),
+					запись("r1", "base-1", None, 1, вид="Revision", выведено=["e1"]),
 				],
 				{},
 			),
@@ -106,18 +108,18 @@ class TestЗатрудненияПосле(UnitTestCase):
 class TestОчередь(UnitTestCase):
 	def test_состав_и_порядок(self):
 		записи = [
-			запись("e1", "B2", "confirmed", 2),
-			запись("e2", "B2", "difficulty", 1),
-			запись("e3", "B1", "skipped"),
+			запись("e1", "base-2", "confirmed", 2),
+			запись("e2", "base-2", "difficulty", 1),
+			запись("e3", "base-1", "skipped"),
 		]
-		# l-1 пройден: B1 без подтверждения — в очереди; I1 урока l-3 не пройден — нет.
+		# l-1 пройден: base-1 без подтверждения — в очереди; whole-1 урока l-3 не пройден — нет.
 		статусы = {"l-1": "passed", "l-3": "in_progress"}
 		очередь = queue.очередь_по_данным(КАРТА, ЦЕЛИ, статусы, записи, "l-2")
 		self.assertEqual(
 			[(п["competency"], п["reason"], п["level"], п["last_outcome"]) for п in очередь],
 			[
-				("B1", "unconfirmed", None, "skipped"),
-				("B2", "difficulty_after_confirmation", 1, "difficulty"),
+				("base-1", "unconfirmed", None, "skipped"),
+				("base-2", "difficulty_after_confirmation", 1, "difficulty"),
 			],
 		)
 		# Суть затруднения — из его записи: через несколько сессий агенту есть что разбирать.
@@ -129,12 +131,12 @@ class TestОчередь(UnitTestCase):
 		записи_b3 = [*записи, запись("e4", "B3", "confirmed", 2), запись("e5", "B3", "difficulty", 2)]
 		self.assertEqual(
 			[п["competency"] for п in queue.очередь_по_данным(карта, цели, статусы, записи_b3, "l-9")],
-			["B3", "B1", "B2"],
+			["B3", "base-1", "base-2"],
 		)
 
 	def test_подтверждённое_ниже_цели_не_в_очереди(self):
 		очередь = queue.очередь_по_данным(
-			КАРТА, ЦЕЛИ, {"l-1": "passed"}, [запись("e1", "B1", "confirmed", 1)]
+			КАРТА, ЦЕЛИ, {"l-1": "passed"}, [запись("e1", "base-1", "confirmed", 1)]
 		)
 		self.assertEqual(очередь, [])
 
@@ -157,7 +159,7 @@ class IntegrationTestПредложениеОчереди(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		настроить_квиз(quiz_required=0)
 		ключ = f"queue-{frappe.generate_hash(length=6)}"
-		курс, _ = курс_из_релиза(релиз=с_компетенциями(пример_релиза(ключ)))
+		курс, _ = курс_из_релиза(релиз=с_каталогом_компетенций(пример_релиза(ключ)))
 		ученик = создать_ученика(f"{ключ}@example.com")
 		зачислить_на_курс(ученик, курс)
 		frappe.set_user(ученик)
@@ -173,17 +175,17 @@ class IntegrationTestПредложениеОчереди(IntegrationTestCase):
 				self.assertTrue(ответ["ok"], ответ)
 			return {"старт": старт, "закрытие": student.complete_lesson(занятие), "занятие": занятие}
 
-		# l-1: B1 пропущена — уйдёт в очередь после закрытия урока.
-		self.assertTrue(пройти("l-1", [("B1", "q-1")])["закрытие"]["ok"])
+		# l-1: base-1 пропущена — уйдёт в очередь после закрытия урока.
+		self.assertTrue(пройти("l-1", [("base-1", "q-1")])["закрытие"]["ok"])
 		self.assertTrue(пройти("l-2", [])["закрытие"]["ok"])
-		последний = пройти("l-3", [("B2", "q-2"), ("I1", "q-3")])
+		последний = пройти("l-3", [("base-2", "q-2"), ("whole-1", "q-3")])
 		self.assertEqual(
 			[(п["competency"], п["reason"]) for п in последний["старт"]["competency_queue"]],
-			[("B1", "unconfirmed")],
+			[("base-1", "unconfirmed")],
 		)
 		отказ = последний["закрытие"]
 		self.assertEqual(отказ["error"]["code"], "course_queue_open", отказ)
-		self.assertEqual([п["competency"] for п in отказ["error"]["competencies"]], ["B1"])
+		self.assertEqual([п["competency"] for п in отказ["error"]["competencies"]], ["base-1"])
 		# Предложено один раз: повторный вызов закрывает урок.
 		self.assertTrue(student.complete_lesson(последний["занятие"])["ok"])
 		# Возврат к пройденному уроку предложения не повторяет — курс уже завершён.

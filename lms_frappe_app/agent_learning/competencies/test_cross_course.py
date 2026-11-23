@@ -18,7 +18,7 @@ from lms_frappe_app.agent_learning.catalog import service as каталог
 from lms_frappe_app.agent_learning.competencies import audit, closing, evidence, queue
 from lms_frappe_app.agent_learning.errors import Отказ
 from lms_frappe_app.tests.catalog_sample import ключи_примера, поверх_опубликованного, пример_каталога
-from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+from lms_frappe_app.tests.release_sample import пример_релиза
 from lms_frappe_app.tests.sample_data import (
 	занятие_релиза,
 	зачислить_на_курс,
@@ -96,7 +96,7 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		return next(з for з in audit.выборка(None, audit.ВЫБОРКА_НЕ_БОЛЬШЕ) if з["event"] == событие)
 
 	def проверка_б(self) -> tuple[list[dict], list[dict]]:
-		return closing.проверка(self.ученик, self.курс_б, self.релиз_б, "l-1", self.цели)
+		return closing.проверка(self.ученик, self.курс_б, "l-1", self.цели)
 
 	def test_свидетельство_по_карте_курса_с_версией(self):
 		"""Компетенция — из карты курса: цели и их составляющие по каталогу; запись несёт версию
@@ -197,9 +197,7 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			),
 			(self.ученик, None),
 		)
-		self.assertIsNone(
-			evidence.состояние_компетенции(self.ученик, self.курс_а, self.к["a"], True)["level"]
-		)
+		self.assertIsNone(evidence.состояние_компетенции(self.ученик, self.курс_а, self.к["a"])["level"])
 		self.assertEqual(self.проверка_б(), (self.цели, []))
 		self.assertEqual(json.loads(frappe.db.get_value(evidence.ЖУРНАЛ, пересмотр, "withdrawn")), [e1])
 
@@ -212,9 +210,7 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 		self.assertEqual(
 			json.loads(frappe.db.get_value(evidence.ЖУРНАЛ, пересмотр["event"], "withdrawn")), [e1]
 		)
-		self.assertIsNone(
-			evidence.состояние_компетенции(self.ученик, self.курс_а, self.к["a"], True)["level"]
-		)
+		self.assertIsNone(evidence.состояние_компетенции(self.ученик, self.курс_а, self.к["a"])["level"])
 		self.assertEqual(self.проверка_б(), (self.цели, []))
 
 		# Подтверждение после пересмотра засчитывается, отменённое аудитом — нет.
@@ -257,47 +253,20 @@ class IntegrationTestСквозныеКомпетенции(IntegrationTestCase)
 			frappe.db.get_value(evidence.ЖУРНАЛ, e1, ["student", "archived_student"]), (None, self.ученик)
 		)
 
-	def test_граница_ключей_карты_внутри_релиза(self):
-		"""Запись другого курса без версии компетенции — ключ карты внутри релиза — не засчитывается,
-		даже если совпала со слагом; курс с картой внутри релиза читает журнал только по себе."""
-
-		def вставить(курс: str, компетенция: str, версия: int, ученик: str | None = None) -> None:
-			frappe.get_doc(
-				{
-					"doctype": evidence.ЖУРНАЛ,
-					"kind": evidence.СВИДЕТЕЛЬСТВО,
-					"student": ученик or self.ученик,
-					"course": курс,
-					"lesson_key": "l-1",
-					"competency": компетенция,
-					"competency_version": версия,
-					"outcome": evidence.ПОДТВЕРЖДЕНО,
-					"level": 4,
-					"request_key": frappe.generate_hash(length=10),
-				}
-			).insert(ignore_permissions=True)
-
-		with self.subTest("подтверждение другого ученика"):
-			другой = создать_ученика(f"cross-other-{frappe.generate_hash(length=6)}@example.com")
-			вставить(self.курс_а, self.к["a"], 1, другой)
-			self.assertEqual(self.проверка_б(), (self.цели, []))
-
-		with self.subTest("слаг в записи без версии"):
-			вставить(self.курс_а, self.к["a"], 0)
-			self.assertEqual(self.проверка_б(), (self.цели, []))
-
-		with self.subTest("курс с картой внутри релиза"):
-			курс, релиз = курс_из_релиза(
-				релиз=с_компетенциями(пример_релиза(f"cross-map-{frappe.generate_hash(length=6)}"))
-			)
-			вставить(self.курс_а, "B1", 1)
-			self.assertEqual(
-				closing.непроверенные(self.ученик, курс, релиз, "l-1", [{"competency": "B1", "target": 2}]),
-				[{"competency": "B1", "target": 2}],
-			)
-
-		with self.subTest("пересмотр в курсе с картой внутри релиза"):
-			свой = self.записать(курс, релиз, "B1", "confirmed", 3, "m-1")["event"]
-			занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, курс, "l-1"))
-			пересмотр = evidence.пересмотреть(занятие, релиз, "l-1", "B1", 1, "Повторилось", "m-2")["event"]
-			self.assertEqual(json.loads(frappe.db.get_value(evidence.ЖУРНАЛ, пересмотр, "withdrawn")), [свой])
+	def test_подтверждение_другого_ученика_не_засчитывается(self):
+		другой = создать_ученика(f"cross-other-{frappe.generate_hash(length=6)}@example.com")
+		frappe.get_doc(
+			{
+				"doctype": evidence.ЖУРНАЛ,
+				"kind": evidence.СВИДЕТЕЛЬСТВО,
+				"student": другой,
+				"course": self.курс_а,
+				"lesson_key": "l-1",
+				"competency": self.к["a"],
+				"competency_version": 1,
+				"outcome": evidence.ПОДТВЕРЖДЕНО,
+				"level": 4,
+				"request_key": frappe.generate_hash(length=10),
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(self.проверка_б(), (self.цели, []))

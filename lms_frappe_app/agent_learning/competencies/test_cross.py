@@ -80,15 +80,6 @@ class TestПодтверждения(UnitTestCase):
 		self.assertTrue(cross.подтверждение(з, 1, {})["current_version"])
 		# Компетенции нет в каталоге — текущей версии нет.
 		self.assertIsNone(cross.подтверждение(з, None, {})["current_version"])
-		# Карта внутри релиза: версии нет.
-		з.competency_version = 0
-		self.assertEqual(
-			(
-				cross.подтверждение(з, None, {})["version"],
-				cross.подтверждение(з, None, {})["current_version"],
-			),
-			(None, None),
-		)
 		self.assertIsNone(cross.подтверждение(None, 1, {}))
 
 
@@ -217,16 +208,13 @@ class TestВидРуководителя(UnitTestCase):
 			[("a", "credited", None), ("b", "level", 2), ("c", "credited", 1)],
 		)
 		записи = [
-			запись("e1", "a", "confirmed", 2, course="assigned", competency_version=1),
-			запись("e2", "a", "confirmed", 3, course="own", competency_version=1),
-			запись(
-				"r1", "a", None, 1, course="personal", competency_version=1, вид="Revision", выведено=["e1"]
-			),
-			запись("e3", "a", "confirmed", 3, course="other", competency_version=0),
-			запись("e4", "z", "confirmed", 3, course="assigned", competency_version=1),
+			запись("e1", "a", "confirmed", 2, course="assigned"),
+			запись("e2", "a", "confirmed", 3, course="own"),
+			запись("r1", "a", None, 1, course="personal", вид="Revision", выведено=["e1"]),
+			запись("e4", "z", "confirmed", 3, course="assigned"),
 		]
 		self.assertEqual(
-			[з.name for з in views.записи_назначенных(записи, "own", {"a"}, {"assigned", "other"})],
+			[з.name for з in views.записи_назначенных(записи, "own", {"a"}, {"assigned"})],
 			["e1", "e2"],
 		)
 
@@ -504,30 +492,6 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 			# Пересмотр затруднение не снимает, но оно у a одно — повода нет.
 			self.assertEqual(self.как_ученик(student.my_competencies)["course_hints"], [])
 
-	def test_старт_урока_по_карте_внутри_релиза(self):
-		"""Карта внутри релиза: подтверждение — из этого курса, без версии; похожих и засчёта нет."""
-		from lms_frappe_app.api import student
-		from lms_frappe_app.tests.release_sample import с_компетенциями
-
-		курс, релиз = курс_из_релиза(релиз=с_компетенциями(пример_релиза(f"xv-map-{self.суффикс}")))
-		зачислить_на_курс(self.ученик, курс)
-		занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, курс, "l-1"))
-		evidence.записать(
-			занятие, релиз, "l-1", "B1", "confirmed", 2, ТЕКСТЫ, "free", ОТМЕТКИ, f"xv-map-{self.суффикс}"
-		)
-		к = next(
-			к
-			for к in self.как_ученик(student.start_lesson, lesson=урок_релиза(курс, "l-1"))["competencies"]
-			if к["key"] == "B1"
-		)
-		self.assertEqual(
-			(к["confirmed"]["level"], к["confirmed"]["course"], к["confirmed"]["version"]), (2, курс, None)
-		)
-		self.assertEqual(
-			(к["confirmed"]["current_version"], к["version"], к["similar"], к["credited"]),
-			(None, None, [], False),
-		)
-
 	def test_вид_руководителя_по_назначенным_курсам(self):
 		"""B назначен организацией, A — личный курс. Засчёт из A руководителю — «засчитано ранее» с
 		видимым уровнем; пересмотр в A уровень в его отчёте не снижает; назначенный A виден."""
@@ -555,7 +519,7 @@ class IntegrationTestСквозныеПредставления(IntegrationTestC
 			self.записать(self.курс_б, a, "confirmed", 2)
 			self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("level", 2))
 			self.пересмотреть(self.курс_а, a, 1)
-			self.assertEqual(evidence.состояние_компетенции(self.ученик, self.курс_б, a, True)["level"], 1)
+			self.assertEqual(evidence.состояние_компетенции(self.ученик, self.курс_б, a)["level"], 1)
 			self.assertEqual(self.уровень_у_руководителя(менеджер, self.курс_б, a), ("level", 2))
 
 		with self.subTest("курс назначен — его записи и пересмотры видны, засчёта из него нет"):

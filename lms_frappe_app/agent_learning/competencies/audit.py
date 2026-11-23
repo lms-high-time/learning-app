@@ -110,17 +110,14 @@ def заключить(событие: str, заключение: str, прич�
 			default=0,
 		)
 	# Отменяется только действующее подтверждение: у затруднения уровня нет, а выведенное уже вне расчёта —
-	# у компетенции каталога и пересмотром в другом курсе.
-	сквозная = bool(запись.competency_version)
+	# и пересмотром в другом курсе.
 	отменить = (
 		запись.kind == evidence.СВИДЕТЕЛЬСТВО
 		and заключение == ПРОТИВОРЕЧИЕ
 		and запись.outcome == evidence.ПОДТВЕРЖДЕНО
 		and запись.name
 		not in evidence._выведенные(
-			evidence._записи(
-				запись.student, запись.course, запись.competency, [запись.competency] if сквозная else None
-			)
+			evidence._записи(запись.student, запись.course, запись.competency, [запись.competency])
 		)
 	)
 	имя = (
@@ -151,7 +148,7 @@ def заключить(событие: str, заключение: str, прич�
 		"event": запись.name,
 		"conclusion": заключение,
 		"withdrawn": отменить,
-		"state": evidence.состояние_компетенции(запись.student, запись.course, запись.competency, сквозная),
+		"state": evidence.состояние_компетенции(запись.student, запись.course, запись.competency),
 	}
 
 

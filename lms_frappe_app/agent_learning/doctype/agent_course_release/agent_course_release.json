@@ -27,7 +27,6 @@
   "sections",
   "sb_snapshot",
   "agent_frame",
-  "competency_map",
   "snapshot"
  ],
  "fields": [
@@ -94,7 +93,7 @@
    "fieldtype": "Link",
    "label": "Выпуск каталога компетенций",
    "options": "Agent Competency Catalog Release",
-   "description": "По какому выпуску каталога собран релиз; определения компетенций курс читает из последнего выпуска. Пусто — карта компетенций в релизе (competency_map) или её нет",
+   "description": "По какому выпуску каталога собран релиз; определения компетенций курс читает из последнего выпуска. Пусто — у курса нет карты компетенций",
    "read_only": 1
   },
   {
@@ -197,16 +196,6 @@
    "print_hide": 1
   },
   {
-   "fieldname": "competency_map",
-   "fieldtype": "JSON",
-   "label": "Карта компетенций",
-   "description": "competencies релиза как есть: ключ, вид, название, описание, составляющие; нет карты или релиз на каталоге — []",
-   "hidden": 1,
-   "read_only": 1,
-   "report_hide": 1,
-   "print_hide": 1
-  },
-  {
    "fieldname": "snapshot",
    "fieldtype": "Long Text",
    "label": "Снимок релиза",
@@ -219,7 +208,7 @@
  ],
  "grid_page_length": 50,
  "links": [],
- "modified": "2026-11-22 12:00:00.000000",
+ "modified": "2026-11-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Agent Learning",
  "name": "Agent Course Release",

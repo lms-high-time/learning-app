@@ -13,7 +13,7 @@ from lms_frappe_app.agent_learning.releases import index, projection
 
 # Модулем, а не именами: класс тестов проекции в этом модуле прогнался бы второй раз.
 from lms_frappe_app.agent_learning.releases import test_projection as проекция
-from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+from lms_frappe_app.tests.release_sample import карта_компетенций, пример_релиза, с_каталогом_компетенций
 from lms_frappe_app.tests.sample_data import создать_куратора
 
 
@@ -146,9 +146,13 @@ class IntegrationTestИндексРелиза(IntegrationTestCase):
 	# --- карта компетенций (learning-services#807) ---
 
 	def test_карта_компетенций_и_цели_уроков(self):
-		релиз = с_компетенциями(пример_релиза())
+		"""Карта — компетенции каталога по целям уроков: цели по порядку уроков, затем составляющие;
+		форму из каталога проверяет `catalog.test_course_release`."""
+		релиз = с_каталогом_компетенций(пример_релиза())
 		с_картой = self.вставить(релиз, self.итог, 4)
-		self.assertEqual(index.карта_компетенций(с_картой), релиз["competencies"])
+		self.assertEqual(
+			[к["key"] for к in index.карта_компетенций(с_картой)], [к["key"] for к in карта_компетенций()]
+		)
 		self.assertEqual(index.компетенции_урока(с_картой, "l-3"), релиз["lessons"][2]["competencies"])
 		self.assertEqual(index.компетенции_урока(с_картой, "l-2"), [])
 		self.assertEqual(index.компетенции_урока(с_картой, "нет-такого"), [])

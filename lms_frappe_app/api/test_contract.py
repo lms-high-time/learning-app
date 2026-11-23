@@ -33,7 +33,7 @@ from lms_frappe_app.agent_learning.releases import schema as схема_рели
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.api import analytics, authoring, manager, public, review, student
 from lms_frappe_app.tests.catalog_sample import поверх_опубликованного, пример_каталога
-from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+from lms_frappe_app.tests.release_sample import пример_релиза, с_каталогом_компетенций
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	политика_по_умолчанию,
@@ -358,7 +358,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 
 	def _опубликовать_релиз(self) -> str:
 		frappe.set_user(self.куратор)
-		релиз = с_компетенциями(пример_релиза(f"contract-{self.суффикс}"))
+		релиз = с_каталогом_компетенций(пример_релиза(f"contract-{self.суффикс}"))
 		# Урок l-1 обходится квизом: у урока с целями по компетенциям квиза нет
 		# (learning-services#809), а свидетельства пишутся по карте курса и без целей урока.
 		del релиз["lessons"][0]["competencies"]
@@ -594,7 +594,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 		"""Свидетельство и пересмотр вниз (learning-services#808)."""
 		поля = {
 			"session": занятие,
-			"competency": "B1",
+			"competency": "base-1",
 			"outcome": "confirmed",
 			"level": 2,
 			"task": "Объяснить выбор устройства",
@@ -611,7 +611,7 @@ class IntegrationTestContractExamples(IntegrationTestCase):
 			"student.revise_level",
 			student.revise_level(
 				session=занятие,
-				competency="B1",
+				competency="base-1",
 				level=1,
 				reason="Затруднение повторилось",
 				request_key=f"contract-rev-{self.суффикс}",

@@ -19,6 +19,15 @@ class AgentCompetencyEvent(Document):
 	журнал квиза.
 	"""
 
+	def validate(self):
+		# Запись — компетенция каталога и её версия: по версии журнал читается во всех курсах
+		# ученика, а по её признакам поставлен уровень (learning-services#839).
+		if (self.competency_version or 0) < 1:
+			frappe.throw(
+				frappe._("У записи журнала компетенций нет версии компетенции каталога"),
+				frappe.ValidationError,
+			)
+
 	def before_insert(self):
 		self.occurred_at = self.occurred_at or now_datetime()
 

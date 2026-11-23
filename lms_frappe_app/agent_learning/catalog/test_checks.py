@@ -221,9 +221,71 @@ class UnitTestСхемаКаталога(UnitTestCase):
 				),
 				[("competency_cycle", "competencies")],
 			),
+			(
+				"круг через три компетенции",
+				_круг_из_трёх,
+				[("competency_cycle", "competencies")],
+			),
+			(
+				# Интегративная из интегративной — без круга.
+				"интегративная опирается на интегративную",
+				lambda к: добавить(
+					к,
+					компетенция(
+						"whole-of-whole",
+						К["classes"],
+						parts=[
+							{"competency": К["whole"], "from_level": 3},
+							{"competency": К["b"], "from_level": 3},
+						],
+					),
+				),
+				[],
+			),
+			(
+				# Петля на себя — только competency_parts, круга из неё не выходит.
+				"компетенция — своя составляющая",
+				lambda к: к["competencies"][2]["parts"].append({"competency": К["whole"], "from_level": 3}),
+				[("competency_parts", f"competencies[{К['whole']}].parts")],
+			),
+			(
+				"составляющая дважды",
+				lambda к: к["competencies"][2]["parts"].append({"competency": К["a"], "from_level": 2}),
+				[("duplicate_key", f"competencies[{К['whole']}].parts")],
+			),
+			(
+				"интегративная из одной составляющей",
+				lambda к: к["competencies"][2].update(parts=[{"competency": К["a"], "from_level": 1}]),
+				[("competency_parts", f"competencies[{К['whole']}].parts")],
+			),
+			(
+				"интегративная без составляющих",
+				lambda к: к["competencies"][2].pop("parts"),
+				[("competency_parts", f"competencies[{К['whole']}].parts")],
+			),
 		):
 			with self.subTest(случай):
 				self.assertEqual(проблемы(правка), ожидаемое)
+		with self.subTest("ключи круга по кругу"):
+			каталог = пример_каталога(С)
+			_круг_из_трёх(каталог)
+			self.assertEqual(
+				[п["keys"] for п in checks.проблемы(каталог)],
+				[[К["whole"], "loop-2", "loop-3", К["whole"]]],
+			)
+
+
+def _круг_из_трёх(каталог: dict) -> None:
+	"""whole → loop-2 → loop-3 → whole, у каждой ещё базовая: составляющих по две."""
+	for ключ, следующая in (("loop-2", "loop-3"), ("loop-3", К["whole"])):
+		каталог["competencies"].append(
+			компетенция(
+				ключ,
+				К["classes"],
+				parts=[{"competency": следующая, "from_level": 3}, {"competency": К["a"], "from_level": 1}],
+			)
+		)
+	каталог["competencies"][2]["parts"].append({"competency": "loop-2", "from_level": 3})
 
 
 def _правки(
