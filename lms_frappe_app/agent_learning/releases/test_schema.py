@@ -92,8 +92,8 @@ class TestСхемаНаПримере(unittest.TestCase):
 			"перевод карточки без описаний": lambda релиз: релиз["course"].update(
 				translations={"en": {"title": "Sample"}, "de": {"title": "Beispiel", "summary": ""}}
 			),
-			# learning-services#802: карта компетенций необязательна.
-			"карта компетенций": с_компетенциями,
+			# learning-services#825: каталог компетенций и цели уроков необязательны.
+			"цели уроков по компетенциям каталога": с_компетенциями,
 		}.items():
 			with self.subTest(случай):
 				релиз = пример_релиза()
@@ -138,9 +138,12 @@ class TestСхемаНаПримере(unittest.TestCase):
 				{"path": "$.lessons[0].competencies[0].target", "message": "больше 4"},
 			),
 			(
-				"неизвестный вид компетенции",
-				lambda релиз: с_компетенциями(релиз)["competencies"][0].update(kind="core"),
-				{"path": "$.competencies[0].kind", "message": "одно из: base, integrative"},
+				# Определения компетенций — только в каталоге (learning-services#839).
+				"карта компетенций в релизе",
+				lambda релиз: с_компетенциями(релиз).update(
+					competencies=[{"key": "base-1", "kind": "base", "title": "Т", "description": "О"}]
+				),
+				{"path": "$.competencies", "message": "лишнее поле"},
 			),
 			(
 				"отрицательный срок домашки",

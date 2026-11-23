@@ -209,12 +209,12 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+		from lms_frappe_app.tests.release_sample import пример_релиза, с_каталогом_компетенций
 		from lms_frappe_app.tests.sample_data import курс_из_релиза
 
 		frappe.set_user("Administrator")
 		cls.курс, cls.релиз = курс_из_релиза(
-			релиз=с_компетенциями(пример_релиза(f"evidence-{frappe.generate_hash(length=6)}"))
+			релиз=с_каталогом_компетенций(пример_релиза(f"evidence-{frappe.generate_hash(length=6)}"))
 		)
 
 	def setUp(self):
@@ -225,7 +225,7 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		зачислить_на_курс(self.ученик, self.курс)
 		self.занятие = frappe.get_doc("Agent Learning Session", занятие_релиза(self.ученик, self.курс, "l-1"))
 
-	def записать(self, ключ: str, компетенция: str = "B1", исход: str = "confirmed", уровень=2, **ещё):
+	def записать(self, ключ: str, компетенция: str = "base-1", исход: str = "confirmed", уровень=2, **ещё):
 		return evidence.записать(
 			self.занятие,
 			self.релиз,
@@ -243,7 +243,7 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		первое = self.записать("k-1")
 		self.assertEqual(
 			(первое["kind"], первое["competency"], первое["duplicate"], первое["state"]),
-			("evidence", "B1", False, {"level": 2, "last_outcome": "confirmed", "last_level": 2}),
+			("evidence", "base-1", False, {"level": 2, "last_outcome": "confirmed", "last_level": 2}),
 		)
 		запись = frappe.get_doc(evidence.ЖУРНАЛ, первое["event"])
 		self.assertEqual(
@@ -255,31 +255,40 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 				запись.release,
 				запись.competency_version,
 			),
-			# У карты внутри релиза версии компетенции нет (learning-services#826).
-			(self.ученик, self.курс, "l-1", self.занятие.name, self.релиз, 0),
+			# Версия компетенции каталога на момент записи (learning-services#826).
+			(
+				self.ученик,
+				self.курс,
+				"l-1",
+				self.занятие.name,
+				self.релиз,
+				frappe.db.get_value("Agent Competency", "base-1", "version"),
+			),
 		)
 		# Повтор ключа — та же запись, даже с другими полями.
 		повтор = self.записать("k-1", уровень=1)
 		self.assertEqual((повтор["event"], повтор["duplicate"]), (первое["event"], True))
-		# Косвенное свидетельство по компетенции другого урока (I1 — цель l-3).
+		# Косвенное свидетельство по компетенции другого урока (whole-1 — цель l-3).
 		self.assertEqual(
-			self.записать("k-2", компетенция="I1", уровень=3, indirect=True)["state"]["level"], 3
+			self.записать("k-2", компетенция="whole-1", уровень=3, indirect=True)["state"]["level"], 3
 		)
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 2)
 
 	def test_компетенция_не_из_карты_ничего_не_пишет(self):
-		self.assertEqual(_код(lambda: self.записать("x-1", компетенция="B9"))[0], "competency_unknown")
+		self.assertEqual(
+			_код(lambda: self.записать("x-1", компетенция="no-such-skill"))[0], "competency_unknown"
+		)
 		self.assertEqual(frappe.db.count(evidence.ЖУРНАЛ, {"student": self.ученик}), 0)
 
 	def test_пересмотр_только_вниз(self):
 		self.записать("p-1", уровень=1)
 		второе = self.записать("p-2", уровень=3, форма="work")
 		self.assertEqual(
-			_код(lambda: evidence.пересмотреть(self.занятие, self.релиз, "l-1", "B1", 3, "Нет", "p-r0")),
+			_код(lambda: evidence.пересмотреть(self.занятие, self.релиз, "l-1", "base-1", 3, "Нет", "p-r0")),
 			("revision_not_lower", {"level": 3, "current_level": 3}),
 		)
 		итог = evidence.пересмотреть(
-			self.занятие, self.релиз, "l-1", "B1", 1, "Затруднение повторилось", "p-r1"
+			self.занятие, self.релиз, "l-1", "base-1", 1, "Затруднение повторилось", "p-r1"
 		)
 		self.assertEqual((итог["kind"], итог["state"]["level"]), ("revision", 1))
 		self.assertEqual(
@@ -287,7 +296,9 @@ class IntegrationTestСвидетельства(IntegrationTestCase):
 		)
 		# Без уровня пересматривать нечего.
 		self.assertEqual(
-			_код(lambda: evidence.пересмотреть(self.занятие, self.релиз, "l-1", "B2", 0, "Нет", "p-r2"))[0],
+			_код(lambda: evidence.пересмотреть(self.занятие, self.релиз, "l-1", "base-2", 0, "Нет", "p-r2"))[
+				0
+			],
 			"revision_not_lower",
 		)
 

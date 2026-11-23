@@ -47,8 +47,6 @@ class IntegrationTestПраваНаРелиз(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			frappe.get_list("Agent Course Release", fields=["agent_frame"])
 		with self.assertRaises(frappe.PermissionError):
-			frappe.get_list("Agent Course Release", fields=["competency_map"])
-		with self.assertRaises(frappe.PermissionError):
 			frappe.get_list("Agent Release Lesson", parent_doctype="Agent Course Release", fields=["agent"])
 
 	def test_права_ролей_на_релиз(self):

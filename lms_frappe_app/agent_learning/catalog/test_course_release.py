@@ -1,14 +1,9 @@
 # Copyright (c) 2026, NikoMusaev and contributors
 # For license information, please see license.txt
 
-"""Релиз курса на каталоге компетенций: проверка ссылок и карта из каталога (learning-services#825).
-
-Релиз с картой внутри проверяют тесты карты (`releases.test_checks`,
-`competencies.*`) — они идут без изменений.
-"""
+"""Релиз курса на каталоге компетенций: проверка ссылок и карта из каталога (learning-services#825)."""
 
 import copy
-import json
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -58,12 +53,10 @@ class IntegrationTestРелизНаКаталоге(IntegrationTestCase):
 		релиз = ответ["release"]
 		к = self.к
 
-		with self.subTest("релиз ссылается на выпуск, карты внутри нет"):
-			запись = frappe.db.get_value(
-				index.РЕЛИЗ, релиз, ["competency_catalog", "competency_map"], as_dict=True
+		with self.subTest("релиз ссылается на выпуск"):
+			self.assertEqual(
+				frappe.db.get_value(index.РЕЛИЗ, релиз, "competency_catalog"), self.выпуск["catalog_release"]
 			)
-			self.assertEqual(запись.competency_catalog, self.выпуск["catalog_release"])
-			self.assertEqual(json.loads(запись.competency_map), [])
 			self.assertEqual(view.история(ответ["course"], релиз)[0]["catalog"], self.выпуск["version"])
 
 		with self.subTest("карта: цели по порядку уроков, затем составляющие"):

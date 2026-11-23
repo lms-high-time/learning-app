@@ -21,7 +21,7 @@ from lms_frappe_app.agent_learning import release_quiz
 from lms_frappe_app.agent_learning.leak_guards import проверить_ответ
 from lms_frappe_app.agent_learning.releases import service as релизы
 from lms_frappe_app.agent_learning.runs import service as прохождения
-from lms_frappe_app.tests.release_sample import пример_релиза, с_компетенциями
+from lms_frappe_app.tests.release_sample import пример_релиза, с_каталогом_компетенций
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
@@ -290,7 +290,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 	def setUp(self):
 		self.addCleanup(frappe.set_user, "Administrator")
 		суффикс = frappe.generate_hash(length=6)
-		релиз = с_компетенциями(пример_релиза(f"leak-{суффикс}"))
+		релиз = с_каталогом_компетенций(пример_релиза(f"leak-{суффикс}"))
 		# Цели по компетенциям — у второго урока: в первом проверяется квиз, а урок с
 		# картой квиза не открывает (learning-services#809).
 		релиз["lessons"][1]["competencies"] = релиз["lessons"][0].pop("competencies")
@@ -320,7 +320,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 						{"key": "flow", "title": "Схема", "description": ОПИСАНИЕ_СХЕМЫ, "html": HTML_СХЕМЫ}
 					],
 				},
-				"l-2": {"competencies": {"B1": ПРИЗНАКИ_КОМПЕТЕНЦИИ}},
+				"l-2": {"competencies": {"base-1": ПРИЗНАКИ_КОМПЕТЕНЦИИ}},
 			}
 		}
 		релиз["map"] = {"nodes": [{"text": КАРТА_КУРСА}]}
@@ -348,7 +348,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 				"student": self.ученик,
 				"course": self.курс,
 				"lesson_key": "l-1",
-				"competency": "B1",
+				"competency": "base-1",
 				"outcome": "difficulty",
 				"level": 2,
 				"task": "Задание свидетельства компетенции",
@@ -594,7 +594,7 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 				"student": self.ученик,
 				"course": личный,
 				"lesson_key": "l-1",
-				"competency": "B1",
+				"competency": "base-1",
 				"outcome": "confirmed",
 				"level": 3,
 				"task": "Задание",
@@ -610,9 +610,9 @@ class IntegrationTestNoLeakRelease(IntegrationTestCase):
 				"doctype": "Agent Session Event",
 				"session": занятие,
 				"kind": "Goal Credited",
-				"note": "B1 не ниже 2: засчитано ранее",
+				"note": "base-1 не ниже 2: засчитано ранее",
 				"credited_by": источник.name,
-				"competency": "B1",
+				"competency": "base-1",
 				"target": 2,
 			}
 		).insert(ignore_permissions=True)

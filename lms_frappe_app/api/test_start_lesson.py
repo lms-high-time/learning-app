@@ -14,7 +14,7 @@ from lms_frappe_app.agent_learning.releases.course_guard import ИЗ_РЕЛИЗ�
 from lms_frappe_app.agent_learning.runs import service as прохождения
 from lms_frappe_app.api import student
 from lms_frappe_app.tests.catalog_sample import ключи_примера, поверх_опубликованного, пример_каталога
-from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей, с_компетенциями
+from lms_frappe_app.tests.release_sample import пример_релиза, релиз_двух_целей, с_каталогом_компетенций
 from lms_frappe_app.tests.sample_data import (
 	добавить_в_организацию,
 	зачислить,
@@ -132,8 +132,8 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 	def test_компетенции_урока_и_составляющие(self):
 		"""Проводка: старт отдаёт компетенции урока по индексу и срезу; порядок и поля —
 		`competencies.test_lesson`."""
-		релиз = с_компетенциями(пример_релиза(f"start-comp-{frappe.generate_hash(length=6)}"))
-		релиз["agent"]["lessons"]["l-3"]["competencies"] = {"I1": "Признаки уровней I1."}
+		релиз = с_каталогом_компетенций(пример_релиза(f"start-comp-{frappe.generate_hash(length=6)}"))
+		релиз["agent"]["lessons"]["l-3"]["competencies"] = {"whole-1": "Признаки уровней whole-1."}
 		frappe.set_user("Administrator")
 		try:
 			курс, _ = курс_из_релиза(релиз=релиз)
@@ -145,7 +145,7 @@ class IntegrationTestStartLesson(IntegrationTestCase):
 
 		self.assertEqual(
 			[(к["key"], к["target"], к["text"]) for к in данные["competencies"]],
-			[("B2", 2, None), ("I1", 3, "Признаки уровней I1."), ("B1", None, None)],
+			[("base-2", 2, None), ("whole-1", 3, "Признаки уровней whole-1."), ("base-1", None, None)],
 		)
 
 	def test_компетенции_урока_из_каталога(self):

@@ -24,8 +24,7 @@
   ученик не записан, где эта компетенция или похожая в целях уроков не ниже уровня затруднения
   (`подсказки`).
 
-Всё — только по записям самого ученика: чужих данных здесь нет. Компетенции карты внутри релиза
-(версия 0) — локальные для курса, в сквозную карту и подсказку они не идут.
+Всё — только по записям самого ученика: чужих данных здесь нет.
 """
 
 import frappe
@@ -56,18 +55,18 @@ def лучшие_подтверждения(записи: list) -> dict:
 def подтверждение(запись, текущая_версия: int | None, названия_курсов: dict[str, str]) -> dict | None:
 	"""Подтверждение наружу: `{level, recorded_at, course, course_title, version, current_version}`;
 	нет записи — `None`. `version` — версия компетенции, по признакам которой поставлен уровень, и
-	`current_version` — она ли текущая; у карты внутри релиза версии нет — оба `None`; компетенции
-	нет в каталоге (`текущая_версия` — `None`) — `current_version` тоже `None`. Без базы."""
+	`current_version` — она ли текущая; компетенции нет в каталоге (`текущая_версия` — `None`) —
+	`current_version` тоже `None`. Без базы."""
 	if запись is None:
 		return None
-	версия = запись.competency_version or None
+	версия = запись.competency_version
 	return {
 		"level": запись.level,
 		"recorded_at": запись.creation.isoformat() if запись.creation else None,
 		"course": запись.course,
 		"course_title": названия_курсов.get(запись.course),
 		"version": версия,
-		"current_version": (версия == текущая_версия) if версия and текущая_версия else None,
+		"current_version": (версия == текущая_версия) if текущая_версия else None,
 	}
 
 
@@ -133,27 +132,24 @@ def поводы_подсказки(
 
 
 def курсы_по_целям(компетенции: set[str]) -> dict[str, dict]:
-	"""Курсы витрины, где компетенции из `компетенции` — в целях уроков действующего релиза на
-	каталоге: `{курс: {title, targets: {компетенция: наивысшая цель}}}`. Витрина — опубликованные
+	"""Курсы витрины, где компетенции из `компетенции` — в целях уроков действующего релиза:
+	`{курс: {title, targets: {компетенция: наивысшая цель}}}`. Витрина — опубликованные
 	курсы, кроме анонсов: на них в личном пространстве может записаться любой
-	(`spaces.каталог`). Одна выборка: курсы, релизы и строки уроков, отобранные по вхождению
-	слага в цели; цели разбираются здесь."""
+	(`spaces.каталог`). Одна выборка: курсы и строки уроков их действующих релизов, отобранные
+	по вхождению слага в цели; цели разбираются здесь."""
 	if not компетенции:
 		return {}
-	к, р, у = frappe.qb.DocType(КУРС), frappe.qb.DocType(index.РЕЛИЗ), frappe.qb.DocType(index.УРОК)
+	к, у = frappe.qb.DocType(КУРС), frappe.qb.DocType(index.УРОК)
 	вхождение = None
 	for ключ in sorted(компетенции):
 		условие = у.competencies.like(f'%"{ключ}"%')
 		вхождение = условие if вхождение is None else вхождение | условие
 	строки = (
 		frappe.qb.from_(к)
-		.join(р)
-		.on(р.name == к.active_release)
 		.join(у)
-		.on((у.parent == р.name) & (у.parenttype == index.РЕЛИЗ))
+		.on((у.parent == к.active_release) & (у.parenttype == index.РЕЛИЗ))
 		.select(к.name, к.title, у.competencies)
-		.where((к.published == 1) & (к.upcoming == 0) & р.competency_catalog.isnotnull())
-		.where(р.competency_catalog != "")
+		.where((к.published == 1) & (к.upcoming == 0))
 		.where(вхождение)
 		.run(as_dict=True)
 	)
@@ -174,7 +170,7 @@ def подсказки(
 	область: set[str] | None = None,
 	кроме: str | None = None,
 ) -> list[dict]:
-	"""Подсказка курса по журналу ученика (`записи` — по компетенциям каталога во всех курсах):
+	"""Подсказка курса по журналу ученика (`записи` — во всех курсах):
 	`[{competencies: [{key, title}], level, courses: [{course, title, targets: [{competency,
 	target}]}]}]`.
 
@@ -236,9 +232,8 @@ def для_старта(
 	компетенции: list[dict], карта: list[dict], записи: list, курс: str, ключ_урока: str, цели: list[dict]
 ) -> None:
 	"""Дописывает компетенциям урока (`lesson.компетенции_старта`) данные журнала ученика:
-	`confirmed` — лучшее подтверждение (`подтверждение`) во всех курсах, у карты внутри
-	релиза — в этом; `similar` — похожие `{key, title, confirmed}`, у карты внутри релиза — `[]`;
-	`credited` — цель урока закрыта засчётом из другого курса (`closing.засчёты_по_записям`), у
+	`confirmed` — лучшее подтверждение (`подтверждение`) во всех курсах; `similar` — похожие
+	`{key, title, confirmed}`; `credited` — цель урока закрыта засчётом из другого курса (`closing.засчёты_по_записям`), у
 	составляющей без цели — `None`.
 
 	`записи` — журнал карты ученика с похожими (`queue.карта_ученика`). Запросы — только по
@@ -247,7 +242,7 @@ def для_старта(
 	по_ключу = {к["key"]: к for к in карта}
 	похожие = {к["key"]: list(по_ключу.get(к["key"], {}).get("similar") or []) for к in компетенции}
 	вне_карты = list(dict.fromkeys(п for список in похожие.values() for п in список if п not in по_ключу))
-	сведения = {к: {"title": о["title"], "version": о.get("version")} for к, о in по_ключу.items()}
+	сведения = {к: {"title": о["title"], "version": о["version"]} for к, о in по_ключу.items()}
 	сведения |= каталог.названия_и_версии(вне_карты)
 	лучшие = лучшие_подтверждения(записи)
 	нужные = {к["key"] for к in компетенции} | {п for список in похожие.values() for п in список}
@@ -268,34 +263,27 @@ def для_старта(
 		к["credited"] = (к["key"] in засчитано) if к["target"] is not None else None
 
 
-def _журнал_каталога(ученик: str) -> list:
-	"""Записи журнала ученика по компетенциям каталога во всех курсах (`competency_version` не 0)
-	по порядку записи — одной выборкой. Архив сброса не читается — у него пуст `student`."""
+def _журнал_ученика(ученик: str) -> list:
+	"""Записи журнала ученика во всех курсах по порядку записи — одной выборкой. Архив сброса
+	не читается — у него пуст `student`."""
 	ж = frappe.qb.DocType(evidence.ЖУРНАЛ)
 	return (
 		frappe.qb.from_(ж)
 		.select(*(ж[поле] for поле in evidence.ПОЛЯ_РАСЧЁТА))
-		.where((ж.student == ученик) & (ж.competency_version > 0))
+		.where(ж.student == ученик)
 		.orderby(ж.creation, ж.name, order=Order.asc)
 		.run(as_dict=True)
 	)
 
 
 def _курсы_и_релизы(курсы: set[str]) -> dict[str, dict]:
-	"""Курс → `{title, release, catalog}`: название, действующий релиз и на каталоге ли он —
-	одной выборкой."""
+	"""Курс → `{title, release}`: название и действующий релиз — одной выборкой."""
 	if not курсы:
 		return {}
-	к, р = frappe.qb.DocType(КУРС), frappe.qb.DocType(index.РЕЛИЗ)
 	return {
-		с.name: {"title": с.title, "release": с.active_release, "catalog": bool(с.competency_catalog)}
-		for с in (
-			frappe.qb.from_(к)
-			.left_join(р)
-			.on(р.name == к.active_release)
-			.select(к.name, к.title, к.active_release, р.competency_catalog)
-			.where(к.name.isin(list(курсы)))
-			.run(as_dict=True)
+		с.name: {"title": с.title, "release": с.active_release}
+		for с in frappe.get_all(
+			КУРС, filters={"name": ("in", list(курсы))}, fields=["name", "title", "active_release"]
 		)
 	}
 
@@ -319,7 +307,7 @@ def сквозная_карта(ученик: str) -> dict:
 	"""Сквозная карта ученика по компетенциям каталога: `{course: None, classification, groups,
 	course_hints}`.
 
-	Компетенции — его курсов на каталоге (цели уроков действующих релизов и их составляющие) и
+	Компетенции — его курсов (цели уроков действующих релизов и их составляющие) и
 	те, по которым у него есть записи журнала в любом курсе. У компетенции — определение из
 	каталога, `level` — подтверждённый уровень по всем курсам без блокировки (открытые уровни —
 	дело курса), `confirmed` — лучшее подтверждение, `courses` — курсы ученика, в карте которых
@@ -330,17 +318,17 @@ def сквозная_карта(ученик: str) -> dict:
 
 	Число запросов не зависит ни от числа курсов, ни от числа записей.
 	"""
-	записи = _журнал_каталога(ученик)
+	записи = _журнал_ученика(ученик)
 	свои_курсы = [з["course"] for з in курсы_ученика(ученик)]
 	курсы = _курсы_и_релизы(set(свои_курсы) | {з.course for з in записи})
-	на_каталоге = {к: курсы[к]["release"] for к in свои_курсы if к in курсы and курсы[к]["catalog"]}
-	цели = _цели_релизов(list(set(на_каталоге.values())))
+	с_релизом = {к: курсы[к]["release"] for к in свои_курсы if к in курсы and курсы[к]["release"]}
+	цели = _цели_релизов(list(set(с_релизом.values())))
 	части = каталог._части_каталога() if any(цели.values()) else {}
 	карты = {
 		курс: каталог._замкнуть(
 			list(dict.fromkeys(ц["competency"] for список in цели[релиз].values() for ц in список)), части
 		)
-		for курс, релиз in на_каталоге.items()
+		for курс, релиз in с_релизом.items()
 	}
 	порядок = list(
 		dict.fromkeys([к for карта in карты.values() for к in карта] + [з.competency for з in записи])

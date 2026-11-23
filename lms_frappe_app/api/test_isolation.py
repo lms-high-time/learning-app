@@ -101,9 +101,9 @@ class IntegrationTestApiIsolation(IntegrationTestCase):
 			"закрытие урока": lambda: student.complete_lesson(self.чужое_занятие),
 			# Свидетельство поставило бы уровень чужому ученику (learning-services#808).
 			"свидетельство": lambda: student.record_evidence(
-				self.чужое_занятие, "B1", "skipped", "isolation-1", task="не моё занятие"
+				self.чужое_занятие, "base-1", "skipped", "isolation-1", task="не моё занятие"
 			),
-			"пересмотр уровня": lambda: student.revise_level(self.чужое_занятие, "B1", 0, "не моё", "isolation-2"),
+			"пересмотр уровня": lambda: student.revise_level(self.чужое_занятие, "base-1", 0, "не моё", "isolation-2"),
 			# Репорт берёт курс и урок из занятия: пропущенный сюда, он
 			# записал бы чужой урок словами не того ученика.
 			"репорт": lambda: student.report_issue(

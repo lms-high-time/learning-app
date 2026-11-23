@@ -70,12 +70,8 @@ class IntegrationTestОсвобождение(IntegrationTestCase):
 		}
 
 	def освобождён(self, релиз: str) -> None:
-		запись = frappe.db.get_value(
-			index.РЕЛИЗ, релиз, ["snapshot", "agent_frame", "competency_map"], as_dict=True
-		)
-		self.assertEqual(
-			(запись.snapshot, запись.agent_frame, запись.competency_map), (None, None, None), релиз
-		)
+		запись = frappe.db.get_value(index.РЕЛИЗ, релиз, ["snapshot", "agent_frame"], as_dict=True)
+		self.assertEqual((запись.snapshot, запись.agent_frame), (None, None), релиз)
 		self.assertEqual(set(self.строк_индекса(релиз).values()), {0}, релиз)
 
 	def цел(self, релиз: str) -> None:
