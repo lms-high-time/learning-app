@@ -135,7 +135,17 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 		frappe.set_user("Guest")
 		карта = self.карта()
 
-		self.assertEqual(карта["documents"], [{"artifact": "summary", "title": "Резюме проекта"}])
+		self.assertEqual(
+			карта["documents"],
+			[
+				{
+					"artifact": "summary",
+					"title": "Резюме проекта",
+					# Все разделы по порядку схемы, и не только собранные на уроке (#856).
+					"blocks": [{"key": "goal", "title": "Цель"}, {"key": "sponsor", "title": "Спонсор"}],
+				}
+			],
+		)
 		self.assertEqual(
 			карта["chapters"][0]["lessons"][0]["blocks"],
 			[{"artifact": "summary", "key": "goal", "title": "Цель", "description": "Одной фразой"}],
@@ -158,6 +168,13 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 
 		документ = карта["documents"][0]
 		self.assertEqual((документ["blocks_filled"], документ["blocks_total"]), (1, 2))
+		self.assertEqual(
+			документ["blocks"],
+			[
+				{"key": "goal", "title": "Цель", "filled": True},
+				{"key": "sponsor", "title": "Спонсор", "filled": False},
+			],
+		)
 		self.assertTrue(карта["chapters"][0]["lessons"][0]["blocks"][0]["filled"])
 
 

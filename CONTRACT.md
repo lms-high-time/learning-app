@@ -441,7 +441,10 @@ JSON или где тег не закрыт, а Desk выводит часть �
 { "ok": true, "data": {
   "course": "p3-express", "title": "P3.express", "next_lesson": "lesson-2",
   "documents": [ { "artifact": "project_summary", "title": "Резюме проекта",
-                   "blocks_total": 6, "blocks_filled": 2 } ],
+                   "blocks_total": 6, "blocks_filled": 2,
+                   "blocks": [ { "key": "goal", "title": "Цель", "filled": true },
+                               { "key": "sponsor", "title": "Спонсор и менеджер", "filled": true },
+                               { "key": "risks", "title": "Риски", "filled": false } ] } ],
   "competencies": [
     { "key": "project-launch", "kind": "integrative", "title": "Запуск проекта",
       "description": "Запускаете проект так, что у него есть спонсор и цель.",
@@ -488,6 +491,12 @@ JSON или где тег не закрыт, а Desk выводит часть �
 всем: что курс оставит после себя, — его обещание. Зачисленному — ещё
 `blocks_total` и `blocks_filled` у документа и `filled` у блока, по тем же
 правилам, что у `artifact`. У курса без документа — пустые списки.
+
+У документа `blocks` — все его разделы по порядку схемы, `{key, title,
+filled?}`: из них страница курса показывает, что окажется в документе
+(learning-services#856). Видны всем; `filled` — только зачисленному. Описания
+раздела здесь нет — оно у краткого блока урока. В примере выше разделов
+меньше, чем `blocks_total`, только ради краткости.
 
 Блок здесь — **краткий блок**: `{artifact, key, title, description, filled?}`,
 `description` — что сюда записывают, для ученика (`null`, если раздел его не
