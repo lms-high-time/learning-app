@@ -179,13 +179,17 @@ class IntegrationTestCourseMapDocuments(IntegrationTestCase):
 
 
 class IntegrationTestCourseMapCompetencies(IntegrationTestCase):
-	"""Компетенции курса на каталоге — блок «Чему научитесь» на странице курса (learning-services#843).
+	"""Компетенции курса на каталоге — вкладка «Умения» на странице курса (learning-services#843,
+	#854): у каждой — цель курса, зачисленному — ещё его уровень (#857).
 
-	Группировка и порядок — юнитом `views.для_витрины`; здесь проводка: карта курса по
-	действующему релизу, гостю.
+	Группировка и порядок — юнитом `views.для_витрины`, уровни — `views.уровни_по_данным`; здесь
+	проводка: карта курса по действующему релизу, гостю и зачисленному.
 	"""
 
-	def test_гость_видит_интегративную_с_частями_и_отдельную_базовую(self):
+	def курс_с_картой(self) -> tuple[str, dict, str]:
+		"""Курс на каталоге: (курс, ключи примера, отдельная базовая). Цели уроков: интегративная
+		(3), отдельная базовая (2), вторая часть интегративной (2); первая часть — только
+		составляющей по каталогу, своей цели у неё нет."""
 		from lms_frappe_app.agent_learning.catalog import service as каталог
 		from lms_frappe_app.tests.catalog_sample import (
 			ключи_примера,
@@ -204,29 +208,58 @@ class IntegrationTestCourseMapCompetencies(IntegrationTestCase):
 		образец["competencies"].append(компетенция(отдельная, к["classes"]))
 		релиз = пример_релиза(f"map-cat-{суффикс}")
 		релиз["catalog"] = каталог.опубликовать(поверх_опубликованного(образец), "Administrator")["version"]
-		# Цели уроков: интегративная, отдельная базовая, вторая часть интегративной; первая часть —
-		# только составляющей по каталогу.
 		релиз["lessons"][0]["competencies"] = [{"competency": к["whole"], "target": 3}]
 		релиз["lessons"][1]["competencies"] = [{"competency": отдельная, "target": 2}]
 		релиз["lessons"][2]["competencies"] = [{"competency": к["b"], "target": 2}]
 		курс, _ = курс_из_релиза(релиз=релиз)
 		frappe.db.set_value("LMS Course", курс, "published", 1)
+		return курс, к, отдельная
+
+	def test_гость_видит_интегративную_с_частями_и_отдельную_базовую(self):
+		курс, к, отдельная = self.курс_с_картой()
 		frappe.set_user("Guest")
 
 		компетенции = public.course_map(course=курс)["data"]["competencies"]
 
-		def кратко(ключ: str) -> dict:
+		def кратко(ключ: str, цель: int | None) -> dict:
 			return {
 				"key": ключ,
 				"kind": "base",
 				"title": f"Умение {ключ}",
 				"description": f"Что человек делает, владея умением {ключ}.",
+				"target": цель,
 			}
 
+		# Гостю — цель курса, но не уровни: ключей `status` и `level` нет вовсе.
 		self.assertEqual(
 			компетенции,
 			[
-				{**кратко(к["whole"]), "kind": "integrative", "parts": [кратко(к["b"]), кратко(к["a"])]},
-				кратко(отдельная),
+				{
+					**кратко(к["whole"], 3),
+					"kind": "integrative",
+					"parts": [кратко(к["b"], 2), кратко(к["a"], None)],
+				},
+				кратко(отдельная, 2),
 			],
 		)
+
+	def test_зачисленный_видит_свой_уровень_у_компетенций_с_целью(self):
+		from lms_frappe_app.tests.sample_data import зачислить_на_курс
+
+		курс, к, отдельная = self.курс_с_картой()
+		ученик = создать_ученика(f"map-lvl-{frappe.generate_hash(length=6)}@example.com")
+		зачислить_на_курс(ученик, курс)
+		frappe.set_user(ученик)
+
+		компетенции = public.course_map(course=курс)["data"]["competencies"]
+		целое, отдельно = компетенции
+		части = {ч["key"]: ч for ч in целое["parts"]}
+
+		# Ни один урок не начат: курс ни одну компетенцию ещё не открыл.
+		for компетенция in (целое, отдельно, части[к["b"]]):
+			self.assertEqual(компетенция["status"], "locked", компетенция["key"])
+			self.assertIsNone(компетенция["level"], компетенция["key"])
+		# Составляющую без своей цели курс не ведёт — уровня у неё нет.
+		self.assertIsNone(части[к["a"]]["target"])
+		self.assertNotIn("status", части[к["a"]])
+		self.assertNotIn("level", части[к["a"]])

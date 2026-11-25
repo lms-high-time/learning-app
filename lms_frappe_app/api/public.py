@@ -23,6 +23,7 @@ from lms_frappe_app.agent_learning.artifacts import data
 from lms_frappe_app.agent_learning.artifacts.course import _схемы_курса
 from lms_frappe_app.agent_learning.artifacts.document import _данные_курса, _заполненность, кратко
 from lms_frappe_app.agent_learning.catalog import read as каталог
+from lms_frappe_app.agent_learning.competencies import evidence
 from lms_frappe_app.agent_learning.competencies import views as представления
 from lms_frappe_app.agent_learning.constants import ПРОЙДЕН
 from lms_frappe_app.agent_learning.doctype.agent_learning_settings.agent_learning_settings import (
@@ -71,11 +72,17 @@ def course_map(course: str, space: str | None = None) -> dict:
 	У главы — описание из действующего релиза; зачисленному — ещё прогресс
 	главы, как у `course_outline` (learning-services#547).
 
-	`competencies` — компетенции курса на каталоге для блока «Чему научитесь»
-	(learning-services#843): интегративные карты курса со своими
+	`competencies` — компетенции курса на каталоге для вкладки «Умения»
+	(learning-services#843, #854): интегративные карты курса со своими
 	составляющими, за ними базовые вне интегративных (`views.для_витрины`).
-	Видны всем и без уровней ученика; у курса без релиза, без каталога или без
-	целей по компетенциям — пустой список.
+	Видны всем; у курса без релиза, без каталога или без целей по
+	компетенциям — пустой список. У компетенции и у каждой её составляющей —
+	`target`, цель курса: наивысшая цель среди уроков релиза, у компетенции без
+	своих целей (составляющая, которую курс отдельно не ведёт) — `null`.
+	Зачисленному у компетенций с целью — ещё его `status` (`locked` — курс её
+	ещё не открыл, `no_info` — открыта, свидетельств нет, `level`) и `level`
+	(1–4 или `null`), как у `my_competencies` (learning-services#857); у
+	компетенции без цели и у прочих этих ключей нет.
 
 	Название курса и цели анонса — на языке запроса, если у курса есть их
 	перевод (learning-services#738); главы, уроки, цели уроков и компетенции —
@@ -102,7 +109,12 @@ def course_map(course: str, space: str | None = None) -> dict:
 	# несут уже прочитанные уроки релиза, и курс без целей не платит за неё ни запроса.
 	цели_компетенций = index.цели_из_строк(уроки_релиза)
 	компетенции = (
-		представления.для_витрины(каталог.карты_по_целям({релиз: цели_компетенций}, кратко=True)[релиз])
+		_компетенции_карты(
+			course,
+			каталог.карты_по_целям({релиз: цели_компетенций}, кратко=True)[релиз],
+			цели_компетенций,
+			frappe.session.user if зачислен else None,
+		)
 		if цели_компетенций
 		else []
 	)
@@ -396,6 +408,46 @@ def _цели_уроков(
 			else:
 				итог[урок].append({"text": цель["text"], "status": статус})
 	return итог
+
+
+def _компетенции_карты(
+	course: str, карта: list[dict], цели_уроков: dict[str, list[dict]], ученик: str | None
+) -> list[dict]:
+	"""Компетенции витрины (`views.для_витрины`) с целью курса и, если есть ученик, его уровнем.
+
+	Цель курса — наивысшая цель компетенции среди уроков релиза. Уровни — по той же карте и тем
+	же целям, что `views.для_ученика`, но без основания: журнал читается без текстов, а карта и
+	цели уже прочитаны (learning-services#857).
+	"""
+	цели: dict[str, int] = {}
+	for список in цели_уроков.values():
+		for ц in список:
+			цели[ц["competency"]] = max(цели.get(ц["competency"], 0), ц["target"])
+	уровни = (
+		{
+			у["key"]: у
+			for у in представления.уровни_по_данным(
+				карта,
+				цели_уроков,
+				прохождения.статусы_уроков(ученик, course),
+				evidence._записи(ученик, course, по_всем_курсам=[к["key"] for к in карта]),
+			)
+		}
+		if ученик
+		else {}
+	)
+
+	def _с_уровнем(компетенция: dict) -> dict:
+		итог = {**компетенция, "target": цели.get(компетенция["key"])}
+		if итог["target"] and (у := уровни.get(компетенция["key"])):
+			итог["status"] = у["status"]
+			итог["level"] = у["level"]
+		return итог
+
+	return [
+		{**_с_уровнем(к), **({"parts": [_с_уровнем(ч) for ч in к["parts"]]} if "parts" in к else {})}
+		for к in представления.для_витрины(карта)
+	]
 
 
 def _документы_курса(
