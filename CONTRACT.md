@@ -498,7 +498,7 @@ filled?}`: из них страница курса показывает, что 
 раздела здесь нет — оно у краткого блока урока. В примере выше разделов
 меньше, чем `blocks_total`, только ради краткости.
 
-Блок здесь — **краткий блок**: `{artifact, key, title, description, filled?}`,
+Блок урока здесь — **краткий блок**: `{artifact, key, title, description, filled?}`,
 `description` — что сюда записывают, для ученика (`null`, если раздел его не
 задал), `filled` — только зачисленному. Та же форма — у `lesson_entry`
 (`blocks`), `start_lesson` (`artifact_blocks`), `complete_lesson` и итога
